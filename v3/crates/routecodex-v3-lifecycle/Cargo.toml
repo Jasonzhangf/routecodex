@@ -19,4 +19,5 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+routecodex-v3-config = { path = "../routecodex-v3-config", features = ["test-hooks"] }
 tempfile = "3"

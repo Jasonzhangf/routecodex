@@ -7,7 +7,7 @@ RouteCodex V3 是当前唯一主力实现。生产 CLI、配置、运行时、�
 - Rust workspace: `v3/Cargo.toml`
 - CLI: `v3/crates/routecodex-v3-cli`
 - Installed command: `rccv3`
-- Default config: `~/.rcc/config.v3.toml`
+- Default config: `~/.rcc/config.toml`
 - Architecture maps: `docs/architecture/v3-*.yml`
 - Mainline review: `docs/architecture/wiki/v3-mainline-caller-flow.md`
 
@@ -17,8 +17,8 @@ RouteCodex V3 是当前唯一主力实现。生产 CLI、配置、运行时、�
 npm run verify:v3-architecture-ci
 npm run test:v3-workspace
 npm run install:v3
-rccv3 config check -c ~/.rcc/config.v3.toml
-rccv3 restart -c ~/.rcc/config.v3.toml
+rccv3 config check -c ~/.rcc/config.toml
+rccv3 restart -c ~/.rcc/config.toml
 curl http://127.0.0.1:5555/health
 ```
 
@@ -44,7 +44,9 @@ curl http://127.0.0.1:5555/v1/messages \
 
 ## 配置与认证
 
-V3 的唯一 authoring 文件是 `~/.rcc/config.v3.toml`。Provider、模型、路由池、监听器和认证句柄必须在该配置及其声明的 V3 provider 文件中定义，并由 `rccv3 config check` 编译为 manifest。
+V3 的唯一 authoring 文件是 `~/.rcc/config.toml`。Provider、模型、路由池、监听器和认证句柄必须在该配置及其声明的 V3 provider 文件中定义，并由 `rccv3 config check` 编译为 manifest。
+
+`scripts/install-global.sh` 与 `scripts/install-release.sh` 当前仍默认 `~/.rcc/config.v3.toml`；该安装脚本路径缺陷由 `a9af206` 跟踪，尚未修复。
 
 API key 通过 V3 配置引用的认证句柄或环境变量提供，例如：
 
@@ -53,7 +55,7 @@ export OPENAI_API_KEY="your_openai_key"
 export ANTHROPIC_API_KEY="your_anthropic_key"
 ```
 
-不要创建或恢复 `config.json`、`configsamples/`、`webui/`、仓库 `samples/` 或 `rcc init` 生成的 V2 provider 文件。
+`provider/<id>/config.v2.toml` 是当前 V3 provider-directory 输入格式，文件名中的 `v2` 仅为格式兼容保留；它不是 V2 runtime、V2 root config reader 或迁移入口。加载契约见 [`v3/README.md`](v3/README.md#provider-config-contract)。不要创建或恢复 `config.json`、`configsamples/`、`webui/`、仓库 `samples/` 或 V2 root config。
 
 ## 文档
 

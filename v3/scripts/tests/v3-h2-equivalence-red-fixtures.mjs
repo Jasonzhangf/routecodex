@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-h2-equivalence-harness.mjs');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-h2-equivalence-harness.mjs');
 const fixtures = [
   {
     name: 'CLI entry replaced by library server',
@@ -44,7 +44,8 @@ for (const fixture of fixtures) {
     for (const dir of ['scripts', 'v3', 'docs']) {
       cpSync(resolve(repoRoot, dir), join(root, dir), {
         recursive: true,
-        filter: (source) => !source.includes('/target/'),
+        filter: (source) =>
+          !source.includes('/target/') && !source.includes('/build-control/'),
       });
     }
     cpSync(resolve(repoRoot, 'package.json'), join(root, 'package.json'));

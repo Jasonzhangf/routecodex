@@ -44,7 +44,7 @@ routing_group = "g400iso"
 endpoints = ["responses"]
 [servers.g400iso.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.goaichat]
@@ -174,19 +174,19 @@ fn assert_glm_400_stayed_internal(
     assert_eq!(observability.provider_id.as_deref(), Some("goaichat"));
     assert_eq!(
         observability.provider_key.as_deref(),
-        Some("goaichat:key1:qwen3.8-max")
+        Some("goaichat:default:key1:qwen3.8-max")
     );
     assert_eq!(observability.provider_status, Some(200));
     let glm_event = observability
         .provider_failure_events
         .iter()
-        .find(|event| event.provider_key == "goaichat:key1:glm-5.3")
+        .find(|event| event.provider_key == "goaichat:default:key1:glm-5.3")
         .expect("glm HTTP 400 must remain on internal observability");
     assert_eq!(glm_event.status, 400);
     assert_eq!(glm_event.action, "switch_provider");
     assert_eq!(
         glm_event.next_provider_key.as_deref(),
-        Some("goaichat:key1:qwen3.8-max")
+        Some("goaichat:default:key1:qwen3.8-max")
     );
     assert!(
         glm_event

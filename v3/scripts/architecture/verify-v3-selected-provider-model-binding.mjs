@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-const root = process.cwd();
+const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(v3Root, '..');
 const failures = [];
 const files = {
   owner: 'v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs',
   direct: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
-  relay: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+  relay: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
+  compat: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
   providerWire: 'v3/crates/routecodex-v3-provider-responses/src/wire.rs',
   providerError: 'v3/crates/routecodex-v3-provider-responses/src/error.rs',
   functionMap: 'docs/architecture/v3-function-map.yml',
@@ -21,7 +26,7 @@ const files = {
   design: 'docs/design/v3-selected-provider-model-binding.md',
   testDesign: 'docs/goals/v3-selected-provider-model-binding-test-design.md',
   sop: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md',
-  packageJson: 'package.json',
+  packageJson: 'v3/package.json',
 };
 
 const abs = (rel) => path.join(root, rel);
@@ -45,7 +50,7 @@ let packageJson = {};
 try { packageJson = JSON.parse(text.packageJson); }
 catch (error) { failures.push(`package.json: JSON parse failed: ${error.message}`); }
 for (const [name, command] of Object.entries({
-  'verify:v3-selected-provider-model-binding': 'node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-selected-provider-model-binding.mjs',
+  'verify:v3-selected-provider-model-binding': 'node scripts/architecture/verify-v3-selected-provider-model-binding.mjs',
   'test:v3-selected-provider-model-binding-red-fixtures': 'node scripts/tests/v3-selected-provider-model-binding-red-fixtures.mjs',
 })) {
   if (packageJson.scripts?.[name] !== command) failures.push(`package.json: script ${name} must equal ${command}`);
@@ -72,23 +77,24 @@ const directSource = directStart >= 0
   ? text.direct.slice(directStart, directEnd >= 0 ? directEnd : undefined)
   : '';
 const directBind = directSource.indexOf('bind_v3_selected_provider_model(');
-const directWire = directSource.indexOf('build_v3_provider_12_responses_wire_payload(', directBind);
+const directWire = directSource.search(/\bbuild_v3_provider_12_responses_wire_payload(?:_with_registry)?\(/u);
 if (directBind < 0 || directWire < 0 || directBind > directWire) {
   failures.push(`${files.direct}: Direct must bind selected model before Provider12 wire build`);
 }
 requireText(text.direct, files.direct, 'provider_model_binding_mismatch');
 requireText(text.direct, files.direct, 'V3ErrorSourceKind::RuntimeFailure');
 
-const relayBuilderStart = text.relay.indexOf('fn build_v3_provider_standard_protocol_payload_from_req07');
+const relayBuilderStart = text.relay.indexOf('fn project_v3_operation_runner_standard_provider_request');
 const relayBind = text.relay.indexOf('bind_v3_selected_provider_model(', relayBuilderStart);
 if (relayBuilderStart < 0 || relayBind < relayBuilderStart) {
   failures.push(`${files.relay}: Relay protocol payload builder must call the shared selected-model owner`);
 }
-const compatStart = text.relay.indexOf('fn apply_v3_provider_req_compat');
-const compatRun = text.relay.indexOf('run_req_outbound_stage3_compat(', compatStart);
-const boundBuilderCall = text.relay.indexOf('build_v3_provider_standard_protocol_payload_from_req07(input)', compatStart);
-if (compatStart < 0 || compatRun < 0 || boundBuilderCall < 0 || boundBuilderCall > compatRun + 500) {
-  failures.push(`${files.relay}: ProviderReqCompat06 must receive the bound protocol payload`);
+const compatStart = text.compat.indexOf('impl Operator for AdjustProviderPrivateRequestOperator');
+const compatRun = text.compat.indexOf('apply_v3_provider_req_compat_to_provider_payload(', compatStart);
+const operatorInput = text.compat.indexOf('\n            input,', compatRun);
+const boundPayload = text.compat.indexOf('input.provider_semantic_payload().clone()');
+if (compatStart < 0 || compatRun < 0 || operatorInput < 0 || operatorInput > compatRun + 200 || boundPayload < 0) {
+  failures.push(`${files.compat}: ProviderReqCompat06 must consume the bound Node06 payload`);
 }
 
 requireText(text.providerError, files.providerError, 'ProviderModelBindingMismatch');

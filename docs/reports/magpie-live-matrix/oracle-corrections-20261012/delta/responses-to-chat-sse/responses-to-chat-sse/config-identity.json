@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-chat-sse/responses-to-chat-sse/v3-protocol-live-mock-lifecycle-rPDBtW/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-chat-sse/responses-to-chat-sse/v3-protocol-live-mock-lifecycle-rPDBtW/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 65228
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 65229
+    }
+  ],
+  "admin_bind": "127.0.0.1:65229",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:65229"
+  },
+  "mode": "relay",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-openai_chat",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-chat-sse/responses-to-chat-sse/v3-protocol-live-mock-lifecycle-rPDBtW/provider/mock-openai_chat/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-chat-sse/responses-to-chat-sse/provider.toml",
+      "model": "mock.chat-model",
+      "wire_model": "chat-model",
+      "sha256": "81b0701449be5f263a1468f95cd54fa1e465ae6386e9def983a3bfb716ec12c0"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "openai_chat",
+    "wire_model": "chat-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-openai_chat/mock.chat-model",
+        "provider_id": "mock-openai_chat",
+        "model": "mock.chat-model",
+        "wire_model": "chat-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-chat-sse/responses-to-chat-sse/v3-protocol-live-mock-lifecycle-rPDBtW/provider/mock-openai_chat/config.v2.toml",
+        "provider_sha256": "81b0701449be5f263a1468f95cd54fa1e465ae6386e9def983a3bfb716ec12c0",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-openai_chat/mock.chat-model"
+  ]
+}

@@ -5,48 +5,20 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None, None)
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None)
         .await
         .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state(
+pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_initial_target(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
-) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(
-        manifest,
-        input,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: false,
-        }),
-        None,
-        None,
-    )
-    .await
-    .into_foundation()
-}
-
-pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_state_and_initial_target(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
     initial_selected_target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     initial_expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
 ) -> crate::V3FoundationRuntimeOutput {
     execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: false,
-        }),
         Some(initial_selected_target),
         Some(initial_expanded),
     )
@@ -54,30 +26,16 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_server_tool_
     .into_foundation()
 }
 
-pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
+pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
 ) -> V3ResponsesRelayDryRunOutcome {
-    execute_v3_responses_relay_dry_run_runtime_inner(
-        manifest,
-        input,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: false,
-        }),
-        None,
-        None,
-    )
-    .await
+    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None).await
 }
 
 pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
-    server_tool_state: Option<V3ResponsesRelayServerToolExecution<'_>>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
 ) -> V3ResponsesRelayDryRunOutcome {
@@ -97,7 +55,6 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         manifest,
         input,
         &transport,
-        server_tool_state,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         false,
@@ -106,8 +63,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         initial_selected_target.clone(),
         initial_expanded,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     {
@@ -189,6 +145,8 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         error_chain: output.error_chain.unwrap_or_default(),
         node_trace: output.node_trace,
         stopped_before_provider_send: true,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
     })
 }
 
@@ -197,104 +155,92 @@ pub fn project_v3_responses_relay_runtime_failure(
     observability: Option<V3RuntimeObservability>,
 ) -> V3ResponsesRelayRuntimeOutput {
     match error {
-        V3ResponsesRelayRuntimeError::ModelNotFound(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                "V3Target10ConcreteProviderSelected",
-                "direct_model_not_found",
-                message,
-            );
-            let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-                source: source.clone(),
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: None,
-            });
-            return V3ResponsesRelayRuntimeOutput {
-                status: projected.status,
-                client_body: V3ResponsesRelayClientBody::Json(projected.body),
-                node_trace: vec!["V3Error06ClientProjected"],
-                error_chain: Some(vec![
-                    "V3Error01SourceRaised",
-                    "V3Error02Classified",
-                    "V3Error03TargetLocalAction",
-                    "V3Error04TargetExhaustionDecision",
-                    "V3Error05ExecutionDecision",
-                    "V3Error06ClientProjected",
-                ]),
-                observability: None,
-                stream_observation: None,
-                finalized_response: None,
-                provider_snapshots: None,
-                protocol_direct_handoff: None,
-            };
-        }
-        V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        } => {
-            let source = provider_pool_exhausted_source(
-                "V3Target10ConcreteProviderSelected",
-                &attempted_candidates,
-            );
-            error_output(source, 502, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::Target(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3HubRuntime",
-                "responses_relay_runtime_error",
-                message,
-            );
-            error_output(source, 500, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => {
-            let source = routecodex_v3_error::build_v3_error_01_source_raised(
-                V3ErrorSourceKind::InvalidRequest,
-                "V3HubReqInbound02Normalized",
-                "invalid_responses_request",
-                message,
-            );
-            error_output(source, 400, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => {
-            let source = routecodex_v3_error::build_v3_error_01_source_raised_internal(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_sse_event_invalid",
-                message,
-                routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
-            );
-            error_output(source, 599, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::ExecutionControlResponse(message) => {
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ServerRespOutbound06ClientFrame",
-                "responses_relay_response_execution_control_error",
-                message,
-            );
-            error_output(source, 599, "none", Vec::new(), observability, 0)
-        }
-        V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-            call_id,
-            code,
-            message,
-            retryable: _,
-        } => {
-            let source = super::web_search_sidecar::web_search_sidecar_failure_source(
-                &call_id, code, &message,
-            );
-            error_output(source, 599, "none", Vec::new(), observability, 0)
-        }
         error => {
-            let message = error.to_string();
-            let source = build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3HubRuntime",
-                "responses_relay_runtime_error",
-                message.clone(),
-            );
-            error_output(source, 500, "none", Vec::new(), observability, 0)
+            let (source, status, terminal_disposition) = match error {
+                V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
+                    attempted_candidates,
+                } => (
+                    provider_pool_exhausted_source(
+                        "V3Target10ConcreteProviderSelected",
+                        &attempted_candidates,
+                    ),
+                    502,
+                    Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+                ),
+                V3ResponsesRelayRuntimeError::Target(message) => (
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3HubRuntime",
+                        "responses_relay_runtime_error",
+                        message,
+                    ),
+                    500,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::ClientInboundCanonical(message) => (
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::InvalidRequest,
+                        "V3HubReqInbound02Normalized",
+                        "invalid_responses_request",
+                        message,
+                    ),
+                    400,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(message) => (
+                    crate::shared::direct_internal_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ProviderResp14Raw",
+                        "provider_response_sse_event_invalid",
+                        message,
+                        routecodex_v3_error::V3InternalErrorCode::V3ProviderResp14Raw,
+                    ),
+                    599,
+                    None,
+                ),
+                V3ResponsesRelayRuntimeError::ExecutionControlResponse(message) => (
+                    crate::shared::direct_plain_error(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ServerRespOutbound06ClientFrame",
+                        "responses_relay_response_execution_control_error",
+                        message,
+                    ),
+                    599,
+                    None,
+                ),
+                error => {
+                    let message = error.to_string();
+                    (
+                        crate::shared::direct_plain_error(
+                            V3ErrorSourceKind::RuntimeFailure,
+                            "V3HubRuntime",
+                            "responses_relay_runtime_error",
+                            message,
+                        ),
+                        500,
+                        None,
+                    )
+                }
+            };
+            let mut output = match source {
+                Ok(source) => error_output(source, status, "none", Vec::new(), observability, 0),
+                Err(fault) => {
+                    let mut output =
+                        super::responses_relay_failures::local_error_output_from_projection(
+                            Err(fault),
+                            Vec::new(),
+                            observability,
+                        );
+                    if let Some(terminal_disposition) = terminal_disposition {
+                        output.terminal_disposition = Some(terminal_disposition);
+                    }
+                    return output;
+                }
+            };
+            if let Some(terminal_disposition) = terminal_disposition {
+                output.terminal_disposition = Some(terminal_disposition);
+            }
+            output
         }
     }
 }

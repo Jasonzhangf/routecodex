@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -22,6 +22,7 @@ static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 #[derive(Debug)]
 struct ProviderCapture {
     authorization: Option<String>,
+    api_key: Option<String>,
     body: Value,
 }
 
@@ -52,6 +53,10 @@ async fn controlled_gemini_upstream(
         .send(ProviderCapture {
             authorization: headers
                 .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned),
+            api_key: headers
+                .get("x-goog-api-key")
                 .and_then(|value| value.to_str().ok())
                 .map(ToOwned::to_owned),
             body: body.clone(),
@@ -177,10 +182,8 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert_eq!(json_body["usageMetadata"]["totalTokenCount"], 5);
     let json_capture = captures_rx.recv().await.unwrap();
-    assert_eq!(
-        json_capture.authorization.as_deref(),
-        Some("Bearer controlled-secret")
-    );
+    assert_eq!(json_capture.api_key.as_deref(), Some("controlled-secret"));
+    assert!(json_capture.authorization.is_none());
     assert_eq!(json_capture.body["contents"][0]["parts"][0]["text"], "json");
     assert!(json_capture.body.get("metadata_center").is_none());
 
@@ -209,7 +212,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert!(!rest.contains("[DONE]"));
     let _sse_capture = captures_rx.recv().await.unwrap();
 
-    let error_response = client
+    let error_result = client
         .post(&endpoint)
         .header("x-session-id", "gemini-controlled-test-session")
         .header("x-conversation-id", "gemini-controlled-test-conversation")
@@ -218,59 +221,64 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
-    let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert_eq!(error_body["error"]["code"], "network_error");
-    assert!(
-        error_body["error"].get("class").is_none()
-            && error_body["error"].get("error_node").is_none()
-            && error_body["error"].get("stage").is_none()
-            && error_body["error"].get("decision").is_none(),
-        "Error06 body must not carry control-plane fields: {error_body}"
-    );
-    assert!(
-        error_body["error"].get("status").is_none(),
-        "provider raw Gemini status must not bypass ErrorErr06 projection: {error_body}"
-    );
+        .await;
+    // The provider's real 429 is provider-private. The client boundary is a broken
+    // transport, never the upstream status or the converted error body.
+    match error_result {
+        Ok(response) => panic!(
+            "a provider-terminal 429 must not reach the Gemini client, got {}",
+            response.status()
+        ),
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted Gemini client transport: {error}"
+        ),
+    }
     let _error_capture = captures_rx.recv().await.unwrap();
     while tokio::time::timeout(Duration::from_millis(25), captures_rx.recv())
         .await
         .is_ok()
     {}
 
+    let opaque_business = json!({"route":"business-route","requiredCapabilities":["read"]});
     let isolation_response = client
         .post(&endpoint)
         .header("x-session-id", "gemini-controlled-test-session")
         .header("x-conversation-id", "gemini-controlled-test-conversation")
         .json(&json!({
             "contents":[{"role":"user","parts":[{"text":"isolation"}]}],
-            "metadata_center":{"route":"must-not-leak"}
+            "metadata_center":opaque_business.clone()
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv())
-            .await
-            .is_err()
+    assert_eq!(isolation_response.status(), StatusCode::OK);
+    let isolation_body: Value = isolation_response.json().await.unwrap();
+    assert_eq!(
+        isolation_body["candidates"][0]["content"]["parts"][0]["text"],
+        "controlled json"
     );
+    let isolation_capture = captures_rx.recv().await.unwrap();
+    assert_eq!(isolation_capture.body["metadata_center"], opaque_business);
+    assert_eq!(
+        isolation_capture.body["contents"][0]["parts"][0]["text"],
+        "isolation"
+    );
+    // Business spelling must not alter the separately bound transport auth.
+    assert_eq!(
+        isolation_capture.api_key.as_deref(),
+        Some("controlled-secret")
+    );
+    assert!(isolation_capture.authorization.is_none());
 
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();
     std::env::remove_var("V3_GEMINI_CONTROLLED_KEY");
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn manifest(
     server_port: u16,

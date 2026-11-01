@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
-    ResponsesTransport, V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseHeader,
-    V3Transport13ResponsesHttpRequest,
+    ResponsesTransport, V3ProviderError, V3ProviderRequestHeader, V3ProviderResp14Raw,
+    V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime, execute_v3_anthropic_relay_runtime_with_client_headers,
@@ -16,6 +16,10 @@ use std::sync::Mutex;
 fn ensure_isolated_provider_state_dir() {
     static INITIALIZE: std::sync::Once = std::sync::Once::new();
     INITIALIZE.call_once(|| {
+        // These wire-parity fixtures replay one completed provider response and
+        // count provider attempts, so the bounded Chat Process continuation is
+        // pinned off; refill coverage lives in the public server entry tests.
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock must follow the Unix epoch")
@@ -71,6 +75,7 @@ impl ResponsesTransport for AnthropicProviderJsonTransport {
 
 struct AnthropicProviderProjectionTransport {
     captured_projection: Mutex<Option<Value>>,
+    captured_provider_headers: Mutex<Option<Vec<V3ProviderRequestHeader>>>,
 }
 
 #[async_trait]
@@ -80,6 +85,7 @@ impl ResponsesTransport for AnthropicProviderProjectionTransport {
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         *self.captured_projection.lock().unwrap() = Some(request.provider_request_projection());
+        *self.captured_provider_headers.lock().unwrap() = Some(request.provider_headers().to_vec());
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id(),
             request.provider_id(),
@@ -451,6 +457,7 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
     let thinking = json!({"type":"adaptive","display":"omitted"});
     let transport = AnthropicProviderProjectionTransport {
         captured_projection: Mutex::new(None),
+        captured_provider_headers: Mutex::new(None),
     };
 
     let output = execute_v3_anthropic_relay_runtime_with_client_headers(
@@ -531,11 +538,33 @@ async fn anthropic_relay_dynamic_claude_code_packet_reaches_anthropic_provider_r
         projection["body"]["messages"],
         json!([{"role":"user","content":[{"type":"text","text":"Reply with exactly: ok"}]}])
     );
-    assert_eq!(projection["headers"]["x-stainless-timeout"], "600");
-    assert!(projection["headers"]["anthropic-beta"]
-        .as_str()
+    let headers = transport
+        .captured_provider_headers
+        .lock()
         .unwrap()
-        .contains("advisor-tool-2026-03-01"));
+        .clone()
+        .expect("typed transport headers must be captured independently of debug projection");
+    let timeouts: Vec<_> = headers
+        .iter()
+        .filter(|header| header.name() == "x-stainless-timeout")
+        .map(|header| header.value())
+        .collect();
+    assert_eq!(timeouts, vec!["600"]);
+    let betas: Vec<_> = headers
+        .iter()
+        .filter(|header| header.name() == "anthropic-beta")
+        .map(|header| header.value())
+        .collect();
+    assert_eq!(betas.len(), 1);
+    assert!(betas[0].contains("advisor-tool-2026-03-01"));
+    for header in &headers {
+        assert_eq!(
+            projection["headers"][header.name()],
+            "[REDACTED]",
+            "debug projection must redact the supplied header {}",
+            header.name()
+        );
+    }
     let serialized = serde_json::to_string(&projection).unwrap();
     assert!(
         !serialized.contains("cc_version=2.1.220.dae"),
@@ -631,7 +660,16 @@ async fn anthropic_relay_anthropic_provider_sse_reaches_client_sse_events() {
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() {
     let server_id = "anthropic_wire_sse_eof_failure";
-    let manifest = manifest(server_id);
+    let mut manifest = manifest(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("anthropic provider wire test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
@@ -677,6 +715,7 @@ async fn anthropic_relay_anthropic_provider_sse_eof_before_message_stop_fails() 
 
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_sse_eof_reselect";
     let manifest = anthropic_reselect_manifest(server_id);
     let provider_health =
@@ -742,6 +781,7 @@ async fn anthropic_relay_anthropic_provider_sse_eof_reselects_next_candidate() {
 
 #[tokio::test]
 async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
+    ensure_isolated_provider_state_dir();
     let server_id = "anthropic_wire_responses_sse_eof_reselect";
     let manifest = responses_reselect_manifest(server_id);
     let provider_health =
@@ -808,7 +848,16 @@ async fn anthropic_relay_responses_provider_sse_eof_reselects_next_candidate() {
 #[tokio::test]
 async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_inference() {
     let server_id = "anthropic_wire_tool_missing_name_failure";
-    let manifest = manifest(server_id);
+    let mut manifest = manifest(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("anthropic provider wire test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
@@ -854,6 +903,118 @@ async fn anthropic_relay_anthropic_provider_tool_use_missing_name_fails_without_
     assert_eq!(output.client_response["error"]["code"], "network_error");
 }
 
+/// A successful provider cyber refusal is representable business output.
+/// Preserve its terminal details without selecting the available backup.
+struct AnthropicCyberRefusalJsonTransport {
+    attempts: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicCyberRefusalJsonTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.attempts.lock().unwrap().push(provider_id.clone());
+        let body = if provider_id == "flaky" {
+            json!({
+                "id":"msg_cyber_refusal",
+                "type":"message",
+                "role":"assistant",
+                "model":"MiniMax-M3",
+                "content":[],
+                "stop_reason":"refusal",
+                "stop_details":{"type":"refusal","category":"cyber","explanation":"policy"},
+                "usage":{"input_tokens":7,"output_tokens":0}
+            })
+        } else {
+            json!({
+                "id":"msg_after_cyber",
+                "type":"message",
+                "role":"assistant",
+                "model":"MiniMax-M3",
+                "content":[{"type":"text","text":"cyber reselect ok"}],
+                "stop_reason":"end_turn",
+                "usage":{"input_tokens":7,"output_tokens":3}
+            })
+        };
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&body).unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn anthropic_relay_cyber_refusal_json_preserves_output_without_reselection() {
+    ensure_isolated_provider_state_dir();
+    let server_id = "anthropic_wire_cyber_refusal_json";
+    let manifest = anthropic_reselect_manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = AnthropicCyberRefusalJsonTransport {
+        attempts: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_anthropic_relay_runtime_with_client_headers_provider_health(
+        &manifest,
+        V3AnthropicRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            toolreason_observation_session_id: None,
+            request_id: "req-anthropic-cyber-refusal-json-preserved".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"Reply OK only."}],
+                "stream":false
+            }),
+        },
+        &transport,
+        Vec::new(),
+        provider_health.runtime_health(),
+    )
+    .await
+    .unwrap();
+
+    let attempts = transport.attempts.lock().unwrap().clone();
+    assert_eq!(
+        attempts,
+        ["flaky"],
+        "successful refusal must not trigger another provider attempt"
+    );
+    assert_eq!(output.status, 200);
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "node_trace={:?}",
+        output.node_trace
+    );
+    assert_eq!(
+        output.client_response,
+        json!({
+            "id":"msg_cyber_refusal",
+            "type":"message",
+            "role":"assistant",
+            "model":"MiniMax-M3",
+            "content":[],
+            "stop_reason":"refusal",
+            "stop_details":{"type":"refusal","category":"cyber","explanation":"policy"},
+            "usage":{"input_tokens":7,"output_tokens":0}
+        })
+    );
+}
+
 fn manifest(server_id: &str) -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -868,7 +1029,7 @@ endpoints = ["responses", "anthropic"]
 
 [servers.{server_id}.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.minimax]

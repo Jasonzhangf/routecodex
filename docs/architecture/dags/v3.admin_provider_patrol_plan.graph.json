@@ -1,0 +1,59 @@
+{
+  "id": "v3.admin_provider_patrol_plan",
+  "version": "1",
+  "inputs": [
+    { "id": "operator-patrol-plan-intent", "schema": "Object", "schema_ref": "v3.admin_provider_patrol_plan.arc.plan_intent" }
+  ],
+  "nodes": [
+    {
+      "id": "plan_n01_plan_declared",
+      "operator": "routecodex.v3.admin.provider_patrol.put_plan",
+      "operator_version": "1",
+      "inputs": ["operator-patrol-plan-intent"],
+      "output": { "id": "plan-declared", "schema": "Object", "schema_ref": "v3.admin_provider_patrol_plan.arc.declared" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_patrol_plan"], "writes": ["v3.admin.provider_patrol_plan"] }
+    },
+    {
+      "id": "plan_n02_plan_read_back",
+      "operator": "routecodex.v3.admin.provider_patrol.get_plan",
+      "operator_version": "1",
+      "inputs": ["plan-declared"],
+      "output": { "id": "plan-read-back", "schema": "Object", "schema_ref": "v3.admin.provider_patrol_plan.arc.read_back" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_patrol_plan"], "writes": [] }
+    },
+    {
+      "id": "plan_n03_plan_armed",
+      "operator": "routecodex.v3.admin.provider_patrol.patrol_status",
+      "operator_version": "1",
+      "inputs": ["plan-read-back"],
+      "output": { "id": "plan-armed", "schema": "Object", "schema_ref": "v3.admin.provider_patrol_plan.arc.armed" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_patrol_plan", "v3.admin.provider_patrol"], "writes": [] }
+    },
+    {
+      "id": "plan_n04_plan_disarmed",
+      "operator": "routecodex.v3.admin.provider_patrol.delete_plan",
+      "operator_version": "1",
+      "inputs": ["plan-armed"],
+      "output": { "id": "plan-disarmed", "schema": "Object", "schema_ref": "v3.admin_provider_patrol_plan.arc.disarmed" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_patrol_plan"], "writes": ["v3.admin.provider_patrol_plan"] }
+    }
+  ],
+  "edges": [
+    { "from": "plan_n01_plan_declared", "to": "plan_n02_plan_read_back", "arc_id": "plan-declared" },
+    { "from": "plan_n02_plan_read_back", "to": "plan_n03_plan_armed", "arc_id": "plan-read-back" },
+    { "from": "plan_n03_plan_armed", "to": "plan_n04_plan_disarmed", "arc_id": "plan-armed" }
+  ],
+  "outputs": ["plan-disarmed"]
+}

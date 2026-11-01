@@ -5,11 +5,11 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-openai-chat-codec-characterization.mjs');
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['protocol branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'V3HubEntryProtocol::OpenAiChat', 'V3HubEntryProtocol::Responses', /missing V3HubEntryProtocol::OpenAiChat|forbidden.*Responses/],
-  ['side channel', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS', 'V3_REMOVED_CONTROL_PAYLOAD_KEYS', /missing V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS/],
+  ['business-name guard revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'use super::{', 'fn reject_side_channel_fields() {}\nuse super::{', /forbidden.*reject_side_channel_fields/],
   ['tool identity governance revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_codec.rs', 'fn validate_request(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {', 'fn validate_message_tool_identity() {}\nfn validate_request(payload: &Value) -> Result<(), V3OpenAiChatCodecError> {', /forbidden.*validate_message_tool_identity/],
   ['SSE coverage', 'v3/crates/routecodex-v3-runtime/tests/hub_openai_chat_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
 ];
@@ -17,7 +17,7 @@ const failures = [];
 for (const [name, relative, from, to, diagnostic] of fixtures) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-openai-chat-codec-red-'));
   try {
-    for (const item of ['v3', 'docs', 'scripts', 'package.json']) cpSync(resolve(repoRoot, item), join(root, item), { recursive: true, filter: source => !source.includes('/target/') });
+    for (const item of ['v3', 'docs', 'scripts', 'package.json']) cpSync(resolve(repoRoot, item), join(root, item), { recursive: true, filter: source => !source.includes('/target/') && !source.includes('/build-control/') });
     const target = join(root, relative);
     const source = readFileSync(target, 'utf8');
     if (!source.includes(from)) throw new Error(`${name}: fixture source missing`);

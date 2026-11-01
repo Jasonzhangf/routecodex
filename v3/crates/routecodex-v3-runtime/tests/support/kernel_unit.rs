@@ -2,23 +2,26 @@ use super::*;
 use async_trait::async_trait;
 use routecodex_v3_config::*;
 use routecodex_v3_provider_responses::{
-    V3ProviderError, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
+    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureCooldownScope,
+    V3ProviderFailurePolicy, V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
 };
-use routecodex_v3_hooks::{ControlRequest, ControlResponse};
 use serde_json::json;
-use servertool_core::web_search_contract::{
-    WebSearchHookOutcome, WebSearchResult, WebSearchResultStatus,
-};
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::thread;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::V3_PROVIDER_ACTION_ISOLATED_DELAY_MS;
+
+fn expect_ordinary_source<T, F: std::fmt::Debug>(
+    result: Result<T, Result<routecodex_v3_error::V3Error01SourceRaised, F>>,
+) -> routecodex_v3_error::V3Error01SourceRaised {
+    match result {
+        Err(Ok(source)) => source,
+        Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+        Ok(_) => panic!("expected an ordinary source"),
+    }
+}
 
 #[path = "../../src/kernel/tests/exact_pin.rs"]
 mod exact_pin;
@@ -317,6 +320,465 @@ fn test_protocol_plan(
     .expect("test protocol plan")
 }
 
+fn provider_concurrency_two_provider_manifest(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_provider_manifest_with_modes(
+        first_provider,
+        second_provider,
+        acquire_timeout_ms,
+        r#""direct""#,
+    )
+}
+
+fn provider_concurrency_two_provider_manifest_with_max_in_flight(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+    max_in_flight: u32,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
+        first_provider,
+        second_provider,
+        acquire_timeout_ms,
+        r#""direct""#,
+        max_in_flight,
+    )
+}
+
+fn provider_concurrency_two_provider_relay_manifest(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_provider_manifest_with_modes(
+        first_provider,
+        second_provider,
+        acquire_timeout_ms,
+        r#""relay""#,
+    )
+}
+
+fn provider_concurrency_two_provider_manifest_with_modes(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+    allowed_modes: &str,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
+        first_provider,
+        second_provider,
+        acquire_timeout_ms,
+        allowed_modes,
+        1,
+    )
+}
+
+fn provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+    allowed_modes: &str,
+    max_in_flight: u32,
+) -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = [{allowed_modes}]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.{first_provider}]
+type = "responses"
+base_url = "http://{first_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FIRST_KEY" }}] }}
+concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{first_provider}.models.test]
+wire_name = "wire-first"
+
+[providers.{second_provider}]
+type = "responses"
+base_url = "http://{second_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
+concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{second_provider}.models.test]
+wire_name = "wire-second"
+
+[forwarders.responses]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "{second_provider}", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
+"#
+    ))
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
+fn provider_concurrency_three_provider_manifest(
+    first_provider: &str,
+    second_provider: &str,
+    third_provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.{first_provider}]
+type = "responses"
+base_url = "http://{first_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FIRST_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{first_provider}.models.test]
+wire_name = "wire-first"
+
+[providers.{second_provider}]
+type = "responses"
+base_url = "http://{second_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{second_provider}.models.test]
+wire_name = "wire-second"
+
+[providers.{third_provider}]
+type = "responses"
+base_url = "http://{third_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "THIRD_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{third_provider}.models.test]
+wire_name = "wire-third"
+
+[forwarders.responses]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "{second_provider}", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "{third_provider}", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
+"#
+    ))
+    .expect("three-provider concurrency manifest");
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
+fn provider_concurrency_two_key_manifest(
+    provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_key_manifest_with_modes(provider, acquire_timeout_ms, r#""direct""#)
+}
+
+fn provider_concurrency_two_key_relay_manifest(
+    provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    provider_concurrency_two_key_manifest_with_modes(provider, acquire_timeout_ms, r#""relay""#)
+}
+
+fn provider_concurrency_two_key_manifest_with_modes(
+    provider: &str,
+    acquire_timeout_ms: u64,
+    allowed_modes: &str,
+) -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = [{allowed_modes}]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.{provider}]
+type = "responses"
+base_url = "http://{provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [
+  {{ alias = "key1", env = "KEY_ONE" }},
+  {{ alias = "key2", env = "KEY_TWO" }}
+] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{provider}.models.test]
+wire_name = "wire-test"
+
+[forwarders.responses]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{provider}", model = "test", key = "key1", priority = 2 }},
+  {{ kind = "provider_model", provider = "{provider}", model = "test", key = "key2", priority = 1 }}
+]
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
+"#
+    ))
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
+fn provider_concurrency_two_key_then_other_provider_manifest(
+    first_provider: &str,
+    second_provider: &str,
+    acquire_timeout_ms: u64,
+) -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.{first_provider}]
+type = "responses"
+base_url = "http://{first_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [
+  {{ alias = "key1", env = "FIRST_KEY_ONE" }},
+  {{ alias = "key2", env = "FIRST_KEY_TWO" }}
+] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{first_provider}.models.test]
+wire_name = "wire-first"
+
+[providers.{second_provider}]
+type = "responses"
+base_url = "http://{second_provider}.invalid/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
+[providers.{second_provider}.models.test]
+wire_name = "wire-second"
+
+[forwarders.responses]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key1", priority = 3 }},
+  {{ kind = "provider_model", provider = "{first_provider}", model = "test", key = "key2", priority = 2 }},
+  {{ kind = "provider_model", provider = "{second_provider}", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
+"#
+    ))
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
+fn saturate_capacity_key(provider_key: &str, declared_max: u32) -> Vec<V3AdaptiveConcurrencyLease> {
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    let scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+        interface_id: "default".into(), model_id: "test".into(),
+    };
+    controller.ensure_initial_budget(provider_key, declared_max).unwrap();
+    let held: Vec<_> = (0..declared_max).map(|_| controller
+        .try_acquire_business_scoped(provider_key, Some(&scope))
+        .expect("real scoped business leases fill the declared hard ceiling")).collect();
+    assert!(
+        controller.try_acquire_business_scoped(provider_key, Some(&scope)).is_none(),
+        "the declared shared hard ceiling must reject another business admission"
+    );
+    assert_eq!(controller.snapshot_for_scope(provider_key, Some(&scope)).unwrap().total_provider_in_flight, declared_max);
+    held
+}
+
+fn release_capacity_leases(leases: Vec<V3AdaptiveConcurrencyLease>) {
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    for lease in leases {
+        controller.release(lease.into_permit()).unwrap();
+    }
+}
+
+fn provider_concurrency_relay_input(request_id: &str) -> V3ResponsesRelayRuntimeInput {
+    V3ResponsesRelayRuntimeInput {
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope("default"),
+        request_id: request_id.to_string(),
+        payload: json!({"model":"client-model","input":"hello"}),
+    }
+}
+
+#[derive(Default)]
+struct ProviderConcurrencyRecordingTransport {
+    sends: Arc<Mutex<Vec<String>>>,
+}
+
+struct ProviderActionRecoveryConcurrencyTransport {
+    first_provider: String,
+    first_send: tokio::sync::Notify,
+    sends: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for ProviderActionRecoveryConcurrencyTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends
+            .lock()
+            .unwrap()
+            .push(request.provider_key().to_string());
+        if request.provider_id() == self.first_provider {
+            self.first_send.notify_one();
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    headers: vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    status: 429,
+                    body: br#"{"error":{"message":"rate limited"}}"#.to_vec(),
+                    body_read_failure: None,
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_concurrency_recovery","object":"response","status":"completed","output":[{"id":"msg_concurrency_recovery","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+        ))
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for ProviderConcurrencyRecordingTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.sends.lock().unwrap().push(format!(
+            "{}:{}",
+            request.provider_key(),
+            request.body()["model"]
+                .as_str()
+                .unwrap_or("<missing-model>")
+        ));
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_capacity","object":"response","status":"completed","output":[{"id":"msg_capacity","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+        ))
+    }
+}
+
+struct PostTransportConcurrencyTransport {
+    busy_providers: BTreeSet<String>,
+    sends: Mutex<Vec<String>>,
+    last_send_at: Mutex<BTreeMap<String, std::time::Instant>>,
+}
+
+impl PostTransportConcurrencyTransport {
+    fn new(busy_providers: &[&str]) -> Self {
+        Self {
+            busy_providers: busy_providers.iter().map(|id| (*id).to_string()).collect(),
+            sends: Mutex::new(Vec::new()),
+            last_send_at: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for PostTransportConcurrencyTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        if self.busy_providers.contains(&provider_id) {
+            let now = std::time::Instant::now();
+            if let Some(previous) = self.last_send_at.lock().unwrap().insert(provider_id.clone(), now) {
+                assert!(now.duration_since(previous) >= Duration::from_millis(900),
+                    "transport-busy identity must retain its original one-second recovery due");
+            }
+        }
+        {
+            let mut calls = self.sends.lock().unwrap();
+            calls.push(provider_id.clone());
+            assert!(
+                calls.len() <= 32,
+                "capacity rejection must back off, not spin"
+            );
+        }
+        if self.busy_providers.contains(&provider_id) {
+            return Err(V3ProviderError::ConcurrencyBusy {
+                request_id: request.request_id().to_string(),
+                provider_id,
+            });
+        }
+        Err(V3ProviderError::HttpStatus {
+            response: Box::new(V3ProviderHttpFailure {
+                request_id: request.request_id().to_string(),
+                provider_id,
+                status: 400,
+                headers: Vec::new(),
+                body: br#"{"error":{"type":"invalid_request_error","message":"mixed provider failure"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        })
+    }
+}
+
 #[tokio::test]
 async fn direct_sse_strip_client_response_id_empties_nested_response_id() {
     let observation = V3RuntimeStreamObservation::default();
@@ -376,7 +838,7 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
     let observation = V3RuntimeStreamObservation::default();
     let runtime_timing = V3RuntimeTimingState::start();
     let source = Box::pin(stream::iter(vec![Ok(
-        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"rsn_CIPHER\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
+        b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"411bd3dd-47a6-49c0-8eef-6a826f349bf6-0\",\"metadata\":{\"encrypted_content\":\"113833ee-native-cipher\"},\"summary\":[{\"type\":\"summary_text\",\"text\":\"plain\"}]}}\n\n".to_vec(),
     )]));
     let mut observed = wrap_direct_sse_provider_event_json_observation_stream(
         V3ProviderAttemptSseStream::new(source),
@@ -389,8 +851,12 @@ async fn direct_sse_strips_encrypted_content_when_retain_false() {
     let first = observed.next().await.unwrap().unwrap();
     let text = String::from_utf8_lossy(&first);
     assert!(
-        !text.contains("rsn_CIPHER"),
-        "retain=false 必须剥离密文: {text}"
+        !text.contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+        "retain=false 必须剥离 UUID-shaped 密文: {text}"
+    );
+    assert!(
+        !text.contains("113833ee-native-cipher"),
+        "retain=false 必须递归剥离 opaque 密文: {text}"
     );
     assert!(text.contains("plain"), "明文 summary 必须保留: {text}");
     assert!(
@@ -507,13 +973,14 @@ pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provide
 
 #[tokio::test]
 async fn provider_error_enters_error_chain_not_success() {
-    struct ErrorTransport;
+    struct ErrorTransport(std::sync::atomic::AtomicUsize);
     #[async_trait]
     impl ResponsesTransport for ErrorTransport {
         async fn send(
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Err(V3ProviderError::Transport {
                 request_id: request.request_id().to_string(),
                 provider_id: request.provider_id().to_string(),
@@ -522,7 +989,9 @@ async fn provider_error_enters_error_chain_not_success() {
         }
     }
     let routing_group = "provider_error_terminal";
-    let manifest = scoped_test_manifest(test_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(test_manifest(), routing_group);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let raw = test_responses_raw(
         routing_group,
@@ -531,26 +1000,25 @@ async fn provider_error_enters_error_chain_not_success() {
         json!({"model":"client-model","input":"hello"}),
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
-    let output = execute_v3_responses_direct_runtime_kernel_core(
+    let transport = ErrorTransport(std::sync::atomic::AtomicUsize::new(0));
+    let execution = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &ErrorTransport,
-    )
-    .await;
-    assert_eq!(output.client_payload.status, 502);
+        &transport,
+    );
+    tokio::pin!(execution);
+    assert!(tokio::time::timeout(Duration::from_millis(50), &mut execution).await.is_err(),
+        "last transport failure must remain pending inside its original request budget");
+    let output = tokio::time::timeout(Duration::from_secs(3), execution).await
+        .expect("original test residence must bound terminal recovery");
+    assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::NoResponse));
+    assert_eq!(output.observability.as_ref().and_then(|value| value.attempts), Some(1));
     assert_eq!(output.error_chain.unwrap()[0], "V3Error01SourceRaised");
-    match output.client_payload.body {
-        V3ClientBody::Json(body) => {
-            assert_eq!(body["error"]["code"], "network_error");
-            assert_eq!(body["error"]["message"], "network error");
-        }
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) => panic!("error response must be JSON"),
-        V3ClientBody::CommittedSse(_) => panic!("error response must be JSON"),
-    }
 }
 
 #[tokio::test]
@@ -570,7 +1038,7 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
                     name: "content-type".to_string(),
                     value: b"application/json".to_vec(),
                 }],
-                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"rsn_MULTI","summary":[{"type":"summary_text","text":"plain"}]}]}"#.to_vec(),
+                br#"{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"411bd3dd-47a6-49c0-8eef-6a826f349bf6-0","metadata":{"encrypted_content":"113833ee-native-cipher"},"summary":[{"type":"summary_text","text":"plain"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Visible answer"}]}]}"#.to_vec(),
             ))
         }
     }
@@ -598,8 +1066,14 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
     match output.client_payload.body {
         V3ClientBody::Json(body) => {
             assert!(
-                !body.to_string().contains("rsn_MULTI"),
-                "多 provider 场景响应密文必须剥离: {body}"
+                !body
+                    .to_string()
+                    .contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+                "多 provider 场景 UUID-shaped 密文必须剥离: {body}"
+            );
+            assert!(
+                !body.to_string().contains("113833ee-native-cipher"),
+                "多 provider 场景 opaque 密文必须递归剥离: {body}"
             );
             assert_eq!(body["output"][0]["summary"][0]["text"], "plain");
         }
@@ -608,15 +1082,23 @@ async fn direct_json_response_strips_encrypted_content_for_multi_provider_route(
 }
 
 #[tokio::test]
-async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send() {
-    struct NoSendTransport;
+async fn direct_runtime_preserves_business_control_names_before_provider_send() {
+    struct BusinessTransport;
     #[async_trait]
-    impl ResponsesTransport for NoSendTransport {
+    impl ResponsesTransport for BusinessTransport {
         async fn send(
             &self,
-            _request: V3Transport13ResponsesHttpRequest,
+            request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            panic!("side-channel control payload must fail before provider transport")
+            assert_eq!(
+                request.body()["metadataCenter"],
+                json!({"providerKey":"must-not-enter-body"})
+            );
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id().to_string(), request.provider_id().to_string(), 200,
+                vec![V3ProviderResponseHeader { name: "content-type".into(), value: b"application/json".to_vec() }],
+                serde_json::to_vec(&json!({"id":"business-response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"preserved"}]}]})).unwrap(),
+            ))
         }
     }
 
@@ -624,8 +1106,8 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
         &test_manifest(),
         V3Server03HttpRequestRaw {
             request_purpose: V3RequestPurpose::Conversation,
-            port: None,
-            pipeline_id: None,
+            port: Some(7777),
+            pipeline_id: Some("business-name-test".into()),
             server_id: "test".to_string(),
             failure_session_scope: test_failure_session_scope("test"),
             request_id: "req-control-leak".to_string(),
@@ -640,24 +1122,21 @@ async fn direct_runtime_rejects_routecodex_control_payload_before_provider_send(
             }),
         },
         crate::register_responses_direct_hooks(),
-        &NoSendTransport,
+        &BusinessTransport,
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 599);
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert!(output.node_trace.contains(&"V3Req04StandardizedResponses"));
-    assert!(!output
+    assert!(output
         .node_trace
         .contains(&"V3Provider12ResponsesWirePayload"));
     match output.client_payload.body {
         V3ClientBody::Json(body) => {
-            assert!(body["error"]["message"]
-                .as_str()
-                .expect("error message")
-                .contains("metadataCenter"));
+            assert_eq!(body["output"][0]["content"][0]["text"], "preserved");
         }
         V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
-            panic!("error response must be JSON")
+            panic!("business response must be JSON")
         }
     }
 }
@@ -724,9 +1203,18 @@ async fn direct_runtime_rejects_invalid_current_data_image_before_provider_send(
 }
 
 #[test]
-fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
+fn direct_protocol_plan_uses_exact_identity_cooldown_across_sessions() {
     let routing_group = "protocol_plan_session_cooldown";
-    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    if let Some(pool) = manifest
+        .route_groups
+        .get_mut(routing_group)
+        .and_then(|group| group.pools.get_mut("default"))
+    {
+        for target in &mut pool.targets {
+            target.priority = Some(1);
+        }
+    }
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session_a = test_failure_session_scope_for(routing_group, "session-a");
     let session_b = test_failure_session_scope_for(routing_group, "session-b");
@@ -741,6 +1229,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
                 Some("key"),
                 Some("test"),
                 Some("controlled protocol plan cooldown"),
+                None,
                 now + offset,
                 Some(V3ProviderFailurePolicy {
                     failure_threshold: 3,
@@ -749,7 +1238,8 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
                     max_probe_interval_ms: None,
                     long_probe_backoff: false,
                     until_restart: false,
-                    cooldown_scope: V3ProviderFailureCooldownScope::Session,
+                    advisory_probe: false,
+                    cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
                 }),
             )
             .expect("session A failure should be recorded");
@@ -778,12 +1268,7 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
     assert_eq!(plan_a.decision.target.unavailable_candidates.len(), 1);
     assert!(
         plan_a.decision.target.unavailable_candidates[0]
-            .starts_with("first:key:test:availability("),
-        "{:?}",
-        plan_a.decision.target.unavailable_candidates
-    );
-    assert!(
-        plan_a.decision.target.unavailable_candidates[0].contains("session-a"),
+            .starts_with("first:default:key:test:availability("),
         "{:?}",
         plan_a.decision.target.unavailable_candidates
     );
@@ -805,9 +1290,9 @@ fn direct_protocol_plan_uses_session_bound_cooldown_before_initial_target() {
         provider_health,
         now + 10,
     )
-    .expect("session B protocol plan should preserve session isolation from session A");
-    assert_eq!(plan_b.decision.target.candidate.provider_id, "first");
-    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 0);
+    .expect("session B must respect the same complete provider identity cooldown");
+    assert_eq!(plan_b.decision.target.candidate.provider_id, "second");
+    assert_eq!(plan_b.decision.target.unavailable_candidates.len(), 1);
 }
 
 #[tokio::test]
@@ -845,7 +1330,7 @@ async fn provider_failure_reselects_without_router_reentry() {
             }
             assert_eq!(
                 self.realtime_events.lock().unwrap().as_slice(),
-                &["first:key:test".to_string()],
+                &["first:default:key:test".to_string()],
                 "provider failure event must be published before the next provider send"
             );
             assert_eq!(request.provider_id(), "second");
@@ -872,7 +1357,8 @@ async fn provider_failure_reselects_without_router_reentry() {
     };
     let routing_group = "provider_failure_reselection";
     let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let provider_health =
+        V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let raw = test_responses_raw(
         routing_group,
         "req",
@@ -903,8 +1389,20 @@ async fn provider_failure_reselects_without_router_reentry() {
     .await;
 
     assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
-    assert_eq!(route_events.lock().unwrap().len(), 2);
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        2,
+        "provider attempts must not duplicate during recovery admission; route selections: {:?}",
+        route_events.lock().unwrap().as_slice()
+    );
+    assert_eq!(
+        route_events.lock().unwrap().as_slice(),
+        &[
+            "first:default:key:test".to_string(),
+            "second:default:key:test".to_string(),
+        ],
+        "Target must select the recovered provider once after its action permit is admitted"
+    );
     assert_eq!(realtime_events.lock().unwrap().len(), 1);
     assert_eq!(
         output
@@ -943,12 +1441,96 @@ async fn provider_failure_reselects_without_router_reentry() {
         observability.provider_failure_events[0]
             .next_provider_key
             .as_deref(),
-        Some("second:key:test")
+        Some("second:default:key:test")
+    );
+}
+
+/// Regression: the direct lane publishes the upstream provider's real HTTP
+/// status to observability. A network transport failure received no HTTP
+/// response, so the published observability must carry `None` while the failure
+/// observation itself keeps its client-facing 502 fallback status.
+#[tokio::test]
+async fn transport_provider_failure_publishes_no_upstream_status_to_observability() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    struct FirstTransportFailsSecondSucceeds {
+        sends: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for FirstTransportFailsSecondSucceeds {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            if self.sends.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(V3ProviderError::Transport {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    reason: "connection closed before response headers".to_string(),
+                });
+            }
+            Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+            ))
+        }
+    }
+
+    let published = Arc::new(Mutex::new(Vec::<(Option<u16>, u16)>::new()));
+    let sink_published = Arc::clone(&published);
+    let transport = FirstTransportFailsSecondSucceeds {
+        sends: AtomicUsize::new(0),
+    };
+    let routing_group = "transport_failure_no_upstream_status";
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        routing_group,
+        "req",
+        "exec",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan)
+            .with_provider_failure_event_sink(Some(Arc::new(move |observability, event| {
+                sink_published
+                    .lock()
+                    .unwrap()
+                    .push((observability.provider_status, event.status));
+            }))),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let published = published.lock().unwrap();
+    assert_eq!(published.len(), 1, "one failed provider attempt");
+    assert_eq!(
+        published[0].0, None,
+        "a transport failure received no HTTP response; the published observability must not mirror the projected 502"
+    );
+    assert_eq!(
+        published[0].1, 502,
+        "the observation keeps the client-facing 502 fallback status"
     );
 }
 
 #[tokio::test]
-async fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
+async fn provider_internal_transport_request_lane_recovers_without_client_error() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct InternalRequestFailureTransport {
@@ -961,7 +1543,15 @@ async fn provider_internal_transport_request_lane_projects_598_without_provider_
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            self.sends.fetch_add(1, Ordering::SeqCst);
+            if self.sends.fetch_add(1, Ordering::SeqCst) > 0 {
+                return Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(), request.provider_id(), 200,
+                    vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                        name: "content-type".into(), value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_recovered","status":"completed","output_text":"ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+                ));
+            }
             Err(V3ProviderError::InternalTransport {
                 request_id: request.request_id().to_string(),
                 provider_id: request.provider_id().to_string(),
@@ -995,16 +1585,20 @@ async fn provider_internal_transport_request_lane_projects_598_without_provider_
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 598, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
-    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
-    if let Some(observability) = output.observability.as_ref() {
-        assert_eq!(observability.provider_failure_events.len(), 0);
-    }
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let events = &output
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].status, 598);
 }
 
 #[tokio::test]
-async fn provider_internal_transport_response_lane_projects_599_without_provider_policy() {
+async fn provider_internal_transport_response_lane_recovers_without_client_error() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct InternalResponseFailureTransport {
@@ -1017,7 +1611,15 @@ async fn provider_internal_transport_response_lane_projects_599_without_provider
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            self.sends.fetch_add(1, Ordering::SeqCst);
+            if self.sends.fetch_add(1, Ordering::SeqCst) > 0 {
+                return Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(), request.provider_id(), 200,
+                    vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                        name: "content-type".into(), value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_recovered","status":"completed","output_text":"ok","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+                ));
+            }
             Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
                 request.provider_id().to_string(),
@@ -1065,18 +1667,18 @@ async fn provider_internal_transport_response_lane_projects_599_without_provider
     )
     .await;
 
-    assert_eq!(output.client_payload.status, 599, "{output:?}");
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
-    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
-    if let Some(observability) = output.observability.as_ref() {
-        assert_eq!(observability.provider_failure_events.len(), 0);
-    }
-    match output.client_payload.body {
-        V3ClientBody::Json(_) => {}
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
-            panic!("internal response failure must terminate before client SSE commit")
-        }
-    }
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(transport.sends.load(Ordering::SeqCst), 2);
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let events = &output
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].status, 599);
+    assert!(output.error_chain.is_none());
+    assert!(output.diagnostic_source.is_none());
 }
 
 #[test]
@@ -1113,6 +1715,9 @@ fn responses_provider_process_direct_keeps_same_protocol_direct() {
         .providers
         .get_mut("grok")
         .expect("grok provider")
+        .interfaces
+        .get_mut("default")
+        .expect("grok default interface")
         .responses
         .as_mut()
         .expect("responses config")
@@ -1261,8 +1866,8 @@ async fn provider_response_decode_failure_reselects_without_router_reentry() {
         "one failed decode attempt must remain observable while provider errors stay off the client stream"
     );
     assert_eq!(
-        observability.provider_failure_events[0].health_state, "healthy",
-        "one counted 2xx decode failure must not enter cooldown before threshold"
+        observability.provider_failure_events[0].health_state, "pre_cool_observation",
+        "a failed decode attempt is held for observation before any health cooldown is committed"
     );
 }
 
@@ -1384,8 +1989,8 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
         "the malformed terminal is observable before candidate switch"
     );
     assert_eq!(
-        observability.provider_failure_events[0].health_state, "healthy",
-        "one transient failure must count toward health without entering cooldown"
+        observability.provider_failure_events[0].health_state, "pre_cool_observation",
+        "the failed exact identity remains under observation before any cooldown is committed"
     );
     match output.client_payload.body {
         V3ClientBody::Json(value) => assert_eq!(value["id"], "resp_second"),
@@ -1396,7 +2001,7 @@ async fn direct_sse_precommit_failures_reselect_before_client_stream() {
 }
 
 #[tokio::test]
-async fn direct_sse_incomplete_reselects_without_projecting_partial_attempt() {
+async fn direct_sse_incomplete_commits_original_attempt_without_reselection() {
     use futures_util::StreamExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1476,18 +2081,19 @@ async fn direct_sse_incomplete_reselects_without_projecting_partial_attempt() {
     assert_eq!(output.client_payload.status, 200, "{output:?}");
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
-        2,
-        "the incomplete attempt must reselect exactly once: {output:?}"
+        1,
+        "the representable incomplete attempt must be preserved: {output:?}"
     );
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
     let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
-        panic!("incomplete attempt must be reselected before client stream starts")
+        panic!("incomplete attempt must be committed to the client")
     };
     let committed = stream.collect::<Vec<_>>().await;
     let text = String::from_utf8(committed.into_iter().flatten().collect()).unwrap();
-    assert!(text.contains("provider-b-only"), "{text}");
-    assert!(!text.contains("provider-a-must-not-commit"), "{text}");
-    assert!(!text.contains("response.incomplete"), "{text}");
+    assert!(!text.contains("provider-b-only"), "{text}");
+    assert!(text.contains("provider-a-must-not-commit"), "{text}");
+    assert!(text.contains("response.incomplete"), "{text}");
+    assert!(text.contains("max_output_tokens"), "{text}");
 }
 
 #[tokio::test]
@@ -1503,13 +2109,14 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
             "network failure after partial provider output",
         )),
     ]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("resident owner must receive the partial attempt failure");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
     let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"recovered\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"recovered\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"recovered\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
@@ -1523,19 +2130,14 @@ async fn direct_sse_full_attempt_commit_reselects_after_partial_network_failure(
     .expect("resident owner must seal the replacement attempt")
     .collect::<Vec<_>>()
     .await;
-    let text = String::from_utf8(
-        frames
-            .into_iter()
-            .flatten()
-            .collect(),
-    )
-    .unwrap();
+    let text = String::from_utf8(frames.into_iter().flatten().collect()).unwrap();
     assert!(text.contains("recovered"));
     assert!(!text.contains("failed-partial"));
 }
 
 #[tokio::test]
-async fn execution_control_payload_architecture_real_tcp_sse_reselection_stays_on_resident_runtime() {
+async fn execution_control_payload_architecture_real_tcp_sse_reselection_stays_on_resident_runtime()
+{
     use futures_util::StreamExt;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -1556,9 +2158,15 @@ async fn execution_control_payload_architecture_real_tcp_sse_reselection_stays_o
         .expect("second TCP provider address");
 
     let first_server = tokio::spawn(async move {
-        let (mut socket, _) = first_listener.accept().await.expect("first provider accept");
+        let (mut socket, _) = first_listener
+            .accept()
+            .await
+            .expect("first provider accept");
         let mut request = [0_u8; 4096];
-        let _ = socket.read(&mut request).await.expect("first provider request");
+        let _ = socket
+            .read(&mut request)
+            .await
+            .expect("first provider request");
         socket
             .write_all(
                 b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
@@ -1577,7 +2185,10 @@ async fn execution_control_payload_architecture_real_tcp_sse_reselection_stays_o
             .await
             .expect("second provider accept");
         let mut request = [0_u8; 4096];
-        let _ = socket.read(&mut request).await.expect("second provider request");
+        let _ = socket
+            .read(&mut request)
+            .await
+            .expect("second provider request");
         socket
             .write_all(
                 b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
@@ -1606,7 +2217,7 @@ port = 4444
 routing_group = "tcp_lifecycle"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
 
@@ -1693,13 +2304,14 @@ async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
     let source: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec(),
     )]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("EOF without terminal must be an error");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
 }
 
@@ -1716,13 +2328,14 @@ async fn direct_sse_full_attempt_commit_does_not_mix_failed_attempt_bytes() {
             "provider A disconnected",
         )),
     ]));
-    let error = collect_direct_sse_attempt_after_terminal(
-        test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
-        V3HubProviderWireProtocol::Responses,
-        crate::nodes::V3AttemptBudget::process_default(),
-    )
-    .await
-    .expect_err("provider A must fail before any bytes are committed");
+    let error = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            test_direct_sse_attempt_stream(source, V3HubProviderWireProtocol::Responses),
+            V3HubProviderWireProtocol::Responses,
+            crate::nodes::V3AttemptBudget::process_default(),
+        )
+        .await,
+    );
     assert_eq!(error.code, "provider_response_sse_stream");
     let replacement: V3ClientSseStream = Box::pin(stream::iter([Ok(
         b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"provider-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"provider-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"done\"}]}}\n\n".to_vec(),
@@ -1776,7 +2389,10 @@ async fn direct_sse_full_attempt_commit_ignores_late_error_after_terminal() {
 
 #[tokio::test]
 async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
-    struct FailedSseTransport;
+    struct FailedSseTransport {
+        sent: tokio::sync::Notify,
+        sends: std::sync::atomic::AtomicUsize,
+    }
 
     #[async_trait]
     impl ResponsesTransport for FailedSseTransport {
@@ -1784,6 +2400,8 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
             &self,
             request: V3Transport13ResponsesHttpRequest,
         ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.sends.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.sent.notify_one();
             Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
                 request.provider_id().to_string(),
@@ -1801,7 +2419,8 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
     }
 
     let routing_group = "direct_sse_no_continuation_error";
-    let manifest = scoped_test_manifest(test_manifest(), routing_group);
+    let mut manifest = scoped_test_manifest(test_manifest(), routing_group);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap().attempt_store.residence_timeout_ms = 300;
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let raw = test_responses_raw(
         routing_group,
@@ -1810,29 +2429,31 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
         json!({"model":"client-model","input":"hello","stream":true}),
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
-    let output = execute_v3_responses_direct_runtime_kernel_core(
+    let transport = FailedSseTransport {
+        sent: tokio::sync::Notify::new(),
+        sends: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let execution = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &FailedSseTransport,
-    )
-    .await;
-
-    assert_eq!(
-        output.client_payload.status, 502,
-        "pre-terminal EOF must finish Error01-06 before any client body is committed: {output:?}"
+        &transport,
     );
-    let V3ClientBody::Json(body) = output.client_payload.body else {
-        panic!("exhausted pre-terminal SSE failure must be a typed terminal error: {output:?}");
-    };
-    assert_eq!(body["error"]["code"], "network_error");
-    assert_eq!(body["error"]["message"], "network error");
-    assert!(
-        !body.to_string().contains("partial"),
-        "failed attempt bytes must never enter the terminal client payload: {body}"
+    tokio::pin!(execution);
+    tokio::select! {
+        _ = transport.sent.notified() => {},
+        _ = &mut execution => panic!("last attempt must stay pending after provider EOF"),
+    }
+    assert!(tokio::time::timeout(Duration::from_millis(50), &mut execution).await.is_err());
+    let output = tokio::time::timeout(Duration::from_secs(3), execution).await
+        .expect("the original test residence deadline must end this request");
+    assert_eq!(transport.sends.load(std::sync::atomic::Ordering::SeqCst), 1,
+        "the final failed identity is not automatically retried or probed");
+    assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness)) if witness.status() == 200),
+        "the actual200 and internal incomplete-SSE failure remain separate: {output:?}"
     );
     assert_eq!(
         output.error_chain.as_deref(),
@@ -1931,8 +2552,11 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
         &manifest,
         raw,
         crate::register_responses_direct_hooks(),
-        &PostCommitResponsesTransport { calls: calls.clone() },
+        &PostCommitResponsesTransport {
+            calls: calls.clone(),
+        },
         &debug,
+        V3DirectDebugNodePublication::Runtime,
     )
     .await;
 
@@ -1945,13 +2569,771 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
     }
     let text = String::from_utf8(bytes).expect("committed client frames must be UTF-8");
     assert!(text.contains("recovered"), "{text}");
-    assert!(!text.contains("partial"), "failed-attempt bytes leaked: {text}");
+    assert!(
+        !text.contains("partial"),
+        "failed-attempt bytes leaked: {text}"
+    );
     assert!(!text.contains("post-first-frame failure"), "{text}");
     assert_eq!(
         *calls.lock().unwrap(),
         2,
         "post-frame failure must be retried entirely inside the Broker"
     );
+}
+
+#[tokio::test]
+async fn provider_concurrency_at_budget_reselects_next_provider() {
+    let first = "conc_busy_a_first";
+    let second = "conc_busy_a_second";
+    let held = saturate_capacity_key(&format!("{first}:key"), 1);
+    let manifest = provider_concurrency_two_provider_manifest(first, second, 80);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-busy-a",
+        "exec-conc-busy-a",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    release_capacity_leases(held);
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{second}:key:wire-second")]
+    );
+    assert!(
+        provider_health
+            .availability(first, Some("key"), Some("test"), 20)
+            .available,
+        "busy admission must not cool the full provider"
+    );
+}
+
+#[tokio::test]
+async fn provider_concurrency_all_busy_exhausts_before_any_provider_429() {
+    let first = "conc_recovery_first";
+    let second = "conc_recovery_second";
+    let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
+    let held_second = saturate_capacity_key(&format!("{second}:key"), 1);
+    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 100);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderActionRecoveryConcurrencyTransport {
+        first_provider: first.to_string(),
+        first_send: tokio::sync::Notify::new(),
+        sends: Mutex::new(Vec::new()),
+    };
+    let mut raw = test_responses_raw(
+        "default",
+        "req-recovery-reselect-busy",
+        "exec-recovery-reselect-busy",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    raw.failure_session_scope =
+        test_failure_session_scope_for("default", "session-recovery-reselect-busy");
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        execute_v3_responses_direct_runtime_kernel_core(
+            V3ResponsesDirectRuntimeCoreState::new()
+                .with_provider_health(provider_health)
+                .with_now_epoch_ms(10),
+            &manifest,
+            raw,
+            crate::register_responses_direct_hooks(),
+            &transport,
+        ),
+    )
+    .await;
+    release_capacity_leases(held_first);
+    release_capacity_leases(held_second);
+    let output = output.expect("all full must remain pending only within the original test residence");
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert!(transport.sends.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn provider_concurrency_budget_reselects_sibling_auth_key() {
+    let provider = "conc_busy_key_provider";
+    let held = saturate_capacity_key(&format!("{provider}:key1"), 1);
+    let manifest = provider_concurrency_two_key_manifest(provider, 80);
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-busy-key",
+        "exec-conc-busy-key",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    release_capacity_leases(held);
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{provider}:key2:wire-test")],
+        "a full key must select the available sibling key"
+    );
+    assert!(
+        provider_health
+            .availability(provider, Some("key1"), Some("test"), 20)
+            .available,
+        "busy admission must stay health-neutral"
+    );
+}
+
+#[tokio::test]
+async fn provider_concurrency_saturated_candidates_wait_then_exhaust_without_send() {
+    let first = "conc_all_busy_timeout_first";
+    let second = "conc_all_busy_timeout_second";
+    let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
+    let held_second = saturate_capacity_key(&format!("{second}:key"), 1);
+    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 5000;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-timeout",
+        "exec-conc-timeout",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let started = std::time::Instant::now();
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    release_capacity_leases(held_first);
+    release_capacity_leases(held_second);
+    assert!(started.elapsed() >= Duration::from_millis(5_000));
+    assert!(started.elapsed() < Duration::from_millis(6_500));
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert!(transport.sends.lock().unwrap().is_empty());
+    assert!(
+        provider_health
+            .availability(first, Some("key"), Some("test"), 50)
+            .available
+    );
+    assert!(
+        provider_health
+            .availability(second, Some("key"), Some("test"), 50)
+            .available
+    );
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_post_transport_busy_exhausts_with_typed_source() {
+    let first = "conc_post_busy_first";
+    let second = "conc_post_busy_second";
+    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 1500;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first, second]);
+    let raw = test_responses_raw(
+        "default",
+        "req-post-busy",
+        "exec-post-busy",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert_eq!(
+        transport
+            .sends
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([first.to_string(), second.to_string()]),
+        "each capacity-busy candidate must be attempted exactly once"
+    );
+    for provider in [first, second] {
+        assert!(
+            provider_health
+                .availability(provider, Some("key"), Some("test"), 50)
+                .available,
+            "post-transport capacity busy must stay health-neutral for {provider}"
+        );
+    }
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("post-transport all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_post_transport_mixed_exhaustion_stays_generic() {
+    let first = "conc_post_mixed_first";
+    let second = "conc_post_mixed_second";
+    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 1500;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first]);
+    provider_health
+        .store()
+        .record_provider_cooldown_failure(
+            second,
+            Some("key"),
+            Some("test"),
+            "mixed non-busy exclusion",
+            0,
+            60_000,
+        )
+        .expect("mixed cooldown setup");
+    let raw = test_responses_raw(
+        "default",
+        "req-post-mixed",
+        "exec-post-mixed",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health.clone())
+            .with_now_epoch_ms(10),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    let calls = transport.sends.lock().unwrap();
+    assert!(
+        (2..=8).contains(&calls.len()),
+        "capacity retries must remain paced: {calls:?}"
+    );
+    assert!(
+        calls.iter().all(|provider| provider == first),
+        "the cooled candidate must never be sent"
+    );
+    drop(calls);
+    assert!(
+        provider_health
+            .availability(first, Some("key"), Some("test"), 50)
+            .available,
+        "the capacity-busy candidate must stay health-neutral"
+    );
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("mixed exhaustion must keep a typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "selected_target_exhausted");
+}
+
+#[tokio::test]
+async fn provider_concurrency_due_probe_does_not_admit_saturated_business() {
+    let first = "conc_all_busy_due_probe_a";
+    let second = "conc_all_busy_due_probe_b";
+    let first_key = format!("{first}:key");
+    let held_first = saturate_capacity_key(&first_key, 2);
+    let held_second = saturate_capacity_key(&format!("{second}:key"), 2);
+    let rate_limit_scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+        interface_id: "default".into(), model_id: "test".into(),
+    };
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_rate_limit_scoped(&first_key, Some(&rate_limit_scope), 0)
+        .expect("rate limit must schedule an adaptive recovery probe");
+    let mut manifest =
+        provider_concurrency_two_provider_manifest_with_max_in_flight(first, second, 80, 2);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-due-probe",
+        "exec-conc-due-probe",
+        json!({"model":"client-model","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_now_epoch_ms(600_000),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    release_capacity_leases(held_first);
+    release_capacity_leases(held_second);
+
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert!(transport.sends.lock().unwrap().is_empty());
+    let snapshot = V3AdaptiveConcurrencyController::process_shared()
+        .snapshot_for_scope(&first_key, Some(&rate_limit_scope))
+        .unwrap();
+    assert_eq!(snapshot.in_flight, 0);
+    assert!(
+        snapshot.saturated,
+        "business exhaustion must not recover or consume the scheduled probe"
+    );
+    assert!(!snapshot.probe_in_flight);
+}
+
+#[tokio::test]
+async fn provider_concurrency_exact_pin_exhausts_without_escape_or_probe() {
+    let provider = "conc_pinned_due_probe";
+    let provider_key = format!("{provider}:key");
+    let held = saturate_capacity_key(&provider_key, 2);
+    let rate_limit_scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+        interface_id: "default".into(), model_id: "test".into(),
+    };
+    V3AdaptiveConcurrencyController::process_shared()
+        .observe_rate_limit_scoped(&provider_key, Some(&rate_limit_scope), 0)
+        .expect("rate limit must schedule an adaptive recovery probe");
+    let mut manifest = provider_concurrency_two_provider_manifest_with_max_in_flight(
+        provider,
+        "conc_pinned_due_probe_alternate",
+        80,
+        2,
+    );
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+    let raw = test_responses_raw(
+        "default",
+        "req-conc-pinned-due-probe",
+        "exec-conc-pinned-due-probe",
+        // Direct provider.model pins expand to exactly the requested provider;
+        // Full pinned admission must exhaust without selecting the alternate provider.
+        json!({"model":"conc_pinned_due_probe.test","input":"hello"}),
+    );
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_now_epoch_ms(600_000),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+    release_capacity_leases(held);
+
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert_eq!(
+        output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::NoResponse)
+    );
+    assert!(transport.sends.lock().unwrap().is_empty());
+    let snapshot = V3AdaptiveConcurrencyController::process_shared()
+        .snapshot_for_scope(&provider_key, Some(&rate_limit_scope))
+        .unwrap();
+    assert!(snapshot.saturated);
+    assert!(!snapshot.probe_in_flight);
+}
+
+#[tokio::test]
+async fn provider_concurrency_recovery_waits_for_saturated_later_candidate_without_sending() {
+    struct FirstFailsSecondMustNotSend {
+        sends: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait]
+    impl ResponsesTransport for FirstFailsSecondMustNotSend {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            let provider_id = request.provider_id().to_string();
+            self.sends.lock().unwrap().push(provider_id.clone());
+            if provider_id == "conc_recov_first" {
+                Err(V3ProviderError::HttpStatus {
+                    response: Box::new(V3ProviderHttpFailure {
+                        request_id: request.request_id().to_string(),
+                        provider_id,
+                        status: 500,
+                        headers: Vec::new(),
+                        body: br#"{"error":{"type":"server_error","message":"first provider failed"}}"#.to_vec(),
+                        body_read_failure: None,
+                    }),
+                })
+            } else {
+                Ok(V3ProviderResp14Raw::from_json(
+                    request.request_id(),
+                    request.provider_id(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    }],
+                    br#"{"id":"resp_saturated_recovery","object":"response","status":"completed","output":[{"id":"msg_saturated_recovery","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
+                ))
+            }
+        }
+    }
+
+    let first = "conc_recov_first";
+    let second = "conc_recov_second";
+    let second_key = format!("{second}:key");
+    let held = saturate_capacity_key(&second_key, 1);
+
+    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 200);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let transport = FirstFailsSecondMustNotSend {
+        sends: Arc::new(Mutex::new(Vec::new())),
+    };
+    let mut raw = test_responses_raw(
+        "default",
+        "req-conc-recovery-busy",
+        "exec-conc-recovery-busy",
+        json!({"model":"client-model","input":"hello"}),
+    );
+    raw.failure_session_scope =
+        test_failure_session_scope_for("default", "session-conc-recovery-busy");
+
+    let started = std::time::Instant::now();
+    let output = tokio::time::timeout(
+        Duration::from_millis(2_500),
+        execute_v3_responses_direct_runtime_kernel_core(
+            V3ResponsesDirectRuntimeCoreState::new()
+                .with_provider_health(provider_health.clone())
+                .with_now_epoch_ms(600_000),
+            &manifest,
+            raw,
+            crate::register_responses_direct_hooks(),
+            &transport,
+        ),
+    )
+    .await;
+    let elapsed = started.elapsed();
+    release_capacity_leases(held);
+
+    let output = output.expect("recovery must stop within the original request residence budget");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[first.to_string()],
+        "after the first provider fails, a full later provider must not receive the request"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(150) && elapsed < Duration::from_millis(1_500),
+        "recovery must wait without renewing the request residence budget: {elapsed:?}"
+    );
+    assert_eq!(output.client_payload.status, 502, "{output:?}");
+    assert!(matches!(output.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness)) if witness.status() == 500));
+    assert!(
+        provider_health
+            .availability(second, Some("key"), Some("test"), 600_001)
+            .available,
+        "busy recovery readmission must stay health-neutral for the second provider"
+    );
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_budget_reselects_second_provider() {
+    let first = "conc_relay_busy_a_first";
+    let second = "conc_relay_busy_a_second";
+    let held = saturate_capacity_key(&format!("{first}:key"), 1);
+    let manifest = provider_concurrency_two_provider_relay_manifest(first, second, 80);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-busy-a"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await;
+    release_capacity_leases(held);
+
+    let output = output.expect("relay should select the available second provider");
+    assert_eq!(output.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{second}:key:wire-second")]
+    );
+    assert!(
+        provider_health
+            .runtime_health()
+            .availability(first, Some("key"), Some("test"), 20)
+            .available,
+        "busy admission must stay health-neutral in relay runtime"
+    );
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_budget_reselects_sibling_auth_key() {
+    let provider = "conc_relay_busy_key_provider";
+    let held = saturate_capacity_key(&format!("{provider}:key1"), 1);
+    let manifest = provider_concurrency_two_key_relay_manifest(provider, 80);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-busy-key"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await;
+    release_capacity_leases(held);
+
+    let output = output.expect("relay should select the available sibling auth key");
+    assert_eq!(output.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{provider}:key2:wire-test")]
+    );
+    assert!(
+        provider_health
+            .runtime_health()
+            .availability(provider, Some("key1"), Some("test"), 20)
+            .available,
+        "busy key1 must stay health-neutral in relay runtime"
+    );
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_saturated_candidates_exhaust_without_send() {
+    let first = "conc_relay_all_busy_timeout_first";
+    let second = "conc_relay_all_busy_timeout_second";
+    let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
+    let held_second = saturate_capacity_key(&format!("{second}:key"), 1);
+    let mut manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 300;
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = ProviderConcurrencyRecordingTransport::default();
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-timeout"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await;
+    release_capacity_leases(held_first);
+    release_capacity_leases(held_second);
+    let output = output.expect("Relay must project typed pool exhaustion");
+    assert_eq!(output.status, 502, "{output:?}");
+    assert!(transport.sends.lock().unwrap().is_empty());
+    for provider in [first, second] {
+        assert!(
+            provider_health
+                .runtime_health()
+                .availability(provider, Some("key"), Some("test"), 40)
+                .available,
+            "relay busy timeout must not cool provider {provider}"
+        );
+    }
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("relay all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_post_transport_busy_exhausts_with_typed_source() {
+    let first = "conc_relay_post_busy_first";
+    let second = "conc_relay_post_busy_second";
+    let mut manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 1500;
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first, second]);
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-post-busy"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await
+    .expect("Relay must project typed pool exhaustion");
+
+    assert_eq!(output.status, 502, "{output:?}");
+    assert_eq!(
+        transport
+            .sends
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([first.to_string(), second.to_string()]),
+        "each capacity-busy relay candidate must be attempted exactly once"
+    );
+    for provider in [first, second] {
+        assert!(
+            provider_health
+                .runtime_health()
+                .availability(provider, Some("key"), Some("test"), 40)
+                .available,
+            "relay post-transport capacity busy must stay health-neutral for {provider}"
+        );
+    }
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("relay post-transport all-busy exhaustion must retain its typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    );
+    assert_eq!(source.code, "provider_concurrency_busy");
+}
+
+#[tokio::test]
+async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generic() {
+    let first = "conc_relay_post_mixed_first";
+    let second = "conc_relay_post_mixed_second";
+    let mut manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+        .attempt_store.residence_timeout_ms = 1500;
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = PostTransportConcurrencyTransport::new(&[first]);
+    provider_health
+        .runtime_health()
+        .store()
+        .record_provider_cooldown_failure(
+            second,
+            Some("key"),
+            Some("test"),
+            "mixed non-busy relay exclusion",
+            0,
+            60_000,
+        )
+        .expect("mixed relay cooldown setup");
+
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        provider_concurrency_relay_input("req-conc-relay-post-mixed"),
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
+    )
+    .await
+    .expect("Relay must project mixed exhaustion");
+
+    assert_eq!(output.status, 502, "{output:?}");
+    let calls = transport.sends.lock().unwrap();
+    assert!(
+        (2..=8).contains(&calls.len()),
+        "capacity retries must remain paced: {calls:?}"
+    );
+    assert!(
+        calls.iter().all(|provider| provider == first),
+        "the cooled relay candidate must never be sent"
+    );
+    drop(calls);
+    assert!(
+        provider_health
+            .runtime_health()
+            .availability(first, Some("key"), Some("test"), 40)
+            .available,
+        "the relay capacity-busy candidate must stay health-neutral"
+    );
+    let source = output
+        .diagnostic_source
+        .as_ref()
+        .expect("relay mixed exhaustion must keep a typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+    );
+    assert_eq!(source.code, "selected_target_exhausted");
 }
 
 #[tokio::test]
@@ -2031,213 +3413,3 @@ async fn matched_optional_failure_uses_captured_default_without_router_reentry()
     );
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
 }
-
-/// direct 模式 Mode B websearch 全链：Req04 激活（web_search 声明本地化为
-/// websearch）、Resp03 拦截剥离、typed hooks sidecar 搜索、hosted
-/// web_search_call + 原 call_id 配对投影、状态机 SearchResultCaptured。
-struct WebSearchHopTransport {
-    sends: Arc<std::sync::atomic::AtomicUsize>,
-}
-#[async_trait]
-impl ResponsesTransport for WebSearchHopTransport {
-    async fn send(
-        &self,
-        request: V3Transport13ResponsesHttpRequest,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        self.sends
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // 主模型响应：本地 websearch function_call（Mode B 需拦截）。
-        Ok(V3ProviderResp14Raw::from_json(
-            request.request_id(),
-            request.provider_id(),
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            br#"{"id":"resp_main","output":[{"type":"function_call","name":"websearch","call_id":"call_ws_1","arguments":"{\"query\":\"routecodex\"}"}]}"#
-                .to_vec(),
-        ))
-    }
-}
-
-fn web_search_sidecar_socket_path(label: &str) -> PathBuf {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    PathBuf::from("/tmp").join(format!("rcc-{label}-{nonce}.sock"))
-}
-
-fn serve_direct_web_search_sidecar(
-    socket_path: PathBuf,
-) -> thread::JoinHandle<servertool_core::web_search_contract::WebSearchHookRequest> {
-    let listener = UnixListener::bind(&socket_path).expect("bind direct sidecar test socket");
-    thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept direct sidecar request");
-        let mut line = String::new();
-        BufReader::new(stream.try_clone().expect("clone direct sidecar stream"))
-            .read_line(&mut line)
-            .expect("read direct sidecar request");
-        let request: ControlRequest =
-            serde_json::from_str(line.trim()).expect("decode direct sidecar request");
-        let ControlRequest::ExecuteWebSearch { request } = request else {
-            panic!("expected ExecuteWebSearch");
-        };
-        let response = ControlResponse::ok(json!({
-            "outcome": WebSearchHookOutcome::Completed(WebSearchResult {
-                call_id: request.call_id.clone(),
-                status: WebSearchResultStatus::Completed,
-                content: Some("search result for routecodex".to_string()),
-                sources: Vec::new(),
-                metadata: None,
-                error: None,
-            })
-        }));
-        writeln!(
-            stream,
-            "{}",
-            serde_json::to_string(&response).expect("encode direct sidecar response")
-        )
-        .expect("write direct sidecar response");
-        *request
-    })
-}
-
-fn direct_web_search_mode_b_manifest() -> V3Config05ManifestPublished {
-    let authoring = parse_v3_config_02_authoring(
-        r#"
-version = 3
-
-[servers.test]
-bind = "127.0.0.1"
-port = 4444
-routing_group = "default"
-[servers.test.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-
-[providers.openai]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "gpt-test"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "ROUTECODEX_V3_TEST_KEY" }] }
-
-[providers.openai.models.gpt-test]
-supports_streaming = true
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "openai.gpt-search"
-capabilities = ["text", "web_search"]
-
-[providers.openai.models.gpt-search]
-supports_streaming = true
-capabilities = ["text"]
-
-[forwarders.responses]
-model = "client-model"
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "openai", model = "gpt-test", priority = 1 }]
-
-[route_groups.default.pools.default]
-selection = { strategy = "priority" }
-targets = [
-  { kind = "forwarder", id = "responses", priority = 1 },
-  { kind = "provider_model", provider = "openai", model = "gpt-search", priority = 2 },
-]
-"#,
-    )
-    .unwrap();
-    compile_v3_config_05_manifest(authoring).unwrap()
-}
-
-#[tokio::test]
-async fn direct_mode_b_websearch_intercepts_hosts_search_and_pairs() {
-    let manifest = direct_web_search_mode_b_manifest();
-    let socket_path = web_search_sidecar_socket_path("direct-sidecar");
-    let sidecar = serve_direct_web_search_sidecar(socket_path.clone());
-    let server_tool_state =
-        V3ResponsesDirectServerToolState::default().with_hooks_sidecar_socket(Some(socket_path.clone()));
-    let sends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let scope = V3ResponsesDirectServerToolScope::new(
-        "/v1/responses",
-        "session-ws-direct",
-        "conversation-ws-direct",
-        4444,
-        "default",
-    );
-    let raw = test_responses_raw(
-        "default",
-        "req-ws-direct",
-        "exec-ws-direct",
-        json!({
-            "model": "client-model",
-            "input": "search routecodex",
-            "tools": [{"type": "web_search"}]
-        }),
-    );
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_server_tool_state(&server_tool_state, scope.clone())
-            .with_now_epoch_ms(1_000),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &WebSearchHopTransport {
-            sends: sends.clone(),
-        },
-    )
-    .await;
-    let request = sidecar.join().expect("join direct sidecar worker");
-    let _ = std::fs::remove_file(&socket_path);
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(
-        sends.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "typed sidecar execution must not issue a second provider attempt"
-    );
-    assert_eq!(request.call_id, "call_ws_1");
-    assert_eq!(request.query, "routecodex");
-    let value = match output.client_payload.body {
-        V3ClientBody::Json(value) => value,
-        V3ClientBody::Bytes(_) | V3ClientBody::Sse(_) | V3ClientBody::CommittedSse(_) => {
-            panic!("direct JSON response must remain JSON")
-        }
-    };
-    let output_arr = value["output"].as_array().expect("output array");
-    // 拦截剥离：客户端看不到本地 websearch function_call。
-    assert!(!output_arr.iter().any(|item| {
-        item.get("type").and_then(Value::as_str) == Some("function_call")
-            && item.get("name").and_then(Value::as_str) == Some("websearch")
-    }));
-    // hosted web_search_call 等价结果（Codex 契约）。
-    let call = output_arr
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
-        .expect("hosted web_search_call projected");
-    assert_eq!(call["status"], "completed");
-    assert_eq!(call["action"]["type"], "search");
-    assert_eq!(call["action"]["query"], "routecodex");
-    assert_eq!(call["results"][0]["text"], "search result for routecodex");
-    // 原 call_id 配对 function_call_output。
-    let paired = output_arr
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output"))
-        .expect("paired function_call_output");
-    assert_eq!(paired["call_id"], "call_ws_1");
-    assert_eq!(paired["output"], "search result for routecodex");
-    // ServerToolCenter websearch 桶状态：SearchResultCaptured。
-    let state = server_tool_state
-        .web_search_load_for_scope(&scope)
-        .expect("center load")
-        .expect("websearch state present");
-    assert_eq!(
-        state.phase(),
-        crate::hub_v1::V3WebSearchCenterPhase::SearchResultCaptured
-    );
-    assert_eq!(state.query(), Some("routecodex"));
-    assert_eq!(state.original_call_id(), Some("call_ws_1"));
-}
-
-#[path = "../../src/kernel/tests/direct_websearch_mode_b.rs"]
-mod direct_websearch_mode_b;

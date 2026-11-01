@@ -1,6 +1,8 @@
 # V3 Provider Key Health Scoring and Cooldown Design
 
-> 2026-09-21 policy amendment: the prior threshold/fixed-cadence examples in this historical design are superseded by the current runtime contract. Every typed provider failure immediately cools the exact provider+auth key+model identity. Recovery uses the provider-owned ladder `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`; continuous failure and failed probes advance it, while successful semantic probe resets it to 5s. Provider health remains the sole owner; probe failure is expected and must not block startup or other sessions.
+> Current 429 policy: early responses cause capacity backpressure only for the exact listener/provider/interface/model/key. A healthy alternative serves the current request immediately. Only another real429 spanning two minutes of the unresolved episode commits a30-minute minimum. Another real429 spanning one hour requires a current matching probe with a real non429 HTTP response before restoration. Business success and time alone cannot bypass that restriction. Non429 probe errors still follow their own typed health policy. An advisory probe does not bypass these mandatory restrictions. See `v3-recovery-wait-44cc3af.md` for the complete episode and request-wait contract.
+
+> Ordinary non429 failures retain their declared thresholds and pre-cool observation. Their business cooldown ladder remains `5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s`. A failed probe advances its own cadence without extending the business cooldown. A declared `health.advisory_probe = true` keeps ordinary probe cadence at its base step and does not exclude an identity after its ordinary hold expires. Matching HTTP2xx needs no body or content-type validation; it cannot bypass a429 minimum or another typed restriction. Provider health remains the sole owner. Failed probes never block startup or unrelated requests.
 
 状态：design / source-controlled runtime pending live replay
 
@@ -13,7 +15,7 @@
 1. 错误先分类，再按分类处理。
 2. 不可恢复错误进入 provider subscription 级 global cooldown，用于去毛刺；这不等于永久失败。
 3. 可恢复错误只降低健康分；健康分降到 0 才进入 cooldown，502 属于可恢复错误。
-4. 进程内 cooldown 只有 semantic probe 成功才能解除；重启按当前运行时合同清空 transient health/cooldown epoch。
+4. 进程内 cooldown 由 HTTP 2xx ping probe 成功解除；429 cooldown 也由同身份业务成功立即解除；重启按当前运行时合同清空 transient health/cooldown epoch。
 5. 错误降低健康分，成功提高健康分；health 只决定 availability 和观测，不能改写 configured priority。
 
 设计结果必须保持 V3 控制面/业务 payload 隔离。score、failure streak、cooldown、probe、routing decision 只能存在 Provider health typed resource 或 scheduling projection，不得进入 provider/client normal payload，也不得由 Router 从 payload 重建。
@@ -50,8 +52,8 @@
 | --- | --- | --- |
 | 分类到恢复策略 | failure class 存在；分类、scope、cooldown action、score delta 未统一为一个 typed action | `V3ProviderFailureAction` 唯一策略产物 |
 | 不可恢复/可恢复边界 | global cooldown 与 threshold 路径存在，但组合合同需显式锁定 | 401/403 按 -20 计分；其他可恢复错误（含 502）按 -5 计分；health-neutral 不计入；带阈值按连击阈值，无阈值可恢复按 score=0，无阈值不可恢复立即 cooldown |
-| key 级健康分 | 无 canonical `score` | ProviderKeyHealthState 持有 0..150 score，configured priority 为基线 |
-| 成功涨分 | 有 success 清理部分 failure/cooldown 状态 | HTTP 响应正常按 +1 计分；probe success 原子恢复到 configured priority |
+| key 级健康分 | 无 canonical `score` | ProviderKeyHealthState 持有 0..150 score，初始 100（含新身份） |
+| 成功涨分 | 有 success 清理部分 failure/cooldown 状态 | HTTP 响应正常按 +1 计分；probe success 原子恢复到 100 |
 | score 持久化 | adaptive score/generation 仅保存在进程内 | 重启开启新的 transient health epoch，不从 cooldown 诊断记录重建 score |
 | priority/health 调度 | route contract 有 priority/weight；旧实现把 score 与 priority 相加 | Target 消费 typed scheduling projection；大数值 configured priority 优先，health 不跨 priority bucket |
 | 文档一致性 | 旧 health-weighted Router 文档与 V3 health-blind Router owner 口径不完全收敛 | canonical V3 文档锁定 Target owner 与 projection 边界 |
@@ -145,7 +147,7 @@ scope 由分类动作决定：
 | --- | --- | --- |
 | Auth / Quota | provider + auth key + model | 只有该模型的上游配额/鉴权状态受影响 |
 | RateLimit | provider + auth key + model | 按 provider/key/model 计分；同一 key 的其他模型保持可用 |
-| Transport | 按 typed action 计入 provider+auth key+model 健康窗口，带阈值按连击阈值进入 global policy；无阈值可恢复按 score=0 | 避免单请求瞬态污染所有 session |
+| Transport | 按 typed action 计入 provider+auth key+model 健康分数，带阈值按连击阈值进入 global policy；score=0 是额外的 global policy 触发条件 | 避免单请求瞬态污染所有 session |
 | Semantic / Protocol | provider + auth key + model | 只阻断确定受影响的模型，不扩散到同 key 其他模型 |
 | ClientDisconnect | none | health-neutral |
 | Session-local invalid state | session + provider key 或 session-only | 不得提升为 provider global |
@@ -257,10 +259,12 @@ Resp03 内部的 server-tool `web_search` hop failure 也属于 health-neutral�
 ### 6.1 Initial value
 
 ```text
-baseline = configured_priority
+baseline = 100
 ```
 
-新 key 不使用随机值；没有历史时确定性为 baseline。
+每个 provider+interfaceId+authAlias+modelId identity 的初始分固定为 100。新 key、
+已配置 key 和没有历史的 key 都使用同一个确定性 baseline；configured priority
+只保留在 Target selection，不参与 score 初始化。
 
 ### 6.2 Event deltas
 
@@ -272,28 +276,30 @@ baseline = configured_priority
 | recoverable failure（含 502） | -5 | failure_streak += 1 |
 | account error（401/403） | -20 | 带阈值按连击阈值；无阈值时立即 cooldown |
 | probe failure | -5 | 保持 cooldown，reschedule |
-| probe success | reset to configured priority | 清 delta window、cooldown、failure streak 和 probe backoff，开启新 generation |
+| probe success | reset to 100 | 清 cooldown、failure streak 和 probe backoff，开启新 generation |
 | health-neutral | 0 | 可写 request-local bypass |
 
 所有变化执行：
 
 ```text
-recent_deltas = rolling_window(last 100 deltas)
-score = clamp(configured_priority + sum(recent_deltas), 0, 150)
+score = clamp(score + delta, 0, 150)
 ```
+
+每个已评分事件直接作用于当前 bounded score。达到 150 后再应用 -5 必须得到 145，
+不得保留 150 以上的隐藏 credit；达到 0 后再扣分仍为 0。
 
 ### 6.3 Probe success
 
 probe success 原子开启新的健康积分 epoch：
 
 ```text
-recent_deltas_milli = []
-score_after_probe = configured_priority
+score_after_probe = 100
 failure_streak = 0
 success_streak = 1
 ```
 
-后续真实 success 从新 epoch 的 configured priority 基线涨分，不能重新应用 probe 前的失败 delta。configured priority 不读取 score，因此恢复健康只恢复原配置意愿，不会跨 priority bucket。
+后续真实 success 从 100 基线涨分，不能重新应用 probe 前的失败 delta。configured
+priority 不读取 score，因此恢复健康只恢复原配置意愿，不会跨 priority bucket。
 
 ### 6.4 Time recovery
 
@@ -343,7 +349,7 @@ restart
   -> do not reconstruct health truth from diagnostic persistence
 ```
 
-`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；probe failure 只能推进 `next_probe_at_ms`，不得改写原 `blocked_until_ms`。任一 deadline 到达都不得直接恢复调度，只有 semantic probe success 可以清除 block。provider health 的 `probe_interval_ms` 是可选最大探索周期；`cc-sol` 和 `kdns` 系列配置 `120000ms`，即任何失败后的下一次探索间隔最长 2 分钟，较短阶梯仍可更早触发。
+`blocked_until_ms` 表示业务流量继续 blocked，`next_probe_at_ms` 表示独立 recovery probe 到期。首次 probe 使用 provider-owned probe interval，可早于业务 cooldown；probe failure 只能推进 `next_probe_at_ms`，不得改写原 `blocked_until_ms`。任一 deadline 到达都不得直接恢复调度，HTTP 2xx ping probe success 可以清除 block；同身份业务成功也立即清除429-owned block。provider health 的 `probe_interval_ms` 是可选最大探索周期；`cc-sol` 和 `kdns` 系列配置 `120000ms`，即任何失败后的下一次探索间隔最长 2 分钟，较短阶梯仍可更早触发。
 
 ## 8. Same-priority scheduling
 
@@ -376,22 +382,22 @@ deterministic round-robin cursor
 
 ```text
 Healthy(score=S, streak=0)
-  success -> Healthy(score from rolling delta window with +1, streak=0)
-  recoverable failure -> Degraded(score from rolling delta window with -5, streak+1)
-  account error -> Degraded(score from rolling delta window with -20)
+  success -> Healthy(score = clamp(S+1, 0, 150), streak=0)
+  recoverable failure -> Degraded(score = clamp(S-5, 0, 150), streak+1)
+  account error -> Degraded(score = clamp(S-20, 0, 150))
 
 Degraded(score>=0)
   success -> Healthy(score up, streak=0)
   recoverable failure ->
+      score=0: Cooldown
       failure_streak<threshold: Degraded
       failure_streak>=threshold: Cooldown
-      no threshold and score=0: Cooldown
 
 Cooldown(blocked_until, probe_due)
   ordinary request -> unavailable
   next_probe_at deadline -> ProbeEligible while business traffic remains blocked
   probe failure -> Cooldown(next probe)
-  probe success -> Healthy(score=configured_priority, empty delta window, streak=0)
+  probe success -> Healthy(score=100, streak=0)
 
 HealthNeutral
   -> no score/cooldown mutation
@@ -432,13 +438,13 @@ HealthNeutral
 
 - classification produces exactly one recovery kind;
 - irrecoverable action immediately creates global cooldown;
-- every typed provider failure immediately cools the exact provider+auth key+model identity;
+- an isolated recoverable failure leaves the exact provider+auth key+model identity available; the default second consecutive same-fingerprint failure creates cooldown, and real success resets the streak;
 - recoverable failures still subtract 5 from the score, while continuous failure streak and meaningful failure-rate bands choose the adaptive 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s cooldown/probe step;
 - health-neutral event changes neither score nor streak;
-- success adds +1 in the rolling score epoch and clears failure streak;
+- success adds +1 to the bounded score and clears failure streak;
 - score clamps at 0/150;
 - probe failure retains cooldown;
-- probe success atomically clears cooldown/backoff and resets score to configured priority with an empty delta window;
+- probe success atomically clears cooldown/backoff and resets score to 100;
 - concurrent probe acquisition is single-flight;
 - stale generation success cannot clear newer cooldown.
 - stale generation failure cannot mutate newer score/backoff state.

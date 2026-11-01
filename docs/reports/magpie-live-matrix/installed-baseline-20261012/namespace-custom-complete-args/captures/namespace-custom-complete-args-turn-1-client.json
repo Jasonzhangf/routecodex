@@ -1,0 +1,64 @@
+{
+  "case_id": "namespace-custom-complete-args",
+  "turn": 1,
+  "turn_id": "namespace-call",
+  "request_source": "fixture",
+  "request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body_text": "{\"model\":\"mock.chat-model\",\"input\":\"go\",\"tools\":[{\"type\":\"function\",\"name\":\"exec_command\",\"parameters\":{\"type\":\"object\"}},{\"type\":\"namespace\",\"name\":\"collaboration\",\"description\":\"Tools in the collaboration namespace.\",\"tools\":[{\"type\":\"function\",\"name\":\"spawn_agent\",\"description\":\"Spawns an agent.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"}}}},{\"type\":\"custom\",\"name\":\"freeform\",\"description\":\"no JSON schema\"}]}],\"stream\":false}"
+  },
+  "client_response": {
+    "url": "http://127.0.0.1:57090/v1/responses",
+    "method": "POST",
+    "request_headers": {
+      "content-type": "application/json"
+    },
+    "status": null,
+    "status_text": null,
+    "headers": {},
+    "raw_headers": [],
+    "body": null,
+    "bodyText": "",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": []
+    },
+    "bodyBytesBase64": "",
+    "response_ended": false,
+    "complete": null,
+    "closed": true,
+    "aborted": false,
+    "truncated": false,
+    "elapsed_ms": 43,
+    "error": "socket hang up",
+    "error_detail": {
+      "name": "Error",
+      "message": "socket hang up",
+      "code": "ECONNRESET",
+      "errno": null,
+      "syscall": null,
+      "stack": "Error: socket hang up\n    at Socket.socketOnEnd (node:_http_client:599:25)\n    at Socket.emit (node:events:531:35)\n    at endReadableNT (node:internal/streams/readable:1698:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)"
+    }
+  },
+  "observation": {
+    "protocol": "responses",
+    "kind": "unknown",
+    "content_type": "",
+    "ok": false,
+    "error": "empty_body"
+  },
+  "diagnostics": [
+    "provider body_must tools.0.function.name mismatch",
+    "provider body_must tools.1.function.name mismatch",
+    "client status missing for completed response",
+    "client body_must item.type missing",
+    "client body_must item.name missing",
+    "client body_must item.namespace missing",
+    "client body_must item.call_id missing",
+    "client body_must item.arguments missing"
+  ]
+}

@@ -8,19 +8,34 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-provider-action-gate.mjs');
 const copied = [
-  'package.json',
+  'v3/package.json',
   '.github/workflows/test.yml',
   'v3/crates/routecodex-v3-error/src/lib.rs',
   'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
+  'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_session_isolation_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_events.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/provider_action_gate_tests.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
   'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_protocol_plan.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_response_thinking_compat_tests.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs',
+  'v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs',
+  'v3/crates/routecodex-v3-runtime/tests/support/kernel_unit.rs',
+  'v3/crates/routecodex-v3-runtime/tests/support/openai_chat_relay_runtime_unit.rs',
   'v3/crates/routecodex-v3-runtime/src/sse_object_pipeline.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_sse_json_codec.rs',
@@ -38,7 +53,9 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime_sse.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
+  'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
   'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
@@ -164,13 +181,13 @@ const cases = [
     diagnostic: /missing active Rust test responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery/u,
   },
   {
-    name: 'Responses Relay incomplete exhaustion loses side-channel usage coverage',
+    name: 'Responses Relay content_filter terminal loses faithful-forward coverage',
     path: 'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
     mutate: (source) => source.replace(
-      'responses_relay_incomplete_exhaustion_keeps_typed_terminal_error',
+      'responses_relay_content_filter_incomplete_preserves_output_without_reselect',
       'responses_relay_incomplete_exhaustion_has_no_typed_terminal_contract',
     ),
-    diagnostic: /missing active Rust test responses_relay_incomplete_exhaustion_keeps_typed_terminal_error/u,
+    diagnostic: /missing active Rust test responses_relay_content_filter_incomplete_preserves_output_without_reselect/u,
   },
   {
     name: 'terminal transition is removed',
@@ -182,10 +199,10 @@ const cases = [
     name: 'terminal Error06 projection bypasses the failure gate',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'record_failure_and_wait_for_terminal_projection',
+      'record_failure_and_commit_terminal_projection',
       'project_terminal_without_wait',
     ),
-    diagnostic: /missing record_failure_and_wait_for_terminal_projection/u,
+    diagnostic: /missing record_failure_and_commit_terminal_projection/u,
   },
   {
     name: 'V3 admitted action permit loses explicit drop ownership',
@@ -197,13 +214,13 @@ const cases = [
     diagnostic: /missing impl Drop for V3ProviderActionPermit/u,
   },
   {
-    name: 'V3 waiter ignores an already-owned group permit',
+    name: 'V3 waiter ignores an already-owned exact permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      '(!self.admit_action || !group_has_active_admission)',
+      '(!self.admit_action || !exact_has_active_admission)',
       '(!self.admit_action || true)',
     ),
-    diagnostic: /missing \(!self\.admit_action \|\| !group_has_active_admission\)/u,
+    diagnostic: /missing \(!self\.admit_action \|\| !exact_has_active_admission\)/u,
   },
   {
     name: 'V3 success release drops the retained recovery ticket',
@@ -224,7 +241,7 @@ const cases = [
     diagnostic: /Responses Relay must re-arm the exact retained recovery ticket/u,
   },
   {
-    name: 'V3 unrelated failure revokes an already-owned group permit',
+    name: 'V3 new failure revokes an already-owned exact permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
       'if !active_admission_owned {',
@@ -236,10 +253,10 @@ const cases = [
     name: 'V3 unrelated same-group provider success releases another provider permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'key.provider_scope == *provider_scope\n                        || state.admitted_action_scope.as_ref() == Some(provider_scope)',
+      'key.provider_scope == *provider_scope',
       'key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.routing_group == provider_scope.routing_group',
     ),
-    diagnostic: /provider success may release only its exact provider scope or the permit-owned action scope/u,
+    diagnostic: /provider success may release only its exact provider scope/u,
   },
   {
     name: 'Direct fresh requests enter the recovery gate by default',
@@ -321,28 +338,37 @@ const cases = [
     name: 'V3 terminal admission caller stops invoking atomic commit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if self.commit_terminal_admission(&key, &admission)?',
-      'if self.bypass_terminal_admission_commit(&key, &admission)?',
+      'if !Self::commit_terminal_generation_locked(',
+      'if !Self::bypass_terminal_generation_locked(',
     ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
+  },
+  {
+    name: 'V3 terminal projection revokes an active exact-key provider permit',
+    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
+    mutate: (source) => source.replace(
+      '!require_admission && state.admitted_generation.is_some()',
+      'false',
+    ),
+    diagnostic: /missing !require_admission && state\.admitted_generation\.is_some\(\)/u,
   },
   {
     name: 'V3 terminal admission leaves only a commented atomic commit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if self.commit_terminal_admission(&key, &admission)?',
-      'if self.bypass_terminal_admission_commit(&key, &admission)? { /* self.commit_terminal_admission(&key, &admission)? */ return Ok(admission); } else if false',
+      'if !Self::commit_terminal_generation_locked(',
+      'if !Self::bypass_terminal_generation_locked( /* Self::commit_terminal_generation_locked( */',
     ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
   },
   {
     name: 'V3 terminal admission shadows the atomic commit symbol',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      'if self.commit_terminal_admission(&key, &admission)?',
-      'let commit_terminal_admission = || true;\n            if commit_terminal_admission()',
+      'if !Self::commit_terminal_generation_locked(',
+      'let commit_terminal_generation_locked = || true;\n        if !commit_terminal_generation_locked() {',
     ),
-    diagnostic: /shadows declared callee V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /shadows declared callee V3ProviderActionGate::commit_terminal_generation_locked/u,
   },
   {
     name: 'V3 terminal admission calls the right method name on the wrong receiver',
@@ -350,13 +376,17 @@ const cases = [
     mutate: (source) => source
       .replace(
         'impl V3ProviderActionGate {\n',
-        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_admission(&self, _key: &V3ProviderActionGateKey, _admission: &V3ProviderActionAdmission) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
+        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_generation(&self, _key: &V3ProviderActionGateKey, _generation: u64, _require_admission: bool) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
       )
       .replace(
-        'if self.commit_terminal_admission(&key, &admission)?',
-        'if UnrelatedGate.commit_terminal_admission(&key, &admission)?',
+        'impl V3ProviderActionGate {\n',
+        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_generation_locked(_states: &mut HashMap<V3ProviderActionGateKey, V3ProviderActionGateState>, _key: &V3ProviderActionGateKey, _generation: u64, _require_admission: bool, _now: Instant) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
+      )
+      .replace(
+        'if !Self::commit_terminal_generation_locked(',
+        'if !UnrelatedGate::commit_terminal_generation_locked(',
       ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
   },
   {
     name: 'V3 manifest endpoint drifts from map',
@@ -379,6 +409,15 @@ const cases = [
     mutate: (source) => source.replace(
       '  wall_clock_expiry: forbidden\n',
       '  wall_clock_expiry: after_5000ms\n',
+    ),
+    diagnostic: /admission_permit must lock explicit ownership/u,
+  },
+  {
+    name: 'V3 manifest allows fresh requests to bypass active HTTP 429 recovery',
+    path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
+    mutate: (source) => source.replace(
+      '  fresh_request_consumes_active_recovery_lane: http_429_only\n',
+      '  fresh_request_consumes_active_recovery_lane: false\n',
     ),
     diagnostic: /admission_permit must lock explicit ownership/u,
   },
@@ -459,24 +498,6 @@ const cases = [
     diagnostic: /duplicate edge IDs: v3-provider-action-gate-06/u,
   },
   {
-    name: 'Responses Relay target projection error bypasses request-local fail-fast',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    mutate: (source) => source.replace(
-      'let req_compat = match build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07) {\n            Ok(req_compat) => req_compat,\n            Err(error) => {\n                handle_provider_request_failure!(V3ResponsesRelayRuntimeError::ProviderCompat(\n                    error\n                ));\n            }\n        };',
-      'let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();',
-    ),
-    diagnostic: /ProviderReqCompat06ProviderCompat request-local fail-fast branch is missing/u,
-  },
-  {
-    name: 'Responses Relay wire encoding failure bypasses typed provider failure handling',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    mutate: (source) => source.replace(
-      'handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));',
-      'bypass_provider_request_failure!(V3ResponsesRelayRuntimeError::Provider(error));',
-    ),
-    diagnostic: /V3ProviderReqOutbound08WirePayload failure branch must enter handle_provider_request_failure/u,
-  },
-  {
     name: 'Responses Relay accepts response.done as provider semantic terminal',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
     mutate: (source) => source.replace(
@@ -498,17 +519,26 @@ const cases = [
     name: 'Direct provider outcome accepts response.done as provider semantic terminal',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_responses_event_classification.rs',
     mutate: (source) => source.replace(
-      'if event_type == "response.completed" {',
-      'if matches!(event_type, "response.completed" | "response.done") {',
+      'if matches!(event_type, "response.completed" | "response.incomplete") {',
+      'if matches!(event_type, "response.completed" | "response.incomplete" | "response.done") {',
     ),
-    diagnostic: /missing if event_type == "response\.completed" \{/u,
+    diagnostic: /missing if matches!\(event_type, "response\.completed" \| "response\.incomplete"\)/u,
+  },
+  {
+    name: 'Direct SSE uses frame event metadata as provider semantic source',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+    mutate: (source) => source.replace(
+      'pub(crate) fn inspect_direct_sse_raw_provider(raw: &str) -> V3DirectSseProviderFacts {\n',
+      'pub(crate) fn inspect_direct_sse_raw_provider(raw: &str) -> V3DirectSseProviderFacts {\n    if event == "response.completed" {}\n',
+    ),
+    diagnostic: /SSE event metadata must not be used as provider semantic source/u,
   },
   {
     name: 'Relay target-resolution source errors are swallowed as exhaustion',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     mutate: (source) => source.replace(
-      'Some(Err(source)) => V3RelayProviderTargetResolution::Failed(source),',
-      'Some(Err(_source)) => V3RelayProviderTargetResolution::Exhausted {\n+                attempted_candidates: vec![candidate_key.clone()],\n+            },',
+      'V3RelayProviderTargetResolution::Failed(source) => {',
+      'V3RelayProviderTargetResolution::Exhausted { attempted_candidates: _ } => {',
     ),
     diagnostic: /target-resolution source errors must not be swallowed as provider-pool exhaustion/u,
   },
@@ -538,15 +568,6 @@ const cases = [
     diagnostic: /missing required edge v3-provider-action-gate-50/u,
   },
   {
-    name: 'Responses Relay failure handler returns before shared provider failure policy',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
-    mutate: (source) => source.replace(
-      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    let result = run_v3_relay_provider_failure_policy(',
-      'if failure.terminal_projection.is_some() {\n        return Ok(Some(failure));\n    }\n    return Ok(None);\n    let result = run_v3_relay_provider_failure_policy(',
-    ),
-    diagnostic: /must enter run_v3_relay_provider_failure_policy immediately after its existing terminal projection guard/u,
-  },
-  {
     name: 'Required gate test name survives only in a comment',
     path: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
     mutate: (source) => source.replace(
@@ -564,10 +585,7 @@ const cases = [
 ];
 
 function sourcePath(rel) {
-  const projectRoot = resolve(v3Root, '..');
-  if (rel === 'package.json') return resolve(projectRoot, rel);
-  if (rel.startsWith('v3/')) return resolve(v3Root, rel.slice('v3/'.length));
-  return resolve(projectRoot, rel);
+  return resolve(v3Root, '..', rel);
 }
 
 function copyFixtureSurface(root) {
@@ -581,7 +599,11 @@ function copyFixtureSurface(root) {
 const failures = [];
 const baselineRoot = mkdtempSync(join(tmpdir(), 'v3-provider-action-gate-baseline-'));
 copyFixtureSurface(baselineRoot);
-const baseline = spawnSync(process.execPath, [verifier], { cwd: baselineRoot, encoding: 'utf8' });
+const baseline = spawnSync(process.execPath, [verifier], {
+  cwd: baselineRoot,
+  encoding: 'utf8',
+  env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: baselineRoot },
+});
 rmSync(baselineRoot, { recursive: true, force: true });
 if (baseline.status !== 0) {
   const output = `${baseline.stdout || ''}\n${baseline.stderr || ''}`.trim();
@@ -603,7 +625,11 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
+    });
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-1200)}`);

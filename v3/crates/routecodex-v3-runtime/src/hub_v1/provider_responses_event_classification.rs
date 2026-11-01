@@ -43,16 +43,6 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         });
     }
 
-    if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
-        crate::hub_v1::V3HubProviderWireProtocol::Responses,
-        event,
-    ) {
-        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
-            code: failure.code,
-            message: failure.message,
-        });
-    }
-
     if matches!(
         event_type,
         "response.failed" | "response.cancelled" | "response.canceled"
@@ -82,7 +72,7 @@ pub(crate) fn classify_v3_provider_responses_json_event(
         });
     }
 
-    if event_type == "response.completed" {
+    if matches!(event_type, "response.completed" | "response.incomplete") {
         return Ok(if response_terminal_has_client_output(event)? {
             V3ProviderResponsesJsonFrameOutcome::Terminal
         } else {

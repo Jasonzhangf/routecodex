@@ -2,8 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GENERATED_WIKI_PAGES, MANUAL_WIKI_PAGES, WIKI_ROOT } from './architecture-wiki-lib.mjs';
 import {
-  loadV3ArchitectureAuditLocks,
-  loadV3MainlineCallMap,
   renderV3MainlineCallerFlowHtml,
   V3_CALLER_FLOW_PATH,
   V3_MAINLINE_SKELETON_SOP_PATH,
@@ -27,7 +25,7 @@ const V3_PROTOCOL_NORMALIZATION_TOOL_GOVERNANCE_BOUNDARY_PATH = 'docs/architectu
 const V3_DEDICATED_REVIEW_SURFACES = new Map([
   [V3_CONFIG_COMPACT_HUB_V1_DEFAULTS_SOP_PATH, {
     id: 'v3-config-compact-hub-v1-defaults-sop',
-    eyebrow: 'config compiler review · audited lock',
+    eyebrow: 'config compiler review',
     title: 'V3 Compact Hub V1 Defaults SOP Review',
     summary: 'Locks compact user authoring to one Rust config compiler path. Fixed Hub endpoint, hook, resource, and execution declarations are derived before Manifest publication and cannot be rebuilt by Runtime, Server, Provider, Virtual Router, Target, or Compat.',
     requestTitle: 'Compact authoring compile flow',
@@ -53,7 +51,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
       ['v3.config.hub_pipeline_declarations', 'routecodex-v3-config', 'Closed fixed Hub V1 endpoints, hooks, resources, and execution declarations.'],
       ['v3.config.published_manifest', 'routecodex-v3-config', 'Only runtime/server configuration truth.'],
     ],
-    checklist: ['Compact TOML compiles to the closed deterministic Manifest', 'V2 compat uses the same default owner', 'No default writer exists outside routecodex-v3-config', 'Locked fingerprint changes require Jason manual authorization'],
+    checklist: ['Compact TOML compiles to the closed deterministic Manifest', 'Configured entry protocols use the same V3 config owner', 'No default writer exists outside routecodex-v3-config'],
   }],
   [V3_ENTRY_PROTOCOL_ENDPOINT_BINDING_PATH, {
     id: 'v3-entry-protocol-endpoint-binding',
@@ -105,7 +103,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     ],
     logicCards: [
       ['Runtime owns protocol lifecycle', 'OpenAI Chat request/response protocol handling stays in Rust runtime/codec owners, not Server or SSE.'],
-      ['SSE stays streaming transport', 'Controlled SSE evidence proves first frame does not wait for terminal and no full-stream materialization.'],
+      ['SSE transports sealed provider content', 'Provider attempts stay client-invisible until a valid terminal. Server owns client SSE headers and keepalives before the sealed business payload.'],
       ['Error and isolation are explicit', 'Provider failure enters Error01-06; metadata_center never enters provider/client normal payload.'],
     ],
     resources: [
@@ -150,7 +148,7 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     id: 'v3-protocol-normalization-tool-governance-boundary',
     eyebrow: 'normalization boundary review · dedicated surface',
     title: 'V3 Protocol Normalization / Tool Governance Boundary Review',
-    summary: 'Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, servertool, and current-turn governance stay in Chat Process govern nodes.',
+    summary: 'Locks the boundary that protocol normalization validates and maps adjacent protocols only, while tool identity pairing, uniqueness, and current-turn governance stay in Chat Process govern nodes.',
     requestTitle: 'Request normalization vs Req04 governance',
     responseTitle: 'Response normalization vs Resp03 governance',
     requestEdges: [
@@ -162,13 +160,13 @@ const V3_DEDICATED_REVIEW_SURFACES = new Map([
     responseEdges: [
       ['ProviderRespInbound01Raw', 'ProviderRespCompat02ProviderCompat', 'provider compat only'],
       ['ProviderRespCompat02ProviderCompat', 'HubRespInbound03Parsed', 'response shape normalization only'],
-      ['HubRespInbound03Parsed', 'HubRespChatProcess04Governed', 'tool/servertool governance'],
+      ['HubRespInbound03Parsed', 'HubRespChatProcess04Governed', 'tool governance'],
       ['HubRespChatProcess04Governed', 'HubRespOutbound06ClientSemantic', 'project after governance'],
     ],
     logicCards: [
       ['Normalization is not governance', 'Codecs map protocols and preserve invalid tool identity shapes for Chat Process rejection or governance.'],
       ['Compat is not fallback', 'Provider compat nodes perform provider micro-adjustments only; no route, model, tool, or fallback policy.'],
-      ['Chat Process owns tool semantics', 'Tool pairing, duplicate identity, orphan output, and servertool belong to Req04/Resp03.'],
+      ['Chat Process owns tool semantics', 'Tool pairing, duplicate identity, orphan output, and current-turn governance belong to Req04/Resp03.'],
     ],
     resources: [
       ['v3.hub.tool_governance_truth', 'Req04 / Resp03 Chat Process', 'Tool identity and governance result.'],
@@ -326,13 +324,11 @@ function renderMarkdown(markdown) {
 const V3_SOP_REVIEW_MARKERS = [
   'data-review-surface="v3-mainline-skeleton-sop"',
   'V3 Mainline Skeleton SOP Review',
-  'Separated locked skeleton diagrams',
+  'Separated skeleton diagrams',
   'Request skeleton',
   'Response skeleton',
   'Error resources',
   'SSE Edge SOP',
-  'Locked chain fingerprints',
-  'Change authorization contract',
   'Canonical sources',
   'Request node logic',
   'Response node logic',
@@ -376,7 +372,7 @@ function v3SopMermaid(kind) {
     '  S0["<b>V3ProviderRespInbound01Raw</b><br/><small>provider raw response/event bytes already received</small>"]',
     '  S1["<b>ProviderRespCompat02ProviderCompat</b><br/><small>provider-specific compat before Hub parse</small>"]',
     '  S2["<b>V3HubRespInbound02Normalized</b><br/><small>Hub response semantic input</small>"]',
-    '  S3["<b>V3HubRespChatProcess03Governed</b><br/><small>response tool/servertool governance owner</small>"]',
+    '  S3["<b>V3HubRespChatProcess03Governed</b><br/><small>response tool governance owner</small>"]',
     '  S4["<b>V3HubRespOutbound05ClientSemantic</b><br/><small>client protocol projection only</small>"]',
     '  S5["<b>V3ServerRespOutbound06ClientFrame</b><br/><small>HTTP/SSE frame handoff only</small>"]',
     '  S0 -->|compat first| S1 -->|normalize| S2 -->|govern at Resp03| S3 -->|project| S4 -->|frame/stream| S5',
@@ -570,29 +566,12 @@ export function auditV3DedicatedReviewSurfacesHtml(expectedOutputs) {
   return failures;
 }
 
-function renderV3MainlineSkeletonSopHtml(root) {
-  const map = loadV3MainlineCallMap(root);
-  const locks = loadV3ArchitectureAuditLocks(root);
-  const chains = map?.chains ?? [];
-  const locksByChain = new Map((locks?.locked_items ?? []).map((item) => [item.chain_id, item]));
-  const required = locks?.policy?.required_locked_chains ?? [];
-  const lockRows = required.map((chainId) => {
-    const chain = chains.find((item) => item.chain_id === chainId);
-    const lock = locksByChain.get(chainId);
-    return [
-      `<code>${escapeHtml(chainId)}</code>`,
-      `<span class="status">${escapeHtml(lock?.status ?? 'missing')}</span>`,
-      String(chain?.edges?.length ?? 0),
-      `<code>${escapeHtml(chain?.owner_feature_id ?? '<missing>')}</code>`,
-      `<code>${escapeHtml((lock?.fingerprint ?? '<missing>').slice(0, 28))}…</code>`,
-    ];
-  });
+function renderV3MainlineSkeletonSopHtml() {
   const canonical = [
     V3_MAINLINE_SKELETON_SOP_PATH,
     'docs/architecture/wiki/html/v3-mainline-caller-flow.html',
     'docs/architecture/v3-mainline-call-map.yml',
     'docs/architecture/v3-resource-operation-map.yml',
-    'docs/architecture/v3-architecture-audit-locks.yml',
     'docs/architecture/v3-function-map.yml',
     'docs/architecture/v3-verification-map.yml',
   ];
@@ -636,18 +615,17 @@ function renderV3MainlineSkeletonSopHtml(root) {
 <body data-review-surface="v3-mainline-skeleton-sop">
   <main>
     <header class="hero">
-      <span class="eyebrow">locked SOP review · generated dedicated surface</span>
+      <span class="eyebrow">mainline skeleton SOP review · generated dedicated surface</span>
       <h1>V3 Mainline Skeleton SOP Review</h1>
-      <p>这个页面是主骨架 SOP 的专用 review surface，不允许退回通用 Markdown HTML。它用同一套可视标准展示 request / response / error / SSE edge 边界、锁定链 fingerprint 和变更授权规则。</p>
+      <p>这个页面是主骨架 SOP 的专用 review surface，不允许退回通用 Markdown HTML。它用同一套可视标准展示 request / response / error / SSE edge 边界和骨架链 owner 拓扑。</p>
       <div class="meta-row">
         <span class="meta-pill">Canonical Markdown source: <code>${escapeHtml(V3_MAINLINE_SKELETON_SOP_PATH)}</code></span>
         <span class="meta-pill">Review source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
-        <span class="meta-pill">Lock source: <code>docs/architecture/v3-architecture-audit-locks.yml</code></span>
       </div>
     </header>
 
     <section class="panel">
-      <h2>Separated locked skeleton diagrams</h2>
+      <h2>Separated skeleton diagrams</h2>
       <div class="flow-stack">
         <section><h3>Request skeleton</h3><div class="flow-box"><pre class="mermaid">${escapeHtml(v3SopMermaid('request'))}</pre></div></section>
         <section><h3>Response skeleton</h3><div class="flow-box"><pre class="mermaid">${escapeHtml(v3SopMermaid('response'))}</pre></div></section>
@@ -667,7 +645,7 @@ function renderV3MainlineSkeletonSopHtml(root) {
       <h2>Response node logic</h2>
       <div class="logic-grid">
         ${v3SopNodeCard('ProviderRespCompat02ProviderCompat', 'Compat before RespInbound', 'Provider-specific response shape differences are normalized before Hub response parsing.')}
-        ${v3SopNodeCard('Resp03', 'Response Chat Process owner', 'Text harvest, tool frame repair, finish_reason branch, servertool, and ordinary tool governance live here.')}
+        ${v3SopNodeCard('Resp03', 'Response Chat Process owner', 'Text harvest, tool frame repair, finish_reason branch, and ordinary tool governance live here.')}
         ${v3SopNodeCard('Resp03 / RespOutbound / Server frame', 'Govern then project then frame', 'Resp03 owns response governance; RespOutbound projects client semantic; server/SSE only frames/transports.')}
       </div>
     </section>
@@ -685,19 +663,20 @@ function renderV3MainlineSkeletonSopHtml(root) {
       <div class="note-grid">
         <article class="note-card"><h3>Inbound model mapping</h3><p>Explicit <code>match.models</code> route pools declare inbound client model to allowed targets. Default/no-explicit-model paths must reject silent wrong-model success unless a configured target model id matches.</p></article>
         <article class="note-card"><h3>Provider wire hook</h3><p>The provider-wire owner rewrites outbound <code>body.model</code> to the selected target <code>wire_model</code>. Provider aliases are catalog/display metadata and never authorize runtime matching.</p></article>
-        <article class="note-card"><h3>Provider error switching</h3><p>429/401/403/413/5xx/transport/codec failures enter Error01-06 and reselect while selected/default candidates remain. Client projection is allowed only after exhaustion.</p></article>
-        <article class="note-card"><h3>Evidence requirement</h3><p>Marker-only 200 is insufficient. Closeout needs provider-request dry-run selected provider/model plus live replay showing provider-switch chain or explicit exhausted error.</p></article>
+        <article class="note-card"><h3>No client error responses</h3><p>All Chat, Responses HTTP/WS/compact, Messages and enabled Gemini entries keep provider, transport, codec and internal failures in typed Error resources. Recovery reselects while eligible candidates remain. Even complete pool exhaustion must never produce a client error status, payload, event, diagnostic SSE comment or fabricated successful terminal; end an uncompletable transport without error semantics.</p></article>
+        <article class="note-card"><h3>Evidence requirement</h3><p>Marker-only 200 is insufficient. Require provider-request dry-run selected provider/model and real public-entry success/failure regressions: complete real success or incomplete transport with zero client error responses, including pool exhaustion, malformed SSE and automatic HTTP parser failures.</p></article>
       </div>
     </section>
 
     <section class="panel">
       <h2>rccv3 live closeout SOP</h2>
+      <div class="callout"><strong>One milestone review before integration.</strong> Complete affected author tests and public-entry acceptance, or a real tooling consumer. Complete applicable runtime acceptance, then one independent overall milestone review and applicable CI before merge/push to main. Complete applicable post-merge acceptance and resource cleanup. Reuse unchanged evidence. Explain expected interruption before a formal rccv3 restart (or rcc restart); separate approval is not required. Execute it once per new build and investigate failure before retrying. Start/stop, including all arguments and aliases, still require explicit human approval. Tooling-only changes do not require restart. Repository checks and Git protection remain enforced.</div>
       <table>
         <thead><tr><th>Step</th><th>Required evidence</th></tr></thead>
         <tbody>
-          <tr><td>Build/install</td><td><code>npm run install:v3</code> and matching hashes for repo, <code>~/.rcc</code>, and <code>/Volumes/extension/.rcc</code> rccv3 binaries.</td></tr>
-          <tr><td>Config/restart</td><td><code>rccv3 config check -c /Volumes/extension/.rcc/config.v3.toml</code>, then <code>rccv3 restart -c /Volumes/extension/.rcc/config.v3.toml</code>. Legacy <code>routecodex restart --port</code> is not authoritative for this V3 instance.</td></tr>
-          <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for all member ports, including 4444 and 5555.</td></tr>
+          <tr><td>Build/install</td><td><code>npm run install:v3</code> from delivered main.</td></tr>
+          <tr><td>Config/restart</td><td>Read the selected active config, otherwise <code>~/.rcc/config.toml</code>; run <code>rccv3 config check -c &lt;active-config&gt;</code>, then <code>rccv3 restart -c &lt;active-config&gt;</code>. Require exit zero and running state.</td></tr>
+          <tr><td>Runtime identity</td><td><code>rccv3 --version</code> and health for every listener declared by the active config.</td></tr>
           <tr><td>Behavior</td><td>Provider-request dry-run, live JSON/SSE probe, and exact old-sample replay when a saved failing sample exists.</td></tr>
         </tbody>
       </table>
@@ -705,17 +684,7 @@ function renderV3MainlineSkeletonSopHtml(root) {
 
     <section class="panel">
       <h2>SSE Edge SOP</h2>
-      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, servertool, routing, retry, or error-policy semantics.</div>
-    </section>
-
-    <section class="panel">
-      <h2>Locked chain fingerprints</h2>
-      ${v3SopHtmlTable(['Chain', 'Lock status', 'Edges', 'Owner', 'Fingerprint'], lockRows)}
-    </section>
-
-    <section class="panel">
-      <h2>Change authorization contract</h2>
-      <div class="callout"><strong>Locked chain edge/resource/caller/callee/fingerprint changes require Jason manual authorization.</strong> The authorization record must include authorization id, item id, approved_by Jason, before/after fingerprints, and reason/scope.</div>
+      <div class="callout"><strong>SSE is transport only.</strong> It owns bytes, UTF-8/frame parsing, frame limits, backpressure/EOF/drop/error closeout, and opaque frame re-encoding only. It must not parse event/data JSON, required_action, terminal status, tool calls, continuation, routing, retry, or error-policy semantics.</div>
     </section>
 
     <section class="panel">
@@ -733,10 +702,10 @@ export function auditV3MainlineSkeletonSopHtmlText(htmlText, relPath = V3_MAINLI
     if (!htmlText.includes(token)) failures.push(`${relPath}: generated SOP HTML missing review-surface token ${token}`);
   }
   if (htmlText.includes('<section class="frame">') || htmlText.includes('<article>\n        <h1>')) {
-    failures.push(`${relPath}: V3 locked SOP must use dedicated review renderer, not generic markdown renderer`);
+    failures.push(`${relPath}: V3 mainline skeleton SOP must use dedicated review renderer, not generic markdown renderer`);
   }
   const mermaidCount = (htmlText.match(/<pre class="mermaid">/g) ?? []).length;
-  if (mermaidCount < 2) failures.push(`${relPath}: V3 locked SOP HTML must contain separate request and response Mermaid diagrams`);
+  if (mermaidCount < 2) failures.push(`${relPath}: V3 mainline skeleton SOP HTML must contain separate request and response Mermaid diagrams`);
   return failures;
 }
 
@@ -890,7 +859,7 @@ export function renderArchitectureWikiHtmlPages(root) {
       continue;
     }
     if (markdownPath === V3_MAINLINE_SKELETON_SOP_PATH) {
-      outputs.set(htmlPathForMarkdown(markdownPath), renderV3MainlineSkeletonSopHtml(root));
+      outputs.set(htmlPathForMarkdown(markdownPath), renderV3MainlineSkeletonSopHtml());
       continue;
     }
     const markdown = readText(root, markdownPath);

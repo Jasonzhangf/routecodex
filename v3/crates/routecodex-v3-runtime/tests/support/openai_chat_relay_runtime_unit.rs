@@ -23,6 +23,22 @@ mod tests {
     }
 
     #[test]
+    fn blank_finish_reason_is_not_terminal() {
+        assert!(!openai_chat_sse_payload_has_terminal_finish_reason(&json!({
+            "choices":[{"index":0,"delta":{},"finish_reason":""}]
+        }))
+        .unwrap());
+        assert!(!openai_chat_sse_payload_has_terminal_finish_reason(&json!({
+            "choices":[{"index":0,"delta":{},"finish_reason":"  "}]
+        }))
+        .unwrap());
+        assert!(openai_chat_sse_payload_has_terminal_finish_reason(&json!({
+            "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]
+        }))
+        .unwrap());
+    }
+
+    #[test]
     fn responses_settlement_tail_frames_after_completed_are_benign() {
         assert!(is_v3_responses_settlement_tail_frame(
             r#"{"type":"ping","cost":"0"}"#
@@ -48,9 +64,15 @@ mod tests {
 
     #[test]
     fn responses_transport_keepalives_are_not_semantic_events() {
-        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("ping"));
-        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("null"));
-        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data("\n  \n"));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            "ping"
+        ));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            "null"
+        ));
+        assert!(crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
+            "\n  \n"
+        ));
         assert!(!crate::hub_v1::is_v3_provider_sse_transport_keepalive_data(
             r#"{"type":"response.output_text.delta","delta":"x"}"#
         ));
@@ -72,8 +94,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -82,7 +102,8 @@ mod tests {
         );
         let mut chunks = Vec::new();
         while let Some(chunk) = stream.next().await {
-            chunks.push(chunk.expect("transport keepalive must not be projected as provider error"));
+            chunks
+                .push(chunk.expect("transport keepalive must not be projected as provider error"));
         }
         let joined_bytes = chunks.concat();
         let joined = String::from_utf8_lossy(&joined_bytes);
@@ -104,8 +125,6 @@ mod tests {
             "test-request-id".to_string(),
             "test-session-id".to_string(),
             provider,
-            None,
-            V3WebSearchExecutionMode::None,
             None,
             false,
             false,
@@ -145,8 +164,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -180,8 +197,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -212,8 +227,6 @@ mod tests {
             "test-session-id".to_string(),
             provider,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             false,
             V3RuntimeStreamObservation::default(),
@@ -226,6 +239,40 @@ mod tests {
         }
         let text = String::from_utf8(chunks.concat()).unwrap();
         assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+        assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn responses_sse_incomplete_content_filter_projects_terminal_not_error() {
+        use futures_util::StreamExt;
+        let manifest = test_relay_manifest();
+        let outcome = test_relay_outcome(&manifest);
+        let provider: V3ProviderSseStream = Box::pin(futures_util::stream::iter(vec![
+            Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_cf\",\"status\":\"in_progress\"}}\n\n".to_vec()),
+            Ok(b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_cf\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"total_tokens\":10}}}\n\n".to_vec()),
+        ]));
+        let mut stream = project_responses_sse_as_openai_chat_stream(
+            "test-request-id".to_string(),
+            "test-session-id".to_string(),
+            provider,
+            None,
+            false,
+            false,
+            V3RuntimeStreamObservation::default(),
+            true,
+            outcome,
+        );
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            chunks.push(chunk.expect(
+                "a legal content_filter incomplete terminal must project as a Chat final frame, not a stream error",
+            ));
+        }
+        let text = String::from_utf8(chunks.concat()).unwrap();
+        assert!(
+            text.contains("\"finish_reason\":\"content_filter\""),
+            "{text}"
+        );
         assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
     }
 
@@ -247,8 +294,6 @@ mod tests {
             "test-request-id".to_string(),
             "test-session-id".to_string(),
             provider,
-            None,
-            V3WebSearchExecutionMode::None,
             None,
             false,
             false,
@@ -283,9 +328,11 @@ mod tests {
             failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "s1")
                 .expect("test scope"),
             provider_id: "test".to_string(),
+            interface_id: "default".to_string(),
             auth_alias: "key".to_string(),
             model_id: "model".to_string(),
             recorded: false,
+            response_control: V3RuntimeStreamObservation::default(),
             _provider_action_permit: None,
         }
     }
@@ -319,11 +366,12 @@ mod tests {
             V3HubTransportIntent::Sse,
             &mut trace,
             None,
-            V3WebSearchExecutionMode::None,
-            None,
             false,
             true,
             "MiniMax-M3",
+            false,
+            &crate::hub_v1::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::default(),
+            None,
         )
         .expect("relay response hook must project without protocol failure");
 
@@ -354,7 +402,7 @@ routing_group = "default"
 
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = { request_max_attempts = 1, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }
 
@@ -392,9 +440,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         async fn send(
             &self,
             _request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError> {
-            self.sends
-                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError>
+        {
+            self.sends.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             panic!("shared request attempt budget must reject before transport.send")
         }
     }
@@ -403,7 +451,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     async fn execution_control_payload_architecture_openai_chat_relay_handoff_does_not_reset_attempt_budget(
     ) {
         std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
-        let manifest = test_relay_manifest();
+        let mut manifest = test_relay_manifest();
+        manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
+            .attempt_store.residence_timeout_ms = 300;
         let request_execution_control =
             crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
                 .expect("request execution control");
@@ -411,20 +461,53 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .attempt_budget()
             .admit_transport_attempt()
             .expect("Direct attempt before Relay handoff");
+        assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
+            Err(crate::execution_control::V3AttemptStoreError::TransportAttemptsExhausted(message))
+                if message.contains("limit 1")));
         let transport = ExecutionControlRejectingTransport {
             sends: std::sync::atomic::AtomicUsize::new(0),
         };
+        let failure_session_scope = V3ProviderFailureSessionScope::new(
+            "test",
+            "default",
+            "shared-openai-chat-attempt-budget",
+        )
+        .expect("session scope")
+        .with_transport_handoff_scope("shared-openai-chat-budget-pipeline", 4444, 1)
+        .expect("transport handoff scope");
+        let mut raw = crate::build_v3_server_03_http_request_raw(
+            "test".into(),
+            failure_session_scope.clone(),
+            "req-shared-openai-chat-attempt-budget".into(),
+            "exec-shared-openai-chat-attempt-budget".into(),
+            "POST".into(),
+            "/v1/chat/completions".into(),
+            json!({"model":"client-model","messages":[{"role":"user","content":"hello"}]}),
+        );
+        raw.port = Some(4444);
+        raw.pipeline_id = Some("shared-openai-chat-budget-pipeline".into());
+        let mut handoff =
+            crate::execute_v3_direct_runtime_kernel_core::<crate::V3ChatDirectCodec, _>(
+                (),
+                &manifest,
+                raw,
+                &transport,
+                V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+                0,
+                true,
+                None,
+                None,
+            )
+            .await
+            .protocol_relay_handoff
+            .expect("cross-protocol Direct producer returns the full handoff");
+        handoff.request_execution_control = request_execution_control.clone();
 
-        let error = execute_v3_openai_chat_relay_runtime_inner(
+        let execution = execute_v3_openai_chat_relay_runtime_inner(
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "test".to_string(),
-                failure_session_scope: V3ProviderFailureSessionScope::new(
-                    "test",
-                    "default",
-                    "shared-openai-chat-attempt-budget",
-                )
-                .expect("session scope"),
+                failure_session_scope,
                 request_id: "req-shared-openai-chat-attempt-budget".to_string(),
                 payload: json!({
                     "model": "client-model",
@@ -436,15 +519,25 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
-            Some(request_execution_control),
-        )
-        .await
+            Some(handoff),
+        );
+        tokio::pin!(execution);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), &mut execution).await.is_err(),
+            "exhausted shared budget must stay pending inside the original residence");
+        let error = tokio::time::timeout(std::time::Duration::from_secs(3), execution)
+        .await.expect("the original short test residence must end this request")
         .expect_err("Relay must reject the next transport attempt from the shared budget");
 
-        assert!(matches!(error, V3OpenAiChatRelayRuntimeError::Target(_)));
+        assert!(
+            matches!(error, V3OpenAiChatRelayRuntimeError::Target(ref message)
+            if message.contains("request provider transport attempt limit 1 exhausted"))
+        );
         assert_eq!(
             transport.sends.load(std::sync::atomic::Ordering::Acquire),
             0
         );
+        assert_eq!(request_execution_control.transport_attempts(), 1);
+        assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
+            Err(crate::execution_control::V3AttemptStoreError::ResidenceDeadlineExceeded(_))));
     }
 }

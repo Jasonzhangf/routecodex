@@ -1,3 +1,38 @@
+## 2026-10-18 Magpie matrix and Source01 integration
+
+- Update09:48Z: M3 PR418 is merged to remote main918bba4fe after all applicable CI39112284069 passed, including installed58. M4a now normally combines main, with no product change after author tests. M4a affected public54PASS, installed58/58PASS, formal install/restart running,4444 real200/completed/MATRIX_OK. Current7777no_response has no persisted provider attempt, exact selected parkzhao identity is waiting probe and official same-bindingL2 returns401Invalidtoken; generation remains unavailable. Closed sample window and evidence boundaries: `.worker-runs/magpie-node-flow-20261012/m4a-runtime-author-acceptance.md` under external playground. Fresh independent overall M4a review is running. Global accepted count stays13/20; DirectD2b, ServerHTTP, remainingError and REQ02 businessCompat/Frame remain separate.
+
+- Installed complete live-mock matrix remains 58/58 PASS. Accepted node count remains 13/20; inverse projection and six global Error nodes remain pending. M2 PR417 is main. M3 PR418 is open with accepted Linux stack correction da594a455; its updated CI is running. M4 source composition now includes that reviewed source through normal Git, while M4 main delivery still depends on M3 main delivery.
+- CI milestone PR419 is merged main. Remote CI39105662749 actually ran installed matrix58/58 and remaining host suites successfully. Duplicate source suites are removed only after canonical verification succeeds; complete CLI/lifecycle coverage remains. Post-merge scope consumer53/53 PASS. No external Magpie checkout is required by CI.
+- M4 integration branch codex/m4-source01-base contains S0 shared/planning typed-fault closure121152318, Foundation typed diagnostic carrier c452f24ac through normal merge, and actual owner/map bindings27a2a7c98. Combined Runtime/Server check succeeds. S0 HTTP-witness and preplan fault-erasure regressions have red/green evidence. Foundation uses real Front consumer tests with seeded typed faults; public SDK-fault injection is not established. Source acceptance does not establish whole-M4 runtime or global node acceptance.
+- Provider-attempt/health H closure33169d528 plus Root477cad523 is integrated and its author tree removed. D1 hook-origin increment a4ac4a666 is committed separately in the active D tree, with native Direct public3/3 PASS and seeded witness red/green proof; it is not part of this M4a base. D prepare/private SSE and R remain pending. REQ02 keeps its declared business codec/field/projection owners. M4 has not been accepted as a whole milestone or merged main.
+- Root resolved the M3 Server outlining/M4 Foundation overlap by retaining the outlined dispatcher and placing all three source/cause evidence writes inside the actual dry-run helper. Combining code does not prove runtime acceptance; combined tests and milestone review remain required. Existing nonchanged S0/H proofs are reused.
+- Task facts and command receipts: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/CRITICAL-PATH-ORDER-20261017.md, m4-s0-foundation-root-acceptance.md, m4-error-bindings-root-acceptance.md, ci-source-suite-delivery.md. Old map-worker npm lifecycle accidentally installed M4 CLI; Root restored accepted M3 via formal installer with exit0 and no restart. It is not M4 runtime evidence.
+
+## 2026-10-18 M3 Linux stack correction
+
+- PR418 Linux CI39103982768 exposed issue230da49: first Responses Relay provider WebSocket handshake overflows the default worker stack. Root reproduced Linux ARM, obtained GDB and measured Server poll846816B. Outlining inactive dry-run/non-Responses branches in their Server owner reduces it to89168B. Runtime/Provider transport and test assertions stay unchanged. A wrapper-only experiment failed and was removed.
+- Fixed exact Linux default-stack public test passes1/1. macOS full multi_listener_server passes127/127. Existing caller map and generated flow now name the two affected actual caller edges; operator DAG/resource/caller gates pass. Latest origin/mainCI419 is normally combined. Formal install and one formal restart load the fix; installed matrix58/58PASS, 4444 real response completes/MATRIX_OK.
+- 7777 real request closes transport because parkzhao/default/key1/claude-fable-5 returns401Invalidtoken; exact-bound L2 probe also401. It is an upstream-auth exception, not a successful generation or repaired credential. Closed restart window also records explicit workgl/chat/key1/deepseek capacity503/allaccounts unavailable, later probe2xx; per existing causality rule this remains upstream capacity, not proof of local request failure or successful final delivery. Missing original/provider payload is not reconstructed.
+- Author/source/runtime evidence: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/m3-stack-root-author-acceptance.md. Updated independent whole milestone review passed with zero findings (AGY Gemini4 medium, conversation d32d09a2-d1fc-4ebd-8fb8-6c444d591aef, controller_no_blocking_findings); the same reviewer corrected only scope serialization. Commit, updated PRCI, main delivery and issue resource disposition remain pending. M4 Source01 is separate; global accepted count remains13/20.
+
+## 2026-10-17 Magpie matrix milestone and incremental node delivery
+
+- M2 PR https://github.com/Jasonzhangf/routecodex/pull/417 is merged into origin/main. CI 39095975369 passed all applicable checks. Remote mergedAt is 2026-10-18T05:34:41Z. The complete installed matrix has 58 passing cases. Accepted node count remains 13/20; matrix coverage and node integration are separate results.
+- M3 source has Runtime 1392 passing tests, one existing ignored test, public suites 201+12+2+127 passing, architecture 222 resources/581 edges passing, and 53 remaining forbidden mutations rejected. Direct/Relay fault and witness corrections are integrated in the task branch. Latest installed binaries are newer than the running service; no claim of latest-source live acceptance is made.
+- Pre-dispatch SDK02..06 caller correction 0b1a318e3 is integrated; its author tree is removed. Actual source/status, SDK rejection, private Server dual-source persistence and public exhaustion tests passed. Removing cause made the consumer test fail; restoration passed. Formal install and one restart loaded the final batch, installed matrix passed58/58, live4444/7777 returned completed/MATRIX_OK. The closed restart sample window has zero persisted records for configured listeners; isolated test ports are separate. Overall independent review and normal PR/CI/main delivery remain pending. Source01 and inverse do not block this batch.
+- Task owner records and raw evidence: /Volumes/Intel/playground/routecodex/.worker-runs/magpie-node-flow-20261012/CRITICAL-PATH-ORDER-20261017.md. Resource cleanup and applicable issue dispositions remain open.
+- M3 independent overall milestone review completed PASS with zero blocking findings (AGY Gemini4 medium, conversation cfa1246c-6e88-4619-8eb9-f7b77b660319; canonical classification controller_no_blocking_findings). Review scope includes the complete runtime/server/governance batch and this note. PR CI and main integration remain pending; later Source01 work is isolated.
+
+## 2026-10-14 Existing issues #127 / #231 / #245: current consumer evidence
+
+- Task-owned evidence: `/private/tmp/rcc-old-issues-01a139ba/final-evidence.md`; accepted independent plan in `plan/plan.md`. Final candidate combines `d6f4330cd`; requirements schema1/version8 read. This delivery adds public regression tests and existing owner/gate bindings. Runtime code and production installation remain unchanged.
+- Latest combined real HTTP consumers passed3/3. #127 proves disabled health ignores persisted cooldown and does not record automatic failure cooldown, with enabled-health control. #231 proves both stale probe outcomes preserve newer state, release only their permit, allow healthy progress, and close exhausted transport. Original merged guard reversals make these regressions red; guards restored exactly.
+- #245 controlled Relay consumer proves HTTP400 `permission_error`/code11128 isolation, actual nonce tool execution and complete paired history, failed-probe exclusion after original deadline, matching probe recovery, independent explicit current-turn native hosted search, and exhaustion without client errors or empty success. Hosted control uses an explicit final current-user search entry; ordinary-text/declaration-only forms were not established. Historical paired wire/channel root remains unknown; #245 stays open.
+- Independent review found missing full tool-schema checks and SSE tool execution evidence. The candidate now verifies the entire projected function schema on every business wire and executes the complete case through JSON and SSE. SSE item/arguments events assemble the same call identity and complete arguments before execution; exhausted SSE must terminate detectably without error or normal empty completion. A changed nonce property type makes the public case red, and restoration is byte-exact. Detailed receipts are in the task evidence index.
+- #127 original Direct remote-continuation gate is retired; its old3/3 acceptance is not claimed. #231 uses current semantic-equivalent public and existing Runtime race evidence; exact historical/installed replay is not claimed. Final disposition depends on independent review, CI/remote integration and owned cleanup; unresolved installed provenance keeps the affected issue open.
+- Recovery package `/Volumes/extension/.rcc/backups/old-issues-01a139ba` has real isolated restore proof for historical4897. Production execution is disabled until current running binary/config recoverability is verified. Last observed loaded4899 differs from disk4901. No production install/restart was performed by this task.
+
 # 2026-08-13 V4 流水线骨架补齐：模块级 debug 开关 / 错误中心 / 路由控制出口 / payload 生命周期 / dry-run
 - Jason 锁定：错误中心只做分类审计，返回给 VR；VR 拿请求/响应错误做决策，决定原始请求如何再次处理；错误中心不做路由操作。
 - Jason 锁定 payload 生命周期：请求发出 -> 响应入客户端（成功）或错误终态（错误）算周期结束；switch/cooldown/reroute 合并同一请求，原始请求 payload 不变。
@@ -36145,3 +36180,116 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - Main closeout: candidate is an ancestor of main; tracked status and `git diff --check` are clean. `./.appsdk/sdk.bin` is ignored by `.gitignore` and is not source dirty. Operator closeout reports pinned SDK `0.1.6`, verify, guide develop, and guide debug passed.
 - File-size baseline gap remains at `verify:v3-file-size`: provider-compat-core `2234/2136`, config v2_compat `1520/1506`, config validate `1813/1759`, provider-responses health `2661/2411`, runtime hooks `1626/1587`, anthropic relay `1607/1521`, openai chat relay `1597/1586`, relay core `1515/1500`, resp_chat_process `5012/4663`, responses relay tests extra `1643/1500`, direct runtime helpers `1510/1500`, direct SSE consumers `1558/1500`, server endpoint handlers `1947/1905`, restart handoff `1515/1507`. No unrelated split was made.
 - Cleanup: collab receipt `cleanup-v3-sse-provider-client-decoupling-20260903-1788530243630` verified; feature worktree, local branch, and claim released. Remote push was not performed.
+
+## 2026-10-06 P0 managed restart — source integration evidence
+
+- Parent-owned stage truth and author logs: `/Users/fanzhang/.codex/task-notes/codex-sse-disconnect-20261006/notes.md`. Final candidate binding and acceptance index: `p0-final-review-evidence.md` in that same directory. Read that index for the exact candidate tree, commands, input boundaries, execution logs, and current review round.
+- Current R4 author handoffs: `p0-review-r4-author-result.md` and `p0-hooks-target-author-result.md`. The previous-release transfer and target-hooks preparation corrections are combined with main `d8a609335`; the latest author public managed CLI 44 and Lifecycle 95 pass. Earlier Debug 18 and Server 96 evidence remains indexed with its source boundary. Public cases cover complete accepted sample drain, diagnostic recovery, actual native-exec rejection, hooks ownership, and one-step migration from real previous native releases while preserving the original service on rejection.
+- Reviews r1, r2 and r3 found retained-hooks, diagnostic persistence and previous-release transfer defects. All FAIL receipts are preserved; corrections and replacement evidence are in the final index. R4 target-hooks preflight also fixes an independently reproduced post-exec association conflict. A final independent PASS is required before integration. Earlier tests are reused only for unchanged inputs.
+- Parent final full-workspace, architecture, rebuilt release 0.90.4839 and isolated official upgrade results are recorded in the index with their precise candidate binding. Isolated restart acceptance does not prove shared installation or runtime acceptance.
+- The user authorized source-first integration to main. Runtime issues `e208714` and `f155337` remain open until shared deployment and the original MTPLX request complete their applicable acceptance. Source integration does not claim those stages.
+
+## 2026-10-20 P0 809a54f Anthropic reasoning-extension takeover (r2 port)
+
+- Base：`origin/main` `7ad8e0e9a`；worktree `/Volumes/Intel/playground/routecodex/809a54f-reasoning-r2-20261020`，branch `codex/p0-anthropic-reasoning-r2-20261020`。旧 worktree 已移除。
+- 首次偏离：provider thinking block 携带 `cache_control` 时被 `anthropic_sse_tree::parse_block` 拒绝；放宽接受后，Responses->Chat canonical 在把 reasoning 条目并入前一条 assistant 文本或 pending tool call 时丢失 carrier，因为 `merge_v3_openai_chat_message_into_pending_tool_message` 只搬 `tool_calls`/`content`/`reasoning_content`。
+- 修复：provider 扩展字段存入 `routecodex_chat_extension.anthropic_reasoning`；inverse projection 恢复且不覆盖 Responses native 字段；每个 reasoning 条目在 `anthropic_reasoning_blocks` 中形成一条有序记录，记录 native type、明文、encrypted data 与可选 provider 扩展，关联只追加不递归合并；第一个 `responses_reasoning_encrypted_content` 保持权威。malformed reasoning 仍以 typed error（`SignatureDeltaRequired`、`ThinkingDeltaRequired`、native payload 缺失）失败。当前 main 的 empty-signature 与 namespace 语义保持。
+- r2 证据：mixed reasoning 单测与公开回归各 `1/1`；characterization `94/94`；provider-wire `19/19`；server `responses_client_anthropic_` `5/5`。公开 HTTP `responses_client_anthropic_reasoning_cache_control_survives_two_turn_tool_roundtrip` 覆盖 Responses Relay -> Anthropic 两轮：第二轮 transcript 为 message->reasoning->function_call，第二 provider wire 保留 `cache_control`、paired tool id/name/arguments 与 tool output `42`。mixed-block 公开回归 `responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_paired_tool_result` 覆盖两种顺序；malformed provider SSE 走真实 server 入口，只终止 transport，不泄漏 error payload 或伪造完成。
+- 静态与架构 gate：`verify:v3-architecture-ci` `35/35`；resource-map、module-boundaries、protocol-conversion-field-parity、provider-action-gate（48 edges）、cargo-fmt 与 `git diff --check` 通过。
+- 独立 Review：oauth/gpt-6.1-sol medium 对完整 worktree diff（base `7ad8e0e9a`）PASS，无 blocking findings，随后发现一个 P1：mixed reasoning blocks 中无扩展的块在下一轮 provider 请求被丢弃。当前修复改为保存每个 reasoning 块的有序记录，并保留 native type、明文、encrypted data 与可选扩展；redacted reasoning 不再只有 codec 级往返覆盖。未做 install/restart/live replay。
+- 边界：按 master 分工未 merge、未 push、未安装、未重启、未做 live replay；本 worktree 保留到 candidate commit 和交接完成。
+
+## 2026-10-23 849ed8f P2 relay 首帧提交 — review FAIL 记录
+
+- Worktree `/Volumes/Intel/playground/routecodex/849ed8f-relay-first-frame`，branch `codex/849ed8f-relay-first-frame`，HEAD `23676e502`（3 commits），未合入。base 已推进到 `origin/main 1a8705c09`（落后 13）。
+- 两份独立 review 都 FAIL。核对后确认两条阻断成立：
+  - B2 提交后失败换候选：inner 两条失败分支 `continue` 前未查 committed；投影器被丢弃，下一轮在同一已提交 sink 上重建并重放 response.created/in_progress + 重复 item。
+  - B3 refill 轮次不关闭条目：`append_text` 复用 open message；无工具 completed 文本会 refill 一轮，两轮文本并进同一 msg_0，终态两条目/单 id。
+  - B1（另一份 review 的阻断）Resp03 无条件 think/control 改写发生在投影之后，流出字节与终态不一致；需设计取舍（逐 chunk 改写 vs 让 openai_chat 文本保持整段）。
+- 非阻断：终态缺 usage 零填充；strip_client_response_id 未生效；`relay_client_stream_commit_eligible` 死代码；doc/status 与实现不符；id 按下标对齐有顺序假设；finish 把非 incomplete/in_progress 都投影成 completed；created/in_progress 手搓 8 字段而非复用 progress 投影。
+- 状态：候选已回滚，live 4444/7777 运行主干构建。分支保留，未清理 worktree。
+
+### B1 根因收敛（2026-10-23 续）
+
+- 逐条读实现：`harvest_v3_think_blocks_at_resp03` 无条件；OpenAiChat 走 `harvest_v3_openai_chat_think_blocks` → `harvest_v3_think_text`，只认 `<think>`、`</think>`（未闭合块把正文留在可见文本）。`govern_v3_relay_control_markers_at_resp03` 用 `ToolMarkupDeclarations::default()`，`removed_label` 只删整行等于独立协议标签的行（`removable_label`），是行级删除。`tool_markup::govern_thinking` 与 think 同族，`complete_provider_attempt` 恒真。
+- 结论：改写由模型输出触发，不存在请求级事实能证明正文不被改写，因此 B1 无法用 gate 收口；只有两条路：
+  - (a) 投影器逐 chunk 复刻同一套治理 + hold-back（未闭合 `<think>` 后不得流出、末尾部分标签前缀回退、未结束行回退），并与终态逐字节收敛。正确但要新建流式治理子系统，需专门红测证明多输入下逐字节一致。
+  - (b) 收敛方向反过来：已提交时把终态正文改写为已流出正文（投影器在 finish 覆写条目文本，按 类型+序号 对齐 id），收敛由构造保证，代价是 SSE 模式下 `<think>` 内联块不再被摘入 reasoning，形成模式相关的载荷语义差异。
+- 两项取舍都需要 owner 拍板；(b) 改动较小但留下可见语义差异，(a) 无差异但工作量与风险显著。
+- 已修：B2 提交后失败不换候选、B3 refill 轮次各自成条目（commit `f9ffca51c`）。未修：B1、终态 usage、strip_client_response_id、死代码、DAG 状态段、id 对齐、finish 状态映射。
+
+## 2026-10-23 849ed8f P2 三条阻断修复 + 候选上线实测
+
+- B1/B2/B3 三条阻断全部修完：提交后失败不换候选、refill 轮次各自成条目、终态由已流出条目重建并按 output_index 排序（收敛由构造保证）。
+- 红测证据：relay_first_frame_commit 5 条；去掉终态重建→"terminal introduces an item"红；去掉排序→"output index order got [148,411,279]"红；去掉守卫→提交后失败路径无覆盖（运行时级仍缺）。
+- 静态 gate：cargo fmt、verify:v3-resource-map、verify:v3-module-boundaries、verify:v3-dagpipe-governance、verify:v3-mainline-caller-flow 全绿。
+- 测试：relay_first_frame_commit 5/5、responses_relay 200/200、client_sse 17/17、multi_listener_server 192/192。
+- 构建 0.90.4935、安装、rccv3 restart 两次（第 2 次加载 output 排序修复）。
+- 7777 实测：首帧 20.94s / 终态 48.17s，89 个 output_text.delta 分散 27.19s、86 个不同到达时刻；终态带 usage；两轮 refill 各自成条目（rs_0,msg_1,rs_2,rs_3,msg_4）。
+- 4444 实测：首帧 4.08s / 终态 8.76s，80 个正文增量分散 4.55s；但出现 2 个 response.created，判定为 Direct refill 拼装行为（本分支未改 Direct），记为观察项未关闭。
+- 文档与 map：DAG P2 状态段、verification-map owner_modules + relay 门禁均已同步。
+- 独立复审：已派（gpt-6.1-sol medium），结果待收。
+
+## 2026-10-24 849ed8f P2 第二轮 review 修复 + think 收割前移
+
+- 第二轮 review 判 FAIL 的两条阻断已修：提交后失败守卫从 provider 流失败分支移到 hook 失败分支（原先重复插在同一分支、hook 分支空守卫）；终态重建同时覆盖顶层 `output_text`。
+- B2（think 内联残留）改为按 owner 指示前移收割，不再作为产品取舍：投影器在流式到达时应用 `harvest_v3_think_text` 的同一条 `<think>` / `</think>` 规则，块内容只进 reasoning、正文只发块外文本，跨帧拆分的标记先扣住，流结束仍未闭合的块按整段语义留作正文。规则真源仍是 `resp_chat_process_03_governed::harvest_v3_think_text`（类型与访问器放开给 gate 用）。
+- 新红测 `relay_first_frame_commit_matches_the_whole_attempt_think_harvest`：对 5 个样本、每个字符切分点比对正文与 reasoning 文本与整段收割逐字相等。去掉前移逻辑后该测转红（`<think>plan</think>answer` 得到整段原文）。
+- 新红测 `relay_first_frame_commit_harvests_inline_think_blocks_like_chat_process`：跨三帧拆分的标记，客户端帧里不出现 think 标记与块内容，块内容只走 reasoning，终态正文为块前后拼接。
+- 提交门标记集改为 Relay 自己的整段 owner 派生（`new_with_governed_markers`，DSML 控制标记按行、think 标记内联），探测到治理文本时 `hold_client_flush` 而不是静默丢帧；对应红测 `relay_committed_marker_prefix_releases_tail_but_real_marker_breaks`。
+- hook 失败分支的提交后守卫需要原始失败值，handler 参数改为 `failure.clone()`（与 provider 流失败分支同形）。
+- 门禁：relay_first_frame_commit 11/11、responses_relay 207/207、client_sse 17/17、resp_chat_process 109/109、openai_chat_namespace_names 6/6、multi_listener_server 203/203、field-parity 5/5、architecture-ci 33/33、fmt 干净。
+- HEAD `5fbda9029` 已推送 PR #472；第三轮独立 review 已派；CI 待收。
+
+## 2026-10-24 第三轮 review（ffcommit-review）verdict：FAIL（对 HEAD 5fbda9029）
+
+- 阻断 1：parity 期望值比错 owner。Relay 的 Chat 响应在 Resp03 前已换成 Responses 语义负载，真 owner 是 `harvest_v3_responses_think_blocks` + `v3_resp03_reasoning_item`（每块一个 summary part、不插 \n），不是 chat 的 `append_v3_resp03_openai_chat_reasoning_content`。投影器插 `\n` 导致多块 reasoning 与终态发叉。
+- 阻断 2：`<thinking>` 家族由投影器第二套语法实现，与真 owner `project_v3_thinking_tag_text_with_tools` 的 protected ranges / opaque invocation / has_complete_tools 未闭合语义不一致，正文会被改写（引号内标签、`<think>a</thinking>b`、无工具未闭合）。
+- 阻断 3：提交后出现 standalone 控制标签时 finish 无条件断流，吞掉标签外正文；probe 不能当 owner。
+- 非阻断：close_round 跨轮保留 think 状态应改为每轮 flush+reset；observe_item_added 死代码；注释错位/错别字；parity gate 只比 delta 文本不比终态结构。
+- 已闭合：提交后失败不换候选、终态重建（在阻断 2 修好后成立）、hold_client_flush 不泄漏、Direct 无回归。
+- 现场：一个 codex exec worker（pid 9879）正在同一 worktree 修 r4 的 3 个 P1（reasoning 载荷、DSML 行级剥除、close_round 重置），未提交改动编译缺 payload 字段。结论仅对 HEAD 5fbda9029 成立。
+
+## 2026-10-24 r4 修复合入 + 门禁复跑
+
+- r4 worker（codex exec 9879）在同一 worktree 完成 3 个 P1 修复并提交：
+  `e18ffb138` 终态决策改由完整治理 owner 结果判断（探针只作 hold，不再凭 confirmed 直接断流；fenced/quoted 保留则正常完成）；reasoning 增量保完整业务载荷（encrypted_content 等进 item.done 与终态账本，可下一轮回传）；close_round 按本轮完整治理释放未闭合 think 块并重置扫描状态。
+  `8c059909b` 对齐 relay 并发 fixture 与交付顺序（provider 先 content 后 reasoning → 客户端 message 在前、reasoning 在后；JSON 整段路径同样如此，非提交路径回归）。
+  `16246057d` 锁定流式 reasoning 载荷交付（防未完成载荷提前 done）。
+- 门禁复跑（worker 退出后干净树）：fmt 干净；relay_first_frame_commit 17/17、responses_relay 215/215、client_sse 17/17、resp_chat_process 109/109、commit_probe 28/28、resp03_think_harvest 5/5、relay_first_frame_commit_public 4/4、openai_chat_namespace_names 6/6、field-parity 5/5、architecture-ci 33/33。
+- HEAD 已推 PR #472；CI test 仍 pending（本地与 CI 用同一 fixture，基督徒r4 改动含 fixture）。
+
+## 2026-10-24 r5-r11 演进与 P1-A 收口（对 HEAD 39f176dcf）
+
+- r6/r9 已并入：`16c1c8e10`（治理 refill 轮次状态每轮重置）+ `a3d7c0367`（P1-B 交错 reasoning 不再重复、P1-C refusal 不再过早封印治理尾巴）。合并 `d161428c4`（origin/main 833d420ac，#474 统一有界 refill）。
+- r11 lead 亲自实现 P1-A：轮次 terminal 偏移从 projector 内部累加改为请求级。根因：未提交轮次丢弃 projector，其内部计数永远看不到那一轮的条目；合并终态把累计条目 prepend 在最后一轮 output 前端，末轮剥离标记后的空治理尾巴按错误起点切片，匹配到早轮正文并重复下发（红证据：客户端收到 "betabeta"，终态 4 个 message）。
+- 修法：`finish(&terminal, current_round_start: usize)`；运行时调用处传 `accumulated_items.len()`（与 `merge_v3_chat_process_refill_output_items` prepend 数量恒等）；删除 `round_terminal_item_start` 字段/初始化/累加；`round_streamed_item_start`（已公告条目账本）保留不动。16 个单测调用点传 0（单轮），跨轮 merge 单测传 `accumulated_items.len()`。
+- 新黑盒回归 `relay_public_governed_uncommitted_round_does_not_reemit_earlier_text`：三轮 marker 先行不提交 → 正常提交 → 剥离标记 + content_filter；修复前 beta 下发两次，修复后每次正文恰好一次、content_filter 终端保真（status=incomplete + reason）。
+- 门禁（.worker-runs/472-r11-recheck/）：新测绿（exit 0）；public 14/14；runtime lib 18/18 + 跨轮 merge 1/1；governed public 12/12；architecture-ci 33/33；cargo fmt / git diff --check 干净。pre-commit hook verify:fast PASS。
+- 提交 `39f176dcf` 已推 PR #472；CI 三项（test / repo-sanity / scope）全 PASS（run 40163030009）。第 4 轮独立 review 已派 ffcommit-review（精确 head 39f176dcf，base 833d420ac），结果待收。
+- 未做：安装/restart/真实入口 replay/merge；等 review PASS 后按交付合同推进。
+
+## 2026-10-24 第 4 轮 review（ffcommit-review，精确 head 39f176dcf vs base 833d420ac）：PASS
+
+- 无 P0/P1。四核逐条成立：accumulated_items.len() == prepend 前缀长度（无 refill/全未提交/全已提交/混合/末轮空 5 个边界推演通过；唯一理论缺口=末轮无 output 数组时 merge 早退，Chat 经 Resp03 恒写 output，不可达，min 兜底）；finish 切片与 release_governed_message_tail / post_commit_governed_consistent_with_terminal 的轮次局部假设一致；round_streamed_item_start 职责不同必须保留且无残留；新测试真实走 HTTP 入口覆盖失败模式，"beta" 断言是修正错误期望（round1 首帧标记永不提交、alpha 不可能流出），非放宽（修复前 "betabeta" 仍击穿）。
+- P2 非阻断建议：1) relay_client_frames.rs:365 既有死代码 observe_item_added 建议删；2) pub 字段 client_stream_projection 暴露 pub(crate) 类型，建议字段降级 pub(crate)；3) DAG doc 未记录"混合轮次终态 output 顺序 [已公告,补发] 与 JSON 路径不同"产品决策，建议补文档；4) 观察：origin/main 已前进 6099a38e7（仅 docs/agents，不触 v3），候选证据仍有效。
+- Reviewer 实跑：relay_first_frame_commit* 18/18、responses_relay* 216/216、client_sse 17/17、relay_first_frame_commit_public 14/14、849ed8f_governed_commit_public 12/12、fmt/diff-check 干净；architecture-ci 33/33 采信作者日志。未做安装/restart/replay/merge（只读约束）。
+- 结论仅对 HEAD 39f176dcf；CI（run 40163030009）test/repo-sanity/scope 全 PASS。下一步：核 origin/main 后合入。
+
+## 2026-10-26 b2c0aa6 probe policy: 429 bounded hold + flexible advisory probe
+
+- User decisions this round: sustained 429 must cool again (the earlier "429 never cools" over-correction is reversed); probe duration/identity comes from a configurable policy, not a hard-coded verdict; probe failures must never advance the health ladder or blacklist a provider; read the latest implementation instead of re-implementing. All traffic conclusions derive from the 4444 request-record log only.
+- Restored base machinery (cooldown_cause marker, RateLimit persistence, business-success release) and tuned it: the 429 arm is threshold 1 with a 60s hold and a 5s probe interval. The store routes a 429 fingerprint to `blocked_until_ms = now + cooldown_ms` with `cooldown_cause = Some(RateLimit)`; expiry auto-releases and any real success (business 200 or 2xx probe) releases early. Other classes keep their ladder.
+- Availability now uses one helper, `probe_state_blocks_availability`: for a RateLimit hold or an advisory probe only the real hold window may exclude; other classes still block while a probe is pending/in-flight. Both the key-level scheduling projection and provider-level availability use it, so projection paths cannot disagree.
+- New flexible knob `health.advisory_probe` (authoring option, default false). When true the recovery probe is purely advisory: probe failure keeps `probe_failure_count` frozen, keeps the probe at the base 5s cadence instead of stepping the ladder, and never removes the identity from selection. The store stamps the configured flag onto every failure action for that provider, because the classified action alone does not carry it.
+- Red/green: `configured_advisory_probe_never_blocks_availability_or_advances_the_ladder` in provider_key_health_contract.rs fails before the store stamp (expired hold stayed blocked) and passes after. Also rewrote provider_health_probe_contract.rs, provider_global_cooldown_persistence_contract.rs, the runtime 429 tests, and the server blackbox from the reversed "429 never cools" wording to the current bounded-hold contract; the CLI pool blackbox keeps hold semantics.
+- Gates: error/config/provider-responses/runtime suites all green; CLI 47 passed with only the 5 pinned-previous-release env gate failures (`managed_lifecycle/previous_release_restart.rs:19`); CLI pool blackbox 7/7. Server suite rerun after the last health.rs edits.
+- Self-review found and fixed one real defect: `upsert_provider_cooldown_probe_with_interval` preserved `existing.cooldown_cause`, so a non-429 failure arriving after a 429 hold inherited the `RateLimit` marker. Availability then treated a probe-owned 5xx cooldown as a bounded hold that auto-expires, silently releasing the identity after the window. Red test `a_429_hold_does_not_relabel_a_later_non_rate_limit_cooldown` (provider_key_health_contract.rs) failed with "a probe-owned 5xx cooldown must not auto-expire one hour later" and passes after restoring `cooldown_cause: None` in the upsert; the 429 caller re-stamps `RateLimit` immediately after, so the hold is unchanged. Manual cooldown keeps its own preservation path.
+- Merged origin/main b708282f4 (delta touched only provider_config_tests.rs and lifecycle tests.rs; no file overlap, fast-forward clean). Version bumped to 0.90.4946. `npm --prefix v3 run build` PASS, installed via `npm --prefix v3 run install`, one formal `rccv3 restart --timeout-ms 180000` reached running state.
+- Post-restart 4444 audit over 725 rows: 163 completed, 15 in flight, 1 failed. The single failed request is the known separate pool-exhaustion-to-502 defect bound to 2630112/8e89837 (V3Error06 projected status 502 with no upstream status), unrelated to this change. For 429 identities, 3 retries fell inside the window but all were already in flight when the first 429 landed; freshly selected identities during a hold = 0, so the hold does block new selection as designed.
+- Full gates after the fix: provider-responses (37 key-health tests incl. the new one), runtime, error, config all green; full server suite exit 0 (204 + 129 + others, 0 failed); CLI pool blackbox 7/7. Build/install/restart receipts: 0.90.4946 running on 4444 and 7777.
+- Note on the reviewer: an independently spawned reviewer reported the repo `AGENTS.md` P0 line as contradicting the loaded contract. That was a false positive: the main tree `/Users/fanzhang/Documents/github/routecodex` carries an uncommitted older `AGENTS.md` that is 584 commits behind `origin/main`. `origin/main:AGENTS.md` still says "cools only after three consecutive failures" for 429 and has no advisory or recovery-wait wording, and this branch updates it to the bounded-hold contract, so branch and origin/main agree.
+- Milestone review PASS (no P0, no P1, four P2). Acted on the two that mattered. P2-1: `key_health_projection` was the one projection that did not read `probe_state_blocks_availability`, so for a 429 hold it reported the 5s probe cadence as the deadline and kept reporting a cooldown after the window had closed. It now reads the same helper and reports the real hold window; red test `an_expired_429_hold_reports_available_in_every_projection` failed with `Some(6000)` against `Some(61000)` and passes now. P2-2 was the reverse direction of the earlier cause bug: a 429 landing during an outstanding 5xx cooldown re-stamps the bounded window, because the latest confirmed failure owns the identity state. A stricter "keep the stronger cause" variant would have needed new state to distinguish a probe-owned hold from a fresh one and would have changed established semantics, so the behavior is kept and locked with `a_429_during_an_outstanding_cooldown_releases_at_its_own_window`, which also proves a repeated 5xx re-arms the ladder from the retained history streak.
+- P2-3 and P2-4 are recorded, not changed. The two deleted public-entry tests are a real coverage reduction: the score-0 guarantee lives at store level (`hs03_zero_score_cools_exact_key_and_valid_probe_restores_100`) and the in-flight-success-before-probe case is covered indirectly. P2-4 is a diagnostics wart: an expired bounded hold keeps a `waiting` entry with `remaining_ms: 0` visible and, with `advisory_probe = true`, keeps the probe on the 5s cadence indefinitely. Neither affects selection, and the advisory switch is off in every live config, so they are follow-ups rather than blockers.
+- Second rebuild and restart for the P2-1 fix: version 0.90.4947, build PASS, installed, one formal restart reached running. Audit over 1591 rows: 385 completed, 19 in flight, 1 failed, and that failure is again the known pool-exhaustion 502. Fresh selection during a hold = 0 again.
+- Remaining: server suite confirmation, commit, merge into main, push, remote receipt, worktree cleanup.

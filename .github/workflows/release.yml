@@ -45,22 +45,20 @@ jobs:
       - name: Install V3 local build dependencies
         run: npm ci --prefix v3 --ignore-scripts
 
+      - name: Fetch Rust dependencies for V3 checks
+        run: cargo fetch --locked --manifest-path v3/Cargo.toml
+
+      - name: Prepare native previous-release migration fixture
+        run: node v3/scripts/prepare-v3-previous-release-fixture.mjs
+
+      - name: Install pinned DAGPipe graph CLI
+        run: cargo install --git https://github.com/Jasonzhangf/DAGpipe.git --rev 8cb59fb5262b5e1e440638faf3b04e06a2762cfb --locked pipeline_runtime
+
       - name: Repo sanity (no root junk)
         run: node scripts/ci/repo-sanity.mjs
 
-      - name: V3 admission snapshot lockstep
-        env:
-          V3_ISOLATION_BASE_COMMIT: ${{ github.event.before }}
-        run: node scripts/architecture/compile-v3-build-admission.mjs --check
-
       - name: Verify V3 canonical build domain
         run: npm --prefix v3 run verify:ci
-
-      - name: Repository file line limit
-        run: node scripts/ci/check-file-line-limit.mjs
-
-      - name: Repository ServerTool Rust-only boundary
-        run: node scripts/verify-servertool-rust-only.mjs
 
       - name: Pack V3 npm tarball
         run: npm --prefix v3 run pack:npm

@@ -1,19 +1,31 @@
-use super::{V3ProviderHealthState, V3ProviderHealthStore};
+use super::{V3ProviderHealthListenerScope, V3ProviderHealthState, V3ProviderHealthStore};
 use crate::global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
+    V3ProviderRateLimitEpisode,
 };
 use routecodex_v3_config::V3Config05ManifestPublished;
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, RwLock, RwLockWriteGuard};
+
+#[cfg(test)]
+thread_local! {
+    static TEST_SPAWN_FAILURE: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
+}
 
 const V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY: usize = 32;
 
 type V3ProviderCooldownPersistenceEntries = Vec<(V3ProviderCooldownKey, u64, u64)>;
+type V3ProviderRateLimitPersistenceEntries =
+    Vec<(V3ProviderCooldownKey, V3ProviderRateLimitEpisode)>;
 
 #[derive(Debug)]
 enum V3ProviderHealthPersistenceCommand {
-    Replace(V3ProviderCooldownPersistenceEntries),
+    Replace(
+        V3ProviderCooldownPersistenceEntries,
+        V3ProviderRateLimitPersistenceEntries,
+    ),
     Flush(mpsc::Sender<Result<(), String>>),
 }
 
@@ -27,6 +39,7 @@ pub(super) struct V3ProviderHealthPersistenceWriter {
 struct V3ProviderHealthPersistenceTicket {
     writer: V3ProviderHealthPersistenceWriter,
     entries: V3ProviderCooldownPersistenceEntries,
+    episodes: V3ProviderRateLimitPersistenceEntries,
 }
 
 impl V3ProviderHealthPersistenceTicket {
@@ -34,81 +47,109 @@ impl V3ProviderHealthPersistenceTicket {
         Some(Self {
             writer: state.persistence.clone()?,
             entries: provider_cooldown_persistence_entries(state),
+            episodes: provider_rate_limit_persistence_entries(state),
         })
     }
 
     fn enqueue(self) {
-        self.writer.enqueue(self.entries);
+        self.writer.enqueue(self.entries, self.episodes);
     }
 }
 
 impl V3ProviderHealthPersistenceWriter {
-    fn start(mut coordinator: V3ProviderCooldownCoordinator) -> Self {
+    fn start(coordinator: V3ProviderCooldownCoordinator) -> Result<Self, String> {
+        Self::start_with_spawn(coordinator, spawn_health_persistence_thread)
+    }
+
+    fn start_with_spawn(
+        mut coordinator: V3ProviderCooldownCoordinator,
+        spawn: impl FnOnce(
+            String,
+            Box<dyn FnOnce() + Send + 'static>,
+        ) -> std::io::Result<std::thread::JoinHandle<()>>,
+    ) -> Result<Self, String> {
         let (sender, receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
         let alarm = Arc::new(RwLock::new(None));
         let writer_alarm = Arc::clone(&alarm);
-        std::thread::Builder::new()
-            .name("v3-provider-health-persistence".to_string())
-            .spawn(move || {
-                let mut persisted_entries = coordinator.persisted_entries();
-                while let Ok(command) = receiver.recv() {
-                    match command {
-                        V3ProviderHealthPersistenceCommand::Replace(entries) => {
-                            let mut merged_entries = persisted_entries
-                                .iter()
-                                .filter(|(key, _, _)| {
-                                    !matches!(
-                                        key.failure_class,
-                                        V3ProviderCooldownFailureClass::Semantic
-                                            | V3ProviderCooldownFailureClass::ProbeLong
-                                    )
-                                })
-                                .cloned()
-                                .collect::<Vec<_>>();
-                            merged_entries.extend(entries);
-                            if merged_entries == persisted_entries {
-                                continue;
-                            }
-                            match coordinator.replace_entries(merged_entries.clone()) {
-                                Ok(()) => {
-                                    persisted_entries = merged_entries;
-                                    if let Ok(mut alarm) = writer_alarm.write() {
-                                        *alarm = None;
-                                    }
-                                }
-                                Err(error) => set_persistence_alarm(
-                                    &writer_alarm,
-                                    format!("provider health persistence write failed: {error}"),
-                                ),
-                            }
+        let work: Box<dyn FnOnce() + Send + 'static> = Box::new(move || {
+            let mut persisted_entries = coordinator.persisted_entries();
+            let mut persisted_episodes = coordinator.persisted_rate_limit_episodes();
+            while let Ok(command) = receiver.recv() {
+                match command {
+                    V3ProviderHealthPersistenceCommand::Replace(entries, episodes) => {
+                        let mut merged_entries = persisted_entries
+                            .iter()
+                            .filter(|(key, _, _)| {
+                                !matches!(
+                                    key.failure_class,
+                                    V3ProviderCooldownFailureClass::Semantic
+                                        | V3ProviderCooldownFailureClass::RateLimit
+                                        | V3ProviderCooldownFailureClass::ProbeLong
+                                        | V3ProviderCooldownFailureClass::ManualAuth
+                                )
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        merged_entries.extend(entries);
+                        if merged_entries == persisted_entries && episodes == persisted_episodes {
+                            continue;
                         }
-                        V3ProviderHealthPersistenceCommand::Flush(receipt) => {
-                            let result = writer_alarm
-                                .read()
-                                .map_err(|error| {
-                                    format!(
-                                        "provider health persistence alarm lock poisoned: {error}"
-                                    )
-                                })
-                                .and_then(|alarm| match alarm.as_ref() {
-                                    Some(error) => Err(error.clone()),
-                                    None => Ok(()),
-                                });
-                            let _ = receipt.send(result);
+                        match coordinator.replace_entries_and_rate_limit_episodes(
+                            merged_entries.clone(),
+                            episodes.clone(),
+                        ) {
+                            Ok(()) => {
+                                persisted_entries = merged_entries;
+                                persisted_episodes = episodes;
+                                if let Ok(mut alarm) = writer_alarm.write() {
+                                    *alarm = None;
+                                }
+                            }
+                            Err(error) => set_persistence_alarm(
+                                &writer_alarm,
+                                format!("provider health persistence write failed: {error}"),
+                            ),
                         }
                     }
+                    V3ProviderHealthPersistenceCommand::Flush(receipt) => {
+                        let result = writer_alarm
+                            .read()
+                            .map_err(|error| {
+                                format!("provider health persistence alarm lock poisoned: {error}")
+                            })
+                            .and_then(|alarm| match alarm.as_ref() {
+                                Some(error) => Err(error.clone()),
+                                None => Ok(()),
+                            });
+                        let _ = receipt.send(result);
+                    }
                 }
-            })
-            .unwrap_or_else(|error| {
-                panic!("provider health persistence writer start failed: {error}")
-            });
-        Self { sender, alarm }
+            }
+        });
+        let spawned = spawn("v3-provider-health-persistence".to_string(), work);
+        Self::after_spawn(sender, alarm, spawned)
     }
 
-    fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
+    fn after_spawn(
+        sender: mpsc::SyncSender<V3ProviderHealthPersistenceCommand>,
+        alarm: Arc<RwLock<Option<String>>>,
+        spawned: std::io::Result<std::thread::JoinHandle<()>>,
+    ) -> Result<Self, String> {
+        spawned
+            .map_err(|error| format!("provider health persistence writer start failed: {error}"))?;
+        Ok(Self { sender, alarm })
+    }
+
+    fn enqueue(
+        &self,
+        entries: V3ProviderCooldownPersistenceEntries,
+        episodes: V3ProviderRateLimitPersistenceEntries,
+    ) {
         if let Err(error) = self
             .sender
-            .try_send(V3ProviderHealthPersistenceCommand::Replace(entries))
+            .try_send(V3ProviderHealthPersistenceCommand::Replace(
+                entries, episodes,
+            ))
         {
             set_persistence_alarm(
                 &self.alarm,
@@ -117,9 +158,15 @@ impl V3ProviderHealthPersistenceWriter {
         }
     }
 
-    fn flush_snapshot(&self, entries: V3ProviderCooldownPersistenceEntries) -> Result<(), String> {
+    fn flush_snapshot(
+        &self,
+        entries: V3ProviderCooldownPersistenceEntries,
+        episodes: V3ProviderRateLimitPersistenceEntries,
+    ) -> Result<(), String> {
         self.sender
-            .send(V3ProviderHealthPersistenceCommand::Replace(entries))
+            .send(V3ProviderHealthPersistenceCommand::Replace(
+                entries, episodes,
+            ))
             .map_err(|error| format!("provider health persistence writer unavailable: {error}"))?;
         let (receipt_sender, receipt_receiver) = mpsc::channel();
         self.sender
@@ -142,30 +189,178 @@ impl V3ProviderHealthPersistenceWriter {
     }
 }
 
+fn spawn_health_persistence_thread(
+    name: String,
+    work: Box<dyn FnOnce() + Send + 'static>,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    #[cfg(test)]
+    if let Some(message) = TEST_SPAWN_FAILURE.with(std::cell::Cell::take) {
+        return Err(std::io::Error::other(message));
+    }
+    std::thread::Builder::new().name(name).spawn(work)
+}
+
+impl V3ProviderHealthPersistenceWriter {
+    fn disabled(message: String) -> Self {
+        let (sender, _receiver) = mpsc::sync_channel(V3_PROVIDER_HEALTH_PERSISTENCE_QUEUE_CAPACITY);
+        Self {
+            sender,
+            alarm: Arc::new(RwLock::new(Some(message))),
+        }
+    }
+}
+
 pub(super) fn start_provider_health_persistence(
     manifest: &V3Config05ManifestPublished,
     persistence_path: Option<PathBuf>,
     legacy_persistence_path: Option<PathBuf>,
+    prune_scope_suffix: Option<String>,
 ) -> Option<(
     V3ProviderHealthPersistenceWriter,
     V3ProviderCooldownPersistenceEntries,
+    V3ProviderRateLimitPersistenceEntries,
 )> {
-    let mut coordinator = persistence_path.map(|path| {
-        load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path)
-            .unwrap_or_else(|error| panic!("provider cooldown persistence load failed: {error}"))
-    });
-    coordinator.as_mut().map(|coordinator| {
-        coordinator
-            .reset_probe_schedule_for_startup()
-            .unwrap_or_else(|error| {
-                panic!("provider cooldown startup probe reset failed: {error}")
-            });
+    let path = persistence_path?;
+    let aggregate_legacy = legacy_provider_cooldown_state_path_for_manifest(manifest);
+    let mut preserved = vec![aggregate_legacy];
+    if let Some(legacy) = legacy_persistence_path.as_ref() {
+        preserved.push(legacy.clone());
+    }
+    prune_stale_provider_cooldown_scope_files(
+        &path,
+        legacy_persistence_path.as_deref(),
+        &preserved,
+        prune_scope_suffix.as_deref(),
+    );
+    let mut coordinator =
+        match load_provider_cooldown_coordinator(manifest, path, legacy_persistence_path) {
+            Ok(coordinator) => coordinator,
+            Err(error) => {
+                return Some((
+                    disabled_persistence_writer(format!(
+                        "provider cooldown persistence load failed: {error}"
+                    )),
+                    Vec::new(),
+                    Vec::new(),
+                ))
+            }
+        };
+    if let Err(error) = coordinator.reset_probe_schedule_for_startup() {
         let entries = coordinator.persisted_entries();
-        (
-            V3ProviderHealthPersistenceWriter::start(coordinator.clone()),
+        let episodes = coordinator.persisted_rate_limit_episodes();
+        return Some((
+            disabled_persistence_writer(format!(
+                "provider cooldown startup probe reset failed: {error}"
+            )),
             entries,
-        )
-    })
+            episodes,
+        ));
+    }
+    let entries = coordinator.persisted_entries();
+    let episodes = coordinator.persisted_rate_limit_episodes();
+    match V3ProviderHealthPersistenceWriter::start(coordinator) {
+        Ok(writer) => Some((writer, entries, episodes)),
+        Err(error) => Some((disabled_persistence_writer(error), entries, episodes)),
+    }
+}
+
+fn disabled_persistence_writer(error: String) -> V3ProviderHealthPersistenceWriter {
+    eprintln!("[RouteCodexV3] provider cooldown persistence disabled: {error}");
+    V3ProviderHealthPersistenceWriter::disabled(error)
+}
+
+/// Retains a bounded number of superseded per-scope cooldown state files.
+///
+/// The state path is keyed by a manifest scope digest, so every config revision
+/// that changes provider, auth or model identity writes a new
+/// `provider-cooldowns-<scope>.json` and the superseded ones are never read
+/// again. Recent generations are kept so a rollback still finds its state;
+/// older ones are removed so the state directory cannot grow per revision.
+fn prune_stale_provider_cooldown_scope_files(
+    current: &Path,
+    legacy: Option<&Path>,
+    preserved: &[PathBuf],
+    scope_suffix: Option<&str>,
+) {
+    const RETAINED_SCOPE_GENERATIONS: usize = 4;
+    /// The state directory is shared by every instance, so age gates deletion:
+    /// on the generation count alone the newest-four rule would remove the
+    /// current scope file of a concurrently running process that has simply not
+    /// written a cooldown recently.
+    const PRUNABLE_GENERATION_AGE: std::time::Duration =
+        std::time::Duration::from_secs(24 * 60 * 60);
+    if std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_some() {
+        // An explicit state path is caller-owned; never prune around it.
+        return;
+    }
+    let Some(directory) = current.parent() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    let mut superseded = Vec::new();
+    for entry in entries.flatten() {
+        let candidate = entry.path();
+        if candidate == current
+            || legacy == Some(candidate.as_path())
+            || preserved.iter().any(|path| path == &candidate)
+        {
+            continue;
+        }
+        let Some(name) = candidate.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("provider-cooldowns-") || !name.ends_with(".json") {
+            continue;
+        }
+        // A listener-scoped manifest owns only the files for this listener.
+        // Never prune another port's live state while cleaning superseded
+        // provider revisions.
+        if scope_suffix.is_some_and(|suffix| !name.ends_with(suffix)) {
+            continue;
+        }
+        // Legacy aggregate callers have no ownership of listener-scoped files.
+        if scope_suffix.is_none()
+            && name
+                .strip_prefix("provider-cooldowns-")
+                .and_then(|name| name.strip_suffix(".json"))
+                .is_some_and(|scope| scope.contains('-'))
+        {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let modified = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
+        // A future or unreadable timestamp is never treated as prunable.
+        if now
+            .duration_since(modified)
+            .map(|age| age < PRUNABLE_GENERATION_AGE)
+            .unwrap_or(true)
+        {
+            continue;
+        }
+        superseded.push((modified, candidate));
+    }
+    if superseded.len() <= RETAINED_SCOPE_GENERATIONS {
+        return;
+    }
+    // Newest first, and the file name breaks ties so equal timestamps cannot
+    // make the retained set depend on directory order.
+    superseded.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    for (_, candidate) in superseded.into_iter().skip(RETAINED_SCOPE_GENERATIONS) {
+        if let Err(error) = fs::remove_file(&candidate) {
+            eprintln!(
+                "[RouteCodexV3] superseded provider cooldown state not removed {}: {error}",
+                candidate.display()
+            );
+        }
+    }
 }
 
 fn load_provider_cooldown_coordinator(
@@ -173,24 +368,28 @@ fn load_provider_cooldown_coordinator(
     path: PathBuf,
     legacy_path: Option<PathBuf>,
 ) -> Result<V3ProviderCooldownCoordinator, String> {
-    const MAX_COOLDOWN_MS: u64 = 5 * 60 * 60_000;
     if std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE").is_none() && !path.exists() {
         if let Some(legacy_path) = legacy_path.filter(|legacy| legacy != &path && legacy.exists()) {
-            let legacy = V3ProviderCooldownCoordinator::load(legacy_path, MAX_COOLDOWN_MS)?;
+            let legacy = V3ProviderCooldownCoordinator::load(legacy_path)?;
             let entries = legacy
                 .persisted_entries()
                 .into_iter()
                 .filter(|(key, _, _)| manifest_contains_cooldown_key(manifest, key))
                 .collect();
-            let mut migrated = V3ProviderCooldownCoordinator::new(path, MAX_COOLDOWN_MS);
-            migrated.replace_entries(entries)?;
+            let mut migrated = V3ProviderCooldownCoordinator::new(path);
+            let episodes = legacy
+                .persisted_rate_limit_episodes()
+                .into_iter()
+                .filter(|(key, _)| manifest_contains_cooldown_key(manifest, key))
+                .collect();
+            migrated.replace_entries_and_rate_limit_episodes(entries, episodes)?;
             return Ok(migrated);
         }
     }
-    V3ProviderCooldownCoordinator::load(path, MAX_COOLDOWN_MS)
+    V3ProviderCooldownCoordinator::load(path)
 }
 
-fn manifest_contains_cooldown_key(
+pub(super) fn manifest_contains_cooldown_key(
     manifest: &V3Config05ManifestPublished,
     key: &V3ProviderCooldownKey,
 ) -> bool {
@@ -198,6 +397,12 @@ fn manifest_contains_cooldown_key(
         return false;
     };
     if !provider.enabled {
+        return false;
+    }
+    let Some(interface) = provider.interfaces.get(&key.interface_id) else {
+        return false;
+    };
+    if !interface.enabled {
         return false;
     }
     if let Some(auth_alias) = key.auth_alias.as_deref() {
@@ -226,6 +431,32 @@ pub(super) fn provider_cooldown_state_path_for_manifest(
         .with_file_name(format!("provider-cooldowns-{scope}.json"))
 }
 
+/// Persistence path for one listener scope.
+///
+/// A single-listener manifest keeps the historical aggregate path so existing
+/// state and the explicit override contract are unchanged. A multi-listener
+/// manifest derives one file per listener; an explicit override is split into
+/// the override directory because one file cannot be handed to several writers.
+pub(super) fn provider_cooldown_state_path_for_listener(
+    manifest: &V3Config05ManifestPublished,
+    listener: &V3ProviderHealthListenerScope,
+) -> PathBuf {
+    if enabled_business_listener_count(manifest) <= 1 {
+        return provider_cooldown_state_path_for_manifest(manifest);
+    }
+    let file_name = listener_scoped_state_file_name(manifest, listener);
+    if let Ok(path) = std::env::var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE") {
+        let base = PathBuf::from(path);
+        let directory = base
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        return directory.join(file_name);
+    }
+    default_provider_cooldown_state_path().with_file_name(file_name)
+}
+
 pub(super) fn legacy_provider_cooldown_state_path_for_manifest(
     manifest: &V3Config05ManifestPublished,
 ) -> PathBuf {
@@ -234,15 +465,77 @@ pub(super) fn legacy_provider_cooldown_state_path_for_manifest(
         .with_file_name(format!("provider-cooldowns-{scope}.json"))
 }
 
+/// Legacy migration source for one listener.
+///
+/// The historical file is keyed by the whole listener set, so it carries no
+/// port provenance once the manifest has more than one listener. Preserve the
+/// file, but never copy an unowned aggregate record into every port.
+pub(super) fn legacy_provider_cooldown_state_path_for_listener(
+    manifest: &V3Config05ManifestPublished,
+    _listener: &V3ProviderHealthListenerScope,
+) -> Option<PathBuf> {
+    (enabled_business_listener_count(manifest) <= 1)
+        .then(|| legacy_provider_cooldown_state_path_for_manifest(manifest))
+}
+
+pub(super) fn listener_scoped_state_suffix(listener: &V3ProviderHealthListenerScope) -> String {
+    format!("-{}.json", listener_identity_digest(listener))
+}
+
+fn enabled_business_listener_count(manifest: &V3Config05ManifestPublished) -> usize {
+    manifest
+        .servers
+        .values()
+        .filter(|server| server.enabled)
+        .count()
+}
+
+fn listener_scoped_state_file_name(
+    manifest: &V3Config05ManifestPublished,
+    listener: &V3ProviderHealthListenerScope,
+) -> String {
+    format!(
+        "provider-cooldowns-{}-{}.json",
+        provider_scope_digest(manifest),
+        listener_identity_digest(listener)
+    )
+}
+
 fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
     let mut hasher = Sha256::new();
     for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
-        hasher.update((server_id.len() as u64).to_le_bytes());
-        hasher.update(server_id.as_bytes());
-        hasher.update((server.bind.len() as u64).to_le_bytes());
-        hasher.update(server.bind.as_bytes());
-        hasher.update(server.port.to_le_bytes());
+        update_listener_identity_digest(&mut hasher, server_id, &server.bind, server.port);
     }
+    update_provider_scope_digest(&mut hasher, manifest);
+    digest_hex(hasher.finalize())
+}
+
+fn provider_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
+    let mut hasher = Sha256::new();
+    update_provider_scope_digest(&mut hasher, manifest);
+    digest_hex(hasher.finalize())
+}
+
+fn listener_identity_digest(listener: &V3ProviderHealthListenerScope) -> String {
+    let mut hasher = Sha256::new();
+    update_listener_identity_digest(
+        &mut hasher,
+        &listener.server_id,
+        &listener.bind,
+        listener.port,
+    );
+    digest_hex(hasher.finalize())
+}
+
+fn update_listener_identity_digest(hasher: &mut Sha256, server_id: &str, bind: &str, port: u16) {
+    hasher.update((server_id.len() as u64).to_le_bytes());
+    hasher.update(server_id.as_bytes());
+    hasher.update((bind.len() as u64).to_le_bytes());
+    hasher.update(bind.as_bytes());
+    hasher.update(port.to_le_bytes());
+}
+
+fn update_provider_scope_digest(hasher: &mut Sha256, manifest: &V3Config05ManifestPublished) {
     // Provider/model/auth identity is part of the persistence scope. A config
     // revision must not inherit cooldown entries for removed or renamed
     // targets and then probe them on startup.
@@ -267,8 +560,11 @@ fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> Stri
             hasher.update(model_id.as_bytes());
         }
     }
-    let digest = hasher.finalize();
+}
+
+fn digest_hex(digest: impl AsRef<[u8]>) -> String {
     digest
+        .as_ref()
         .iter()
         .take(16)
         .map(|byte| format!("{byte:02x}"))
@@ -278,18 +574,9 @@ fn enabled_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> Stri
 fn legacy_listener_scope_digest(manifest: &V3Config05ManifestPublished) -> String {
     let mut hasher = Sha256::new();
     for (server_id, server) in manifest.servers.iter().filter(|(_, server)| server.enabled) {
-        hasher.update((server_id.len() as u64).to_le_bytes());
-        hasher.update(server_id.as_bytes());
-        hasher.update((server.bind.len() as u64).to_le_bytes());
-        hasher.update(server.bind.as_bytes());
-        hasher.update(server.port.to_le_bytes());
+        update_listener_identity_digest(&mut hasher, server_id, &server.bind, server.port);
     }
-    let digest = hasher.finalize();
-    digest
-        .iter()
-        .take(16)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    digest_hex(hasher.finalize())
 }
 
 fn default_provider_cooldown_state_path() -> PathBuf {
@@ -311,9 +598,16 @@ fn provider_cooldown_persistence_entries(
             Some((
                 V3ProviderCooldownKey {
                     provider_id: key.provider_id.clone(),
+                    interface_id: key.interface_id.clone(),
                     auth_alias: key.auth_alias.clone(),
                     model_id: probe.probe_model_id.clone(),
-                    failure_class: if probe.long_probe_backoff {
+                    failure_class: if state.auth_key_cooldowns.contains_key(key) {
+                        V3ProviderCooldownFailureClass::ManualAuth
+                    } else if probe.cooldown_cause
+                        == Some(V3ProviderCooldownFailureClass::RateLimit)
+                    {
+                        V3ProviderCooldownFailureClass::RateLimit
+                    } else if probe.long_probe_backoff {
                         V3ProviderCooldownFailureClass::ProbeLong
                     } else {
                         V3ProviderCooldownFailureClass::Semantic
@@ -321,6 +615,27 @@ fn provider_cooldown_persistence_entries(
                 },
                 probe.blocked_until_ms?,
                 probe.next_probe_at_ms?,
+            ))
+        })
+        .collect()
+}
+
+fn provider_rate_limit_persistence_entries(
+    state: &V3ProviderHealthState,
+) -> V3ProviderRateLimitPersistenceEntries {
+    state
+        .adaptive_history
+        .iter()
+        .filter_map(|(key, history)| {
+            Some((
+                V3ProviderCooldownKey {
+                    provider_id: key.provider_id.clone(),
+                    interface_id: key.interface_id.clone(),
+                    auth_alias: key.auth_alias.clone(),
+                    model_id: key.model_id.clone(),
+                    failure_class: V3ProviderCooldownFailureClass::RateLimit,
+                },
+                history.rate_limit_episode.clone()?,
             ))
         })
         .collect()
@@ -344,7 +659,7 @@ impl V3ProviderHealthStore {
     }
 
     pub fn flush_persistence(&self) -> Result<(), String> {
-        let (writer, entries) = {
+        let (writer, entries, episodes) = {
             let state = self
                 .state
                 .read()
@@ -352,10 +667,11 @@ impl V3ProviderHealthStore {
             (
                 state.persistence.clone(),
                 provider_cooldown_persistence_entries(&state),
+                provider_rate_limit_persistence_entries(&state),
             )
         };
         match writer {
-            Some(writer) => writer.flush_snapshot(entries),
+            Some(writer) => writer.flush_snapshot(entries, episodes),
             None => Ok(()),
         }
     }
@@ -363,7 +679,9 @@ impl V3ProviderHealthStore {
 
 fn set_persistence_alarm(alarm: &RwLock<Option<String>>, message: String) {
     if let Ok(mut alarm) = alarm.write() {
-        *alarm = Some(message);
+        if alarm.is_none() {
+            *alarm = Some(message);
+        }
     }
 }
 
@@ -440,6 +758,7 @@ mod tests {
         let manifest = manifest("primary", "127.0.0.1", 1);
         let valid = V3ProviderCooldownKey {
             provider_id: "p".into(),
+            interface_id: "default".into(),
             auth_alias: Some("k".into()),
             model_id: Some("m".into()),
             failure_class: V3ProviderCooldownFailureClass::Semantic,
@@ -456,10 +775,48 @@ mod tests {
             model_id: Some("removed-model".into()),
             ..valid.clone()
         };
+        let stale_interface = V3ProviderCooldownKey {
+            interface_id: "removed-interface".into(),
+            ..valid.clone()
+        };
         assert!(manifest_contains_cooldown_key(&manifest, &valid));
         assert!(!manifest_contains_cooldown_key(&manifest, &stale_provider));
         assert!(!manifest_contains_cooldown_key(&manifest, &stale_auth));
         assert!(!manifest_contains_cooldown_key(&manifest, &stale_model));
+        assert!(!manifest_contains_cooldown_key(&manifest, &stale_interface));
+
+        let mut named_manifest = manifest.clone();
+        let provider = named_manifest
+            .providers
+            .get_mut("p")
+            .expect("fixture provider");
+        let mut chat = provider
+            .interfaces
+            .get("default")
+            .expect("default interface")
+            .clone();
+        chat.id = "chat".to_string();
+        provider.interfaces.insert("chat".to_string(), chat);
+        let named_interface = V3ProviderCooldownKey {
+            interface_id: "chat".into(),
+            ..valid.clone()
+        };
+        assert!(manifest_contains_cooldown_key(
+            &named_manifest,
+            &named_interface
+        ));
+        named_manifest
+            .providers
+            .get_mut("p")
+            .expect("fixture provider")
+            .interfaces
+            .get_mut("chat")
+            .expect("named interface")
+            .enabled = false;
+        assert!(!manifest_contains_cooldown_key(
+            &named_manifest,
+            &named_interface
+        ));
     }
 
     fn manifest(server_id: &str, bind: &str, port: u16) -> V3Config05ManifestPublished {
@@ -502,8 +859,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         let path = root.path().join("provider-cooldowns.json");
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             path.clone(),
-            60_000,
-        ));
+        ))
+        .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -536,7 +893,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .flush_persistence()
             .expect("flush receipt must follow the latest snapshot");
 
-        let restored = V3ProviderCooldownCoordinator::load(path, 60_000)
+        let restored = V3ProviderCooldownCoordinator::load(path)
             .expect("load flushed provider cooldown state");
         let entries = restored.persisted_entries();
         assert_eq!(entries.len(), 1);
@@ -556,18 +913,22 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     fn health_persistence_preserves_other_failure_classes() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone(), 60_000);
+        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
         coordinator
-            .record_failure(
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                V3ProviderCooldownFailureClass::Auth,
-                100,
-                crate::global_cooldown::V3ProviderCooldownObservation::default(),
-            )
+            .replace_entries(vec![(
+                V3ProviderCooldownKey {
+                    provider_id: "provider-a".into(),
+                    interface_id: "default".into(),
+                    auth_alias: Some("key-a".into()),
+                    model_id: Some("model-a".into()),
+                    failure_class: V3ProviderCooldownFailureClass::Auth,
+                },
+                60_100,
+                60_100,
+            )])
             .expect("seed auth cooldown");
-        let writer = V3ProviderHealthPersistenceWriter::start(coordinator);
+        let writer = V3ProviderHealthPersistenceWriter::start(coordinator)
+            .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -590,8 +951,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .flush_persistence()
             .expect("flush mixed failure classes");
 
-        let restored = V3ProviderCooldownCoordinator::load(path, 60_000)
-            .expect("load mixed provider cooldown state");
+        let restored =
+            V3ProviderCooldownCoordinator::load(path).expect("load mixed provider cooldown state");
         let entries = restored.persisted_entries();
         assert_eq!(entries.len(), 2);
         assert!(entries
@@ -615,8 +976,8 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         std::fs::create_dir_all(&root).expect("create isolated persistence target");
         let writer = V3ProviderHealthPersistenceWriter::start(V3ProviderCooldownCoordinator::new(
             root.clone(),
-            60_000,
-        ));
+        ))
+        .expect("start persistence writer");
         let store = V3ProviderHealthStore {
             state: Arc::new(RwLock::new(V3ProviderHealthState {
                 persistence: Some(writer),
@@ -648,5 +1009,180 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             .contains("persistence write failed"));
 
         std::fs::remove_dir_all(&root).expect("remove isolated persistence target");
+    }
+
+    #[test]
+    fn unsupported_provider_cooldown_schema_disables_persistence_without_overwriting() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let contents = br#"{"schema_version": 4, "entries": []}"#;
+        std::fs::write(&path, contents).expect("write unsupported cooldown state");
+        let manifest = manifest("s", "127.0.0.1", 1);
+
+        let (writer, entries, _) =
+            start_provider_health_persistence(&manifest, Some(path.clone()), None, None)
+                .expect("an unreadable cooldown state must not stop provider health persistence");
+
+        assert!(
+            entries.is_empty(),
+            "an unreadable cooldown state must start from no persisted cooldown"
+        );
+        let alarm = writer
+            .alarm()
+            .expect("an unreadable cooldown state must raise the persistence alarm");
+        assert!(
+            alarm.contains("provider cooldown persistence load failed"),
+            "{alarm}"
+        );
+        assert!(
+            alarm.contains("unsupported provider cooldown state schema 4"),
+            "{alarm}"
+        );
+        assert_eq!(std::fs::read(&path).expect("read original state"), contents);
+
+        writer.enqueue(Vec::new(), Vec::new());
+        assert!(writer.flush_snapshot(Vec::new(), Vec::new()).is_err());
+        assert_eq!(std::fs::read(path).expect("read original state"), contents);
+        assert!(writer
+            .alarm()
+            .expect("disabled persistence must retain its first failure")
+            .contains("unsupported provider cooldown state schema 4"));
+    }
+
+    #[test]
+    fn corrupt_provider_cooldown_state_disables_persistence_without_overwriting() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let contents = b"{not json";
+        std::fs::write(&path, contents).expect("write corrupt cooldown state");
+        let manifest = manifest("s", "127.0.0.1", 1);
+
+        let (writer, entries, _) =
+            start_provider_health_persistence(&manifest, Some(path.clone()), None, None)
+                .expect("a corrupt cooldown state must not stop provider health persistence");
+
+        assert!(entries.is_empty());
+        let alarm = writer.alarm().expect("persistence alarm");
+        assert!(alarm.contains("decode provider cooldown state"), "{alarm}");
+        assert_eq!(std::fs::read(path).expect("read original state"), contents);
+    }
+
+    #[test]
+    fn persistence_writer_spawn_failure_disables_startup_without_panicking() {
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let path = root.path().join("provider-cooldowns.json");
+        let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
+        coordinator
+            .replace_entries(vec![(
+                V3ProviderCooldownKey {
+                    provider_id: "p".into(),
+                    interface_id: "default".into(),
+                    auth_alias: Some("k".into()),
+                    model_id: Some("m".into()),
+                    failure_class: V3ProviderCooldownFailureClass::Semantic,
+                },
+                60_100,
+                60_100,
+            )])
+            .expect("seed persisted cooldown");
+        let manifest = manifest("s", "127.0.0.1", 1);
+        TEST_SPAWN_FAILURE
+            .with(|failure| failure.set(Some("injected writer start failure".to_string())));
+
+        let (writer, entries, _) =
+            start_provider_health_persistence(&manifest, Some(path), None, None)
+                .expect("spawn failure must keep provider health persistence available");
+
+        assert_eq!(
+            entries.len(),
+            1,
+            "startup failure must preserve cooldown entries"
+        );
+        assert!(writer
+            .alarm()
+            .expect("disabled writer must retain the startup failure")
+            .contains("provider health persistence writer start failed"));
+        writer.enqueue(Vec::new(), Vec::new());
+        assert!(writer.flush_snapshot(Vec::new(), Vec::new()).is_err());
+        assert!(TEST_SPAWN_FAILURE.with(std::cell::Cell::take).is_none());
+    }
+
+    #[test]
+    fn superseded_cooldown_scope_files_are_pruned_while_recent_generations_survive() {
+        // Backdates a generation far enough that the shared-directory age gate
+        // treats it as prunable.
+        fn backdate(path: &std::path::Path) {
+            let modified =
+                std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 60 * 60);
+            let handle = fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .expect("open superseded generation for backdating");
+            handle
+                .set_times(std::fs::FileTimes::new().set_modified(modified))
+                .expect("backdate superseded generation");
+        }
+
+        let root = tempfile::tempdir().expect("create isolated persistence directory");
+        let current = root.path().join("provider-cooldowns-current.json");
+        fs::write(&current, b"{}").expect("write current scope state");
+        let legacy = root.path().join("provider-cooldowns-legacy.json");
+        fs::write(&legacy, b"{}").expect("write legacy scope state");
+        let unrelated = root.path().join("provider-cooldowns.json");
+        fs::write(&unrelated, b"{}").expect("write undigested legacy state");
+        let other_listener = root
+            .path()
+            .join("provider-cooldowns-revision-listener.json");
+        fs::write(&other_listener, b"{}").expect("write another listener state");
+        backdate(&other_listener);
+        let mut generations = Vec::new();
+        for index in 0..6 {
+            let path = root
+                .path()
+                .join(format!("provider-cooldowns-rev{index}.json"));
+            fs::write(&path, b"{}").expect("write superseded scope state");
+            // Distinct modification times make the retained-generation rule
+            // deterministic instead of depending on filesystem timestamp
+            // granularity.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            backdate(&path);
+            generations.push(path);
+        }
+        // A concurrently running instance's current scope file: superseded by
+        // name for this manifest, but freshly written by its owner.
+        let concurrent = root.path().join("provider-cooldowns-concurrent.json");
+        fs::write(&concurrent, b"{}").expect("write concurrent scope state");
+
+        prune_stale_provider_cooldown_scope_files(&current, Some(&legacy), &[], None);
+
+        assert!(
+            other_listener.exists(),
+            "an unscoped owner must not prune listener state"
+        );
+
+        assert!(
+            current.exists(),
+            "the live scope state must never be pruned"
+        );
+        assert!(
+            legacy.exists(),
+            "the legacy scope state must never be pruned"
+        );
+        assert!(
+            unrelated.exists(),
+            "an undigested provider-cooldowns.json is not a scope generation"
+        );
+        assert!(
+            concurrent.exists(),
+            "a recently written scope file is never pruned, even when superseded by name"
+        );
+        for (index, path) in generations.iter().enumerate() {
+            assert_eq!(
+                path.exists(),
+                index >= 2,
+                "only the newest four prunable generations are retained: {}",
+                path.display()
+            );
+        }
     }
 }

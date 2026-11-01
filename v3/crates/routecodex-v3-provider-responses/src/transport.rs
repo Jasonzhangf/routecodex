@@ -1,14 +1,25 @@
 use crate::adaptive_concurrency::{
-    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyPermitGuard,
-    V3AdaptiveConcurrencyProbeResult,
+    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
+    V3AdaptiveConcurrencyProbeResult, V3ConcurrencyIdentityScope,
+};
+use crate::provider_auth::{
+    discovery_models_url, extract_discovered_models, resolve_secret, V3DiscoveredModel,
 };
 use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream};
-use crate::shared::{collect_response_headers, content_type, validated_sse_stream};
+use crate::shared::{
+    collect_response_headers, content_type, remaining_timeout, send_http_await,
+    validated_sse_stream,
+};
 pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
-use crate::transport_admission::{acquire_provider_admission, V3ProviderAdmissionError};
+use crate::transport_admission::{
+    provider_admission_error, take_or_acquire_provider_admission_scoped,
+    V3PreAcquiredProviderAdmission,
+};
+use crate::transport_handoff::{
+    V3ProviderTransportAttemptControl, V3ProviderTransportAttemptState,
+};
 use crate::wire::{
-    V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ProviderAuthSecretHandle,
-    V3ResponsesStreamIntent,
+    V3Provider12ResponsesWirePayload, V3ProviderAuthHandle, V3ResponsesStreamIntent,
 };
 use crate::{
     V3ProviderError, V3ProviderHttpFailure, V3ProviderInternalTransportLane,
@@ -21,8 +32,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_tungstenite::{
@@ -37,6 +47,11 @@ use tokio_tungstenite::{
 type ResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type SharedResponsesWebSocket = Arc<Mutex<Option<ResponsesWebSocket>>>;
 mod cancellation;
+mod probe;
+use probe::is_rate_limited;
+mod request_metadata;
+pub use request_metadata::V3ProviderRequestHeader;
+use request_metadata::{normalize_provider_header_name, V3ProviderHttpAuthCarrier};
 mod websocket;
 pub use cancellation::V3ProviderCancellation;
 use websocket::{
@@ -58,10 +73,6 @@ const ANTHROPIC_PROVIDER_HEADER_NAMES: &[&str] = &[
     "x-stainless-retry-count",
     "x-stainless-timeout",
 ];
-// Keep the client-level idle read guard at the maximum supported local cold-start
-// budget. Per-request `RequestBuilder::timeout` and the protocol-specific SSE
-// semantic guards remain the authoritative shorter deadlines for providers that
-// configure them; this guard must not truncate a 15-minute local provider start.
 const V3_PROVIDER_HTTP_READ_TIMEOUT_SECS: u64 = 900;
 const V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 30;
 const V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS: u64 = 30;
@@ -93,34 +104,10 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
         initial_concurrency_budget: u32,
-        concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ProviderRequestHeader {
-    name: String,
-    value: String,
-}
-
-impl V3ProviderRequestHeader {
-    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            name: normalize_provider_header_name(name.into()),
-            value: value.into(),
-        }
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn value(&self) -> &str {
-        &self.value
-    }
-}
-
 pub fn build_v3_anthropic_provider_request_header(
     name: impl Into<String>,
     value: impl Into<String>,
@@ -139,15 +126,15 @@ pub fn is_v3_anthropic_provider_request_header_name(name: impl AsRef<str>) -> bo
         .any(|allowed| *allowed == name)
 }
 
-fn normalize_provider_header_name(name: String) -> String {
-    name.trim().to_ascii_lowercase()
-}
-
 #[derive(Debug)]
 pub struct V3Transport13ResponsesRequest {
     _sealed: (),
-    kind: V3Transport13ResponsesRequestKind,
+    pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
+    transport_attempt_control: Option<V3ProviderTransportAttemptControl>,
+    pre_acquired_admission: V3PreAcquiredProviderAdmission,
+    auth_carrier: V3ProviderHttpAuthCarrier,
+    identity_scope: Option<V3ConcurrencyIdentityScope>,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
@@ -168,6 +155,31 @@ impl V3Transport13ResponsesRequest {
         Ok(self)
     }
 
+    fn with_transport_attempt_control(
+        mut self,
+        control: V3ProviderTransportAttemptControl,
+    ) -> Self {
+        self.transport_attempt_control = Some(control);
+        self
+    }
+
+    pub fn with_pre_acquired_admission(mut self, admission: V3AdaptiveConcurrencyLease) -> Self {
+        if self.identity_scope.is_none() {
+            self.identity_scope = admission.identity_scope().cloned();
+        }
+        self.pre_acquired_admission.set(admission);
+        self
+    }
+
+    pub fn with_identity_scope(mut self, scope: V3ConcurrencyIdentityScope) -> Self {
+        self.identity_scope = Some(scope);
+        self
+    }
+
+    pub fn release_pre_acquired_admission(&mut self) {
+        self.pre_acquired_admission.release();
+    }
+
     pub fn transport_kind(&self) -> crate::transport_handoff::V3ProviderTransportKind {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { .. } => {
@@ -179,20 +191,11 @@ impl V3Transport13ResponsesRequest {
         }
     }
 
-    fn provider_key(&self) -> String {
+    pub fn provider_key(&self) -> String {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { auth, .. }
             | V3Transport13ResponsesRequestKind::WebSocketV2 { auth, .. } => {
                 format!("{}:{}", self.provider_id(), auth.alias)
-            }
-        }
-    }
-
-    fn cancellation(&self) -> Option<V3ProviderCancellation> {
-        match &self.kind {
-            V3Transport13ResponsesRequestKind::Http { cancellation, .. }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 { cancellation, .. } => {
-                cancellation.clone()
             }
         }
     }
@@ -204,13 +207,6 @@ fn current_epoch_ms() -> u64 {
         .map_or(0, |duration| {
             duration.as_millis().min(u64::MAX as u128) as u64
         })
-}
-
-fn is_rate_limited(error: &V3ProviderError) -> bool {
-    matches!(
-        error,
-        V3ProviderError::HttpStatus { response } if response.status == 429
-    )
 }
 
 impl V3Transport13ResponsesRequest {
@@ -368,7 +364,11 @@ fn provider_request_headers_for_url(
         Value::Object(headers) => headers,
         _ => unreachable!("provider_request_headers always returns an object"),
     };
-    headers.extend(provider_headers);
+    headers.extend(
+        provider_headers
+            .into_iter()
+            .map(|(name, _)| (name, Value::String("[REDACTED]".to_string()))),
+    );
     Value::Object(headers)
 }
 
@@ -413,6 +413,10 @@ pub(crate) fn v3_transport_13_request(
         _sealed: (),
         kind,
         handoff_scope: None,
+        transport_attempt_control: None,
+        pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
+        auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
+        identity_scope: None,
     }
 }
 
@@ -420,6 +424,28 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
     wire: V3Provider12ResponsesWirePayload,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
     let (request_id, target, stream_intent, endpoint, body) = wire.into_parts();
+    build_v3_transport_13_responses_request_from_wire_parts(
+        request_id,
+        target,
+        stream_intent,
+        endpoint,
+        body,
+    )
+}
+
+/// The wire node has already selected the target and encoded the body. Keep
+/// that typed transport context separate while consuming the data edge body.
+pub fn build_v3_transport_13_responses_request_from_wire_parts(
+    request_id: String,
+    target: crate::V3ResponsesProviderTarget,
+    stream_intent: V3ResponsesStreamIntent,
+    endpoint: crate::V3ResponsesRequestEndpoint,
+    body: Value,
+) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
+    let identity_scope = V3ConcurrencyIdentityScope {
+        interface_id: target.interface_id.clone(),
+        model_id: target.canonical_model_id.clone(),
+    };
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
@@ -450,24 +476,26 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                 target.auth,
                 stream_intent,
                 body,
-                Vec::new(),
+                target.headers
+                    .iter()
+                    .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+                    .collect(),
                 Some(Duration::from_millis(request_timeout_ms)),
                 concurrency_acquire_timeout_ms,
+                sse_first_frame_timeout_ms,
             )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 initial_concurrency_budget: budget,
                 concurrency_acquire_timeout_ms: timeout_ms,
                 compatibility_profile: request_compatibility_profile,
-                sse_first_frame_timeout_ms: sse_timeout,
                 ..
             } = &mut request.kind
             {
                 *budget = initial_concurrency_budget;
                 *timeout_ms = concurrency_acquire_timeout_ms;
                 *request_compatibility_profile = compatibility_profile;
-                *sse_timeout = sse_first_frame_timeout_ms;
             }
-            Ok(request)
+            Ok(request.with_identity_scope(identity_scope))
         }
         V3ResponsesTransportKind::WebsocketV2 => {
             if endpoint == crate::V3ResponsesRequestEndpoint::Compact {
@@ -497,8 +525,8 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                 "type".to_string(),
                 Value::String("response.create".to_string()),
             );
-            Ok(v3_transport_13_request(
-                V3Transport13ResponsesRequestKind::WebSocketV2 {
+            Ok(
+                v3_transport_13_request(V3Transport13ResponsesRequestKind::WebSocketV2 {
                     request_id,
                     provider_id,
                     canonical_model_id: target.canonical_model_id,
@@ -507,11 +535,11 @@ pub fn build_v3_transport_13_responses_request_from_v3_provider_12(
                     stream_intent,
                     event: body,
                     initial_concurrency_budget,
-                    concurrency_acquire_timeout_ms,
                     cancellation: None,
                     compatibility_profile,
-                },
-            ))
+                })
+                .with_identity_scope(identity_scope),
+            )
         }
     }
 }
@@ -623,6 +651,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
         provider_headers,
         timeout,
         60_000,
+        None,
     )
 }
 
@@ -642,6 +671,30 @@ pub trait ResponsesTransport: Send + Sync {
         &self,
         request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError>;
+
+    /// Start one broker-owned attempt before Runtime enters its outer timeout.
+    /// Transports without transport-handoff state return None.
+    fn begin_transport_attempt(
+        &self,
+        _request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        Ok(None)
+    }
+
+    /// Attach an already-started attempt control without changing the original
+    /// send result type. ProviderResponsesTransport::send validates ownership
+    /// and consumes the control for phase observation.
+    async fn send_observed(
+        &self,
+        request: V3Transport13ResponsesRequest,
+        attempt_control: Option<V3ProviderTransportAttemptControl>,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let request = match attempt_control {
+            Some(attempt_control) => request.with_transport_attempt_control(attempt_control),
+            None => request,
+        };
+        self.send(request).await
+    }
 }
 
 #[derive(Clone)]
@@ -689,12 +742,46 @@ impl ProviderResponsesTransport {
     ) -> crate::transport_handoff::V3ProviderTransportAttemptBroker {
         self.handoff.clone()
     }
+
+    fn begin_attempt_for_request(
+        &self,
+        request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        let Some(scope) = request.handoff_scope.clone() else {
+            return Ok(None);
+        };
+        let key = self
+            .handoff
+            .begin_next(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                request.transport_kind(),
+                scope,
+            )
+            .map_err(|reason| V3ProviderError::InternalTransport {
+                request_id: request.request_id().to_string(),
+                provider_id: request.provider_id().to_string(),
+                lane: V3ProviderInternalTransportLane::Request,
+                reason,
+            })?;
+        Ok(Some(V3ProviderTransportAttemptControl::new(
+            self.handoff.clone(),
+            key,
+        )))
+    }
 }
 
 #[async_trait]
 impl ResponsesTransport for Arc<dyn ResponsesTransport> {
     fn handoff_handle(&self) -> Option<Arc<dyn ResponsesTransport>> {
         self.as_ref().handoff_handle()
+    }
+
+    fn begin_transport_attempt(
+        &self,
+        request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        self.as_ref().begin_transport_attempt(request)
     }
 
     async fn send(
@@ -713,42 +800,66 @@ impl ResponsesTransport for ProviderResponsesTransport {
         Some(Arc::new(self.clone()))
     }
 
+    fn begin_transport_attempt(
+        &self,
+        request: &V3Transport13ResponsesRequest,
+    ) -> Result<Option<V3ProviderTransportAttemptControl>, V3ProviderError> {
+        self.begin_attempt_for_request(request)
+    }
+
     async fn send(
         &self,
-        request: V3Transport13ResponsesRequest,
+        mut request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let provider_key = request.provider_key();
-        let cancellation = request.cancellation();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
-        let attempt_key = request
-            .handoff_scope
-            .clone()
-            .map(|scope| {
-                self.handoff
-                    .begin_next(
-                        request_id.clone(),
-                        provider_id.clone(),
-                        request.transport_kind(),
-                        scope,
-                    )
-                    .map_err(|reason| V3ProviderError::InternalTransport {
+        let attempt_control = match request.transport_attempt_control.take() {
+            Some(attempt_control) => {
+                if !attempt_control.is_bound_to(
+                    &self.handoff,
+                    &request_id,
+                    &provider_id,
+                    request.transport_kind(),
+                ) || !attempt_control.claim_for_send()
+                {
+                    return Err(V3ProviderError::InternalTransport {
                         request_id: request_id.clone(),
                         provider_id: provider_id.clone(),
                         lane: V3ProviderInternalTransportLane::Request,
-                        reason,
-                    })
-            })
-            .transpose()?;
+                        reason:
+                            "provider transport attempt control is not bound or already claimed"
+                                .to_string(),
+                    });
+                }
+                Some(attempt_control)
+            }
+            None => {
+                let attempt_control = self.begin_attempt_for_request(&request)?;
+                if let Some(attempt_control) = &attempt_control {
+                    if !attempt_control.claim_for_send() {
+                        return Err(V3ProviderError::InternalTransport {
+                            request_id: request_id.clone(),
+                            provider_id: provider_id.clone(),
+                            lane: V3ProviderInternalTransportLane::Request,
+                            reason: "provider transport attempt was already claimed".to_string(),
+                        });
+                    }
+                }
+                attempt_control
+            }
+        };
+        let attempt_key = attempt_control
+            .as_ref()
+            .map(|attempt_control| attempt_control.key().clone());
         let controller = V3AdaptiveConcurrencyController::process_shared();
         if let Err(reason) =
             controller.ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
         {
             if let Some(attempt_key) = &attempt_key {
-                let _ = self.handoff.transition(
-                    attempt_key,
-                    crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                );
+                let _ = self
+                    .handoff
+                    .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
             }
             return Err(V3ProviderError::InternalTransport {
                 request_id: request_id.clone(),
@@ -757,49 +868,17 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 reason,
             });
         }
-        let acquire_timeout_ms = match &request.kind {
-            V3Transport13ResponsesRequestKind::Http {
-                concurrency_acquire_timeout_ms,
-                ..
-            }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 {
-                concurrency_acquire_timeout_ms,
-                ..
-            } => *concurrency_acquire_timeout_ms,
-        };
-        let lease = acquire_provider_admission(
-            controller.clone(),
-            provider_key.clone(),
-            current_epoch_ms(),
-            Duration::from_millis(acquire_timeout_ms),
-            cancellation,
-        )
-        .await
-        .map_err(|error| {
-            if let Some(attempt_key) = &attempt_key {
-                let _ = self.handoff.transition(
-                    attempt_key,
-                    crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                );
-            }
-            match error {
-                V3ProviderAdmissionError::ClientDisconnect => V3ProviderError::ClientDisconnect {
-                    request_id: request.request_id().to_string(),
-                    provider_id: request.provider_id().to_string(),
-                },
-                V3ProviderAdmissionError::Timeout => V3ProviderError::Transport {
-                    request_id: request.request_id().to_string(),
-                    provider_id: request.provider_id().to_string(),
-                    reason: format!(
-                        "provider concurrency admission timed out after {}ms",
-                        acquire_timeout_ms
-                    ),
-                },
-            }
-        })?;
-        let was_probe = lease.is_probe();
-        let permit = lease.into_permit();
-        let permit_guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), permit);
+        let (permit_guard, was_probe, websocket_connection) =
+            websocket::acquire_admission_and_connection_slot(
+                &self.websocket_sessions,
+                &mut request,
+                &self.handoff,
+                attempt_key.as_ref(),
+                controller.clone(),
+                provider_key.clone(),
+            )
+            .await?;
+        let auth_carrier = request.auth_carrier;
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
                 request_id,
@@ -821,11 +900,13 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     provider_id,
                     url,
                     auth,
+                    auth_carrier,
                     stream_intent,
                     body,
                     provider_headers,
                     timeout,
                     sse_first_frame_timeout_ms,
+                    attempt_control.as_ref(),
                     cancellation,
                     compatibility_profile,
                 )
@@ -840,7 +921,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 stream_intent,
                 event,
                 initial_concurrency_budget: _,
-                concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
             } => {
@@ -852,6 +932,10 @@ impl ResponsesTransport for ProviderResponsesTransport {
                     auth,
                     stream_intent,
                     event,
+                    websocket_connection.expect(
+                        "WebSocket connection slot is re-acquired after provider admission",
+                    ),
+                    attempt_control.as_ref(),
                     cancellation,
                     compatibility_profile,
                 )
@@ -864,10 +948,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 if raw.body_kind() == crate::raw_response::V3ProviderResponseBodyKind::Sse {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
-                            .transition(
-                                attempt_key,
-                                crate::transport_handoff::V3ProviderTransportAttemptState::Streaming,
-                            )
+                            .transition(attempt_key, V3ProviderTransportAttemptState::Streaming)
                             .map_err(|reason| V3ProviderError::InternalTransport {
                                 request_id: raw.request_id().to_string(),
                                 provider_id: raw.provider_id().to_string(),
@@ -875,24 +956,21 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 reason,
                             })?;
                     }
-                    let guard = if was_probe {
+                    let permit_guard = if was_probe {
                         permit_guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted)
                     } else {
                         permit_guard
                     };
                     return Ok(hold_sse_lease(
                         raw,
-                        guard,
+                        permit_guard,
                         self.handoff.clone(),
                         attempt_key,
                     ));
                 } else {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
-                            .transition(
-                                attempt_key,
-                                crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
-                            )
+                            .transition(attempt_key, V3ProviderTransportAttemptState::Terminal)
                             .map_err(|reason| V3ProviderError::InternalTransport {
                                 request_id: raw.request_id().to_string(),
                                 provider_id: raw.provider_id().to_string(),
@@ -914,10 +992,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
             Err(error) => {
                 if let Some(attempt_key) = &attempt_key {
                     self.handoff
-                        .transition(
-                            attempt_key,
-                            crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                        )
+                        .transition(attempt_key, V3ProviderTransportAttemptState::Failed)
                         .map_err(|reason| V3ProviderError::InternalTransport {
                             request_id: request_id.clone(),
                             provider_id: provider_id.clone(),
@@ -932,14 +1007,14 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 .with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited),
                         );
                     } else {
-                        controller
-                            .observe_rate_limit(&provider_key, now_ms)
-                            .map_err(|reason| V3ProviderError::InternalTransport {
+                        permit_guard.observe_rate_limit(now_ms).map_err(|reason| {
+                            V3ProviderError::InternalTransport {
                                 request_id: request_id.clone(),
                                 provider_id: provider_id.clone(),
                                 lane: V3ProviderInternalTransportLane::Response,
                                 reason,
-                            })?;
+                            }
+                        })?;
                         drop(permit_guard);
                     }
                 } else {
@@ -989,7 +1064,7 @@ fn hold_sse_lease(
                                 if let Some(attempt_key) = &attempt_key {
                                     let _ = handoff.transition(
                                         attempt_key,
-                                        crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+                                        V3ProviderTransportAttemptState::Failed,
                                     );
                                 }
                                 drop(guard.take());
@@ -1016,20 +1091,16 @@ fn hold_sse_lease(
                     }
                     Some(Err(error)) => {
                         if let Some(attempt_key) = &attempt_key {
-                            let _ = handoff.transition(
-                                attempt_key,
-                                crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
-                            );
+                            let _ = handoff
+                                .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
                         }
                         drop(guard.take());
                         Some((Err(error), (stream, guard, provider_sequence, true)))
                     }
                     None => {
                         if let Some(attempt_key) = &attempt_key {
-                            let _ = handoff.transition(
-                                attempt_key,
-                                crate::transport_handoff::V3ProviderTransportAttemptState::Terminal,
-                            );
+                            let _ = handoff
+                                .transition(attempt_key, V3ProviderTransportAttemptState::Terminal);
                         }
                         None
                     }
@@ -1042,7 +1113,86 @@ fn hold_sse_lease(
         .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms)
 }
 
+/// Constructing this future does not mark the phase. Its body runs only when
+/// the wrapped original send future is polled. A cancellation branch that wins
+/// before that poll therefore leaves the attempt as NotSent.
+async fn mark_send_started_when_polled<F>(
+    future: F,
+    attempt_control: Option<&V3ProviderTransportAttemptControl>,
+) -> F::Output
+where
+    F: std::future::Future,
+{
+    if let Some(attempt_control) = attempt_control {
+        attempt_control.mark_send_started();
+    }
+    future.await
+}
+
 impl ProviderResponsesTransport {
+    #[allow(clippy::too_many_arguments)]
+    async fn send_http_headers(
+        &self,
+        request_id: &str,
+        provider_id: &str,
+        url: reqwest::Url,
+        auth: V3ProviderAuthHandle,
+        auth_carrier: V3ProviderHttpAuthCarrier,
+        stream_intent: V3ResponsesStreamIntent,
+        body: Value,
+        provider_headers: Vec<V3ProviderRequestHeader>,
+        timeout: Option<Duration>,
+        sse_first_frame_timeout_ms: Option<u64>,
+        attempt_control: Option<&V3ProviderTransportAttemptControl>,
+        cancellation: Option<V3ProviderCancellation>,
+    ) -> Result<reqwest::Response, V3ProviderError> {
+        ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
+        let secret = resolve_secret(
+            &request_id,
+            &provider_id,
+            &auth,
+            timeout,
+            cancellation.clone(),
+        )
+        .await?;
+        let accept = match stream_intent {
+            V3ResponsesStreamIntent::Json => "application/json",
+            V3ResponsesStreamIntent::Sse => "text/event-stream",
+        };
+        let anthropic_messages = is_anthropic_messages_url(&url);
+        let mut request = self
+            .client
+            .post(url)
+            .header(reqwest::header::ACCEPT, accept);
+        request = match auth_carrier {
+            V3ProviderHttpAuthCarrier::ExistingBearer => request.bearer_auth(&secret),
+            V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
+        };
+        if let Some(deadline) = deadline {
+            request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
+        }
+        if anthropic_messages {
+            request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
+        } else {
+            for header in &provider_headers {
+                request = request.header(header.name(), header.value());
+            }
+        }
+        let send = mark_send_started_when_polled(request.json(&body).send(), attempt_control);
+        send_http_await(
+            request_id.to_string(),
+            provider_id.to_string(),
+            send,
+            cancellation.clone(),
+            match stream_intent {
+                V3ResponsesStreamIntent::Sse => sse_first_frame_timeout_ms,
+                V3ResponsesStreamIntent::Json => None,
+            },
+        )
+        .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn send_http(
         &self,
@@ -1050,89 +1200,41 @@ impl ProviderResponsesTransport {
         provider_id: String,
         url: reqwest::Url,
         auth: V3ProviderAuthHandle,
+        auth_carrier: V3ProviderHttpAuthCarrier,
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
         sse_first_frame_timeout_ms: Option<u64>,
+        attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
-        let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
-        let accept = match stream_intent {
-            V3ResponsesStreamIntent::Json => "application/json",
-            V3ResponsesStreamIntent::Sse => "text/event-stream",
-        };
-        let anthropic_messages = is_anthropic_messages_url(&url);
-        let provider_headers = provider_headers.clone();
-        let mut request = self
-            .client
-            .post(url)
-            .header(reqwest::header::ACCEPT, accept)
-            .bearer_auth(&secret);
-        if let Some(timeout) = timeout {
-            request = request.timeout(timeout);
-        }
-        if anthropic_messages {
-            request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
-        }
-        let send = request.json(&body).send();
-        let response = match cancellation.clone() {
-            Some(cancellation) => {
-                tokio::select! {
-                    _ = cancellation.cancelled() => {
-                        return Err(V3ProviderError::ClientDisconnect { request_id, provider_id });
-                    }
-                    response = send => response,
-                }
-            }
-            None => send.await,
-        }
-        .map_err(|error| V3ProviderError::Transport {
-            request_id: request_id.clone(),
-            provider_id: provider_id.clone(),
-            reason: error.to_string(),
-        })?;
+        let response = self
+            .send_http_headers(
+                &request_id,
+                &provider_id,
+                url,
+                auth,
+                auth_carrier,
+                stream_intent,
+                body,
+                provider_headers,
+                timeout,
+                sse_first_frame_timeout_ms,
+                attempt_control,
+                cancellation.clone(),
+            )
+            .await?;
         let status = response.status().as_u16();
         let headers = collect_response_headers(response.headers());
         let response_content_type = content_type(response.headers());
         if status >= 400 {
-            let body = match read_response_body_bytes(
-                response,
-                &request_id,
-                &provider_id,
-                cancellation.clone(),
-            )
-            .await
-            {
-                Ok(body) => body,
-                Err(V3ProviderError::ClientDisconnect {
-                    request_id: client_request_id,
-                    provider_id: client_provider_id,
-                }) => {
-                    return Err(V3ProviderError::ClientDisconnect {
-                        request_id: client_request_id,
-                        provider_id: client_provider_id,
-                    });
-                }
-                Err(V3ProviderError::ResponseBody { reason, .. }) => {
-                    // 错误 body 读取失败不允许静默空化：把读失败原因并入
-                    // HttpStatus 错误，客户端/错误链仍能看到原始 provider status
-                    // 与 body 读取失败原因，而不是一个无 detail 的空错误体。
-                    return Err(V3ProviderError::HttpStatus {
-                        response: Box::new(V3ProviderHttpFailure {
-                            request_id,
-                            provider_id,
-                            status,
-                            headers,
-                            body: Vec::new(),
-                            body_read_failure: Some(reason),
-                        }),
-                    });
-                }
-                Err(other) => return Err(other),
-            };
+            // `read_response_body_bytes` already carries the received status and
+            // any read failure reason into its own typed error.
+            let body =
+                read_response_body_bytes(response, &request_id, &provider_id, cancellation.clone())
+                    .await?;
             return Err(V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {
                     request_id,
@@ -1162,37 +1264,38 @@ impl ProviderResponsesTransport {
             .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
 
-        match stream_intent {
-            V3ResponsesStreamIntent::Json => Err(V3ProviderError::UnexpectedContentType {
+        if response_content_type
+            .as_deref()
+            .is_some_and(|value| value.starts_with("text/event-stream"))
+        {
+            let stream = validated_sse_stream(
+                response.bytes_stream(),
+                request_id.clone(),
+                provider_id.clone(),
+                cancellation,
+            );
+            return Ok(V3ProviderResp14Raw::from_sse(
                 request_id,
                 provider_id,
-                expected: "JSON",
-                content_type: response_content_type,
-            }),
-            V3ResponsesStreamIntent::Sse
-                if response_content_type
-                    .as_deref()
-                    .is_some_and(|value| value.starts_with("text/event-stream")) =>
-            {
-                let stream = validated_sse_stream(
-                    response.bytes_stream(),
-                    request_id.clone(),
-                    provider_id.clone(),
-                    cancellation,
-                );
-                Ok(
-                    V3ProviderResp14Raw::from_sse(request_id, provider_id, status, headers, stream)
-                        .with_compatibility_profile(compatibility_profile)
-                        .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms),
-                )
-            }
-            V3ResponsesStreamIntent::Sse => Err(V3ProviderError::UnexpectedContentType {
-                request_id,
-                provider_id,
-                expected: "SSE",
-                content_type: response_content_type,
-            }),
+                status,
+                headers,
+                stream,
+            )
+            .with_compatibility_profile(compatibility_profile)
+            .with_sse_first_frame_timeout_ms(sse_first_frame_timeout_ms));
         }
+
+        Err(V3ProviderError::UnexpectedContentType {
+            request_id,
+            provider_id,
+            expected: match stream_intent {
+                V3ResponsesStreamIntent::Json => "JSON",
+                V3ResponsesStreamIntent::Sse => "SSE",
+            },
+            content_type: response_content_type,
+            status,
+            headers,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1200,28 +1303,19 @@ impl ProviderResponsesTransport {
         &self,
         request_id: String,
         provider_id: String,
-        canonical_model_id: String,
+        _canonical_model_id: String,
         url: String,
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
+        mut connection: OwnedMutexGuard<Option<ResponsesWebSocket>>,
+        attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
-        let secret = resolve_secret(&request_id, &provider_id, &auth).await?;
-        let session_key = format!(
-            "{}\u{1f}{}\u{1f}{}\u{1f}{}",
-            provider_id, canonical_model_id, auth.alias, url
-        );
-        let session = {
-            let mut sessions = self.websocket_sessions.lock().await;
-            sessions
-                .entry(session_key)
-                .or_insert_with(|| Arc::new(Mutex::new(None)))
-                .clone()
-        };
-        let mut connection = session.lock_owned().await;
+        let secret =
+            resolve_secret(&request_id, &provider_id, &auth, None, cancellation.clone()).await?;
         if connection.is_none() {
             let mut handshake = url
                 .clone()
@@ -1234,7 +1328,8 @@ impl ProviderResponsesTransport {
                 OPENAI_BETA_HEADER,
                 HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),
             );
-            let connect = connect_async(handshake);
+            // Keep handshake state off the nested Server/Relay poll stack.
+            let connect = Box::pin(connect_async(handshake));
             let connected = match cancellation.clone() {
                 Some(cancellation) => {
                     tokio::select! {
@@ -1255,7 +1350,8 @@ impl ProviderResponsesTransport {
             .expect("WebSocket connection initialized");
         let encoded = serde_json::to_string(&event)
             .map_err(|error| websocket_protocol_error(&request_id, &provider_id, error))?;
-        let send = socket.send(Message::Text(encoded));
+        let send =
+            mark_send_started_when_polled(socket.send(Message::Text(encoded)), attempt_control);
         match cancellation.clone() {
             Some(cancellation) => {
                 tokio::select! {
@@ -1410,7 +1506,6 @@ fn content_type_header(value: &str) -> V3ProviderResponseHeader {
         value: value.as_bytes().to_vec(),
     }
 }
-
 fn ensure_not_cancelled(
     request_id: &str,
     provider_id: &str,
@@ -1424,13 +1519,16 @@ fn ensure_not_cancelled(
     }
     Ok(())
 }
-
 async fn read_response_body_bytes(
     response: reqwest::Response,
     request_id: &str,
     provider_id: &str,
     cancellation: Option<V3ProviderCancellation>,
 ) -> Result<Vec<u8>, V3ProviderError> {
+    let status = response.status().as_u16();
+    // The head survives a failed body read for every status, not only for error
+    // statuses: the upstream really answered, and the head is that evidence.
+    let headers = collect_response_headers(response.headers());
     let read = response.bytes();
     let bytes = match cancellation {
         Some(cancellation) => {
@@ -1446,99 +1544,128 @@ async fn read_response_body_bytes(
         }
         None => read.await,
     }
-    .map_err(|error| V3ProviderError::ResponseBody {
-        request_id: request_id.to_string(),
-        provider_id: provider_id.to_string(),
-        reason: error.to_string(),
+    .map_err(|error| {
+        let reason = crate::shared::format_v3_provider_transport_error(&error);
+        if status >= 400 {
+            V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                    status,
+                    headers,
+                    body: Vec::new(),
+                    body_read_failure: Some(reason),
+                }),
+            }
+        } else {
+            V3ProviderError::ResponseBodyUnreadable {
+                request_id: request_id.to_string(),
+                provider_id: provider_id.to_string(),
+                status,
+                headers,
+                reason,
+            }
+        }
     })?;
     Ok(bytes.to_vec())
 }
+/// 上游模型发现（WebUI onboarding）使用的合成 request id；只出现在错误变体里。
+pub(crate) const DISCOVERY_REQUEST_ID: &str = "admin-discover";
+const DISCOVERY_TIMEOUT_SECS: u64 = 15;
 
-async fn resolve_secret(
-    request_id: &str,
+pub async fn discover_v3_provider_model_entries(
     provider_id: &str,
+    provider_type: &str,
+    base_url: &str,
     auth: &V3ProviderAuthHandle,
-) -> Result<String, V3ProviderError> {
-    let secret = match &auth.secret {
-        V3ProviderAuthSecretHandle::Environment(name) => {
-            std::env::var(name).map_err(|_| V3ProviderError::MissingAuthSecret {
-                request_id: request_id.to_string(),
-                provider_id: provider_id.to_string(),
-                auth_alias: auth.alias.clone(),
-            })?
-        }
-        V3ProviderAuthSecretHandle::TokenFile(path) => tokio::fs::read_to_string(path)
-            .await
-            .map_err(|error| V3ProviderError::AuthSecretRead {
-                request_id: request_id.to_string(),
-                provider_id: provider_id.to_string(),
-                auth_alias: auth.alias.clone(),
-                reason: error.to_string(),
-            })?,
-        V3ProviderAuthSecretHandle::SecretFile { path, key } => {
-            let content = tokio::fs::read_to_string(path).await.map_err(|error| {
-                V3ProviderError::AuthSecretRead {
-                    request_id: request_id.to_string(),
-                    provider_id: provider_id.to_string(),
-                    auth_alias: auth.alias.clone(),
-                    reason: error.to_string(),
-                }
-            })?;
-            // 解析归 config 层（编译期已校验 key 存在），运行时只取值。
-            routecodex_v3_config::resolve_v3_secret_file_key(&content, key).map_err(|reason| {
-                V3ProviderError::AuthSecretRead {
-                    request_id: request_id.to_string(),
-                    provider_id: provider_id.to_string(),
-                    auth_alias: auth.alias.clone(),
-                    reason,
-                }
-            })?
-        }
-        V3ProviderAuthSecretHandle::ApiKey(value) => expand_env_vars(value),
-    };
-    let secret = secret.trim().to_string();
-    if secret.is_empty() {
-        return Err(V3ProviderError::MissingAuthSecret {
-            request_id: request_id.to_string(),
+) -> Result<Vec<V3DiscoveredModel>, V3ProviderError> {
+    let url = discovery_models_url(provider_id, provider_type, base_url)?;
+    let discovery_deadline = Instant::now() + Duration::from_secs(DISCOVERY_TIMEOUT_SECS);
+    let discovery_budget = Some(Duration::from_secs(DISCOVERY_TIMEOUT_SECS));
+    let secret = resolve_secret(
+        DISCOVERY_REQUEST_ID,
+        provider_id,
+        auth,
+        discovery_budget,
+        None,
+    )
+    .await?;
+    let remaining = remaining_timeout(discovery_deadline, DISCOVERY_REQUEST_ID, provider_id)?;
+    let client = reqwest::Client::builder()
+        .timeout(remaining)
+        .build()
+        .map_err(|error| V3ProviderError::InternalTransport {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
             provider_id: provider_id.to_string(),
-            auth_alias: auth.alias.clone(),
+            lane: crate::V3ProviderInternalTransportLane::Request,
+            reason: format!("model discovery client build failed: {error}"),
+        })?;
+    let mut request = client
+        .get(&url)
+        .header(reqwest::header::ACCEPT, "application/json");
+    request = match provider_type {
+        "anthropic" => request
+            .header("x-api-key", secret.as_str())
+            .header("anthropic-version", "2023-06-01"),
+        "gemini" => request.header("x-goog-api-key", secret.as_str()),
+        _ => request.bearer_auth(secret.as_str()),
+    };
+    let response = request
+        .send()
+        .await
+        .map_err(|error| V3ProviderError::Transport {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} failed: {error}"),
+        })?;
+    let status = response.status().as_u16();
+    if !(200..=299).contains(&status) {
+        // provider 错误 body 可能回显凭据，因此只暴露 status，不暴露 body。
+        return Err(V3ProviderError::Transport {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} returned HTTP {status}"),
         });
     }
-    Ok(secret)
+    let body = response
+        .bytes()
+        .await
+        .map_err(|error| V3ProviderError::ResponseBody {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} body read failed: {error}"),
+        })?;
+    let decoded: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|error| V3ProviderError::ResponseBody {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} body is not JSON: {error}"),
+        })?;
+    let models = extract_discovered_models(provider_id, provider_type, &url, &decoded)?;
+    if models.is_empty() {
+        return Err(V3ProviderError::ResponseBody {
+            request_id: DISCOVERY_REQUEST_ID.to_string(),
+            provider_id: provider_id.to_string(),
+            reason: format!("model discovery GET {url} returned an empty model list"),
+        });
+    }
+    Ok(models)
 }
 
-fn expand_env_vars(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut result = String::with_capacity(input.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
-            let mut j = i + 2;
-            while j < bytes.len() && bytes[j] != b'}' {
-                j += 1;
-            }
-            if j < bytes.len() {
-                let inner = &input[i + 2..j];
-                let (var_name, default_val) = if let Some(dash_pos) = inner.find(":-") {
-                    (&inner[..dash_pos], Some(&inner[dash_pos + 2..]))
-                } else {
-                    (inner, None)
-                };
-                let env_val = std::env::var(var_name).ok().unwrap_or_default();
-                let replacement = if env_val.is_empty() {
-                    default_val.unwrap_or("")
-                } else {
-                    &env_val
-                };
-                result.push_str(replacement);
-                i = j + 1;
-                continue;
-            }
-        }
-        result.push(bytes[i] as char);
-        i += 1;
-    }
-    result
+/// 兼容视图：只保留模型名（onboarding wizard 与 provider health test 依赖的既有形状）。
+pub async fn discover_v3_provider_models(
+    provider_id: &str,
+    provider_type: &str,
+    base_url: &str,
+    auth: &V3ProviderAuthHandle,
+) -> Result<Vec<String>, V3ProviderError> {
+    Ok(
+        discover_v3_provider_model_entries(provider_id, provider_type, base_url, auth)
+            .await?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

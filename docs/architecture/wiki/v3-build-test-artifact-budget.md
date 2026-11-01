@@ -2,7 +2,7 @@
 
 ## Contract
 
-The RouteCodex-owned V3 Cargo test target has a 2 GiB steady-state allocation budget. The build-tooling owner removes test-owned outputs after every canonical V3 Cargo test and retains reusable dependency artifacts while they fit inside that budget. An explicit `CARGO_TARGET_DIR` is namespaced under `routecodex-v3-test`, so idle over-budget Cargo test-profile cleanup cannot remove unrelated workspace artifacts; an active external builder makes cleanup fail explicitly.
+The RouteCodex-owned V3 Cargo test target has a 2 GiB steady-state allocation budget. The build-tooling owner removes test-owned outputs after every canonical V3 Cargo test and retains reusable dependency artifacts while they fit inside that budget. An explicit `CARGO_TARGET_DIR` is namespaced under `routecodex-v3-test`, so idle over-budget Cargo test-profile cleanup cannot remove unrelated workspace artifacts; an active external builder defers cache maintenance while preserving the completed test result.
 
 The canonical lock records both PID and process-start identity. Acquisition derives the current wrapper identity without process enumeration and removes the lock directory if owner initialization fails. Inspection normalizes `ps` output under the `C` locale before comparing identities. A matching live process keeps ownership; a dead process or a reused PID makes the lock stale and reclaimable. If a restricted environment denies inspection of another live process's start identity, exclusivity is retained only for a bounded lease.
 
@@ -27,7 +27,9 @@ flowchart LR
 - The complete Cargo test profile inside the RouteCodex-owned target namespace only when the retained cache exceeds 2 GiB and no other V3 builder is active.
 
 Active-builder detection binds the untruncated `ps ucomm` executable identity (`cargo`
-or `rustc`) separately from its argument string. This prevents macOS `comm` path
+or `rustc`) separately from its argument string. It first inventories PID and executable
+identity, then streams the full command only for candidate Cargo or rustc PIDs, so
+unrelated long argv never enters the wrapper buffer. This prevents macOS `comm` path
 truncation from hiding a real builder, while a parent shell or npm command that merely
 names a later Cargo command cannot block the current wrapper's own terminal cleanup.
 
@@ -38,4 +40,7 @@ names a later Cargo command cannot block the current wrapper's own terminal clea
 
 ## Failure
 
-After owned cleanup, allocation above 2 GiB is a build failure. There is no silent success, runtime fallback, or payload-side compensation.
+After owned cleanup, allocation above 2 GiB is a build failure. An active V3 builder
+defers cache maintenance instead, so the completed test result is preserved. A failed
+builder scan fails cleanup explicitly and never proceeds to profile eviction. There is
+no silent success, runtime fallback, or payload-side compensation.

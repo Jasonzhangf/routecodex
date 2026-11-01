@@ -1,0 +1,15 @@
+version = 3
+
+[servers.loopback]
+bind = "127.0.0.1"
+port = 57043
+endpoints = ["openai_chat", "responses", "anthropic", "gemini"]
+
+[servers.loopback.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+
+[servers.loopback.routes.default]
+tiers = [[{ use = "mock-responses/mock.responses-model" }]]

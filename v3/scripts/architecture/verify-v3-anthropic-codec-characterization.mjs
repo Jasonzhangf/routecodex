@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const root = process.cwd();
 const sourcePath = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs';
 const source = [
   readFileSync(resolve(root, sourcePath), 'utf8'),
-  ...filesBelow('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec'),
+  ...filesBelow('v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec')
+    .filter((path) => !path.endsWith('_tests.rs'))
+    .map((path) => readFileSync(path, 'utf8')),
 ].join('\n');
 const tests = readFileSync(resolve(root, 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs'), 'utf8');
 const failures = [];
@@ -45,9 +47,8 @@ requireAll(source, sourcePath, [
   'V3AnthropicCodecStage', 'ClientInputToHubSemantic', 'HubSemanticToProviderWire',
   'ProviderRawToHubResponseSemantic', 'HubResponseSemanticToClientProjection',
   'V3HubEntryProtocol::Anthropic', 'V3HubProviderWireProtocol::Anthropic',
-  'validate_json_response', 'validate_sse_event', 'reject_side_channel_fields', 'into_object',
-  'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
-  'resource_handle', 'MalformedProviderError',
+  'validate_json_response', 'validate_sse_event', 'into_object',
+  'MalformedProviderError',
   'MalformedSseEvent',
   'collect_v3_anthropic_request_shape_branch_semantics',
   'V3AnthropicChatShapeBranchSemantic',
@@ -71,6 +72,7 @@ forbidNear(source, sourcePath, '"request.messages[].content[].image.source.url"'
 forbidNear(source, sourcePath, '"request.messages[].content[].image.source.data"', 'ChatMediaMimeType');
 
 forbidAll(source, sourcePath, [
+  /reject_side_channel_fields/,
   /compile_v3_hub_v1_static_registry/, /compile_v3_hub_relay_(?:request|response)_hooks/,
   /V3HubStaticHookRegistry/, /V3HubRelay(?:Request|Response)Hook/, /routecodex-v3-server/,
   /Gemini/, /OpenAiChat/, /fallback/i, /provider[_-]?family/i,
@@ -79,7 +81,7 @@ forbidAll(source, sourcePath, [
 ]);
 requireAll(tests, 'focused Anthropic codec tests', [
   'tool_result', 'tool_use', 'thinking', 'V3HubTransportIntent::Sse',
-  'MalformedProviderError', 'MalformedSseEvent', 'SideChannelLeaked', 'ProviderProtocolNotAnthropic',
+  'MalformedProviderError', 'MalformedSseEvent', 'business_names_are_preserved', 'ProviderProtocolNotAnthropic',
   'anthropic_image_source_url_maps_only_to_chat_image_url_url',
   'anthropic_image_base64_data_maps_to_chat_inline_media_data',
   'anthropic_image_base64_media_type_maps_to_chat_media_mime_type',
@@ -121,7 +123,10 @@ requireAll(readFileSync(resolve(root, 'docs/architecture/v3-resource-operation-m
 
 const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
 for (const script of ['test:v3-anthropic-codec-characterization', 'verify:v3-anthropic-codec-characterization', 'test:v3-anthropic-codec-characterization-red-fixtures']) {
-  if (!packageJson.scripts?.[script]) fail('package.json: missing script ' + script);
+  const command = packageJson.scripts?.[script];
+  if (!command) { fail('package.json: missing script ' + script); continue; }
+  const scriptPath = command.match(/\bnode\s+(\S+\.mjs)\b/)?.[1];
+  if (!scriptPath || !existsSync(resolve(root, scriptPath))) fail('package.json: ' + script + ' references missing script ' + (scriptPath ?? '(none)'));
 }
 if (failures.length) {
   console.error('[verify:v3-anthropic-codec-characterization] failed');

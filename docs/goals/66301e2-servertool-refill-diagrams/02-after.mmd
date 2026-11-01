@@ -1,0 +1,28 @@
+%%{init: {"theme":"base","themeVariables":{"clusterBkg":"#F8FAFC","clusterBorder":"#CBD5E1","lineColor":"#475569"}}}%%
+flowchart TD
+  S([当前 execution 的标准请求]):::boundary --> M{Direct 或 Relay}:::decision
+  M -->|Direct| D[注册 Direct 请求治理]:::action
+  M -->|Relay| Q[Req04 普通工具与历史治理及 Outbound]:::action
+  D --> P[正常 Provider 传输与完整缓冲]:::action
+  Q --> P
+  P --> R{对应响应 owner}:::decision
+  R -->|Direct| DD[注册 Direct 响应治理]:::action
+  R -->|Relay| RR[Response Inbound 与 Chat Process 治理]:::action
+  DD --> F[形成完整治理与源 summary 事实]:::action
+  RR --> F
+  F --> C[复用同一 Chat Process 续杯判断]:::action
+  C --> A[(按序保留本轮业务内容)]:::data
+  A --> K{typed 决策}:::decision
+  K -->|最终交付| V[标准 continuation 与累积内容投影]:::action
+  V --> B[暂存真实客户端候选与真实终态]:::action
+  K -->|续杯| W[正常 staging 输出 DeferredRefill]:::action
+  W --> N[不提交中间完成事件]:::action
+  B --> E([唯一输出：execution outcome]):::boundary
+  N --> E
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F1EAFE,stroke:#7C3AED,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569

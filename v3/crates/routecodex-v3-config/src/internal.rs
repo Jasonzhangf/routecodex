@@ -32,8 +32,12 @@ struct InternalConfig {
     debug_samples: DebugSamples,
     #[serde(default)]
     error_handling: ErrorHandling,
+    target_recovery: V3InternalTargetRecoveryPolicy,
+    rate_limit_recovery: V3InternalRateLimitRecoveryPolicy,
     #[serde(default)]
     observability: Observability,
+    #[serde(default)]
+    chat_process: ChatProcess,
 }
 
 pub fn v3_internal_user_config_authoring() -> crate::V3Config02AuthoringParsed {
@@ -75,8 +79,6 @@ struct ErrorHandling {
     #[serde(default)]
     recoverable_http_statuses: Vec<u16>,
     #[serde(default)]
-    recoverable_failure_threshold: u32,
-    #[serde(default)]
     recoverable_cooldown_ms: u64,
     #[serde(default)]
     recoverable_probe_interval_ms: u64,
@@ -95,13 +97,59 @@ pub struct V3InternalErrorHandlingPolicy {
     pub transient_stages: Vec<String>,
     pub transient_wait_ms: Vec<u64>,
     pub recoverable_http_statuses: Vec<u16>,
-    pub recoverable_failure_threshold: u32,
     pub recoverable_cooldown_ms: u64,
     pub recoverable_probe_interval_ms: u64,
     pub unrecoverable_http_statuses: Vec<u16>,
     pub unrecoverable_failure_threshold: u32,
     pub unrecoverable_cooldown_ms: u64,
     pub unrecoverable_probe_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3InternalTargetRecoveryPolicy {
+    pub backoff_wait_ms: Vec<u64>,
+    pub steady_wait_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3InternalRateLimitRecoveryPolicy {
+    pub observation_window_ms: u64,
+    pub cooldown_ms: u64,
+    pub probe_required_after_ms: u64,
+}
+
+pub fn v3_internal_rate_limit_recovery() -> &'static V3InternalRateLimitRecoveryPolicy {
+    &INTERNAL_CONFIG.rate_limit_recovery
+}
+
+impl V3InternalTargetRecoveryPolicy {
+    pub fn wait_ms(&self, step: usize) -> u64 {
+        self.backoff_wait_ms
+            .get(step)
+            .copied()
+            .unwrap_or(self.steady_wait_ms)
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatProcess {
+    #[serde(default)]
+    refill: ChatProcessRefill,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatProcessRefill {
+    #[serde(default)]
+    max_consecutive_refills: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct V3InternalChatProcessRefillPolicy {
+    pub max_consecutive_refills: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -190,7 +238,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
             .transient_wait_ms
             .windows(2)
             .all(|pair| pair[0] < pair[1]));
-        assert!(config.recoverable_failure_threshold > 0);
         assert!(config.recoverable_cooldown_ms > 0);
         assert_eq!(config.recoverable_probe_interval_ms, 15 * 60_000);
         assert!(config.unrecoverable_failure_threshold > 0);
@@ -200,7 +247,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
             transient_stages: config.transient_stages.clone(),
             transient_wait_ms: config.transient_wait_ms.clone(),
             recoverable_http_statuses: config.recoverable_http_statuses.clone(),
-            recoverable_failure_threshold: config.recoverable_failure_threshold,
             recoverable_cooldown_ms: config.recoverable_cooldown_ms,
             recoverable_probe_interval_ms: config.recoverable_probe_interval_ms,
             unrecoverable_http_statuses: config.unrecoverable_http_statuses.clone(),
@@ -210,6 +256,55 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
         }
     });
     &POLICY
+}
+
+pub fn v3_internal_target_recovery() -> &'static V3InternalTargetRecoveryPolicy {
+    &INTERNAL_CONFIG.target_recovery
+}
+
+pub fn v3_internal_chat_process_refill_policy() -> &'static V3InternalChatProcessRefillPolicy {
+    static POLICY: LazyLock<V3InternalChatProcessRefillPolicy> =
+        LazyLock::new(|| V3InternalChatProcessRefillPolicy {
+            max_consecutive_refills: INTERNAL_CONFIG.chat_process.refill.max_consecutive_refills,
+        });
+    &POLICY
+}
+
+/// Test-only injection of the typed refill limit.
+///
+/// The hook and its backing atomic are compiled only for this crate's own unit
+/// tests or when the `test-hooks` cargo feature is enabled. The feature is
+/// requested solely from dev-dependencies, so a shipped binary still has one
+/// source: the compiled `internal.toml` value. It is not a user config, server
+/// override, environment variable or dynamic API in a production binary.
+/// `u32::MAX` means "no override".
+#[cfg(any(test, feature = "test-hooks"))]
+static CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(u32::MAX);
+
+#[cfg(any(test, feature = "test-hooks"))]
+#[doc(hidden)]
+pub fn v3_test_only_set_chat_process_refill_max_override(value: Option<u32>) {
+    CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.store(
+        value.unwrap_or(u32::MAX),
+        std::sync::atomic::Ordering::SeqCst,
+    );
+}
+
+/// Effective compiled limit.
+///
+/// Production builds read only the compiled policy. Unit tests and `test-hooks`
+/// builds may exercise public-entry tests with a process-wide override.
+pub fn v3_effective_chat_process_refill_max() -> u32 {
+    #[cfg(any(test, feature = "test-hooks"))]
+    {
+        let override_value =
+            CHAT_PROCESS_REFILL_MAX_TEST_OVERRIDE.load(std::sync::atomic::Ordering::SeqCst);
+        if override_value != u32::MAX {
+            return override_value;
+        }
+    }
+    v3_internal_chat_process_refill_policy().max_consecutive_refills
 }
 
 pub fn classify_v3_internal_provider_error(
@@ -243,6 +338,13 @@ pub fn classify_v3_internal_provider_error(
 /// 违反控制面规则；查找层按 trim+lowercase 归一化匹配，资产值必须已归一化，
 /// 否则合法资产会静默 miss 落到消费方降级）。
 fn validate_internal_config(config: &InternalConfig) {
+    assert!(!config.target_recovery.backoff_wait_ms.is_empty());
+    assert!(config
+        .target_recovery
+        .backoff_wait_ms
+        .iter()
+        .all(|wait_ms| *wait_ms > 0));
+    assert!(config.target_recovery.steady_wait_ms > 0);
     let gpt_family = config
         .model_families
         .get(GPT_FAMILY_KEY)
@@ -454,10 +556,41 @@ mod tests {
         );
     }
 
+    // 503（upstream unavailable）是单一可恢复类：声明表与 provider action 阈值必须
+    // 一致（每个 typed provider 失败首次即冷却），与 401..403 账户/计费类相同。503 曾
+    // 同时出现在 unrecoverable_http_statuses 与可恢复阈值路径，形成两套冲突声明。
+    #[test]
+    fn upstream_unavailable_status_is_recoverable_with_the_declared_threshold() {
+        let policy = v3_internal_error_handling();
+        assert!(!policy.unrecoverable_http_statuses.contains(&503));
+        assert!(policy.recoverable_http_statuses.contains(&503));
+        assert_eq!(
+            classify_v3_internal_provider_error(
+                "V3ProviderReqOutbound09TransportRequest",
+                503,
+                "provider_http_503"
+            ),
+            V3InternalErrorCategory::Recoverable
+        );
+        assert_eq!(policy.unrecoverable_failure_threshold, 1);
+        for status in [401_u16, 402, 403] {
+            assert_eq!(
+                classify_v3_internal_provider_error(
+                    "V3ProviderReqOutbound09TransportRequest",
+                    status,
+                    "provider_auth_failure"
+                ),
+                V3InternalErrorCategory::Unrecoverable,
+                "status={status}"
+            );
+        }
+    }
+
     #[test]
     fn invalid_internal_assets_fail_fast() {
         fn parse(raw: &str) -> InternalConfig {
-            toml::from_str(raw).expect("syntactically valid")
+            let required_control_tables = "\n[target_recovery]\nbackoff_wait_ms = [1000, 3000, 15000, 35000, 90000]\nsteady_wait_ms = 1000\n[rate_limit_recovery]\nobservation_window_ms = 120000\ncooldown_ms = 1800000\nprobe_required_after_ms = 3600000\n";
+            toml::from_str(&format!("{raw}{required_control_tables}")).expect("syntactically valid")
         }
         let missing_family = parse("[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
         let missing_builtin_defaults = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
@@ -569,5 +702,84 @@ mod tests {
             ),
             V3InternalErrorCategory::Recoverable
         );
+    }
+
+    #[test]
+    fn chat_process_refill_policy_parses_shipped_internal_toml() {
+        let config: InternalConfig =
+            toml::from_str(INTERNAL_CONFIG_TOML).expect("embedded internal.toml must parse");
+        assert_eq!(config.chat_process.refill.max_consecutive_refills, 1);
+        assert_eq!(
+            v3_internal_chat_process_refill_policy().max_consecutive_refills,
+            1
+        );
+    }
+
+    #[test]
+    fn chat_process_refill_rejects_negative_float_and_string_values() {
+        for raw in [
+            "[chat_process.refill]\nmax_consecutive_refills = -1\n",
+            "[chat_process.refill]\nmax_consecutive_refills = 1.5\n",
+            "[chat_process.refill]\nmax_consecutive_refills = \"1\"\n",
+        ] {
+            assert!(
+                toml::from_str::<InternalConfig>(raw).is_err(),
+                "invalid refill value must fail deserialization: {raw}"
+            );
+        }
+    }
+
+    static REFILL_OVERRIDE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct RefillOverrideGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl RefillOverrideGuard {
+        fn acquire() -> Self {
+            let lock = REFILL_OVERRIDE_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            v3_test_only_set_chat_process_refill_max_override(None);
+            Self { _lock: lock }
+        }
+
+        fn set(&self, value: Option<u32>) {
+            v3_test_only_set_chat_process_refill_max_override(value);
+        }
+    }
+
+    impl Drop for RefillOverrideGuard {
+        fn drop(&mut self) {
+            v3_test_only_set_chat_process_refill_max_override(None);
+        }
+    }
+
+    #[test]
+    fn effective_refill_max_defaults_to_compiled_policy() {
+        let _guard = RefillOverrideGuard::acquire();
+        assert_eq!(v3_effective_chat_process_refill_max(), 1);
+        assert_eq!(
+            v3_effective_chat_process_refill_max(),
+            v3_internal_chat_process_refill_policy().max_consecutive_refills
+        );
+    }
+
+    #[test]
+    fn effective_refill_max_honors_test_override_zero_and_three() {
+        let guard = RefillOverrideGuard::acquire();
+        guard.set(Some(0));
+        assert_eq!(v3_effective_chat_process_refill_max(), 0);
+        guard.set(Some(3));
+        assert_eq!(v3_effective_chat_process_refill_max(), 3);
+    }
+
+    #[test]
+    fn effective_refill_max_clearing_override_restores_compiled_policy() {
+        let guard = RefillOverrideGuard::acquire();
+        guard.set(Some(3));
+        assert_eq!(v3_effective_chat_process_refill_max(), 3);
+        guard.set(None);
+        assert_eq!(v3_effective_chat_process_refill_max(), 1);
     }
 }

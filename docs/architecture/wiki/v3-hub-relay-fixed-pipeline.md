@@ -182,15 +182,14 @@ Relay is borrow-first and move-at-boundary:
   servertool/apply_patch/MCP/native/custom/function tools.
 - apply_patch boundary: Resp03 projects model-emitted `function_call apply_patch` arguments into
   client-facing freeform `custom_tool_call.input`; Req04 pairs the returned tool output by
-  `call_id`, normalizes executor failure/success to `APPLY_PATCH_ERROR` / `APPLY_PATCH_RESULT`,
-  and keeps that result in the next provider request. This remains a Chat Process tool governance
+  `call_id` and preserves the exact client executor output in the next provider request. This remains a Chat Process tool governance
   hook block, not an apply_patch lifecycle, servertool lifecycle, handler repair, or SSE repair.
 - Positive matrix:
   - ordinary function/tool output;
   - Responses Relay JSON preserves the current request's tool output and `tools` declaration;
   - custom tool output;
   - servertool hook profile;
-  - apply_patch freeform client projection and normalized next-turn failure feedback;
+  - apply_patch freeform client projection and exact next-turn failure or success feedback;
   - MCP and native tool families;
   - historical image/attachment placeholder with current-turn payload preserved;
   - JSON and SSE arbitrary chunk ordering through the one `V3ServerRespOutbound06ClientFrame` exit.

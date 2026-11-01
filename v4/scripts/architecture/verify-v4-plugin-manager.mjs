@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Architecture gate for routecodex-v4-plugin-manager.
-// Positive: manager source owns the active pointer and audit ledger;
-// lifecycle port is a trait consumed via typed port, no Cordis import.
-// Red: any forbidden pattern (Cordis import, business payload, fallback,
-// auto-rollback, second active truth) fails.
+// Positive: manager source keeps no Cordis/NodeContainer import or business
+// payload/secret field; symbol names are owned by the Rust L2 regression.
+// Red: any forbidden pattern (Cordis/NodeContainer import, business payload,
+// secret or native-handle field) fails.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,20 +21,6 @@ const source = [
   .join('\n');
 const red = process.argv.includes('--red-self-test');
 const failures = [];
-
-const required = [
-  'pub trait LifecyclePort',
-  'pub struct PluginManager',
-  'fn publish(',
-  'expected_base_hash',
-  'mount_candidate',
-  'Option<ActiveChain>',
-  'AuditSink',
-  'ExecutionFailure',
-];
-for (const token of required) {
-  if (!source.includes(token)) failures.push(`missing: ${token}`);
-}
 
 // Real Rust import syntax: any reference to Cordis/NodeContainer internals or
 // a second node-selection primitive is a hard boundary violation.

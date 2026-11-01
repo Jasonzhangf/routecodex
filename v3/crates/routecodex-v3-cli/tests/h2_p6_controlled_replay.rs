@@ -9,13 +9,15 @@ use reqwest::StatusCode as ReqwestStatusCode;
 use serde_json::{json, Value};
 use std::{
     fs,
-    net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
+use tempfile::TempDir;
 use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
     sync::{mpsc, oneshot},
     time::{sleep, timeout},
 };
@@ -49,7 +51,10 @@ struct ProviderCapture {
 #[derive(Debug, Clone)]
 enum ProviderMode {
     Success,
+    CustomToolCall { input: String },
     Failure { label: &'static str },
+    RateLimited,
+    UpstreamBadGateway,
 }
 
 #[derive(Clone)]
@@ -74,6 +79,12 @@ impl Drop for ControlledUpstream {
 
 struct CliProcess {
     child: Child,
+    _runtime_dir: TempDir,
+}
+
+struct H2Config {
+    path: PathBuf,
+    _config_dir: TempDir,
 }
 
 impl Drop for CliProcess {
@@ -86,6 +97,319 @@ impl Drop for CliProcess {
 }
 
 #[tokio::test]
+async fn bug_705d624_real_http_429_never_reaches_the_client() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
+    let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &rate_a, &rate_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    // The declared recovery budget expires while all candidates keep returning 429,
+    // so both client lanes eventually observe a transport break after waiting.
+    // The real upstream 429 stays in the typed Error chain: the client never receives
+    // the provider status, a provider header, or a provider error body.
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
+    next_capture(&mut rate_a.captures, "429 first upstream").await;
+    next_capture(&mut rate_b.captures, "429 second upstream").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_last_provider_failure_never_reaches_the_client_and_reselection_succeeds() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
+    let mut no_response = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &rate, &no_response, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+    wait_for_health(&client, &mut cli, ports.reselect, "h2_reselect").await;
+
+    // Every candidate on the exhausted lane fails: the last real 429 and the later
+    // transport failure both stay in the typed Error chain, and the client boundary is a
+    // transport break instead of a provider status or a provider error body.
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    next_capture(&mut rate.captures, "429 before transport failure").await;
+    next_capture(&mut no_response.captures, "transport after 429").await;
+
+    let success_response = client
+        .post(format!("http://127.0.0.1:{}/v1/responses", ports.reselect))
+        .json(&json!({"model":"client-test","input":"failure then success"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(success_response.status(), ReqwestStatusCode::OK);
+    assert_eq!(
+        success_response.json::<Value>().await.unwrap(),
+        json!({"id":"h2_json","output_text":"ok"})
+    );
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_all_provider_no_response_breaks_streaming_client_transport() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut no_response_a = start_no_response_upstream().await;
+    let mut no_response_b = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
+    next_capture(&mut no_response_a.captures, "first no-response transport").await;
+    next_capture(&mut no_response_b.captures, "second no-response transport").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+/// A real HTTP client (not a raw socket) must observe provider exhaustion as a
+/// transport failure, not as a clean end of an empty SSE body. The raw-bytes
+/// check above proves the wire keeps the incomplete chunked framing; this case
+/// proves an actual consumer surfaces that incomplete body as an error and never
+/// as `Ok(None)` with a `response.completed` terminal. That distinction is the
+/// reported "error returned as a successful empty response" failure.
+#[tokio::test]
+async fn bug_705d624_no_response_reaches_a_real_consumer_as_a_transport_error() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut no_response_a = start_no_response_upstream().await;
+    let mut no_response_b = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    let (received, error, version) = read_front_response_consumer(ports.exhausted).await;
+    let body = String::from_utf8_lossy(&received);
+    assert!(
+        error.is_some(),
+        "a real consumer must observe a transport error, not a clean EOF, for provider exhaustion: {body:?}"
+    );
+    assert_eq!(
+        version,
+        reqwest::Version::HTTP_11,
+        "a real plaintext-loopback client negotiates HTTP/1.1: {version:?}"
+    );
+    assert!(
+        !body.contains("response.completed"),
+        "provider exhaustion must not reach the consumer as a completed response: {body:?}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error"),
+        "no provider or proxy error payload may be projected to the client: {body:?}"
+    );
+    next_capture(&mut no_response_a.captures, "consumer first no-response").await;
+    next_capture(&mut no_response_b.captures, "consumer second no-response").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+/// Positive control for the same real consumer: a healthy provider's complete
+/// SSE response must still be read as a clean stream with its `response.completed`
+/// terminal. Without this, a client that broke on every stream would look like a
+/// fix for the no-response case.
+#[tokio::test]
+async fn bug_705d624_real_consumer_reads_a_healthy_sse_response_to_completion() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let no_response_a = start_no_response_upstream().await;
+    let no_response_b = start_no_response_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &no_response_a, &no_response_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.success, "h2_success").await;
+
+    let (received, error, version) = read_front_response_consumer(ports.success).await;
+    let body = String::from_utf8_lossy(&received);
+    assert!(
+        error.is_none(),
+        "a healthy provider response must reach the consumer as a clean stream: {body:?}"
+    );
+    assert_eq!(
+        version,
+        reqwest::Version::HTTP_11,
+        "a real plaintext-loopback client negotiates HTTP/1.1: {version:?}"
+    );
+    assert!(
+        body.contains("response.completed"),
+        "a healthy provider response must carry its completed terminal: {body:?}"
+    );
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut bad_gateway_a = start_controlled_upstream(ProviderMode::UpstreamBadGateway).await;
+    let mut bad_gateway_b = start_controlled_upstream(ProviderMode::UpstreamBadGateway).await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &bad_gateway_a, &bad_gateway_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
+    next_capture(
+        &mut bad_gateway_a.captures,
+        "first actual HTTP 502 upstream",
+    )
+    .await;
+    next_capture(
+        &mut bad_gateway_b.captures,
+        "second actual HTTP 502 upstream",
+    )
+    .await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn bug_705d624_aborted_provider_stream_never_projects_network_error_to_client() {
+    let success = start_controlled_upstream(ProviderMode::Success).await;
+    let mut aborted_a = start_aborted_sse_upstream().await;
+    let mut aborted_b = start_aborted_sse_upstream().await;
+    let ports = H2Ports::allocate();
+    let config = write_h2_config(&ports, &success, &aborted_a, &aborted_b, "");
+    let client = reqwest::Client::new();
+    let mut cli = start_cli_server(&config, ports.all());
+    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+
+    // An aborted provider stream is a provider transport failure. It must stay in the
+    // typed Error chain: the client must never receive HTTP 502, a `network_error`
+    // code, or a `response.failed` frame.
+    assert_no_front_http_headers(ports.exhausted, false).await;
+    assert_front_sse_transport_break(ports.exhausted).await;
+    next_capture(&mut aborted_a.captures, "first aborted provider stream").await;
+    next_capture(&mut aborted_b.captures, "second aborted provider stream").await;
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+async fn assert_no_front_http_headers(port: u16, stream: bool) {
+    assert!(
+        !stream,
+        "only a non-streaming client is closed without HTTP response bytes"
+    );
+    let response = read_front_response(port, stream).await;
+    assert!(
+        response.is_empty(),
+        "stream={stream} expected zero HTTP response bytes, got {}",
+        String::from_utf8_lossy(&response)
+    );
+}
+
+/// A streaming client must observe an aborted transfer instead of a normal end of
+/// stream: the response head and one SSE comment frame reach the transport, the body
+/// keeps chunked framing, and the transfer never terminates with the final chunk. That
+/// incomplete chunked body is the transport failure a client retries, so provider
+/// exhaustion does not end the session.
+async fn assert_front_sse_transport_break(port: u16) {
+    let response = read_front_response(port, true).await;
+    let text = String::from_utf8_lossy(&response).into_owned();
+    assert!(
+        text.starts_with("HTTP/1.1 200"),
+        "streaming no-response must write the response head: {text:?}"
+    );
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("content-type: text/event-stream"),
+        "streaming no-response must keep the SSE boundary: {text:?}"
+    );
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("transfer-encoding: chunked"),
+        "streaming no-response must frame the break as an incomplete chunked body: {text:?}"
+    );
+    assert!(
+        (text.contains(":\n\n") || text.contains(": keepalive\n\n"))
+            && !text.contains("provider")
+            && !text.contains("transport break"),
+        "streaming no-response must flush neutral SSE framing without control facts: {text:?}"
+    );
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "streaming no-response must abort the transfer instead of terminating it: {text:?}"
+    );
+}
+
+async fn read_front_response(port: u16, stream: bool) -> Vec<u8> {
+    let payload = serde_json::to_string(
+        &json!({"model":"client-test","input":"upstream no response","stream":stream}),
+    )
+    .unwrap();
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    // Keep the HTTP/1.1 default persistent connection so the response framing, not the
+    // connection close, carries the transfer boundary: a close-delimited EOF would
+    // otherwise be indistinguishable from an aborted transfer.
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        payload.len(), payload
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut received = Vec::new();
+    let mut buffer = [0u8; 4096];
+    loop {
+        match timeout(Duration::from_secs(10), socket.read(&mut buffer)).await {
+            Ok(Ok(0)) | Ok(Err(_)) => break,
+            Ok(Ok(count)) => received.extend_from_slice(&buffer[..count]),
+            Err(_) => panic!("front connection must terminate before timeout"),
+        }
+    }
+    received
+}
+
+/// Drive the public `/v1/responses` streaming entry through the real `reqwest`
+/// consumer instead of a raw socket, and report the decoded body bytes and the
+/// terminal outcome. A clean end of body is `Ok(None)`; a truncated/incomplete
+/// transfer surfaces as `Err`. Returning the terminal outcome lets a test assert
+/// the consumer-visible classification rather than only the wire bytes.
+async fn read_front_response_consumer(
+    port: u16,
+) -> (Vec<u8>, Option<reqwest::Error>, reqwest::Version) {
+    // A fresh client per request forces a real per-request protocol negotiation
+    // instead of reusing the health-check client's pooled connection.
+    let client = reqwest::Client::new();
+    let response = timeout(
+        Duration::from_secs(10),
+        client
+            .post(format!("http://127.0.0.1:{port}/v1/responses"))
+            .json(&json!({"model":"client-test","input":"upstream no response","stream":true}))
+            .send(),
+    )
+    .await
+    .expect("front response head must arrive before timeout")
+    .expect("front response head must be a valid HTTP response");
+    let version = response.version();
+    let mut response = response;
+    let mut received = Vec::new();
+    let mut error = None;
+    loop {
+        match timeout(Duration::from_secs(10), response.chunk()).await {
+            Ok(Ok(Some(chunk))) => received.extend_from_slice(&chunk),
+            Ok(Ok(None)) => break,
+            Ok(Err(error_chunk)) => {
+                error = Some(error_chunk);
+                break;
+            }
+            Err(_) => panic!("front consumer stream must terminate before timeout"),
+        }
+    }
+    (received, error, version)
+}
+
+#[tokio::test]
 async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     assert_eq!(H2_SCENARIOS.len(), 6);
 
@@ -95,7 +419,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     let mut failure_b =
         start_controlled_upstream(ProviderMode::Failure { label: "failure-b" }).await;
     let ports = H2Ports::allocate();
-    let config_path = write_h2_config(&ports, &success, &failure_a, &failure_b);
+    let config_path = write_h2_config(&ports, &success, &failure_a, &failure_b, "");
 
     let client = reqwest::Client::new();
     let mut cli = start_cli_server(&config_path, ports.all());
@@ -215,31 +539,10 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     );
     assert_eq!(reselect_success.body["model"], "wire-success");
 
-    let exhausted_response = client
-        .post(format!("http://127.0.0.1:{}/v1/responses", ports.exhausted))
-        .json(&json!({
-            "model": "client-test",
-            "input": "default pool exhaustion",
-            "metadata": {"h2_case": "default_pool_exhaustion"}
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(exhausted_response.status(), ReqwestStatusCode::BAD_GATEWAY);
-    let exhausted_body: Value = exhausted_response.json().await.unwrap();
-    assert_eq!(exhausted_body["error"]["code"], "network_error");
-    assert_eq!(exhausted_body["error"]["message"], "network error");
-    assert!(exhausted_body["error"].get("internal_code").is_none());
-    assert!(
-        exhausted_body["error"].get("target_exhausted").is_none()
-            && exhausted_body["error"]
-                .get("candidates_remaining")
-                .is_none()
-            && exhausted_body["error"].get("decision").is_none()
-            && exhausted_body["error"].get("external_error").is_none(),
-        "Error06 body must not carry control-plane fields: {}",
-        exhausted_body["error"]
-    );
+    // The exhausted lane has no eligible candidate left, so the client boundary is a
+    // transport break. The last real upstream 503 stays in the typed Error chain: the
+    // client never receives a provider status, a provider error code, or a provider body.
+    assert_no_front_http_headers(ports.exhausted, false).await;
     let exhausted_first = next_capture(&mut failure_a.captures, "exhaustion first").await;
     assert_eq!(exhausted_first.body["model"], "wire-failure-a");
     let exhausted_second = next_capture(&mut failure_b.captures, "exhaustion second").await;
@@ -261,6 +564,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
             },
             "response_payload": {
                 "id": "h2_dry_run",
+                "output_text": "dry control",
                 "api_key": "dry-run-response-secret"
             }
         }))
@@ -346,7 +650,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "command": "npm run test:v3-h2-p6-controlled-replay",
         "expected_exit_code": 0,
         "scenarios": H2_SCENARIOS,
-        "config": config_path.display().to_string(),
+        "config": config_path.path.display().to_string(),
         "ports": {
             "success": ports.success,
             "reselect": ports.reselect,
@@ -381,7 +685,7 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
             "default_pool_exhaustion": {
                 "first_provider_wire_request": exhausted_first.body,
                 "second_provider_wire_request": exhausted_second.body,
-                "client_response": exhausted_body
+                "client_transport_break": "zero HTTP response bytes; no provider status, code, or body"
             },
             "dry_run": dry_run
         },
@@ -396,6 +700,109 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
         "H2 P6 controlled replay evidence: {}",
         evidence_path.display()
     );
+
+    drop(cli);
+    wait_ports_closed(&client, &ports.all()).await;
+}
+
+#[tokio::test]
+async fn responses_relay_sse_preserves_json_looking_apply_patch_input() {
+    // This is freeform text, even though it parses as JSON and names a field
+    // used by the legacy apply_patch wrapper.
+    let input = r#"{ "patch": "keep \u4e2d exactly", "input": "literal" }"#.to_string();
+    let mut success = start_controlled_upstream(ProviderMode::CustomToolCall {
+        input: input.clone(),
+    })
+    .await;
+    let failure_a = start_controlled_upstream(ProviderMode::Failure { label: "failure-a" }).await;
+    let failure_b = start_controlled_upstream(ProviderMode::Failure { label: "failure-b" }).await;
+    let ports = H2Ports::allocate();
+    let config_path = write_h2_config(
+        &ports,
+        &success,
+        &failure_a,
+        &failure_b,
+        "responses = { process = \"chat\", streaming = \"client\" }",
+    );
+    let client = reqwest::Client::new();
+    let tools = json!([{"type":"custom","name":"apply_patch","format":{"type":"text"}}]);
+    let mut cli = start_cli_server(&config_path, ports.all());
+    wait_for_health(&client, &mut cli, ports.success, "h2_success").await;
+
+    let response = client
+        .post(format!("http://127.0.0.1:{}/v1/responses", ports.success))
+        .json(&json!({"model":"client-test", "input":"make a patch", "tools":tools, "stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert_eq!(status, ReqwestStatusCode::OK, "{body}");
+    let added = sse_data_payload(&body, "response.output_item.added");
+    assert_eq!(
+        added["item"]["input"].as_str(),
+        Some(input.as_str()),
+        "{body}"
+    );
+    let completed = sse_data_payload(&body, "response.completed");
+    let item = &completed["response"]["output"][0];
+    assert_eq!(item["type"], "custom_tool_call", "{body}");
+    assert_eq!(item["name"], "apply_patch", "{body}");
+    assert_eq!(item["call_id"], "call_patch", "{body}");
+    assert_eq!(item["input"].as_str(), Some(input.as_str()), "{body}");
+    let capture = next_capture(&mut success.captures, "apply_patch SSE").await;
+    assert_eq!(capture.body["stream"], true);
+    assert!(
+        capture.body["tools"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|entry| { entry["name"] == "apply_patch" })),
+        "provider tool declaration changed: {:?}",
+        capture.body
+    );
+
+    for output in [
+        "patch rejected: context mismatch in /tmp/含 空格.txt\r\nold",
+        "Success. Updated /tmp/含 空格.txt\r\n",
+    ] {
+        let followup = client
+            .post(format!("http://127.0.0.1:{}/v1/responses", ports.success))
+            .json(&json!({
+                "model":"client-test", "stream":false, "tools":tools,
+                "input":[
+                    {"role":"user","content":"make a patch"},
+                    item,
+                    {"type":"custom_tool_call_output","call_id":"call_patch","output":output}
+                ]
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = followup.status();
+        let body = followup.text().await.unwrap();
+        assert_eq!(status, ReqwestStatusCode::OK, "{body}");
+        let followup_capture = next_capture(&mut success.captures, "apply_patch followup").await;
+        assert!(
+            followup_capture.body["input"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|entry| {
+                    entry["call_id"] == "call_patch" && entry["output"] == output
+                })),
+            "provider-bound output changed: {:?}",
+            followup_capture.body
+        );
+        assert!(
+            followup_capture.body["input"]
+                .as_array()
+                .is_some_and(|items| items.iter().any(|entry| {
+                    entry["type"] == "custom_tool_call"
+                        && entry["name"] == "apply_patch"
+                        && entry["call_id"] == "call_patch"
+                        && entry["input"] == input
+                })),
+            "provider-bound call changed: {:?}",
+            followup_capture.body
+        );
+    }
 
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
@@ -423,12 +830,39 @@ async fn controlled_responses_upstream(
         .unwrap();
 
     match &state.mode {
+        ProviderMode::CustomToolCall { input } => {
+            if parsed["input"].as_array().is_some_and(|items| items.iter().any(|entry| {
+                entry["type"] == "custom_tool_call_output" && entry["call_id"] == "call_patch"
+            })) {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"id":"resp_patch_followup","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]},{"type":"reasoning","summary":[{"type":"summary_text","text":"patch complete"}]}]}"#))
+                    .unwrap();
+            }
+            let item = json!({
+                "type": "custom_tool_call", "id": "item_patch", "call_id": "call_patch",
+                "name": "apply_patch", "input": input
+            });
+            let added = json!({"type":"response.output_item.added", "output_index":0, "item":item});
+            let completed = json!({
+                "type":"response.completed",
+                "response":{"id":"resp_patch", "status":"completed", "output":[item]}
+            });
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(format!(
+                    "event: response.output_item.added\ndata: {added}\n\nevent: response.completed\ndata: {completed}\n\ndata: [DONE]\n\n"
+                )))
+                .unwrap()
+        }
         ProviderMode::Success if parsed.get("stream").and_then(Value::as_bool) == Some(true) => {
             Response::builder()
                 .status(StatusCode::OK)
                 .header("content-type", "text/event-stream")
                 .body(Body::from(
-                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                    "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_sse\"}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"h2_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"sse complete\"}]}]}}\n\ndata: [DONE]\n\n",
                 ))
                 .unwrap()
         }
@@ -441,6 +875,20 @@ async fn controlled_responses_upstream(
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .header("content-type", "application/json")
             .body(Body::from(format!(r#"{{"error":"controlled_{label}"}}"#)))
+            .unwrap(),
+        ProviderMode::RateLimited => Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"rate_limit_error","code":"rate_limit_error","message":"controlled rate limit"}}"#,
+            ))
+            .unwrap(),
+        ProviderMode::UpstreamBadGateway => Response::builder()
+            .status(StatusCode::BAD_GATEWAY)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"upstream_gateway_error","message":"controlled upstream 502"}}"#,
+            ))
             .unwrap(),
     }
 }
@@ -471,6 +919,71 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
     }
 }
 
+async fn start_no_response_upstream() -> ControlledUpstream {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => {
+                    let (socket, _) = accepted.unwrap();
+                    captures_tx.send(ProviderCapture {
+                        authorization: None,
+                        accept: None,
+                        body: json!({"transport_connected": true}),
+                    }).unwrap();
+                    drop(socket);
+                }
+            }
+        }
+    });
+    ControlledUpstream {
+        base_url: format!("http://{address}/v1"),
+        captures: captures_rx,
+        shutdown: Some(shutdown_tx),
+    }
+}
+
+/// A provider that commits an SSE response head and one frame, then aborts the body.
+/// The runtime reads an incomplete provider stream, which is a provider transport
+/// failure and must stay provider-private.
+async fn start_aborted_sse_upstream() -> ControlledUpstream {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => {
+                    let (mut socket, _) = accepted.unwrap();
+                    captures_tx.send(ProviderCapture {
+                        authorization: None,
+                        accept: None,
+                        body: json!({"transport_connected": true}),
+                    }).unwrap();
+                    let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
+                    let frame = "event: response.created\ndata: {\"type\":\"response.created\",\"id\":\"h2_aborted\"}\n\n";
+                    let chunk = format!("{:x}\r\n{}\r\n", frame.len(), frame);
+                    let _ = socket.write_all(head.as_bytes()).await;
+                    let _ = socket.write_all(chunk.as_bytes()).await;
+                    // Abort the body: no terminating chunk and no `[DONE]`.
+                    drop(socket);
+                }
+            }
+        }
+    });
+    ControlledUpstream {
+        base_url: format!("http://{address}/v1"),
+        captures: captures_rx,
+        shutdown: Some(shutdown_tx),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct H2Ports {
     success: u16,
@@ -492,13 +1005,9 @@ impl H2Ports {
     }
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 /// Return the decoded `data:` payload for the named SSE event.
 fn sse_data_payload(body: &str, event: &str) -> Value {
@@ -523,16 +1032,13 @@ fn write_h2_config(
     success: &ControlledUpstream,
     failure_a: &ControlledUpstream,
     failure_b: &ControlledUpstream,
-) -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-h2-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    ));
-    fs::create_dir_all(&root).unwrap();
-    let path = root.join("config.h2.toml");
+    success_responses_config: &str,
+) -> H2Config {
+    let config_dir = tempfile::Builder::new()
+        .prefix("routecodex-v3-h2-")
+        .tempdir()
+        .unwrap();
+    let path = config_dir.path().join("config.h2.toml");
     fs::write(
         &path,
         format!(
@@ -580,6 +1086,7 @@ endpoints = ["responses"]
 
 [providers.success]
 type = "responses"
+{success_responses_config}
 base_url = "{success_base}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "success", env = "ROUTECODEX_V3_H2_SUCCESS_KEY" }}] }}
@@ -684,35 +1191,44 @@ targets = [{{ kind = "forwarder", id = "h2_exhausted", priority = 1 }}]
             reselect_port = ports.reselect,
             exhausted_port = ports.exhausted,
             success_base = success.base_url,
+            success_responses_config = success_responses_config,
             failure_a_base = failure_a.base_url,
             failure_b_base = failure_b.base_url,
             hub_v1_declaration = hub_v1_test_declaration(),
             success_execution = hub_v1_server_execution("h2_success"),
             reselect_execution = hub_v1_server_execution("h2_reselect"),
-            exhausted_execution = hub_v1_server_execution("h2_exhausted"),
+            // This fixture tests terminal transport privacy, including permanent
+            // 429. Declare a finite recovery budget rather than relying on the
+            // retired immediate-exhaustion behavior. Six seconds permits the
+            // declared five-second cross-provider action gate to reach B once.
+            exhausted_execution = format!("{}\n[servers.h2_exhausted.execution.attempt_store]\nresidence_timeout_ms = 6000\n", hub_v1_server_execution("h2_exhausted")),
         ),
     )
     .unwrap();
-    path
+    H2Config {
+        path,
+        _config_dir: config_dir,
+    }
 }
 
-fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
-    let state_root = std::env::temp_dir().join(format!(
-        "rccv3-h2-state-{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock must be after UNIX epoch")
-            .as_nanos()
-    ));
-    let temp_dir = PathBuf::from("/tmp/rccv3-h2-runtime");
-    fs::create_dir_all(&temp_dir).expect("H2 lifecycle temp directory must be available");
+fn start_cli_server(config_path: &H2Config, _ports: Vec<u16>) -> CliProcess {
+    let runtime_dir = tempfile::Builder::new()
+        .prefix("h2-")
+        .tempdir_in("/tmp")
+        .expect("H2 lifecycle temp directory must be available");
+    let temp_dir = runtime_dir.path();
+    let state_root = temp_dir.join("state");
     let mut child = Command::new(env!("CARGO_BIN_EXE_rccv3"))
         .args(["server", "start", "--foreground", "--config"])
-        .arg(config_path)
+        .arg(&config_path.path)
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .env("ROUTECODEX_V3_H2_SUCCESS_KEY", "h2-success-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_A_KEY", "h2-failure-a-secret")
         .env("ROUTECODEX_V3_H2_FAILURE_B_KEY", "h2-failure-b-secret")
+        // Keep the debug sample writer inside the test-owned temp dir. The
+        // sandbox denies the real `$HOME/.rcc/codex-samples` retention lock, and
+        // a scoped child must not touch shared user state.
+        .env("HOME", temp_dir)
         .env("TMPDIR", &temp_dir)
         .env("TMP", &temp_dir)
         .env("TEMP", &temp_dir)
@@ -725,13 +1241,16 @@ fn start_cli_server(config_path: &Path, _ports: Vec<u16>) -> CliProcess {
         "H2 CLI pid={} binary={} config={}",
         child.id(),
         env!("CARGO_BIN_EXE_rccv3"),
-        config_path.display()
+        config_path.path.display()
     );
     assert!(
         matches!(child.try_wait(), Ok(None)),
         "rccv3 CLI server exited during startup"
     );
-    CliProcess { child }
+    CliProcess {
+        child,
+        _runtime_dir: runtime_dir,
+    }
 }
 
 async fn wait_for_health(

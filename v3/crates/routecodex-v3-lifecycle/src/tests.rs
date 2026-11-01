@@ -1,13 +1,67 @@
 use super::*;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
-pub(crate) static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+#[cfg(unix)]
+#[path = "../../routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
+mod hub_v1_fixture;
+
+/// Tests mutate process environment variables under one lock. Recover a
+/// poisoned guard so one failing test cannot turn later tests into cascades.
+pub(crate) struct TestEnvLock(Mutex<()>);
+
+impl TestEnvLock {
+    const fn new() -> Self {
+        Self(Mutex::new(()))
+    }
+
+    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, ()>, std::convert::Infallible> {
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()))
+    }
+}
+
+pub(crate) static TEST_ENV_LOCK: TestEnvLock = TestEnvLock::new();
 pub(crate) const TEST_HOOKS_INSTALL_RECORD_ENV: &str = "ROUTECODEX_HOOKS_INSTALL_RECORD";
 
+#[cfg(unix)]
+mod codex_sample_persistence;
+mod control_plane_accept;
 mod hooks_lifecycle;
+mod restart_plan;
+mod runtime_fd_limit;
+
+#[test]
+fn managed_config_ephemeral_detection_covers_system_temp_roots() {
+    // Codex-managed orphans were observed under both the caller TMPDIR
+    // (`/private/var/folders/.../T/...`) and the fixed `/private/tmp/...` root,
+    // so both must select the managed-child watchdog.
+    #[cfg(target_os = "macos")]
+    assert!(managed_config_is_ephemeral(Path::new(
+        "/private/tmp/rc-ab/config.toml"
+    )));
+    #[cfg(target_os = "macos")]
+    assert!(managed_config_is_ephemeral(Path::new(
+        "/private/var/folders/rc/T/rc-ab/config.toml"
+    )));
+    assert!(managed_config_is_ephemeral(
+        &std::env::temp_dir().join("rc-mmx/config.toml")
+    ));
+    let real_temp = TempDir::new().unwrap();
+    assert!(managed_config_is_ephemeral(
+        &real_temp.path().join("config.toml")
+    ));
+    assert!(!managed_config_is_ephemeral(Path::new(
+        "/etc/routecodex/config.toml"
+    )));
+    assert!(!managed_config_is_ephemeral(Path::new(
+        "/Volumes/extension/.rcc/config.toml"
+    )));
+}
 
 #[test]
 fn control_client_disconnect_is_not_a_managed_runtime_failure() {
@@ -100,7 +154,7 @@ async fn failed_hooks_stop_completes_main_lifecycle_and_reports_degraded_cleanup
 
 #[tokio::test]
 #[cfg(unix)]
-async fn failed_hooks_restart_continues_to_replacement() {
+async fn native_exec_failure_retains_aggregate_and_hooks_owner() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
     let root = TempDir::new().unwrap();
@@ -129,6 +183,7 @@ async fn failed_hooks_restart_continues_to_replacement() {
         .unwrap();
     let restart_plan = ControlRestartPlan {
         control_instance_id: declaration.instance_id.clone(),
+        control_start_nonce: "test-nonce".into(),
         declaration: declaration.clone(),
         executable_path: root.path().join("missing-replacement"),
         snapshots: false,
@@ -137,39 +192,36 @@ async fn failed_hooks_restart_continues_to_replacement() {
         sse_dump: false,
     };
 
-    let error = restart_managed_runtime_in_place(
-        &instance_dir,
-        &socket_path,
-        handle,
-        V3HooksSidecarSupervisor::from_startup(
-            instance_dir.clone(),
-            tokio::spawn(async move { Ok(Some(sidecar)) }),
-        ),
-        restart_plan,
-        false,
-    )
-    .await
-    .unwrap_err();
+    let supervisor = V3HooksSidecarSupervisor::from_startup(
+        instance_dir.clone(),
+        tokio::spawn(async move { Ok(Some(sidecar)) }),
+    );
+    let (stream, _peer) = UnixStream::pair().unwrap();
+    let error =
+        restart_managed_runtime_in_place(&instance_dir, &handle, restart_plan, false, &stream)
+            .await
+            .unwrap_err();
 
     assert!(
-        matches!(error, V3LifecycleError::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound),
-        "restart must pass hooks cleanup failure and attempt replacement, got {error}"
+        error.to_string().contains("No such file"),
+        "restart must report native exec failure, got {error}"
     );
-    let status: V3ManagedStatusRecord = read_json(&instance_dir.join("status.json")).unwrap();
-    assert_eq!(status.state, V3ManagedRunState::Failed);
-    assert!(status.detail.as_deref().is_some_and(|detail| {
-        detail.contains("exec restart failed") && detail.contains("hooks sidecar shutdown failed")
-    }));
+    assert!(!listener_set_is_available(&declaration.listeners));
     assert!(instance_dir.join("pid.cache").exists());
-    assert!(!instance_dir.join("control.json").exists());
-    assert!(!socket_path.exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(socket_path.exists());
     assert!(process_record_path.exists());
-    assert!(!restart_plan_path.exists());
+    assert!(restart_plan_path.exists());
+    assert!(!instance_dir.join(FRONT_HANDOFF_FILE).exists());
+    assert!(!instance_dir.join(PROVIDER_HANDOFF_FILE).exists());
+    handle.shutdown().await;
+    assert!(supervisor.stop().await.is_err());
 }
 
 #[tokio::test]
 #[cfg(unix)]
 async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_control() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -198,7 +250,7 @@ async fn live_persisted_hooks_group_does_not_block_reaping_running_runtime_contr
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_499,
+        45_557,
     );
     write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
     write_status(
@@ -296,6 +348,7 @@ async fn live_hooks_group_does_not_block_forced_stop() {
 #[tokio::test]
 #[cfg(unix)]
 async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
     let root = TempDir::new().unwrap();
     let instance_dir = root.path().join("instance");
     ensure_private_dir(&instance_dir).unwrap();
@@ -321,7 +374,7 @@ async fn stale_identity_mismatch_hooks_group_does_not_block_runtime_reap() {
         &root.path().join("config.v3.toml"),
         "digest",
         "/tmp/rccv3",
-        45_496,
+        45_558,
     );
     write_json_atomic(&instance_dir.join("instance.json"), &expected).unwrap();
     write_status(
@@ -381,6 +434,53 @@ fn unavailable_hook_detail_survives_a_running_status_update() {
     assert_eq!(
         append_status_detail(None, "released listener ports 45499".to_string()),
         "released listener ports 45499"
+    );
+}
+
+#[test]
+fn pending_exec_restart_diagnostic_survives_starting_status_read() {
+    let root = TempDir::new().unwrap();
+    let instance_dir = root.path().join("instance");
+    ensure_private_dir(&instance_dir).unwrap();
+    let instance_id = "v3-pending-restart-diagnostic";
+    let detail = "codex sample persistence shutdown failed during exec restart: request=req-7 file=request.json reason=permission denied";
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Starting,
+        Some(format!("exec restart accepted; {detail}")),
+    )
+    .unwrap();
+
+    assert_eq!(
+        read_pending_startup_detail(&instance_dir, instance_id).unwrap(),
+        Some(detail.to_string())
+    );
+
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Starting,
+        Some("exec restart accepted".to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_pending_startup_detail(&instance_dir, instance_id).unwrap(),
+        None,
+        "the generic legacy restart marker must not become a persistent running detail"
+    );
+
+    write_status(
+        &instance_dir,
+        instance_id,
+        V3ManagedRunState::Running,
+        Some(detail.to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_pending_startup_detail(&instance_dir, instance_id).unwrap(),
+        None,
+        "the next normal child start must not replay a consumed startup diagnostic"
     );
 }
 
@@ -447,6 +547,320 @@ port = 45498
         }),
         "declaration must include enabled admin_webui listener: {:?}",
         declaration.listeners
+    );
+}
+
+fn free_business_port() -> u16 {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+fn admin_isolated_listeners(
+    business_port: u16,
+    admin_port: u16,
+) -> Vec<V3ManagedListenerDeclaration> {
+    vec![
+        V3ManagedListenerDeclaration {
+            server_id: "responses_v3".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: business_port,
+        },
+        V3ManagedListenerDeclaration {
+            server_id: "admin_webui".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: admin_port,
+        },
+    ]
+}
+
+/// An admin_webui listener that cannot bind is optional. Its occupied port
+/// must not be classified as business unavailability, otherwise a managed
+/// start refuses to run even though every business listener is free.
+#[test]
+fn issue850e916_admin_only_occupancy_is_not_business_unavailability() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let business_port = free_business_port();
+    let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_placeholder.local_addr().unwrap().port();
+    let mut declaration = managed_test_declaration(
+        "admin-only-availability",
+        Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        business_port,
+    );
+    declaration.listeners = admin_isolated_listeners(business_port, admin_port);
+
+    assert!(
+        listener_set_is_available(&declaration.listeners),
+        "an occupied admin_webui port must not make the business listener set unavailable: {:?}",
+        declaration.listeners
+    );
+    assert!(
+        occupied_listener_ports(&declaration.listeners).is_empty(),
+        "an occupied admin_webui port must not appear as an occupied business port: {:?}",
+        occupied_listener_ports(&declaration.listeners)
+    );
+}
+
+/// Residual discovery feeds the scoped signaling path. A previous instance
+/// that only overlaps on the optional admin listener must never be harvested
+/// as a business residual process. The second group covers the symmetric
+/// case: the target business port equals the port that the other instance
+/// declares only as its optional admin_webui listener.
+#[test]
+fn issue850e916_admin_only_occupancy_is_excluded_from_residual_pids() {
+    struct ChildGuard(std::process::Child);
+
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let business_port = free_business_port();
+    let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_placeholder.local_addr().unwrap().port();
+    let mut target = managed_test_declaration(
+        "admin-only-residual-target",
+        Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        business_port,
+    );
+    target.listeners = admin_isolated_listeners(business_port, admin_port);
+
+    let published = V3ManagedInstanceDeclaration {
+        listeners: vec![V3ManagedListenerDeclaration {
+            server_id: "admin_webui".to_string(),
+            bind: "127.0.0.1".to_string(),
+            port: admin_port,
+        }],
+        ..managed_test_declaration(
+            "admin-only-residual-previous",
+            Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+            "digest",
+            "/tmp/rccv3",
+            admin_port,
+        )
+    };
+    let instance_dir = state.join("instances").join(&published.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+
+    let residual = std::process::Command::new("sleep")
+        .arg("300")
+        .spawn()
+        .expect("spawn residual process");
+    let residual_pid = residual.id();
+    let _residual = ChildGuard(residual);
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: published.instance_id.clone(),
+            pid: residual_pid,
+            start_nonce: "admin-only-residual".to_string(),
+            started_at_epoch_ms: epoch_ms(),
+            process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
+        },
+    )
+    .unwrap();
+
+    let discovered = instance_residual_pids_for_listener_set(&state, &target.listeners)
+        .expect("residual discovery must succeed");
+    assert!(
+        discovered.is_empty(),
+        "an admin-only overlap must not be reported as a business residual: {discovered:?}"
+    );
+
+    // Second group: the target's business port is exactly the port that the
+    // other instance declares only as its optional admin_webui listener, and
+    // that instance declares no business listener at all. Both sides must be
+    // judged by declaration semantics (server_id), never by port-number
+    // guessing.
+    {
+        let root = TempDir::new().unwrap();
+        let state = root.path().join("state");
+        // Bind the admin placeholder first so the free business port cannot
+        // collide with the already-bound admin port.
+        let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let target_admin_port = admin_placeholder.local_addr().unwrap().port();
+        let target_business_port = free_business_port();
+        assert_ne!(
+            target_admin_port, target_business_port,
+            "business and admin listeners must own distinct ports"
+        );
+        let mut target = managed_test_declaration(
+            "admin-port-overlaps-business-target",
+            Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+            "digest",
+            "/tmp/rccv3",
+            target_business_port,
+        );
+        target.listeners = admin_isolated_listeners(target_business_port, target_admin_port);
+
+        let published = V3ManagedInstanceDeclaration {
+            listeners: vec![V3ManagedListenerDeclaration {
+                server_id: "admin_webui".to_string(),
+                bind: "127.0.0.1".to_string(),
+                port: target_business_port,
+            }],
+            ..managed_test_declaration(
+                "admin-port-overlaps-business-previous",
+                Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+                "digest",
+                "/tmp/rccv3",
+                target_business_port,
+            )
+        };
+        let instance_dir = state.join("instances").join(&published.instance_id);
+        ensure_private_dir(&instance_dir).unwrap();
+        write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+
+        let residual = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .expect("spawn residual process");
+        let residual_pid = residual.id();
+        let _residual = ChildGuard(residual);
+        write_json_atomic(
+            &instance_dir.join("pid.cache"),
+            &V3ManagedPidCache {
+                schema_version: SCHEMA_VERSION,
+                instance_id: published.instance_id.clone(),
+                pid: residual_pid,
+                start_nonce: "admin-port-overlaps-business".to_string(),
+                started_at_epoch_ms: epoch_ms(),
+                process_start_token: Some(process_start_token(residual_pid).unwrap().unwrap()),
+            },
+        )
+        .unwrap();
+
+        let discovered = instance_residual_pids_for_listener_set(&state, &target.listeners)
+            .expect("residual discovery must succeed");
+        assert!(
+            discovered.is_empty(),
+            "a published admin-only listener on the target business port must not be a business residual: {discovered:?}"
+        );
+    }
+
+    // ChildGuard terminates only the processes this test spawned.
+}
+
+/// Reaping an orphan control socket only needs the business listener set to
+/// be free. An occupied optional admin listener must not block that reap.
+#[test]
+fn issue850e916_admin_only_occupancy_does_not_block_orphan_reap() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let root = TempDir::new().unwrap();
+    let business_port = free_business_port();
+    let admin_placeholder = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_placeholder.local_addr().unwrap().port();
+    let mut declaration = managed_test_declaration(
+        "admin-only-orphan-reap",
+        Path::new("/tmp/rccv3-850e916/config.v3.toml"),
+        "digest",
+        "/tmp/rccv3",
+        business_port,
+    );
+    declaration.listeners = admin_isolated_listeners(business_port, admin_port);
+    let instance_dir = root.path().join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Starting,
+        Some("crash window: control record never written".to_string()),
+    )
+    .unwrap();
+    let socket_path = managed_control_socket_path(&declaration.instance_id);
+    fs::write(&socket_path, b"orphan control socket").unwrap();
+
+    reap_inactive_runtime_files(&instance_dir, &declaration)
+        .expect("an occupied admin_webui port must not block reaping an orphan control socket");
+
+    assert!(
+        !socket_path.exists(),
+        "the orphan control socket must be reaped despite admin-only occupancy"
+    );
+    assert!(!instance_dir.join("control.json").exists());
+    let _ = fs::remove_file(socket_path);
+}
+
+/// FM-4: the explicit-PID port guard must keep refusing a PID that owns
+/// listener ports outside the declared target set. The test drives the guard
+/// directly with the test process's own listeners, so it never signals,
+/// starts, stops, or touches a foreign PID.
+#[test]
+fn guard_explicit_listener_pids_rejects_pid_listening_outside_target_ports() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let first = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let second = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let first_port = first.local_addr().unwrap().port();
+    let second_port = second.local_addr().unwrap().port();
+    assert_ne!(
+        first_port, second_port,
+        "ephemeral listeners must own distinct ports"
+    );
+    let target_ports = std::collections::BTreeSet::from([first_port]);
+
+    let error = guard_explicit_listener_pids_are_scoped_to_target_ports(
+        &[std::process::id()],
+        &target_ports,
+    )
+    .expect_err("a PID that also listens on a non-target port must be refused");
+    assert!(matches!(error, V3LifecycleError::Validation(_)));
+    let message = error.to_string();
+    assert!(
+        message.contains("refusing to signal listener PID")
+            && message.contains("non-target listener ports"),
+        "the refusal must expose the scoped validation error, got: {message}"
+    );
+    assert!(
+        message.contains(&second_port.to_string()),
+        "the refusal must name non-target port {second_port}, got: {message}"
+    );
+
+    // The guard only reads the listener table, so both test-owned listeners
+    // must keep accepting connections after the refusal.
+    for listener in [&first, &second] {
+        let address = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(address)
+            .expect("guard refusal must not stop the test-owned listener");
+        let (accepted, _) = listener
+            .accept()
+            .expect("guard refusal must not close the test-owned listener");
+        drop(accepted);
+        drop(client);
+    }
+}
+
+/// Complement to the admin-only safety cases: a genuinely occupied business
+/// port must stay in `occupied_listener_ports`, while an occupied optional
+/// admin_webui port must be excluded from that same set.
+#[test]
+fn issue850e916_occupied_business_port_is_preserved_while_admin_is_excluded() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    let business_occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let business_port = business_occupied.local_addr().unwrap().port();
+    let admin_port = admin_occupied.local_addr().unwrap().port();
+    assert_ne!(
+        business_port, admin_port,
+        "business and admin listeners must own distinct ports"
+    );
+    let listeners = admin_isolated_listeners(business_port, admin_port);
+
+    assert_eq!(
+        occupied_listener_ports(&listeners),
+        std::collections::BTreeSet::from([business_port]),
+        "a real business occupation must be preserved while the occupied admin_webui port is excluded"
     );
 }
 
@@ -632,12 +1046,12 @@ fn restart_without_current_instance_state_fails_without_bootstrap() {
         .build()
         .unwrap();
     let error = runtime
-        .block_on(lifecycle.restart(&executable, Duration::from_millis(1)))
+        .block_on(lifecycle.restart(&executable, Duration::ZERO))
         .unwrap_err();
 
     assert!(
         matches!(&error, V3LifecycleError::NotRunning(instance_id) if instance_id == &declaration.instance_id),
-        "restart without live managed truth must fail explicitly instead of bootstrapping a detached runtime, got {error}"
+        "restart without managed truth must report NotRunning before budget expiry, got {error}"
     );
     assert!(
         !instance_dir.join("instance.json").exists(),
@@ -647,6 +1061,94 @@ fn restart_without_current_instance_state_fails_without_bootstrap() {
         !instance_dir.join("status.json").exists(),
         "restart without live managed truth must not publish startup status"
     );
+}
+
+#[cfg(unix)]
+fn write_finite_restart_child_fixture(root: &Path) -> PathBuf {
+    let executable = root.join("restart-child.sh");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf 'started\\n' > \"$(dirname \"$0\")/restart-child-started\"\nexit 0\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    executable
+}
+
+#[cfg(unix)]
+fn assert_expired_restart_budget_preserves_terminal_state(state: V3ManagedRunState) {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let port_listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = port_listener.local_addr().unwrap().port();
+    drop(port_listener);
+    let (config, executable, state_root) = fixture_with_port(&root, port);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state_root);
+    let (published, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state_root.join("instances").join(&published.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+    write_status(
+        &instance_dir,
+        &published.instance_id,
+        state.clone(),
+        Some("terminal state before expired restart".to_string()),
+    )
+    .unwrap();
+    assert_eq!(
+        read_json::<V3ManagedStatusRecord>(&instance_dir.join("status.json"))
+            .unwrap()
+            .state,
+        state,
+        "test setup must expose the intended terminal branch"
+    );
+
+    let instance_before = fs::read(instance_dir.join("instance.json")).unwrap();
+    let status_before = fs::read(instance_dir.join("status.json")).unwrap();
+    let started_marker = root.path().join("restart-child-started");
+    let replacement = write_finite_restart_child_fixture(root.path());
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    let result = runtime.block_on(lifecycle.restart(&replacement, Duration::ZERO));
+    let instance_after = fs::read(instance_dir.join("instance.json")).unwrap();
+    let status_after = fs::read(instance_dir.join("status.json")).unwrap();
+
+    assert!(
+        matches!(&result, Err(V3LifecycleError::Timeout(_))),
+        "expired restart budget must return Timeout for {state:?}, got {result:?}"
+    );
+    assert_eq!(
+        instance_after, instance_before,
+        "expired restart budget must not rewrite instance.json for {state:?}"
+    );
+    assert_eq!(
+        status_after, status_before,
+        "expired restart budget must not rewrite status.json for {state:?}"
+    );
+    // The old bootstrap branch rewrites instance.json/status.json synchronously
+    // before spawn, so the byte assertions above catch a pre-spawn mutation
+    // even when the finite child has not been scheduled yet. A GREEN run never
+    // spawns it at all, so the marker can never appear for correct behavior.
+    assert!(
+        !started_marker.exists(),
+        "expired restart budget must not start a managed child for {state:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn expired_restart_budget_keeps_stopped_owner_state_without_spawning() {
+    assert_expired_restart_budget_preserves_terminal_state(V3ManagedRunState::Stopped);
+}
+
+#[cfg(unix)]
+#[test]
+fn expired_restart_budget_keeps_failed_owner_state_without_spawning() {
+    assert_expired_restart_budget_preserves_terminal_state(V3ManagedRunState::Failed);
 }
 
 #[test]
@@ -740,67 +1242,6 @@ fn restart_matches_live_previous_owner_when_config_path_changes_for_the_same_lis
 }
 
 #[test]
-fn restart_plan_projects_a_validated_config_path_change_and_rejects_listener_drift() {
-    let root = TempDir::new().unwrap();
-    let instance_dir = root.path().join("instance");
-    ensure_private_dir(&instance_dir).unwrap();
-    let executable_path = std::env::current_exe().unwrap();
-    let current = managed_test_declaration(
-        "v3-legacy-config-owner",
-        &root.path().join("config.v3.toml"),
-        "legacy-digest",
-        executable_path.to_str().unwrap(),
-        45555,
-    );
-    let target = managed_test_declaration(
-        "v3-user-config-owner",
-        &root.path().join("config.toml"),
-        "user-digest",
-        executable_path.to_str().unwrap(),
-        45555,
-    );
-    let request = ControlRequest {
-        schema_version: SCHEMA_VERSION,
-        instance_id: current.instance_id.clone(),
-        start_nonce: "nonce".to_string(),
-        operation: ControlOperation::Restart,
-        ports: None,
-    };
-    let write_plan = |target_declaration: V3ManagedInstanceDeclaration| {
-        write_json_atomic(
-            &instance_dir.join(RESTART_PLAN_FILE),
-            &V3ManagedRestartPlanRecord {
-                schema_version: SCHEMA_VERSION,
-                instance_id: current.instance_id.clone(),
-                start_nonce: "nonce".to_string(),
-                executable_path: executable_path.display().to_string(),
-                target_declaration: Some(target_declaration),
-                snapshots: false,
-                snapshot_direct: false,
-                snapshot_stages: None,
-                sse_dump: false,
-            },
-        )
-        .unwrap();
-    };
-
-    write_plan(target.clone());
-    let projected = control_restart_plan(&instance_dir, &request, &current)
-        .unwrap()
-        .unwrap();
-    assert_eq!(projected.declaration, target);
-
-    let mut listener_drift = target;
-    listener_drift.listeners.push(V3ManagedListenerDeclaration {
-        server_id: "additional".to_string(),
-        bind: "127.0.0.1".to_string(),
-        port: 45556,
-    });
-    write_plan(listener_drift);
-    assert!(control_restart_plan(&instance_dir, &request, &current).is_err());
-}
-
-#[test]
 fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
     let root = TempDir::new().unwrap();
     let state = root.path().join("state");
@@ -843,10 +1284,41 @@ fn exec_restart_reentry_adopts_changed_declaration_from_previous_owner() {
     )
     .unwrap();
 
-    assert!(
-        adopt_exec_restart_declaration_change(&state, &expected_dir, &expected).unwrap(),
-        "exec-reentered child must adopt the current declaration"
-    );
+    write_json_atomic(
+        &old_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: old.instance_id.clone(),
+            start_nonce: "previous-exec-owner".into(),
+            socket_path: managed_control_socket_path(&old.instance_id)
+                .display()
+                .to_string(),
+        },
+    )
+    .unwrap();
+    write_json_atomic(
+        &old_dir.join(FRONT_HANDOFF_FILE),
+        &Vec::<serde_json::Value>::new(),
+    )
+    .unwrap();
+    write_json_atomic(
+        &old_dir.join(PROVIDER_HANDOFF_FILE),
+        &Vec::<serde_json::Value>::new(),
+    )
+    .unwrap();
+    ensure_private_dir(&expected_dir).unwrap();
+    write_json_atomic(&expected_dir.join(EXEC_RESTART_DECLARATION_FILE), &expected).unwrap();
+    let adopted_owner = adopt_exec_restart_declaration_change(
+        &state,
+        &expected_dir,
+        &expected,
+        &ExecRestartOwner {
+            instance_id: old.instance_id.clone(),
+            start_nonce: "previous-exec-owner".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(adopted_owner, old_dir);
 
     let adopted: V3ManagedInstanceDeclaration =
         read_json(&expected_dir.join("instance.json")).unwrap();
@@ -953,6 +1425,84 @@ fn non_terminal_runtime_state_is_never_reaped_after_control_probe_failure() {
     assert!(instance_dir.join("pid.cache").exists());
     assert!(instance_dir.join("status.json").exists());
     drop(occupied);
+}
+
+#[tokio::test]
+async fn stale_stopping_state_can_reach_owned_reap_after_child_exit() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Stopping,
+        Some("child exited before terminal status".to_string()),
+    )
+    .unwrap();
+
+    wait_for_stopping_instance(&instance_dir, &declaration, Duration::from_millis(50))
+        .await
+        .expect("stale owned stop must reach the existing reap safety check");
+    reap_inactive_runtime_files(&instance_dir, &declaration).unwrap();
+}
+
+#[tokio::test]
+async fn active_stopping_child_is_not_reaped_when_listeners_have_closed() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (declaration, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&declaration.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &declaration).unwrap();
+    write_status(
+        &instance_dir,
+        &declaration.instance_id,
+        V3ManagedRunState::Stopping,
+        None,
+    )
+    .unwrap();
+    let socket_path = managed_control_socket_path(&declaration.instance_id);
+    fs::write(&socket_path, b"active control socket").unwrap();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            pid: std::process::id(),
+            start_nonce: "active-stop".to_string(),
+            started_at_epoch_ms: 1,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id.clone(),
+            socket_path: socket_path.display().to_string(),
+            start_nonce: "active-stop".to_string(),
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(
+        wait_for_stopping_instance(&instance_dir, &declaration, Duration::from_millis(50)).await,
+        Err(V3LifecycleError::Timeout(_))
+    ));
+    assert!(instance_dir.join("pid.cache").exists());
+    assert!(instance_dir.join("control.json").exists());
+    assert!(socket_path.exists());
+    fs::remove_file(socket_path).unwrap();
 }
 
 #[test]

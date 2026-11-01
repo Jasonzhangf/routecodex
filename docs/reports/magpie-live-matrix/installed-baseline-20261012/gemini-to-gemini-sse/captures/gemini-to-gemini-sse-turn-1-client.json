@@ -1,0 +1,63 @@
+{
+  "case_id": "gemini-to-gemini-sse",
+  "turn": 1,
+  "turn_id": null,
+  "request_source": "fixture",
+  "request": {
+    "method": "POST",
+    "path": "/v1beta/models/mock.gemini-model:streamGenerateContent",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body_text": "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"hello\"}]}]}"
+  },
+  "client_response": {
+    "url": "http://127.0.0.1:57015/v1beta/models/mock.gemini-model:streamGenerateContent",
+    "method": "POST",
+    "request_headers": {
+      "content-type": "application/json"
+    },
+    "status": null,
+    "status_text": null,
+    "headers": {},
+    "raw_headers": [],
+    "body": null,
+    "bodyText": "",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": []
+    },
+    "bodyBytesBase64": "",
+    "response_ended": false,
+    "complete": null,
+    "closed": true,
+    "aborted": false,
+    "truncated": false,
+    "elapsed_ms": 3,
+    "error": "socket hang up",
+    "error_detail": {
+      "name": "Error",
+      "message": "socket hang up",
+      "code": "ECONNRESET",
+      "errno": null,
+      "syscall": null,
+      "stack": "Error: socket hang up\n    at Socket.socketOnEnd (node:_http_client:599:25)\n    at Socket.emit (node:events:531:35)\n    at endReadableNT (node:internal/streams/readable:1698:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)"
+    }
+  },
+  "observation": {
+    "protocol": "gemini",
+    "kind": "unknown",
+    "content_type": "",
+    "ok": false,
+    "error": "empty_body"
+  },
+  "diagnostics": [
+    "provider attempt count 0 != scripted 1 for turn 1",
+    "provider attempt count 0 != asserted 1 for turn 1",
+    "provider business attempt missing for turn 1",
+    "client status missing for completed response",
+    "client body_must text missing",
+    "client body_must finishReason missing",
+    "semantic terminal missing from client output"
+  ]
+}

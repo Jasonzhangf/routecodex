@@ -66,7 +66,9 @@ for (const fixture of fixtures) {
   try {
     cpSync(v3Root, join(root, 'v3'), {
       recursive: true,
-      filter: (source) => !source.includes('/target/'),
+      // Build-control holds live sockets and is gitignored runtime state, so a
+      // source copy must not try to duplicate it.
+      filter: (source) => !source.includes('/target/') && !source.includes('/build-control/'),
     });
     const target = join(root, fixture.file);
     const source = readFileSync(target, 'utf8');

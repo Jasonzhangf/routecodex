@@ -78,7 +78,7 @@ async function main() {
     requestId,
     model: mapped?.model || chatLike?.model
   });
-  const stats = { textDelta: 0, ra: 0, completed: 0, done: 0, doneToken: 0 };
+  const stats = { textDelta: 0, ra: 0, completed: 0, incomplete: 0, failed: 0, nonProtocolTerminator: 0 };
   let chunks = 0;
   await new Promise((resolve) => {
     readable.on('data', (buf) => {
@@ -87,9 +87,14 @@ async function main() {
         chunks++;
         if (s.includes('event: response.output_text.delta')) stats.textDelta++;
         if (s.includes('event: response.required_action')) stats.ra++;
+        // Responses 终态只有 completed / incomplete / failed。
         if (s.includes('event: response.completed')) stats.completed++;
-        if (s.includes('event: response.done')) stats.done++;
-        if (s.includes('data: [DONE]')) stats.doneToken++;
+        if (s.includes('event: response.incomplete')) stats.incomplete++;
+        if (s.includes('event: response.failed')) stats.failed++;
+        // 非 Responses 终止符（response.done / Chat 的 [DONE]）出现即回归。
+        if (s.includes('event: response.done') || s.includes('data: [DONE]')) {
+          stats.nonProtocolTerminator++;
+        }
       } catch { /* ignore */ }
     });
     readable.on('end', resolve);
@@ -102,8 +107,10 @@ async function main() {
   console.log('requestId:', requestId);
   console.log('mapped.output_text.length:', typeof outputText === 'string' ? outputText.length : 0);
   console.log('mapped.required_action.tool_calls:', ra);
-  console.log('sse: chunks=%d textDelta=%d required_action=%d completed=%d done=%d doneToken=%d',
-    chunks, stats.textDelta, stats.ra, stats.completed, stats.done, stats.doneToken);
+  console.log(
+    'sse: chunks=%d textDelta=%d required_action=%d completed=%d incomplete=%d failed=%d nonProtocolTerminator=%d',
+    chunks, stats.textDelta, stats.ra, stats.completed, stats.incomplete, stats.failed,
+    stats.nonProtocolTerminator);
 }
 
 main().catch((e) => {

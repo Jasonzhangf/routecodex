@@ -1,0 +1,63 @@
+{
+  "bundle_digest": "sha256:868fe60e645e4215c87a511c04f940589d7d1096e1835e8d444da44357a85bd4",
+  "created_at": "2026-10-10T07:23:14.667757+00:00",
+  "frozen_reviews": [
+    {
+      "module_id": "routecodex-v4-base-node",
+      "review_id": "base-sdk013-architecture-review"
+    },
+    {
+      "module_id": "routecodex-v4-edge",
+      "review_id": "edge-sdk013-architecture-review"
+    },
+    {
+      "module_id": "routecodex-v4-control",
+      "review_id": "control-sdk013-architecture-review"
+    }
+  ],
+  "legacy_reconciled_reviews": [
+    {
+      "module_id": "routecodex-v4-error",
+      "review_id": "error-sdk013-architecture-review",
+      "stage": "source_implemented"
+    }
+  ],
+  "maps": [
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "resource-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.0007-to-0.1.0008/maps/resource-map.json",
+      "source_digest": "sha256:05bd659f2ff634de66cef0cf93bcfea64d14afeef3ed27541c6aecd687e72a72",
+      "target_digest": "sha256:4073e213121c8b6296ac68a1188de6935d03a930a6090dd355dfdbb30b92a31a"
+    },
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "function-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.0007-to-0.1.0008/maps/function-map.json",
+      "source_digest": "sha256:963a8a2a0d80e7482a63ffd5e7a04ce1029e75666a670b9747cf7cabcbe3d430",
+      "target_digest": "sha256:45f5819b21bfdcde2dba12e10b1f059030b922e438f05f8604302509e8d994ce"
+    },
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "mainline-call-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.0007-to-0.1.0008/maps/mainline-call-map.json",
+      "source_digest": "sha256:5d04ef3b62980469685851859ba494cd2a3382008f79fc1c3b3f001c70ad362e",
+      "target_digest": "sha256:9e9a21ba1c5b8dd25ef565e6b02211baabba3568e1fa89e8944134a115847684"
+    },
+    {
+      "canonical_source_digest": null,
+      "canonical_target_digest": null,
+      "name": "verification-map.json",
+      "snapshot_path": ".appsdk/migrations/0.1.0007-to-0.1.0008/maps/verification-map.json",
+      "source_digest": "sha256:2a273f5e9b69486365d97350a28e0a07fc83dc2c5d40bd55b6cea793e856e377",
+      "target_digest": "sha256:46e272026960bf6c37d8111bc11e886e73bc4b911e1e53f0d3347413b768e732"
+    }
+  ],
+  "migration_id": "appsdk-0.1.0007-to-0.1.0008",
+  "schema_version": 1,
+  "source_version": "0.1.0007",
+  "target_version": "0.1.0008"
+}

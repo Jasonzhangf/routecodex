@@ -1,10 +1,9 @@
 // feature_id: v3.admin_api_integration
 // Admin REST API 黑盒集成测试：使用 axum 自带 test server 拉起 in-process
 // 服务，覆盖 Dashboard / Routes / Providers / Revisions / Reload 端点。
-use routecodex_v3_admin::{router, AppState, ProviderHealthEntry};
+use routecodex_v3_admin::{router, AppState};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 static TEST_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn temp_home() -> PathBuf {
@@ -72,6 +71,15 @@ fn http_client() -> reqwest::Client {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| panic!("http client"))
+}
+
+/// Local admin token provisioned by `AppState::new` for this temp config dir. Mutating
+/// admin requests must carry it (one rule, no path exceptions).
+fn admin_token(home: &std::path::Path) -> String {
+    std::fs::read_to_string(home.join("state").join("admin-token"))
+        .expect("admin token provisioned under <config_dir>/state/admin-token")
+        .trim()
+        .to_string()
 }
 
 async fn bind_test_server() -> (String, AppState, PathBuf) {
@@ -142,7 +150,30 @@ fn write_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) 
         })
         .collect::<Vec<_>>()
         .join("\n");
-    std::fs::write(store_path, format!("{content}\n")).expect("observability store");
+    let temp_path = store_path.with_extension("jsonl.tmp-test");
+    std::fs::write(&temp_path, format!("{content}\n")).expect("observability store temp");
+    std::fs::rename(&temp_path, &store_path).expect("atomic observability store replace");
+}
+
+fn append_observability_rows(home: &std::path::Path, rows: &[serde_json::Value]) {
+    use std::io::Write;
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    std::fs::create_dir_all(store_path.parent().unwrap()).expect("logs dir");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&store_path)
+        .expect("open observability store");
+    for row in rows {
+        writeln!(
+            file,
+            "{}",
+            serde_json::json!({ "schema_version": 1, "row": row })
+        )
+        .expect("append observability row");
+    }
 }
 
 fn observability_row_with_result(request_key: &str, result: Option<&str>) -> serde_json::Value {
@@ -253,7 +284,8 @@ async fn routes_get_returns_tree() {
 
 #[tokio::test]
 async fn routes_validate_rejects_invalid_target() {
-    let (base, _state, _home) = bind_test_server().await;
+    let (base, _state, home) = bind_test_server().await;
+    let token = admin_token(&home);
     let body = serde_json::json!({
         "servers": [{
             "server_id": "routecodex_v3_4444", "port": 4444,
@@ -268,6 +300,7 @@ async fn routes_validate_rejects_invalid_target() {
     });
     let response = http_client()
         .post(format!("{base}/api/routes/validate"))
+        .header("x-routecodex-admin-token", &token)
         .json(&body)
         .send()
         .await
@@ -291,6 +324,7 @@ async fn routes_validate_rejects_invalid_target() {
     });
     let response = http_client()
         .post(format!("{base}/api/routes/validate"))
+        .header("x-routecodex-admin-token", &token)
         .json(&zero_weight)
         .send()
         .await
@@ -395,22 +429,9 @@ async fn revisions_and_static_assets_are_served() {
     assert!(css.status().is_success());
 }
 
-static HEALTH_ENTRY: OnceLock<ProviderHealthEntry> = OnceLock::new();
-
-fn sample_health() -> ProviderHealthEntry {
-    HEALTH_ENTRY
-        .get_or_init(|| ProviderHealthEntry {
-            tested_at_epoch_ms: 1,
-            ok: true,
-            latency_ms: 1,
-            error: None,
-        })
-        .clone()
-}
-
 #[tokio::test]
-async fn provider_health_test_returns_record() {
-    let (base, state, home) = bind_test_server().await;
+async fn provider_health_test_returns_inline_diagnostic_without_second_health_truth() {
+    let (base, _state, home) = bind_test_server().await;
     let provider_dir = home.join("provider").join("local");
     std::fs::create_dir_all(&provider_dir).expect("provider dir");
     std::fs::write(
@@ -437,22 +458,57 @@ supportsStreaming = true
     .expect("write local provider");
     let response = http_client()
         .post(format!("{base}/api/providers/local/health-test"))
+        .header("x-routecodex-admin-token", admin_token(&home))
         .send()
         .await
         .expect("health response");
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.expect("health json");
+    assert_eq!(body["provider_id"].as_str(), Some("local"));
     assert!(
-        body.get("tested_at_epoch_ms").is_some(),
-        "tested_at_epoch_ms present"
+        body.get("latency_ms").is_some(),
+        "the ad-hoc diagnostic returns its measurement inline: {body}"
     );
-    let cached = state.health_cache.lock().await.get("local").cloned();
-    assert!(cached.is_some(), "health cached in app state");
+    assert_eq!(
+        body["ok"].as_bool(),
+        Some(false),
+        "an unreachable base URL must report a real failure: {body}"
+    );
     assert!(
-        cached.unwrap().error.is_some(),
-        "error message captured when endpoint unreachable"
+        body["error"].is_string(),
+        "the ad-hoc diagnostic must expose the failure inline: {body}"
     );
-    let _ = sample_health();
+
+    // No second provider-health truth: neither the list nor the detail projection may
+    // expose a cached `health` field.
+    let list: serde_json::Value = http_client()
+        .get(format!("{base}/api/providers"))
+        .send()
+        .await
+        .expect("providers response")
+        .json()
+        .await
+        .expect("providers json");
+    let providers = list.as_array().expect("providers array");
+    assert!(!providers.is_empty(), "provider list populated");
+    for provider in providers {
+        assert!(
+            provider.get("health").is_none(),
+            "provider list must not expose a second provider-health truth: {provider}"
+        );
+    }
+    let detail: serde_json::Value = http_client()
+        .get(format!("{base}/api/providers/local"))
+        .send()
+        .await
+        .expect("provider detail response")
+        .json()
+        .await
+        .expect("provider detail json");
+    assert!(
+        detail.get("health").is_none(),
+        "provider detail must not expose a second provider-health truth: {detail}"
+    );
 }
 
 #[tokio::test]
@@ -494,6 +550,438 @@ async fn observability_records_group_terminal_errors_by_raw_status_code() {
     assert_eq!(
         filtered_body["records"][0]["request_key"],
         "4444:req-source"
+    );
+}
+
+/// The records handler caches its projection keyed on the store file identity.
+/// Appending rows must extend the cached view instead of serving a stale page,
+/// and a rewrite (retention compaction) must rebuild it from scratch.
+#[tokio::test]
+async fn observability_records_cache_tracks_append_and_rewrite() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:first", Some("success"))],
+    );
+
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(first["total"], 1);
+    assert_eq!(first["records"][0]["request_key"], "4444:first");
+
+    append_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:second", Some("error"))],
+    );
+    let appended: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("appended records response")
+        .json()
+        .await
+        .expect("appended records json");
+    assert_eq!(appended["total"], 2);
+    let mut keys: Vec<&str> = appended["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request_key"))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["4444:first", "4444:second"]);
+
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result(
+            "4444:rewritten",
+            Some("success"),
+        )],
+    );
+    let rewritten: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("rewritten records response")
+        .json()
+        .await
+        .expect("rewritten records json");
+    assert_eq!(rewritten["total"], 1);
+    assert_eq!(rewritten["records"][0]["request_key"], "4444:rewritten");
+
+    // Retention-style atomic replacement to a longer file: the new inode must
+    // force a rebuild instead of resuming into the old offset.
+    let padded = serde_json::json!({
+        "request_key": "4444:padded",
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 10,
+        "meta": { "padding": "x".repeat(4096) },
+        "scope": { "port": 4444 },
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0
+    });
+    write_observability_rows(&home, &[padded]);
+    let padded_body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("padded records response")
+        .json()
+        .await
+        .expect("padded records json");
+    assert_eq!(padded_body["total"], 1);
+    assert_eq!(padded_body["records"][0]["request_key"], "4444:padded");
+}
+
+#[tokio::test]
+async fn observability_records_cache_rebuilds_on_same_length_early_rewrite() {
+    let (base, _state, home) = bind_test_server().await;
+    let first = serde_json::json!({
+        "request_key": "4444:stable",
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 3,
+        "finished_epoch_ms": 2,
+        "duration_ms": 10,
+        "meta": { "marker": "alpha" },
+        "scope": { "port": 4444 },
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0
+    });
+    let mut tail = observability_row_with_result("4444:tail", Some("success"));
+    tail["started_epoch_ms"] = serde_json::json!(2);
+    tail["meta"] = serde_json::json!({ "padding": "x".repeat(5000) });
+    write_observability_rows(&home, &[first.clone(), tail.clone()]);
+
+    let before: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("initial records response")
+        .json()
+        .await
+        .expect("initial records json");
+    let stable_marker = |body: &serde_json::Value| {
+        body["records"]
+            .as_array()
+            .expect("records array")
+            .iter()
+            .find(|row| row["request_key"] == "4444:stable")
+            .expect("stable record")["meta"]["marker"]
+            .clone()
+    };
+    assert_eq!(stable_marker(&before), "alpha");
+
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    let original = std::fs::read_to_string(&store_path).expect("read observability store");
+    assert!(original.contains("\"marker\":\"alpha\""));
+    let rewritten = original.replace("\"marker\":\"alpha\"", "\"marker\":\"bravo\"");
+    assert_eq!(rewritten.len(), original.len());
+    std::fs::write(&store_path, rewritten).expect("same-length in-place rewrite");
+
+    let after: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("rewritten records response")
+        .json()
+        .await
+        .expect("rewritten records json");
+    assert_eq!(stable_marker(&after), "bravo");
+}
+
+/// `/api/overview`, `/records`, `/records/:key` and the SSE tail share one
+/// process-wide store cache, so a poll of any of them must not consume the
+/// change signal the others rely on. The dashboard refreshes `/api/overview`
+/// every 10s, which would otherwise leave the requests list and the live tail
+/// lagging a full cycle behind.
+#[tokio::test]
+async fn observability_records_stay_fresh_when_overview_polls_between_them() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:first", Some("success"))],
+    );
+
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(first["total"], 1);
+
+    append_observability_rows(
+        &home,
+        &[observability_row_with_result(
+            "4444:second",
+            Some("success"),
+        )],
+    );
+    // A dashboard poll of the overview lands between two records polls.
+    let overview = http_client()
+        .get(format!("{base}/api/overview"))
+        .send()
+        .await
+        .expect("overview response");
+    assert!(overview.status().is_success(), "overview must succeed");
+
+    let appended: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("appended records response")
+        .json()
+        .await
+        .expect("appended records json");
+    let mut keys: Vec<&str> = appended["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request_key"))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["4444:first", "4444:second"],
+        "an overview poll between two records polls must not stale the records view"
+    );
+}
+
+/// The same shared signal on the deleted-store path: the overview must not be
+/// able to pin rows that no longer exist on disk.
+#[tokio::test]
+async fn observability_records_drop_rows_when_the_store_is_deleted_between_polls() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:gone", Some("success"))],
+    );
+    let before: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("before records response")
+        .json()
+        .await
+        .expect("before records json");
+    assert_eq!(before["total"], 1);
+
+    std::fs::remove_file(
+        home.join("logs")
+            .join("server-v3-4444.request-records.jsonl"),
+    )
+    .expect("remove observability store");
+    let overview = http_client()
+        .get(format!("{base}/api/overview"))
+        .send()
+        .await
+        .expect("overview response");
+    assert!(overview.status().is_success(), "overview must succeed");
+
+    let after: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("after records response")
+        .json()
+        .await
+        .expect("after records json");
+    assert_eq!(
+        after["total"], 0,
+        "a deleted store must not stay visible through the shared projection"
+    );
+}
+
+/// A row that cannot be decoded is a loud, repeatable error. The reader position
+/// must not advance past bytes that were never decoded, or one 502 would be
+/// followed by a silently truncated history.
+#[tokio::test]
+async fn observability_records_keep_reporting_a_decode_error_until_it_is_fixed() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[observability_row_with_result("4444:first", Some("success"))],
+    );
+    let store = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+
+    // A well-formed envelope whose row is not a source row: the store read
+    // succeeds and the decode is what fails.
+    let mut corrupt = std::fs::read_to_string(&store).expect("read observability store");
+    corrupt.push_str("{\"schema_version\":1,\"row\":{\"not\":\"a source row\"}}\n");
+    std::fs::write(&store, &corrupt).expect("write undecodable store");
+
+    for poll in 1..=3 {
+        let response = http_client()
+            .get(format!(
+                "{base}/api/observability/records?page=1&page_size=10&range=all"
+            ))
+            .send()
+            .await
+            .expect("corrupt records response");
+        assert_eq!(
+            response.status().as_u16(),
+            502,
+            "poll {poll} must keep reporting the decode error instead of serving stale rows"
+        );
+    }
+
+    // Repairing the store must restore every valid row, including the one that
+    // was already there before the undecodable line.
+    write_observability_rows(
+        &home,
+        &[
+            observability_row_with_result("4444:first", Some("success")),
+            observability_row_with_result("4444:second", Some("success")),
+        ],
+    );
+    let healed: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("healed records response")
+        .json()
+        .await
+        .expect("healed records json");
+    let mut keys: Vec<&str> = healed["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request_key"))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["4444:first", "4444:second"]);
+}
+
+/// A failed refresh must not leave a reader position behind. Resuming from a
+/// stale offset would silently skip the prefix of whatever the path holds next
+/// and resurrect rows that are no longer on disk, while still answering 200.
+#[tokio::test]
+async fn observability_records_rebuild_from_scratch_after_a_failed_refresh() {
+    let (base, _state, home) = bind_test_server().await;
+    let store = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    // Both keys are the same length, so the repaired store is the same length as
+    // the original up to the line appended after it.
+    let envelope = |key: &str| {
+        serde_json::json!({
+            "schema_version": 1,
+            "row": observability_row_with_result(key, Some("success")),
+        })
+        .to_string()
+    };
+    let keys_of = |body: &serde_json::Value| -> Vec<String> {
+        let mut keys: Vec<String> = body["records"]
+            .as_array()
+            .expect("records array")
+            .iter()
+            .map(|row| {
+                row["request_key"]
+                    .as_str()
+                    .expect("request_key")
+                    .to_string()
+            })
+            .collect();
+        keys.sort();
+        keys
+    };
+
+    // Same inode throughout: these are in-place rewrites, not the atomic
+    // replacement the writer normally uses.
+    std::fs::create_dir_all(store.parent().expect("store parent")).expect("logs dir");
+    std::fs::write(&store, format!("{}\n", envelope("c1:old"))).expect("seed store");
+    let first: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("first records response")
+        .json()
+        .await
+        .expect("first records json");
+    assert_eq!(keys_of(&first), vec!["c1:old"]);
+
+    std::fs::write(
+        &store,
+        "{\"schema_version\":1,\"row\":{\"not\":\"a source row\"}}\n",
+    )
+    .expect("undecodable in-place rewrite");
+    let failed = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("failed records response");
+    assert_eq!(
+        failed.status().as_u16(),
+        502,
+        "an undecodable store must fail loudly"
+    );
+
+    // Longer than the length the reader last consumed successfully.
+    std::fs::write(
+        &store,
+        format!("{}\n{}\n", envelope("c1:new"), envelope("c1:extra")),
+    )
+    .expect("repaired in-place rewrite");
+    let healed: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=50&range=all"
+        ))
+        .send()
+        .await
+        .expect("healed records response")
+        .json()
+        .await
+        .expect("healed records json");
+    assert_eq!(
+        keys_of(&healed),
+        vec!["c1:extra", "c1:new"],
+        "a refresh after a failure must rebuild from the start, not resume from a stale offset"
     );
 }
 
@@ -616,4 +1104,339 @@ async fn observability_keeps_provider_attempt_failures_visible_after_success() {
         error_filtered_body["records"][0]["result"],
         "failed-attempt"
     );
+}
+
+/// Same request row shape, with the typed error category chosen by the caller.
+/// `provider_status` stays the projected client status, which is why a local
+/// transport failure and a genuine upstream 502 both project `502`.
+fn observability_attempt_row_with_category(
+    request_key: &str,
+    provider_status: u16,
+    error_category: &str,
+) -> serde_json::Value {
+    let mut row = observability_attempt_row(request_key, provider_status);
+    row["meta"]["error_category"] = serde_json::json!(error_category);
+    row
+}
+
+fn find_record<'a>(body: &'a serde_json::Value, request_key: &str) -> &'a serde_json::Value {
+    body["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .find(|row| row["request_key"] == request_key)
+        .unwrap_or_else(|| panic!("record {request_key} missing from {body}"))
+}
+
+/// Acceptance criteria 2 and 5: one `502` bucket splits into the provider really
+/// answering 502 versus our own transport failure, while the pre-existing
+/// `error_status_codes` facet stays exactly as it was.
+#[tokio::test]
+async fn observability_splits_one_error_status_bucket_by_origin() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:upstream", 502, "provider_http_502"),
+            observability_attempt_row_with_category("4444:local", 502, "provider_transport_error"),
+        ],
+    );
+
+    let body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response")
+        .json()
+        .await
+        .expect("records json");
+
+    // Unchanged: both rows still project the client status 502.
+    assert_eq!(body["facets"]["error_status_codes"]["502"], 2);
+    // The new facet is the direct answer to the complaint: `502` is 1 + 1, not 2.
+    assert_eq!(
+        body["facets"]["error_status_origins"]["502"],
+        serde_json::json!({"upstream": 1, "local": 1})
+    );
+    assert_eq!(
+        body["facets"]["error_origins"],
+        serde_json::json!({"upstream": 1, "local": 1, "unknown": 0})
+    );
+}
+
+/// Acceptance criterion 3: every failure row carries its own origin next to
+/// `result`, and a success row carries none.
+#[tokio::test]
+async fn observability_rows_expose_error_origin() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:upstream", 502, "provider_http_502"),
+            observability_attempt_row_with_category("4444:local", 502, "provider_transport_error"),
+            observability_row_with_result("4444:ok", Some("success")),
+        ],
+    );
+
+    let body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response")
+        .json()
+        .await
+        .expect("records json");
+
+    assert_eq!(
+        find_record(&body, "4444:upstream")["error_origin"],
+        "upstream"
+    );
+    assert_eq!(find_record(&body, "4444:local")["error_origin"], "local");
+    assert!(
+        find_record(&body, "4444:ok")["error_origin"].is_null(),
+        "a success row has no error origin"
+    );
+}
+
+/// Acceptance criterion 5: for every status `s`, the origin counts sum to
+/// `error_status_codes[s]` and `error_status_origins[s].upstream` equals the
+/// number of rows whose category really is `provider_http_s`. This is what makes
+/// the new facet a strict refinement of the old one rather than a second,
+/// independently-computed number.
+#[tokio::test]
+async fn observability_status_origins_refine_status_codes_per_status() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:up-502", 502, "provider_http_502"),
+            observability_attempt_row_with_category(
+                "4444:loc-502",
+                502,
+                "provider_transport_error",
+            ),
+            observability_attempt_row_with_category("4444:up-429", 429, "provider_http_429"),
+            observability_attempt_row_with_category("4444:loc-503", 503, "api_error"),
+            observability_row_with_result("4444:ok", Some("success")),
+        ],
+    );
+
+    let body: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all"
+        ))
+        .send()
+        .await
+        .expect("records response")
+        .json()
+        .await
+        .expect("records json");
+
+    let codes = body["facets"]["error_status_codes"]
+        .as_object()
+        .expect("error_status_codes object");
+    let origins = body["facets"]["error_status_origins"]
+        .as_object()
+        .expect("error_status_origins object");
+    assert_eq!(
+        codes.keys().collect::<Vec<_>>(),
+        origins.keys().collect::<Vec<_>>(),
+        "the refined facet must cover exactly the statuses the old facet reports"
+    );
+    // The cross-check: upstream == the number of rows whose category really is
+    // `provider_http_<status>` (only 502 and 429 have such a row above).
+    let upstream_rows_for = |status: &str| -> u64 {
+        match status {
+            "502" | "429" => 1,
+            _ => 0,
+        }
+    };
+    for (status, code_count) in codes {
+        let split = origins[status]
+            .as_object()
+            .expect("per-status origin object");
+        let split_total: u64 = split.values().map(|count| count.as_u64().unwrap()).sum();
+        assert_eq!(
+            split_total,
+            code_count.as_u64().unwrap(),
+            "status {status} must split into exactly its own total"
+        );
+        assert_eq!(
+            split
+                .get("upstream")
+                .and_then(|count| count.as_u64())
+                .unwrap_or(0),
+            upstream_rows_for(status),
+            "status {status} upstream count must equal its provider_http_{status} rows"
+        );
+    }
+    assert_eq!(
+        origins["502"],
+        serde_json::json!({"upstream": 1, "local": 1})
+    );
+    assert_eq!(origins["429"], serde_json::json!({"upstream": 1}));
+    assert_eq!(origins["503"], serde_json::json!({"local": 1}));
+}
+
+/// Acceptance criterion 4: the filter selects by origin, AND-combines with
+/// `error_status_code`, and rejects an unknown origin value.
+#[tokio::test]
+async fn observability_filters_by_error_origin() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows(
+        &home,
+        &[
+            observability_attempt_row_with_category("4444:upstream-502", 502, "provider_http_502"),
+            observability_attempt_row_with_category("4444:upstream-503", 503, "provider_http_503"),
+            observability_attempt_row_with_category(
+                "4444:local-502",
+                502,
+                "provider_transport_error",
+            ),
+            observability_attempt_row_with_category(
+                "4444:local-timeout",
+                502,
+                "provider_response_header_timeout",
+            ),
+            observability_row_with_result("4444:ok", Some("success")),
+        ],
+    );
+
+    let local: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all&error_origin=local"
+        ))
+        .send()
+        .await
+        .expect("local response")
+        .json()
+        .await
+        .expect("local json");
+    assert_eq!(local["total"], 2);
+    for row in local["records"].as_array().expect("local records") {
+        assert_eq!(row["error_origin"], "local");
+    }
+
+    let upstream_502: serde_json::Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&range=all&error_origin=upstream&error_status_code=502"
+        ))
+        .send()
+        .await
+        .expect("upstream 502 response")
+        .json()
+        .await
+        .expect("upstream 502 json");
+    assert_eq!(
+        upstream_502["total"], 1,
+        "only the genuine upstream 502, not the local failures that also project 502"
+    );
+    assert_eq!(
+        find_record(&upstream_502, "4444:upstream-502")["error_origin"],
+        "upstream"
+    );
+
+    let rejected = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=10&error_origin=bogus"
+        ))
+        .send()
+        .await
+        .expect("bogus origin response");
+    assert_eq!(rejected.status(), 400);
+    let rejected_body: serde_json::Value = rejected.json().await.expect("bogus origin json");
+    assert_eq!(rejected_body["error"], "invalid error_origin: bogus");
+}
+
+/// Every browser-requestable WebUI asset must really be served by the admin router.
+///
+/// `api/mod.rs` serves static assets from an exhaustive allowlist - there is no `ServeDir`, no
+/// wildcard and no fallback - so shipping a new view module without registering it in three
+/// places (`include_str!` const, `build_router` route, `static_serve` match arm) makes the
+/// browser 404 the module, the ES module graph fails to resolve, and the whole page dies.
+/// That is invisible to the smoke scripts, which read files from disk: only a request through
+/// the real router can see it. This walks the real `admin-webui` directory and GETs every asset.
+#[tokio::test]
+async fn every_webui_asset_is_served_by_the_admin_router() {
+    let (base, _state, _home) = bind_test_server().await;
+    let client = http_client();
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../admin-webui");
+    let root = root
+        .canonicalize()
+        .unwrap_or_else(|error| panic!("canonicalize {}: {error}", root.display()));
+    let mut assets = Vec::new();
+    collect_webui_assets(&root, &root, &mut assets);
+    assets.sort();
+
+    // Guard the walk itself: an empty or tiny set would make the assertion below vacuous.
+    assert!(
+        assets.len() >= 15,
+        "expected the real admin-webui asset set, found {}: {assets:?}",
+        assets.len()
+    );
+    for required in [
+        "providers.html",
+        "app/views/providers.js",
+        "app/views/provider-models.js",
+        "app/core.js",
+        "styles.css",
+        "vendor/ambient.css",
+    ] {
+        assert!(
+            assets.iter().any(|asset| asset == required),
+            "asset walk missed {required}; found {assets:?}"
+        );
+    }
+
+    for asset in &assets {
+        let response = client
+            .get(format!("{base}/{asset}"))
+            .send()
+            .await
+            .unwrap_or_else(|error| panic!("GET /{asset} failed: {error}"));
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "/{asset} is a browser-requestable WebUI asset but the admin router does not serve it. \
+             Register it in api/mod.rs (build_router route + static_serve match arm) and add the \
+             include_str! const in lib.rs."
+        );
+        let body = response.text().await.expect("asset body");
+        assert!(!body.is_empty(), "/{asset} was served with an empty body");
+    }
+}
+
+/// Collect every file the browser could request. The rule is inverted on purpose: everything in
+/// `admin-webui` must be served, and the only exclusion is an explicit one, so adding an asset
+/// type the allowlist does not know about (an `.svg`, a font, a source map) fails this test
+/// instead of 404ing in the browser while the test still passes.
+fn collect_webui_assets(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+    let entries =
+        std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read_dir {dir:?}: {error}"));
+    for entry in entries {
+        let path = entry.expect("dir entry").path();
+        if path.is_dir() {
+            collect_webui_assets(root, &path, out);
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        // Node-only smoke scripts: they run under `node`, the browser never requests them.
+        if name.ends_with(".mjs") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .expect("asset lives under admin-webui")
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(relative);
+    }
 }

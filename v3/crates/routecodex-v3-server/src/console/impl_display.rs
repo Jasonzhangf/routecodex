@@ -1,4 +1,5 @@
 use crate::*;
+use routecodex_v3_runtime::hub_v1::usage_normalization::split_v3_canonical_usage_cache;
 use serde_json::Value;
 
 pub(crate) fn format_v3_console_usage_summary(usage: Option<&V3RuntimeUsageSummary>) -> String {
@@ -43,17 +44,21 @@ pub(crate) fn format_v3_console_human_usage_summary(
 }
 
 fn format_v3_console_cache_summary(usage: &V3RuntimeUsageSummary) -> Option<String> {
-    // OpenAI-compatible usage reports cached tokens as a sub-count of input.
-    let (cached, denominator) = if let Some(cached) = usage.cached_tokens {
-        (cached, usage.input_tokens.map(|input| input as f64))
-    } else {
-        // Anthropic-compatible usage reports the uncached increment separately.
-        let cached = usage.cache_read_input_tokens?;
-        (
-            cached,
-            usage.input_tokens.map(|input| cached as f64 + input as f64),
-        )
-    };
+    // Shared canonical split: OpenAI-compatible usage reports cached tokens as a
+    // sub-count of input, while Anthropic-compatible usage reports the uncached
+    // increment separately, so its read and creation counts both belong in the
+    // denominator.
+    let cache = split_v3_canonical_usage_cache(
+        usage.input_tokens,
+        usage.cached_tokens,
+        usage.cache_read_input_tokens,
+        usage.cache_creation_input_tokens,
+    );
+    let cached = cache.cached_tokens?;
+    // An unreported input keeps the denominator unknown, as before.
+    let denominator = usage
+        .input_tokens
+        .map(|_| cache.effective_input_tokens as f64);
     Some(match denominator {
         Some(denominator) if denominator > 0.0 => {
             format!(
@@ -89,15 +94,10 @@ pub(crate) fn infer_v3_console_finish_reason_from_response_status(
     response_status: Option<&str>,
 ) -> Option<String> {
     match response_status.map(str::trim) {
-        Some(status) if status.eq_ignore_ascii_case("completed") => Some("stop".to_string()),
-        Some(status) if status.eq_ignore_ascii_case("done") => Some("stop".to_string()),
         Some(status) if status.eq_ignore_ascii_case("requires_action") => {
             Some("tool_calls".to_string())
         }
-        // Responses 协议 response.incomplete 合法终态的观测兜底：reason 通常由
-        // stream_observation 显式记录（max_output_tokens -> length）；JSON 路径
-        // 或未知 reason 时按截断语义投影 length。
-        Some(status) if status.eq_ignore_ascii_case("incomplete") => Some("length".to_string()),
+        // Lifecycle completion and incompleteness do not establish a reason.
         _ => None,
     }
 }
@@ -505,20 +505,12 @@ impl<'a> V3ConsoleLayeredBlock<'a> {
         } else {
             &safe_session
         };
-        let session_width =
-            V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH - v3_console_display_width("[sessionID:]");
-        let display_session = truncate_v3_console_display_width_middle(session, session_width);
-        let scope = format!("[sessionID:{display_session}]");
-        let diagnostic = format!(
+        let scope = format!("[sessionID:{session}]");
+        format!(
             "{} {}",
             align_v3_console_display_width(&scope, V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH),
             self.debug
-        );
-        if display_session == session {
-            diagnostic
-        } else {
-            format!("{diagnostic} sessionIDFull={session}")
-        }
+        )
     }
 }
 

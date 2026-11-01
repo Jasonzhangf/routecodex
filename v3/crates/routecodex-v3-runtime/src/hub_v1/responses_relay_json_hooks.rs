@@ -9,12 +9,18 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) manifest: &'a V3Config05ManifestPublished,
     pub(crate) server_id: &'a str,
     pub(crate) provider_id: Option<&'a str>,
+    pub(crate) interface_id: Option<&'a str>,
     pub(crate) expected_model_id: &'a str,
     pub(crate) provider_protocol: V3HubProviderWireProtocol,
+    pub(crate) source_provider_protocol: V3HubProviderWireProtocol,
+    pub(crate) namespace_registry:
+        &'a provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
     pub(crate) provider_response_transport_intent: V3HubTransportIntent,
     pub(crate) compatibility_profile: Option<&'a str>,
-    pub(crate) web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    pub(crate) web_search_center_state: Option<V3WebSearchCenterState>,
+    pub(crate) opencode_zen_tcm_bridge:
+        Option<&'a provider_compat_core::opencode_zen_tcm::OpencodeZenTcmBridgeBinding>,
+    pub(crate) custom_tool_function_binding:
+        Option<&'a provider_compat_core::CustomToolFunctionBinding>,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记（仅 gpt 模型 + 单一 provider
     /// 候选时为 true），响应侧 Resp03 只消费此结果，不重复判定。
     pub(crate) retain_response_cipher: bool,
@@ -22,10 +28,33 @@ pub(crate) struct V3ResponsesRelayJsonResponseHookInput<'a> {
     pub(crate) tool_thinking_turn_context: &'a V3ToolThinkingTurnContext,
 }
 
+/// Compatibility entry for callers that do not need refill facts. The typed
+/// invocation source stays `Client`; Runtime-launched refills call the
+/// `_with_invocation_source` owner directly.
 pub(crate) fn run_json_response_hooks(
     input: V3ResponsesRelayJsonResponseHookInput<'_>,
     trace: &mut Vec<&'static str>,
-) -> Result<(Value, Option<V3WebSearchCenterState>), V3ResponsesRelayRuntimeError> {
+) -> Result<
+    (
+        Value,
+        super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts,
+    ),
+    V3ResponsesRelayRuntimeError,
+> {
+    run_json_response_hooks_with_invocation_source(input, V3HubInvocationSource::Client, trace)
+}
+
+pub(crate) fn run_json_response_hooks_with_invocation_source(
+    input: V3ResponsesRelayJsonResponseHookInput<'_>,
+    invocation_source: V3HubInvocationSource,
+    trace: &mut Vec<&'static str>,
+) -> Result<
+    (
+        Value,
+        super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts,
+    ),
+    V3ResponsesRelayRuntimeError,
+> {
     let normalized_provider_value = match input.provider_protocol {
         V3HubProviderWireProtocol::Responses => {
             normalize_v3_responses_json_document(input.provider_value, "Responses")?
@@ -35,29 +64,42 @@ pub(crate) fn run_json_response_hooks(
         }
         _ => input.provider_value.clone(),
     };
+    // `provider_protocol` stays the canonical semantic protocol so ProviderRespCompat02
+    // and normalization keep their existing meaning. The raw wire protocol is carried
+    // separately as a typed witness that only the Resp03 source-provenance gate reads.
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         normalized_provider_value,
         V3ProviderRespInbound01RawContext::new(
             V3HubEntryProtocol::Responses,
             input.provider_protocol,
             V3HubExecutionMode::Relay,
-            V3HubInvocationSource::Client,
+            invocation_source,
             input.provider_response_transport_intent,
         )
-        .with_compatibility_profile(input.compatibility_profile),
+        .with_source_provider_protocol(input.source_provider_protocol)
+        .with_compatibility_profile(input.compatibility_profile)
+        .with_opencode_zen_tcm_bridge(input.opencode_zen_tcm_bridge.cloned())
+        .with_custom_tool_function_binding(input.custom_tool_function_binding.cloned()),
     );
     trace.push("V3ProviderRespInbound01Raw");
     let hooks = compile_v3_hub_relay_response_hooks();
-    let mut resp02 = hooks.normalize(resp01)?;
+    let mut resp02 = hooks.normalize_with_context(resp01, None, Some(input.request_id))?;
     trace.push("ProviderRespCompat02ProviderCompat");
+    // Capture the provider's own explicit-summary fact from the *native*
+    // payload first. Two later stages can synthesize Responses-shaped
+    // `output[].reasoning.summary[].text` that the provider never sent: the
+    // Chat -> Responses conversion below maps `reasoning_content` into summary
+    // text, and `govern` can synthesize RCC reasoning/toolreason summary
+    // content. Neither may suppress the bounded refill decision.
+    let has_source_summary =
+        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     if input.provider_protocol == V3HubProviderWireProtocol::OpenAiChat {
-        let converted =
-            build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
-                resp02.provider_payload(),
-                input.provider_semantic_body,
-                Some(input.manifest),
-                input.provider_id,
-            )?;
+        let converted = build_v3_responses_provider_response_from_openai_chat_payload(
+            resp02.provider_payload(),
+            input.provider_semantic_body,
+        )?;
         resp02.set_responses_semantic_payload(normalize_v3_responses_json_document(
             &converted,
             "OpenAI Chat",
@@ -69,30 +111,65 @@ pub(crate) fn run_json_response_hooks(
         input.server_id,
         input.session_id,
         input.request_id,
-        input.web_search_execution_mode,
         input.retain_response_cipher,
         input.tool_thinking_enabled,
         input.expected_model_id,
         input.tool_thinking_turn_context,
     );
-    let response_hook_profile = match input.web_search_center_state {
-        Some(state) => response_hook_profile.with_web_search_center_state(state),
-        None => response_hook_profile,
+    let response_hook_profile = response_hook_profile
+        .with_complete_provider_attempt(true)
+        .with_serialized_tool_context(
+            super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::from_registry(
+                input.namespace_registry,
+            ),
+        );
+    let resp03 = match hooks.govern(resp02, &response_hook_profile) {
+        Ok(resp03) => resp03,
+        Err(V3HubRelayResponseError::GovernedAttemptEmpty) => {
+            return Err(super::empty_provider_attempt_failure(
+                input.provider_protocol,
+            ));
+        }
+        Err(error) => return Err(error.into()),
     };
-    let resp03 = hooks.govern(resp02, &response_hook_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, response_web_search_state, _response_web_search_hook_outcome) =
-        resp03.into_parts();
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03(resp03);
-    let mut finalized_payload = resp05.client_payload().clone();
-    trace.push("V3HubRespOutbound05ClientSemantic");
-    crate::direct_response_hooks::apply_v3_memory_raw_capture_json_payload(
-        &mut finalized_payload,
-        input.manifest,
-        input.request_id,
+    let mut resp03 = resp03.into_governed();
+    let tool_calls = resp03.tool_calls.clone();
+    if input.source_provider_protocol == V3HubProviderWireProtocol::Gemini {
+        super::gemini_responses_codec::restore_gemini_tool_kinds(
+            std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
+            input.namespace_registry,
+        );
+    }
+    super::request_outbound_mcp_names::restore_responses_mcp_tool_identities(
+        std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
+        &input.namespace_registry.restore_identities(),
     );
+    super::resp_chat_process_codex_integer_values::normalize_v3_codex_integer_tool_values_at_resp03(
+        input.provider_semantic_body,
+        std::sync::Arc::make_mut(resp03.previous.provider_payload_mut()),
+    );
+    let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
+        resp03,
+        |payload| Ok(project_v3_responses_client_completed_response(&payload)),
+    )
+    .map_err(|error| V3ResponsesRelayRuntimeError::Target(error.to_string()))?;
+    trace.push("V3HubRespOutbound05ClientSemantic");
+    let resp06 = super::server_resp_outbound_06_client_frame::
+        try_build_v3_server_resp_outbound_06_with_framer_and_memory_raw_capture(
+        resp05,
+        &input.manifest.memory_raw_capture,
+        input.request_id,
+    )
+    .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?;
     trace.push("V3ServerRespOutbound06ClientFrame");
-    Ok((finalized_payload, response_web_search_state))
+    Ok((
+        resp06.into_client_payload(),
+        super::resp_chat_process_03_governed::V3ChatProcessGovernedFacts {
+            tool_calls,
+            has_source_summary,
+        },
+    ))
 }
 
 fn normalize_v3_responses_json_document(
@@ -126,55 +203,15 @@ fn normalize_v3_openai_chat_json_document(
         .map(|document| document.to_normalized_value())
 }
 
-/// 把搜索 hop 结果投影到客户端可见的 finalized 响应：追加 hosted
-/// `web_search_call`（completed、action.search、text_result）与原始
-/// call_id 配对的 `function_call_output`。控制状态不进入 payload——
-/// 这里投影的是协议等价结果（Codex hosted web_search 契约）。
-/// 从搜索 provider 响应提取文本结果：优先 Responses `output[].message
-/// .content[].output_text.text`，其次 Chat `choices[].message.content`。
-/// Req04 阶段（route 之前）的 Mode B 判定：按请求声明的 model 的编译期
-/// `web_search_execution_mode` 解析。请求 model 无法解析时按 `None`（不激活
-/// 本地搜索）。selected target 的 mode 由 Resp03 侧 response profile 再校验。
-pub(crate) fn resolve_request_web_search_execution_mode(
-    manifest: &V3Config05ManifestPublished,
-    payload: &Value,
-) -> routecodex_v3_config::V3WebSearchExecutionMode {
-    let Some(model) = payload
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return routecodex_v3_config::V3WebSearchExecutionMode::None;
-    };
-    resolve_web_search_mode_and_backend(manifest, model).0
-}
-
-/// Mode B 的编译期 backend binding（`provider.model`）：请求 model 的 manifest
-/// `web_search_backend_binding`。搜索 hop 用它 direct pin 搜索目标；Mode B 配置
-/// 编译期已保证 exactly one binding，这里仅透传（解析失败按 None，由搜索 hop
-/// fail-fast）。
 pub(crate) fn responses_relay_request_hook_profile(
     manifest: &V3Config05ManifestPublished,
     server_id: &str,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-) -> V3HubServertoolRequestProfile {
+) -> V3HubRequestHookProfile {
     let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
-    let base = if web_search_execution_mode.is_metadata_center_local_search() {
-        // Mode B：Req04 需在工具面含标准 web_search 声明时激活 websearch
-        // ServerTool 实例（LocalToolSurfaceActive），供 Resp03 同轮拦截。
-        V3HubServertoolRequestProfile::enabled(["servertool.request"])
-            .with_web_search_execution_mode(web_search_execution_mode)
-            .with_tool_thinking_enabled(tool_thinking_enabled)
-    } else if tool_thinking_enabled {
-        // Tool-thinking is a request hook even when no servertool/web-search
-        // surface is active. Keep the profile enabled so Req04 can inject the
-        // shared guidance; response validation remains permissive.
-        V3HubServertoolRequestProfile::enabled([]).with_tool_thinking_enabled(true)
-    } else if manifest.memory_raw_capture.enabled {
-        V3HubServertoolRequestProfile::enabled([])
+    let base = if tool_thinking_enabled || manifest.memory_raw_capture.enabled {
+        V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(tool_thinking_enabled)
     } else {
-        V3HubServertoolRequestProfile::disabled()
+        V3HubRequestHookProfile::disabled()
     };
     base.with_memory_raw_capture_enabled(manifest.memory_raw_capture.enabled)
 }
@@ -184,7 +221,6 @@ pub(crate) fn responses_relay_response_hook_profile(
     server_id: &str,
     session_id: &str,
     request_id: &str,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     expected_model_id: &str,
@@ -192,29 +228,12 @@ pub(crate) fn responses_relay_response_hook_profile(
 ) -> V3HubRelayResponseHookProfile {
     let toolreason_client_projection =
         v3_toolreason_client_projection_enabled_for_server(manifest, server_id);
-    let profile = if web_search_execution_mode
-        == routecodex_v3_config::V3WebSearchExecutionMode::NativeRemoteSearchToolMix
-        || web_search_execution_mode.is_metadata_center_local_search()
-    {
-        // Mode A（原生搜索）与 Mode B（本地 ServerToolCenter 治理）都不走
-        // 客户端 exec_command 投影；Resp03 按 profile.mode 分别处理。
-        V3HubRelayResponseHookProfile::empty()
-            .with_web_search_execution_mode(web_search_execution_mode)
-            .with_retain_response_cipher(retain_response_cipher)
-            .with_tool_thinking_enabled(tool_thinking_enabled)
-            .with_tool_thinking_turn_context(tool_thinking_turn_context)
-            .with_toolreason_expected_model_id(expected_model_id)
-            .with_toolreason_client_projection(toolreason_client_projection)
-    } else {
-        // 未声明 web_search 执行模式的兼容路径：保持既有 exec_command 投影。
-        V3HubRelayResponseHookProfile::empty()
-            .with_servertool_name("web_search")
-            .with_retain_response_cipher(retain_response_cipher)
-            .with_tool_thinking_enabled(tool_thinking_enabled)
-            .with_tool_thinking_turn_context(tool_thinking_turn_context)
-            .with_toolreason_expected_model_id(expected_model_id)
-            .with_toolreason_client_projection(toolreason_client_projection)
-    };
+    let profile = V3HubRelayResponseHookProfile::empty()
+        .with_retain_response_cipher(retain_response_cipher)
+        .with_tool_thinking_enabled(tool_thinking_enabled)
+        .with_tool_thinking_turn_context(tool_thinking_turn_context)
+        .with_toolreason_expected_model_id(expected_model_id)
+        .with_toolreason_client_projection(toolreason_client_projection);
     let profile = profile.with_toolreason_observation_request_id(request_id);
     let profile = profile.with_toolreason_observation_session_id(session_id);
     profile

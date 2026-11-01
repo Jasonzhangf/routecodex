@@ -1,18 +1,13 @@
-use super::web_search_hop::{
-    apply_v3_responses_relay_web_search_control_completion,
-    project_web_search_result_into_finalized, resolve_web_search_mode_and_backend,
-};
+use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
-    provider_runtime_failure_stage, resolve_v3_relay_target_outcome,
-    resolve_v3_relay_target_outcome_with_rescue, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_candidate_key_parts, v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
+    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolution, V3RelayProviderTargetResolutionInput,
+    V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
@@ -28,10 +23,11 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_12_responses_wire_payload, ReqwestResponsesTransport, ResponsesTransport,
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ProviderHealthStore,
-    V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseHeader,
-    V3ResponsesProviderTarget, V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
+    build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
+    ReqwestResponsesTransport, ResponsesTransport, V3ProviderAuthHandle, V3ProviderError,
+    V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderResp14Raw,
+    V3ProviderResponseBody, V3ProviderResponseHeader, V3ResponsesProviderTarget,
+    V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseField, SseIncrementalDecoder, SseTransportLimits,
@@ -42,10 +38,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "responses_relay_runtime/relay_client_frames.rs"]
+mod relay_client_frames;
 #[path = "responses_openai_chat_conversion.rs"]
 mod responses_openai_chat_conversion;
-#[path = "responses_relay_diagnostics.rs"]
-mod responses_relay_diagnostics;
 #[path = "responses_relay_dry_run.rs"]
 mod responses_relay_dry_run;
 #[path = "responses_relay_failures.rs"]
@@ -56,7 +52,9 @@ mod responses_relay_json_hooks;
 mod responses_relay_runtime_inner;
 #[path = "responses_relay_types.rs"]
 mod responses_relay_types;
-use responses_relay_runtime_inner::execute_v3_responses_relay_runtime_inner;
+use responses_relay_runtime_inner::{
+    execute_v3_responses_relay_runtime_inner, execute_v3_responses_relay_runtime_inner_with_refill,
+};
 pub(crate) use responses_relay_runtime_inner::{
     find_responses_tool_output_ids, V3ResponsesRelayToolOutputIds,
 };
@@ -69,9 +67,28 @@ pub struct V3ResponsesRelayProviderHealthHandle {
 }
 
 impl V3ResponsesRelayProviderHealthHandle {
+    pub fn with_observation_clock(
+        mut self,
+        clock: std::sync::Arc<dyn crate::V3ProviderHealthObservationClock>,
+    ) -> Self {
+        self.runtime_health = self.runtime_health.with_observation_clock(clock);
+        self
+    }
+
     pub fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
         Self {
             runtime_health: V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        }
+    }
+
+    pub fn from_manifest_for_listener(
+        manifest: &V3Config05ManifestPublished,
+        listener: &V3ProviderHealthListenerScope,
+    ) -> Self {
+        Self {
+            runtime_health: V3ProviderFailureRuntimeHealth::from_manifest_for_listener(
+                manifest, listener,
+            ),
         }
     }
 
@@ -97,11 +114,13 @@ impl V3ResponsesRelayProviderHealthHandle {
         self.runtime_health.store().persistence_alarm()
     }
 }
+pub(super) use responses_openai_chat_conversion::build_v3_responses_provider_response_from_openai_chat_payload;
+pub(crate) use responses_openai_chat_conversion::build_v3_responses_reasoning_item_from_openai_chat_message;
+pub(crate) use responses_openai_chat_conversion::V3OpenAiChatToolCallProjection;
 use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
-    execute_v3_responses_relay_dry_run_runtime_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome,
     project_v3_responses_relay_runtime_failure,
 };
 pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;
@@ -110,8 +129,7 @@ use responses_relay_failures::{
     is_v3_responses_provider_response_failure, provider_failure_output,
     provider_failure_output_with_observation, provider_http_failure,
     provider_request_relay_failure, provider_response_hook_failure,
-    provider_response_stream_failure, provider_runtime_failure, provider_semantic_failure,
-    provider_terminal_admission_failure, server_routing_group,
+    provider_response_stream_failure, provider_runtime_failure, server_routing_group,
     terminalize_v3_responses_relay_provider_failure,
 };
 use responses_relay_json_hooks::*;
@@ -123,7 +141,6 @@ const V3_RESPONSES_RELAY_PROVIDER_EVENT_FAILED_MESSAGE: &str =
 const V3_RESPONSES_RELAY_PROVIDER_EVENT_CODEC_OWNER: &str = "ProviderRespInbound01Raw -> V3HubRespInbound02Normalized (Responses event codec; SSE transport is opaque framing)";
 const V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER: &str =
     "V3HubRespOutbound05ClientSemantic -> V3ServerRespOutbound06ClientFrame";
-const V3_ANTHROPIC_CYBER_REFUSAL_CODE: &str = "ANTHROPIC_CYBER_REFUSAL";
 pub async fn execute_v3_responses_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
@@ -145,25 +162,16 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server_tool_state<
-    T: ResponsesTransport,
->(
+pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: ResponsesTransport>(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     execute_v3_responses_relay_runtime_inner(
         manifest,
         input,
         transport,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: true,
-        }),
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
         true,
@@ -172,55 +180,204 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health_and_server
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
     provider_health: &V3ResponsesRelayProviderHealthHandle,
-    server_tool_state: &V3ResponsesRelayServerToolState,
-    scope: V3ResponsesRelayServerToolScope,
     provider_snapshots: V3ResponsesRelayProviderSnapshotCapture,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
-    initial_observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
-    initial_request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    initial_relay_seeds: V3ResponsesRelayRuntimeSeeds,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
     let transport = V3LiveSnapResponsesTransport::with_default_transport();
     let snapshots = transport.snapshots();
-    let mut output = execute_v3_responses_relay_runtime_inner(
-        manifest,
-        input,
-        &transport,
-        Some(V3ResponsesRelayServerToolExecution {
-            control: server_tool_state,
-            scope,
-            commit_effects: true,
-        }),
-        provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-        true,
-        provider_failure_event_sink,
-        route_selection_event_sink,
-        initial_selected_target,
-        initial_expanded,
-        initial_request_local_excluded_candidates,
-        initial_observability_accumulator,
-        initial_request_execution_control,
-    )
-    .await?;
-    output.provider_snapshots = Some(snapshots.into_payload(
-        provider_snapshots.provider_request,
-        provider_snapshots.provider_response,
-    ));
-    Ok(output)
+    let control = match initial_relay_seeds.request_execution_control.clone() {
+        Some(control) => control,
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
+            .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
+    };
+    let max_refills = v3_chat_process_refill_max_consecutive();
+    // One request-scoped projection state survives the refill rounds: a round
+    // that committed its first business frames keeps them, and the final round
+    // seals the single tail over the merged response.
+    let mut relay_seeds = initial_relay_seeds.clone();
+    if relay_seeds.client_stream_projection.is_none() {
+        relay_seeds.client_stream_projection = relay_seeds
+            .client_frame_sink
+            .clone()
+            .map(|_| std::sync::Arc::new(std::sync::Mutex::new(None)));
+    }
+    let mut payload = input.payload.clone();
+    let mut accumulated_items: Vec<Value> = Vec::new();
+    let mut accumulated_usage: Option<V3RuntimeUsageSummary> = None;
+    let mut accumulated_attempts: Option<usize> = None;
+    let mut rounds = 0usize;
+    loop {
+        let mut seeds = relay_seeds.clone();
+        seeds.request_execution_control = Some(control.clone());
+        if rounds > 0 {
+            // The original client execution owns the route-policy commit. A
+            // refill must not commit the same pending transaction twice.
+            seeds.route_policy_pending = None;
+            // Each execution owns an independent timing terminal. Reusing the
+            // original accumulator would make the first refill's
+            // `finish_runtime()` observe an already-finished state.
+            seeds.observability_accumulator = None;
+        }
+        let execution_input = V3ResponsesRelayRuntimeInput {
+            payload: payload.clone(),
+            ..input.clone()
+        };
+        let invocation_source = if rounds == 0 {
+            V3HubInvocationSource::Client
+        } else {
+            V3HubInvocationSource::Refill
+        };
+        let chat_process_refill = V3ResponsesRelayRefillSignal::default();
+        let mut output = execute_v3_responses_relay_runtime_inner_with_refill(
+            manifest,
+            execution_input,
+            &transport,
+            provider_health.runtime_health(),
+            V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+            true,
+            provider_failure_event_sink.clone(),
+            route_selection_event_sink.clone(),
+            initial_selected_target.clone(),
+            initial_expanded.clone(),
+            initial_request_local_excluded_candidates.clone(),
+            seeds,
+            invocation_source,
+            chat_process_refill.clone(),
+        )
+        .await?;
+        let chat_process_refill = chat_process_refill.take();
+        if let Some(attempts) = output
+            .observability
+            .as_ref()
+            .and_then(|observability| observability.attempts)
+        {
+            accumulated_attempts = Some(accumulated_attempts.unwrap_or(0).saturating_add(attempts));
+        }
+        if chat_process_refill == Some(V3ChatProcessRefillDisposition::RequestRefill) {
+            if let Some(finalized) = output.finalized_response.as_ref() {
+                if let Ok(next_payload) = build_v3_chat_process_refill_continuation_request(
+                    V3HubEntryProtocol::Responses,
+                    &payload,
+                    finalized,
+                ) {
+                    // Request-local cancellation witness: the control carries no
+                    // independent cancel flag, so the residence deadline is the
+                    // only one. An expired deadline delivers the current real
+                    // result instead of launching another execution.
+                    if control.deadline_unix_ms().is_ok() && control.try_admit_refill(max_refills) {
+                        // A refill is a new execution of the Runtime mainline:
+                        // it owns its own provider transport attempt allowance
+                        // while the request-scoped refill budget and residence
+                        // deadline stay unchanged.
+                        control.begin_refill_execution();
+                        accumulated_items
+                            .extend(collect_v3_chat_process_business_output_items(finalized));
+                        accumulate_v3_chat_process_refill_usage(
+                            &mut accumulated_usage,
+                            extract_v3_runtime_usage_summary(finalized),
+                        );
+                        // A round that never committed left no client bytes:
+                        // drop its projector so the next round starts a clean
+                        // frame sequence. A committed round keeps its state and
+                        // appends from the next round.
+                        if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
+                            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+                            match slot.as_mut() {
+                                Some(projection) if projection.is_committed() => {
+                                    // The next round is a separate business item
+                                    // in the delivered payload: close the open
+                                    // items so the client sees one item per round.
+                                    projection
+                                        .close_round_with_finalized(Some(finalized))
+                                        .map_err(
+                                            V3ResponsesRelayRuntimeError::ExecutionControlResponse,
+                                        )?;
+                                }
+                                Some(_) => *slot = None,
+                                None => {}
+                            }
+                        }
+                        payload = next_payload;
+                        rounds += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if rounds > 0 {
+            if let Some(mut finalized) = output.finalized_response.take() {
+                // The refill loop only accumulates usage when it launches the
+                // next execution. Fold the final execution's usage in before
+                // write-back so the delivered total covers every round.
+                accumulate_v3_chat_process_refill_usage(
+                    &mut accumulated_usage,
+                    extract_v3_runtime_usage_summary(&finalized),
+                );
+                merge_v3_chat_process_refill_output_items(&mut finalized, &accumulated_items);
+                if let Some(usage) = accumulated_usage.as_ref() {
+                    write_v3_chat_process_refill_usage(&mut finalized, usage);
+                }
+                output.finalized_response = Some(finalized.clone());
+                output.client_body = project_v3_responses_relay_client_body(
+                    v3_responses_relay_transport_intent_from_stream_field(&input.payload),
+                    finalized,
+                    crate::shared::v3_strip_client_response_id_enabled_for_server(
+                        manifest,
+                        &input.server_id,
+                    ),
+                    control.attempt_budget(),
+                )?;
+            }
+            if let Some(observability) = output.observability.as_mut() {
+                if accumulated_usage.is_some() {
+                    observability.usage = accumulated_usage.clone();
+                }
+                if accumulated_attempts.is_some() {
+                    observability.attempts = accumulated_attempts;
+                }
+            }
+        }
+        // Seal the committed client tail over the delivered response. The
+        // terminal frame stays inside the seal, so a failed seal cannot deliver
+        // it first, and the already-flushed prefix is never replayed. The merged
+        // terminal starts with every prior round's accumulated items, so the
+        // current round's governed tail must be sliced from that request-level
+        // offset rather than a projector-local counter a dropped uncommitted
+        // round can never have updated.
+        if let Some(handle) = relay_seeds.client_stream_projection.as_ref() {
+            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(projection) = slot.as_mut() {
+                if projection.is_committed() {
+                    if let Some(finalized) = output.finalized_response.clone() {
+                        output.client_body = V3ResponsesRelayClientBody::Sse(
+                            projection
+                                .finish(&finalized, accumulated_items.len())
+                                .map_err(V3ResponsesRelayRuntimeError::ExecutionControlResponse)?,
+                        );
+                    }
+                }
+            }
+        }
+        output.provider_snapshots = Some(snapshots.into_payload(
+            provider_snapshots.provider_request,
+            provider_snapshots.provider_response,
+        ));
+        return Ok(output);
+    }
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTransport>(
@@ -235,7 +392,6 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         manifest,
         input,
         transport,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -244,8 +400,7 @@ pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTr
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
 }
@@ -263,7 +418,6 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         manifest,
         input,
         transport,
-        None,
         provider_health.runtime_health(),
         retry_policy,
         true,
@@ -272,16 +426,9 @@ pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-}
-
-pub(crate) struct V3ResponsesRelayServerToolExecution<'state> {
-    pub(crate) control: &'state V3ResponsesRelayServerToolState,
-    pub(crate) scope: V3ResponsesRelayServerToolScope,
-    pub(crate) commit_effects: bool,
 }
 
 async fn handle_v3_responses_relay_provider_failure(
@@ -290,10 +437,10 @@ async fn handle_v3_responses_relay_provider_failure(
     mut failure: V3ResponsesRelayProviderFailure,
     state: &mut V3ResponsesRelayProviderRetryState<'_>,
 ) -> Result<Option<V3ResponsesRelayProviderFailure>, V3ResponsesRelayRuntimeError> {
-    if failure.terminal_projection.is_some() {
+    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let result = run_v3_relay_provider_failure_policy(
+    let result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
         failure.source_stage,
@@ -310,11 +457,28 @@ async fn handle_v3_responses_relay_provider_failure(
             failed_candidates: state.failed_candidates,
             same_candidate_retries: state.same_candidate_retries,
             trace: state.trace,
+            last_external_http: state.last_external_http,
         },
+        failure.response_processing_code,
+        failure.attempt_source.clone(),
+        failure.provider_status,
+        failure.provider_body_read_failure.as_deref(),
     )
     .await
-    .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)?;
-    let event = build_v3_runtime_provider_failure_observation_from_policy_event(&result.event);
+    {
+        Ok(result) => result,
+        Err(Ok(error)) => return Err(V3ResponsesRelayRuntimeError::ProviderHealth(error)),
+        Err(Err(fault)) => {
+            failure.error_operator_fault = Some(fault);
+            return Ok(Some(failure));
+        }
+    };
+    // Carry the real upstream HTTP status (if any) into the policy event so the
+    // failure observation can separate it from the client projection status.
+    let mut policy_event = result.event.clone();
+    policy_event.provider_status = failure.provider_status;
+    policy_event.failed_attempt_evidence = failure.failed_attempt_evidence.clone();
+    let event = build_v3_runtime_provider_failure_observation_from_policy_event(&policy_event);
     state.provider_failure_events.push(event.clone());
     if let Some(sink) = state.provider_failure_event_sink {
         let mut observability = state.selected_observability.clone();
@@ -323,6 +487,11 @@ async fn handle_v3_responses_relay_provider_failure(
     }
     failure = attach_v3_provider_failure_events_to_failure(failure, state.provider_failure_events);
     match result.decision.action {
+        V3Error05ExecutionAction::ReevaluateTarget => {
+            *state.retry_selected = None;
+            *state.pending_recovery = None;
+            Ok(None)
+        }
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
             if result.event.wait_ms.is_some() {
@@ -345,6 +514,7 @@ async fn handle_v3_responses_relay_provider_failure(
         }
         V3Error05ExecutionAction::ProjectTerminal => {
             failure.terminal_projection = result.terminal_projection;
+            failure.terminal_disposition = result.terminal_disposition;
             Ok(Some(failure))
         }
         V3Error05ExecutionAction::ClientDisconnected
@@ -378,34 +548,6 @@ fn v3_provider_failure_message_from_body(body: &Value) -> String {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("provider failure")
         .to_string()
-}
-
-fn build_v3_runtime_provider_failure_observation_from_policy_event(
-    event: &V3RelayProviderFailurePolicyEvent,
-) -> V3RuntimeProviderFailureObservation {
-    V3RuntimeProviderFailureObservation {
-        provider_key: v3_relay_provider_candidate_key_parts(
-            &event.candidate.provider_id,
-            Some(&event.candidate.auth_alias),
-            Some(&event.candidate.model_id),
-        ),
-        provider_id: event.candidate.provider_id.clone(),
-        auth_alias: Some(event.candidate.auth_alias.clone()),
-        model_id: event.candidate.model_id.clone(),
-        status: event.status,
-        error_type: event.error_type.clone(),
-        external_error_kind: None,
-        external_error_code: event.error_type.clone(),
-        external_error_status: Some(event.status),
-        internal_code: None,
-        message: event.message.clone(),
-        failure_count: event.health_record.failure_count,
-        health_state: event.health_record.state.clone(),
-        cooldown_until_ms: event.health_record.cooldown_until_ms,
-        action: event.action.clone(),
-        next_provider_key: event.next_provider_key.clone(),
-        wait_ms: event.wait_ms,
-    }
 }
 
 fn attach_v3_provider_failure_events_to_failure(
@@ -510,6 +652,8 @@ pub(crate) fn read_v3_runtime_finish_reason(value: &Value) -> Option<String> {
         .or_else(|| read_v3_runtime_string_path(value, &["finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stop_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["stopReason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["delta", "stop_reason"]))
+        .or_else(|| read_v3_runtime_string_path(value, &["message", "stop_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "finish_reason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "finishReason"]))
         .or_else(|| read_v3_runtime_string_path(value, &["response", "stop_reason"]))
@@ -533,18 +677,12 @@ fn infer_v3_runtime_response_status_from_provider_event_type(
 }
 
 fn infer_v3_runtime_finish_reason_from_provider_event_json(
-    event_type: Option<&str>,
+    _event_type: Option<&str>,
     response_status: Option<&str>,
 ) -> Option<String> {
     match response_status.map(str::trim) {
         Some(status) if status.eq_ignore_ascii_case("requires_action") => {
             Some("tool_calls".to_string())
-        }
-        Some(status)
-            if status.eq_ignore_ascii_case("completed")
-                && matches!(event_type, Some("response.completed")) =>
-        {
-            Some("stop".to_string())
         }
         _ => None,
     }
@@ -660,23 +798,30 @@ pub(crate) fn materialize_v3_runtime_input_usage_estimate_from_request(
     response: &mut Value,
     request: &Value,
 ) {
+    let Some(response_object) = response.as_object_mut() else {
+        return;
+    };
+    // The estimate is a full BPE pass and is discarded whenever the provider
+    // already reported `input_tokens`, so the reported value is checked first.
+    if response_object
+        .get("usage")
+        .and_then(Value::as_object)
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(Value::as_u64)
+        .is_some_and(|tokens| tokens > 0)
+    {
+        return;
+    }
     let estimated_input_tokens = crate::token_estimation::estimate_v3_request_tokens(request);
     if estimated_input_tokens == 0 {
         return;
     }
-    let Some(response_object) = response.as_object_mut() else {
-        return;
-    };
     let usage = response_object
         .entry("usage")
         .or_insert_with(|| Value::Object(Map::new()));
     let Some(usage_object) = usage.as_object_mut() else {
         return;
     };
-    let input_tokens = usage_object.get("input_tokens").and_then(Value::as_u64);
-    if input_tokens.is_some_and(|tokens| tokens > 0) {
-        return;
-    }
     usage_object.insert(
         "input_tokens".to_string(),
         Value::from(estimated_input_tokens),
@@ -715,7 +860,7 @@ fn read_v3_usage_u64(value: &Value, path: &[&str]) -> Option<u64> {
         })
 }
 
-fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
+pub(super) fn build_v3_runtime_sse_json_frame(event: &str, payload: &Value) -> Vec<u8> {
     let data =
         serde_json::to_string(payload).expect("serde_json::Value serialization must not fail");
     format!("event: {event}\ndata: {data}\n\n").into_bytes()
@@ -740,112 +885,122 @@ pub fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(
 }
 
 pub(crate) fn build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget(
-    mut response: Value,
+    response: Value,
     attempt_budget: crate::nodes::V3AttemptBudget,
 ) -> Result<V3ResponsesRelayClientStream, String> {
     let _owner = V3_RESPONSES_RELAY_SSE_CLIENT_FRAME_PROJECTION_OWNER;
-    materialize_v3_responses_terminal_usage(&mut response);
-    let status = response.get("status").and_then(Value::as_str);
-    // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
-    // content_filter 触发）：必须按协议投影 response.created + output_item.done
-    // （部分输出）+ response.incomplete + response.done + [DONE]，禁止把它映射
-    // 成 response.failed 丢弃部分输出；只有 status=failed 才是失败终态。
-    let failed = status == Some("failed");
-    let incomplete = status == Some("incomplete");
-    let mut frames = Vec::new();
-    if !failed {
-        if let Some(response_id) = response.get("id").and_then(Value::as_str) {
-            frames.push(build_v3_runtime_sse_json_frame(
-                "response.created",
-                &json!({
-                    "type": "response.created",
-                    "response": {
-                        "id": response_id,
-                        "status": response
-                            .get("status")
-                            .cloned()
-                            .unwrap_or_else(|| json!("in_progress")),
-                    }
-                }),
-            ));
-            if let Some(output) = response.get("output").and_then(Value::as_array) {
-                let mut reasoning_progress_emitted = false;
-                for (index, item) in output.iter().enumerate() {
-                    let projected_item =
-                        project_v3_responses_client_event_output_item_done_item(item);
-                    append_v3_responses_client_reasoning_progress_frames(
-                        &mut frames,
-                        response_id,
-                        index,
-                        &projected_item,
-                        &mut reasoning_progress_emitted,
-                    );
-                    append_v3_responses_client_function_call_progress_frames(
-                        &mut frames,
-                        response_id,
-                        index,
-                        &projected_item,
-                    )?;
+    let (_, stream) = super::execute_v3_operation_runner_response_frame_committed_client_sse(
+        response,
+        move |mut response| {
+            materialize_v3_responses_terminal_usage(&mut response);
+            let status = response.get("status").and_then(Value::as_str);
+            // response.incomplete 是 Responses 协议合法终态（max_output_tokens 截断 /
+            // content_filter 触发）：必须按协议投影 response.created + output_item.done
+            // （部分输出）+ response.incomplete，禁止把它映射成 response.failed 丢弃部分
+            // 输出；只有 status=failed 才是失败终态。
+            //
+            // Responses 客户端帧序列与 Direct 路径/上游 provider 保持一致：协议没有
+            // `response.done` 事件，Chat Completions 的 `[DONE]` 终止符也不属于 Responses。
+            // A paused provider turn retains response.in_progress at the end of this
+            // exchange; it must not acquire a fabricated response.completed event.
+            // 不得向 Responses 客户端追加非协议帧。
+            let failed = status == Some("failed");
+            let mut frames = Vec::new();
+            if !failed {
+                if let Some(response_id) = response.get("id").and_then(Value::as_str) {
+                    // response.created/response.in_progress 承载“尚未产生输出”的响应快照：
+                    // 与上游 provider 和 Direct 路径一致，status 为 in_progress、output 为空。
+                    let progress_response =
+                        build_v3_responses_client_progress_response(&response, response_id);
                     frames.push(build_v3_runtime_sse_json_frame(
-                        "response.output_item.done",
+                        "response.created",
                         &json!({
-                            "type": "response.output_item.done",
-                            "response_id": response_id,
-                            "output_index": index,
-                            "item": projected_item,
+                            "type": "response.created",
+                            "response": progress_response,
                         }),
                     ));
+                    frames.push(build_v3_runtime_sse_json_frame(
+                        "response.in_progress",
+                        &json!({
+                            "type": "response.in_progress",
+                            "response": progress_response,
+                        }),
+                    ));
+                    if let Some(output) = response.get("output").and_then(Value::as_array) {
+                        let mut reasoning_progress_emitted = false;
+                        for (index, item) in output.iter().enumerate() {
+                            let projected_item =
+                                project_v3_responses_client_event_output_item_done_item(item);
+                            append_v3_responses_client_reasoning_progress_frames(
+                                &mut frames,
+                                response_id,
+                                index,
+                                &projected_item,
+                                &mut reasoning_progress_emitted,
+                            );
+                            append_v3_responses_client_function_call_progress_frames(
+                                &mut frames,
+                                response_id,
+                                index,
+                                &projected_item,
+                            )?;
+                            frames.push(build_v3_runtime_sse_json_frame(
+                                "response.output_item.done",
+                                &json!({
+                                    "type": "response.output_item.done",
+                                    "response_id": response_id,
+                                    "output_index": index,
+                                    "item": projected_item,
+                                }),
+                            ));
+                        }
+                    }
                 }
             }
-        }
-    }
-    let terminal_frame_index;
-    if failed {
-        frames.push(build_v3_runtime_sse_json_frame(
-            "response.failed",
-            &json!({
-                "type": "response.failed",
-                "response": response,
-            }),
-        ));
-        terminal_frame_index = frames.len() - 1;
-    } else {
-        let terminal_response = project_v3_responses_client_completed_response(&response);
-        let terminal_event = if incomplete {
-            "response.incomplete"
-        } else {
-            "response.completed"
-        };
-        frames.push(build_v3_runtime_sse_json_frame(
-            terminal_event,
-            &json!({
-                "type": terminal_event,
-                "response": terminal_response,
-            }),
-        ));
-        terminal_frame_index = frames.len() - 1;
-        frames.push(build_v3_runtime_sse_json_frame(
-            "response.done",
-            &json!({
-                "type": "response.done",
-                "response": terminal_response,
-            }),
-        ));
-    }
-    frames.push(b"data: [DONE]\n\n".to_vec());
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
-        .map_err(|error| error.to_string())?;
-    for (index, frame) in frames.into_iter().enumerate() {
-        committed.push(frame).map_err(|error| error.to_string())?;
-        if index == terminal_frame_index {
-            committed
-                .mark_last_frame_as_terminal()
+            let terminal_frame_index;
+            if failed {
+                frames.push(build_v3_runtime_sse_json_frame(
+                    "response.failed",
+                    &json!({
+                        "type": "response.failed",
+                        "response": response,
+                    }),
+                ));
+                terminal_frame_index = frames.len() - 1;
+            } else {
+                let terminal_response = project_v3_responses_client_completed_response(&response);
+                let terminal_event = match status {
+                    Some("incomplete") => "response.incomplete",
+                    Some("in_progress") => "response.in_progress",
+                    _ => "response.completed",
+                };
+                frames.push(build_v3_runtime_sse_json_frame(
+                    terminal_event,
+                    &json!({
+                        "type": terminal_event,
+                        "response": terminal_response,
+                    }),
+                ));
+                terminal_frame_index = frames.len() - 1;
+            }
+            let mut committed =
+                crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
+                    .map_err(|error| error.to_string())?;
+            for (index, frame) in frames.into_iter().enumerate() {
+                committed.push(frame).map_err(|error| error.to_string())?;
+                if index == terminal_frame_index {
+                    committed
+                        .mark_last_frame_as_terminal()
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            let stream = committed
+                .seal_after_validated_terminal()
                 .map_err(|error| error.to_string())?;
-        }
-    }
-    committed
-        .seal_after_validated_terminal()
-        .map_err(|error| error.to_string())
+            Ok((response, stream))
+        },
+    )?;
+    Ok(stream)
 }
 
 pub(crate) fn materialize_v3_responses_terminal_usage(response: &mut Value) {
@@ -984,7 +1139,7 @@ fn append_v3_responses_client_function_call_progress_frames(
         return Ok(());
     }
     let mut added_item = item.clone();
-    if item_type == Some("function_call") {
+    if item_type == Some("function_call") && item.get("arguments").is_some() {
         if let Some(object) = added_item.as_object_mut() {
             object.insert("arguments".to_string(), Value::String(String::new()));
         }
@@ -1012,9 +1167,8 @@ fn append_v3_responses_client_function_call_progress_frames(
     // string. Preserve an imperfect provider tool call instead of converting
     // it into a 502: native string arguments pass through byte-for-byte;
     // structured arguments are deterministically encoded; an absent field is
-    // represented by the protocol's empty initial argument buffer. This does
-    // does not infer or alter toolreason fields, and never changes the command
-    // object itself.
+    // kept absent without an invented parameter progress event. This does
+    // not infer or alter toolreason fields or the command object.
     let arguments = match item.get("arguments") {
         Some(Value::String(arguments)) => arguments.clone(),
         Some(arguments @ (Value::Object(_) | Value::Array(_))) => serde_json::to_string(arguments)
@@ -1022,7 +1176,7 @@ fn append_v3_responses_client_function_call_progress_frames(
                 format!("Responses client projection function_call arguments failed: {error}")
             })?,
         Some(value) => value.to_string(),
-        None => String::new(),
+        None => return Ok(()),
     };
     frames.push(build_v3_runtime_sse_json_frame(
         "response.function_call_arguments.done",
@@ -1037,18 +1191,23 @@ fn append_v3_responses_client_function_call_progress_frames(
     Ok(())
 }
 
-fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
+pub(super) fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Value {
     if item.get("type").and_then(Value::as_str) != Some("output_text") {
         return item.clone();
     }
-    let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+    let mut content_part = item.clone();
+    if let Some(text) = content_part.get_mut("text") {
+        if !text.is_string() {
+            *text = Value::String(text.to_string());
+        }
+    }
+    if let Some(object) = content_part.as_object_mut() {
+        object.remove("id");
+    }
     let mut projected = json!({
         "type": "message",
         "role": "assistant",
-        "content": [{
-            "type": "output_text",
-            "text": text,
-        }],
+        "content": [content_part],
     });
     if let Some(id) = item.get("id").cloned() {
         projected["id"] = id;
@@ -1056,10 +1215,34 @@ fn project_v3_responses_client_event_output_item_done_item(item: &Value) -> Valu
     projected
 }
 
+/// `response.created`/`response.in_progress` 的响应快照：保留 provider 身份
+/// 与模型字段，但按 Responses 协议把状态固定为 `in_progress`、清空 output
+/// （此刻尚未产生任何输出条目），并清掉只在终态成立的字段。禁止在
+/// in-progress 帧里携带终态 status、最终 output、usage 或 incomplete_details。
+fn build_v3_responses_client_progress_response(response: &Value, response_id: &str) -> Value {
+    let mut progress = response.clone();
+    if let Some(object) = progress.as_object_mut() {
+        object.insert("id".to_string(), Value::String(response_id.to_string()));
+        object.insert(
+            "status".to_string(),
+            Value::String("in_progress".to_string()),
+        );
+        object.insert("output".to_string(), Value::Array(Vec::new()));
+        // Candidate outcomes describe the terminal output positions. Defer
+        // this business extension until a snapshot contains that output.
+        object.remove("gemini_candidate_outcomes");
+        object.insert("usage".to_string(), Value::Null);
+        object.insert("incomplete_details".to_string(), Value::Null);
+        object.remove("completed_at");
+        object.remove("stop_details");
+    }
+    progress
+}
+
 /// SSE 事件级 completed/done 内嵌 response 的 item 表示投影：与
 /// `output_item.done` 事件保持一致（output_text -> message 包裹），
 /// 避免同一 SSE 流内同一 output 条目出现两种 client 语义。
-fn project_v3_responses_client_completed_response(response: &Value) -> Value {
+pub(super) fn project_v3_responses_client_completed_response(response: &Value) -> Value {
     let mut projected = response.clone();
     if let Some(output) = projected.get_mut("output").and_then(Value::as_array_mut) {
         for item in output.iter_mut() {
@@ -1067,6 +1250,19 @@ fn project_v3_responses_client_completed_response(response: &Value) -> Value {
         }
     }
     projected
+}
+
+pub(super) fn selected_interface_has_responses_contract(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+    interface_id: &str,
+) -> bool {
+    manifest
+        .providers
+        .get(provider_id)
+        .and_then(|provider| provider.interfaces.get(interface_id))
+        .and_then(|interface| interface.responses.as_ref())
+        .is_some()
 }
 
 pub(crate) fn provider_target(
@@ -1087,33 +1283,18 @@ pub(crate) fn provider_target(
         .ok_or_else(|| {
             V3ResponsesRelayRuntimeError::Target("selected auth handle missing".to_string())
         })?;
-    let secret = match (
-        &auth.env,
-        &auth.token_file,
-        &auth.secret_file,
-        &auth.secret_key,
-        &auth.api_key,
-    ) {
-        (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => {
-            return Err(V3ResponsesRelayRuntimeError::Target(
-                "selected auth handle is invalid".to_string(),
-            ));
-        }
-    };
+    let secret = v3_provider_auth_handle_from_manifest_entry(selected.auth_alias.clone(), auth)
+        .map_err(V3ResponsesRelayRuntimeError::Target)?
+        .secret;
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        interface_id: selected.interface_id.clone(),
         provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),
-        compatibility_profile: provider.compatibility_profile.clone(),
+        compatibility_profile: selected.compatibility_profile.clone(),
+        headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: selected.auth_alias.clone(),
             secret,
@@ -1129,6 +1310,288 @@ pub(crate) fn provider_target(
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::provider_failure_runtime_policy::{
+        resolve_v3_relay_target_outcome, V3RelayProviderTargetResolution,
+    };
+    use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+
+    fn operator_fault_manifest() -> V3Config05ManifestPublished {
+        let source = r#"
+version = 3
+[servers.operator_fault]
+bind = "127.0.0.1"
+port = 5555
+routing_group = "operator_fault"
+endpoints = ["responses"]
+[providers.primary]
+type = "responses"
+base_url = "http://primary.invalid/v1"
+default_model = "gpt-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "OPERATOR_FAULT_KEY" }] }
+[providers.primary.models.gpt-test]
+wire_name = "gpt-test"
+[route_groups.operator_fault.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", key = "key", priority = 1 }]
+"#;
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(source).expect("operator-fault authoring"),
+        )
+        .expect("operator-fault manifest")
+    }
+
+    #[tokio::test]
+    async fn responses_compat_other_none_uses_canonical_fallback_source() {
+        let manifest = operator_fault_manifest();
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let failure_session_scope =
+            V3ProviderFailureSessionScope::new("operator_fault", "operator_fault", "session")
+                .expect("compat session scope");
+        let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id: "operator_fault",
+            failure_session_scope: &failure_session_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &json!({"model": "gpt-test", "input": "hello"}),
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 0,
+            deterministic_sample: 0,
+        }) {
+            V3RelayProviderTargetResolution::Selected(selected) => selected,
+            _ => panic!("fixture must select its provider"),
+        };
+        let compat_error = classify_v3_provider_compat_error(
+            "request",
+            &V3ProviderCompatProfileId::Passthrough,
+            "provider request compatibility failed".to_string(),
+        );
+        assert_eq!(
+            compat_error.classification(),
+            V3ProviderCompatErrorClassification::Other
+        );
+        let expected_message = format!("V3 Responses Relay provider compat failed: {compat_error}");
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(compat_error),
+            "primary",
+            None,
+        )
+        .expect("Responses compat Other must defer to the provider failure policy");
+        assert_eq!(failure.status, 502);
+        assert_eq!(failure.source_stage, "ProviderReqCompat06ProviderCompat");
+        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+        assert_eq!(failure.policy_error_message, expected_message);
+        assert!(failure.terminal_projection.is_none());
+        assert!(failure.error_operator_fault.is_none());
+
+        let context = V3RelayProviderFailurePolicyContext {
+            manifest: &manifest,
+            captured_target_09: None,
+            failure_session_scope: failure_session_scope.clone(),
+            provider_health: &health,
+            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+            deterministic_sample: 0,
+        };
+        let mut last_external_http = None;
+        let mut failed_candidates = BTreeSet::new();
+        let mut same_candidate_retries = BTreeMap::new();
+        let mut retry_selected = None;
+        let mut pending_recovery = None;
+        let mut provider_failure_events = Vec::new();
+        let selected_observability = V3RuntimeObservability::default();
+        let mut trace = Vec::new();
+        let mut state = V3ResponsesRelayProviderRetryState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            retry_selected: &mut retry_selected,
+            pending_recovery: &mut pending_recovery,
+            provider_failure_events: &mut provider_failure_events,
+            provider_failure_event_sink: None,
+            selected_observability: &selected_observability,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        };
+
+        let output =
+            handle_v3_responses_relay_provider_failure(&context, selected, failure, &mut state)
+                .await
+                .expect("compat Other must use the ordinary failure policy")
+                .expect("single-candidate compat Other must terminate");
+        let projected = output
+            .terminal_projection
+            .as_ref()
+            .expect("compat Other must carry the canonical Error06 projection");
+        let source = &projected.diagnostic_source;
+
+        assert_eq!(
+            source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+        );
+        assert_eq!(source.source_stage, "ProviderReqCompat06ProviderCompat");
+        assert_eq!(source.code, "provider_request_compat_error");
+        assert_eq!(source.message, expected_message);
+        assert!(source.internal_error.is_none());
+        let external = source
+            .external_error
+            .as_ref()
+            .expect("ordinary failure policy must preserve provider identity");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, None);
+        assert_eq!(
+            external.code.as_deref(),
+            Some("provider_request_compat_error")
+        );
+        assert_eq!(external.provider_id.as_deref(), Some("primary"));
+        assert_eq!(external.upstream_request_id, None);
+        assert_eq!(external.message.as_deref(), Some(expected_message.as_str()));
+        assert_eq!(
+            projected.chain,
+            routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS
+        );
+        assert!(output.error_operator_fault.is_none());
+        assert_eq!(failed_candidates.len(), 1);
+        assert!(same_candidate_retries.is_empty());
+        assert!(retry_selected.is_none());
+        assert!(pending_recovery.is_none());
+        assert_eq!(provider_failure_events.len(), 1);
+        assert!(
+            health
+                .store()
+                .availability_for_session(
+                    &failure_session_scope,
+                    "primary",
+                    Some("key"),
+                    Some("gpt-test"),
+                    u64::MAX,
+                )
+                .available
+        );
+    }
+
+    #[tokio::test]
+    async fn operator_fault_short_circuits_before_retry_health_and_candidate_mutation() {
+        let manifest = operator_fault_manifest();
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let failure_session_scope =
+            V3ProviderFailureSessionScope::new("operator_fault", "operator_fault", "session")
+                .expect("operator-fault session scope");
+        let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id: "operator_fault",
+            failure_session_scope: &failure_session_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &json!({"model": "gpt-test", "input": "hello"}),
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 0,
+            deterministic_sample: 0,
+        }) {
+            V3RelayProviderTargetResolution::Selected(selected) => selected,
+            _ => panic!("fixture must select its provider"),
+        };
+        let source = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_projection_nonterminal",
+            "Error06 SDK completed without a terminal client projection",
+        );
+        let fault = crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+            source,
+            Ok(None),
+        )
+        .expect_err("missing Error06 must produce the actual typed SDK fault");
+        let failure = V3ResponsesRelayProviderFailure {
+            attempt_source: None,
+            status: 502,
+            provider_status: None,
+            provider_body_read_failure: None,
+            policy_error_type: "provider_request_compat_error".to_string(),
+            policy_error_message: "operator fault must not enter provider policy".to_string(),
+            provider_id: selected.candidate.provider_id.clone(),
+            source_stage: "ProviderReqCompat06ProviderCompat",
+            observability: None,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: Some(fault.clone()),
+            failed_attempt_evidence: None,
+            matched_policy: None,
+            response_processing_code: None,
+        };
+        let context = V3RelayProviderFailurePolicyContext {
+            manifest: &manifest,
+            captured_target_09: None,
+            failure_session_scope: failure_session_scope.clone(),
+            provider_health: &health,
+            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+            deterministic_sample: 0,
+        };
+        let mut last_external_http = None;
+        let mut failed_candidates = BTreeSet::new();
+        let mut same_candidate_retries = BTreeMap::new();
+        let mut retry_selected = None;
+        let mut pending_recovery = None;
+        let mut provider_failure_events = Vec::new();
+        let selected_observability = V3RuntimeObservability::default();
+        let mut trace = Vec::new();
+        let mut state = V3ResponsesRelayProviderRetryState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            retry_selected: &mut retry_selected,
+            pending_recovery: &mut pending_recovery,
+            provider_failure_events: &mut provider_failure_events,
+            provider_failure_event_sink: None,
+            selected_observability: &selected_observability,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        };
+
+        let output =
+            handle_v3_responses_relay_provider_failure(&context, selected, failure, &mut state)
+                .await
+                .expect("operator fault must exit without a policy error");
+
+        let output = output.expect("operator fault must remain terminal");
+        assert_eq!(output.error_operator_fault, Some(fault));
+        assert!(
+            output.terminal_projection.is_none(),
+            "seeded operator fault must not become a client projection"
+        );
+        assert!(failed_candidates.is_empty());
+        assert!(same_candidate_retries.is_empty());
+        assert!(retry_selected.is_none());
+        assert!(pending_recovery.is_none());
+        assert!(provider_failure_events.is_empty());
+        assert!(trace.is_empty());
+        assert!(
+            health
+                .store()
+                .availability_for_session(
+                    &failure_session_scope,
+                    "primary",
+                    Some("key"),
+                    Some("gpt-test"),
+                    u64::MAX,
+                )
+                .available
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "responses_relay_first_frame_commit_tests.rs"]
+mod responses_relay_first_frame_commit_tests;
+#[cfg(test)]
+#[path = "responses_relay_runtime_multi_interface_tests.rs"]
+mod responses_relay_runtime_multi_interface_tests;
+
+#[cfg(test)]
 #[path = "responses_relay_runtime_tests.rs"]
 mod responses_relay_runtime_tests;
 #[cfg(test)]
@@ -1138,3 +1601,7 @@ mod responses_relay_runtime_tests_extra;
 #[cfg(test)]
 #[path = "responses_relay_runtime_failure_propagation_test.rs"]
 mod responses_relay_runtime_failure_propagation_test;
+
+#[cfg(test)]
+#[path = "responses_relay_output_cap_tests.rs"]
+mod responses_relay_output_cap_tests;

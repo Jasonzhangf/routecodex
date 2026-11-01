@@ -152,6 +152,43 @@ pub fn strip_memory_envelope_from_text(text: &str, report: &MemoryCaptureReport)
     }
 }
 
+/// Strip the declared memory envelope from one Responses output part's text
+/// carrier. Only `output_text` parts carry captured memory text.
+pub fn strip_memory_envelope_from_responses_output_part(
+    part: &mut Value,
+    report: &MemoryCaptureReport,
+) {
+    if !report.memory_unit_found {
+        return;
+    }
+    if part.get("type").and_then(Value::as_str) == Some("output_text") {
+        if let Some(Value::String(text)) = part.get_mut("text") {
+            *text = strip_memory_envelope_from_text(text, report);
+        }
+    }
+}
+
+/// Strip the declared memory envelope from one Responses output item snapshot,
+/// covering both content parts and a compact message-level `text` carrier.
+pub fn strip_memory_envelope_from_responses_output_item(
+    item: &mut Value,
+    report: &MemoryCaptureReport,
+) {
+    if !report.memory_unit_found {
+        return;
+    }
+    if let Some(parts) = item.get_mut("content").and_then(Value::as_array_mut) {
+        for part in parts {
+            strip_memory_envelope_from_responses_output_part(part, report);
+        }
+    }
+    if item.get("type").and_then(Value::as_str) == Some("message") {
+        if let Some(Value::String(text)) = item.get_mut("text") {
+            *text = strip_memory_envelope_from_text(text, report);
+        }
+    }
+}
+
 pub fn strip_memory_envelope_from_responses_payload(
     payload: &mut Value,
     report: &MemoryCaptureReport,
@@ -161,15 +198,7 @@ pub fn strip_memory_envelope_from_responses_payload(
     }
     if let Some(items) = payload.get_mut("output").and_then(Value::as_array_mut) {
         for item in items {
-            if let Some(parts) = item.get_mut("content").and_then(Value::as_array_mut) {
-                for part in parts {
-                    if part.get("type").and_then(Value::as_str) == Some("output_text") {
-                        if let Some(Value::String(text)) = part.get_mut("text") {
-                            *text = strip_memory_envelope_from_text(text, report);
-                        }
-                    }
-                }
-            }
+            strip_memory_envelope_from_responses_output_item(item, report);
         }
     }
 }

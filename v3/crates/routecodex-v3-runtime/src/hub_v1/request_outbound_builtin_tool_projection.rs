@@ -1,14 +1,15 @@
 use provider_compat_core::namespace_tools::{
     flatten_namespace_tool_for_provider, openai_chat_freeform_custom_tool_parameters,
-    push_unique_provider_function_tool, validate_namespace_tool_dispatch_names,
+    provider_function_tool_name, push_unique_provider_function_tool,
+    replace_provider_function_tool, validate_namespace_tool_dispatch_names,
 };
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use routecodex_v3_config::V3WebSearchExecutionMode;
 
-use super::is_v3_gpt_canonical_model;
 use super::request_outbound_mcp_names::provider_function_name;
+use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 
 pub(crate) fn project_openai_responses_hosted_web_search_for_selected_target(
     payload: &mut Value,
@@ -46,9 +47,7 @@ fn is_hosted_web_search_choice(choice: &Value) -> bool {
     )
 }
 
-pub(super) fn promote_tool_search_output_tools_to_provider_tools(
-    payload: &mut Value,
-) -> Result<(), String> {
+pub(super) fn collect_tool_search_output_tools(payload: &Value) -> Result<Vec<Value>, String> {
     let mut discovered = Vec::new();
     if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
         for (index, message) in messages.iter().enumerate() {
@@ -98,9 +97,28 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
             discovered.extend(tools.iter().cloned());
         }
     }
+    Ok(discovered)
+}
+
+pub(super) fn promote_tool_search_output_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let discovered = collect_tool_search_output_tools(payload)?;
     if discovered.is_empty() {
         return Ok(());
     }
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-responses",
+        )?;
+    let source_tools = registry.source_tools(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+    );
     let top_level = payload.as_object_mut().ok_or_else(|| {
         "MalformedOutboundField target_protocol=provider path=$: expected object".to_string()
     })?;
@@ -110,11 +128,54 @@ pub(super) fn promote_tool_search_output_tools_to_provider_tools(
     let tools = tools.as_array_mut().ok_or_else(|| {
         "MalformedOutboundField target_protocol=provider path=$.tools: expected array".to_string()
     })?;
-    for tool in discovered {
-        if !tools.iter().any(|existing| existing == &tool) {
-            tools.push(tool);
-        }
+    *tools = source_tools;
+    Ok(())
+}
+
+/// Merge the current request's `input[].additional_tools.tools` into the
+/// provider-visible `tools` declaration set. The original `additional_tools`
+/// input surface is preserved; this only makes the same client capability
+/// declarations reachable on the provider wire, with the existing
+/// `additional_tools` schema-refresh precedence (a later declaration for the
+/// same tool identity supersedes the earlier one).
+pub(super) fn promote_additional_tools_to_provider_tools(
+    payload: &mut Value,
+) -> Result<(), String> {
+    let additional: Vec<Value> = payload
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .filter_map(|item| item.get("tools").and_then(Value::as_array))
+        .flatten()
+        .cloned()
+        .collect();
+    if additional.is_empty() {
+        return Ok(());
     }
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-responses",
+        )?;
+    let source_tools = registry.source_tools(
+        payload
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+    );
+    let top_level = payload.as_object_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=provider path=$: expected object".to_string()
+    })?;
+    let tools = top_level
+        .entry("tools".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let tools = tools.as_array_mut().ok_or_else(|| {
+        "MalformedOutboundField target_protocol=provider path=$.tools: expected array".to_string()
+    })?;
+    *tools = source_tools;
     Ok(())
 }
 
@@ -181,21 +242,76 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     web_search_execution_mode: V3WebSearchExecutionMode,
     has_web_search_capability: bool,
 ) -> Result<(), String> {
-    validate_namespace_tool_dispatch_names(payload)?;
+    let mut drops = Vec::new();
+    project_openai_chat_provider_tools_for_web_search_mode_recording(
+        payload,
+        model_id,
+        web_search_execution_mode,
+        has_web_search_capability,
+        &V3ProjectionDropContext::disabled(),
+        &mut drops,
+    )
+}
+
+/// stage-3 openai_chat provider tools 投影：非数组 `tools` 不再 hard error，
+/// 而是 DROP（`root.remove` 已移除）+ RECORD + PRINT 后继续请求。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn project_openai_chat_provider_tools_for_web_search_mode_recording(
+    payload: &mut Value,
+    _model_id: Option<&str>,
+    web_search_execution_mode: V3WebSearchExecutionMode,
+    has_web_search_capability: bool,
+    drop_context: &V3ProjectionDropContext,
+    drops: &mut Vec<V3ProjectionDropRecord>,
+) -> Result<(), String> {
+    let refreshed_provider_tool_names = validate_namespace_tool_dispatch_names(payload)?;
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            payload,
+            "openai-chat",
+        )?;
+    registry.project_references(payload);
+    if let Some(choice) = payload
+        .get_mut("tool_choice")
+        .and_then(Value::as_object_mut)
+    {
+        if choice.get("type").and_then(Value::as_str) == Some("custom")
+            && choice
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|name| {
+                    registry.identities().any(|identity| {
+                        identity.kind == provider_compat_core::namespace_tools::ToolKind::Custom
+                            && identity.actual_wire_name == name
+                    })
+                })
+        {
+            choice.insert("type".into(), Value::String("function".into()));
+        }
+    }
+    if let Some(tools) = payload.get("tools").and_then(Value::as_array) {
+        payload["tools"] = Value::Array(registry.project_tools("openai-responses", tools)?);
+    }
     let Some(root) = payload.as_object_mut() else {
         return Ok(());
     };
     let Some(tools) = root.remove("tools") else {
         return Ok(());
     };
-    let tools = tools.as_array().ok_or_else(|| {
-        "MalformedOutboundField target_protocol=openai_chat path=$.tools".to_string()
-    })?;
-    // gpt 家族模型保留标准 hosted web_search 语义（openai 官方支持）；其余
-    // 所有模型统一替换为内部 websearch 工具（RouteCodex 本地搜索 hop 执行，
-    // 不区分 provider、不依赖 provider 原生搜索能力）。家族判定真源在 compat
-    // 层（is_v3_gpt_canonical_model 委托 config 家族判定），本节点只消费结果。
-    let is_gpt_model = model_id.is_some_and(is_v3_gpt_canonical_model);
+    // 客户端可能发送非数组 `tools`（例如字符串/对象）。openai_chat wire 的
+    // tools 必须是声明数组，非数组不携带任何可转换的工具声明语义；stage 1/2
+    // 对 tools 无损，因此这里证明是客户端原始形态。没有兼容表示 → 丢弃并继续，
+    // 不再让客户端收到 598 provider_request_payload_invalid。
+    let Some(tools) = tools.as_array() else {
+        drops.push(V3ProjectionDropRecord::new(
+            "openai_chat",
+            "$.tools",
+            "non_array_tools_unrepresentable",
+            tools.clone(),
+            "project_openai_chat_provider_tools_for_web_search_mode",
+        ));
+        return Ok(());
+    };
     let mut normalized_tools = Vec::new();
     let mut normalized_tool_indexes = HashMap::<String, usize>::new();
     let mut web_search_options = Map::new();
@@ -207,11 +323,12 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                 .map_err(|error| format!("$.tools[{index}]: {error}"))?
                 .ok_or_else(|| format!("$.tools[{index}]: namespace tool was not flattened"))?;
             for tool in flattened {
-                push_unique_provider_function_tool(
+                push_provider_tool_with_refresh_precedence(
                     &mut normalized_tools,
                     &mut normalized_tool_indexes,
                     tool,
                     "openai_chat",
+                    &refreshed_provider_tool_names,
                 )?;
             }
             continue;
@@ -233,18 +350,6 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
                         &format!("$.tools[{index}]"),
                     )?;
                 }
-            } else if has_web_search_capability
-                && (web_search_execution_mode.is_metadata_center_local_search() || !is_gpt_model)
-            {
-                // Mode B（显式内部路由，如 MiniMax 走标准 web search 内部路由）
-                // 或非 gpt 模型：标准 web_search 声明投影为本地 websearch
-                // function tool（单一工具名 websearch，供 Resp03 同轮拦截本地执行）。
-                push_unique_provider_function_tool(
-                    &mut normalized_tools,
-                    &mut normalized_tool_indexes,
-                    build_local_web_search_function_tool(tool, index, "websearch")?,
-                    "openai_chat",
-                )?;
             } else if has_web_search_capability {
                 // gpt 模型 + provider 具备 web_search 能力：保持既有 hosted
                 // web_search_options 投影（与 HEAD 行为一致）。
@@ -260,11 +365,12 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
             // 避免未知字段/误调用）。
         } else {
             let normalized = normalize_openai_chat_provider_tool(tool, index)?;
-            push_unique_provider_function_tool(
+            push_provider_tool_with_refresh_precedence(
                 &mut normalized_tools,
                 &mut normalized_tool_indexes,
                 normalized,
                 "openai_chat",
+                &refreshed_provider_tool_names,
             )?;
         }
     }
@@ -290,95 +396,21 @@ pub(super) fn project_openai_chat_provider_tools_for_web_search_mode(
     Ok(())
 }
 
-fn build_local_web_search_function_tool(
-    tool: &Value,
-    index: usize,
-    local_tool_name: &str,
-) -> Result<Value, String> {
-    let path = format!("$.tools[{index}]");
-    let row = tool
-        .as_object()
-        .ok_or_else(|| format!("MalformedOutboundField target_protocol=openai_chat path={path}"))?;
-    for key in row.keys() {
-        if !matches!(
-            key.as_str(),
-            "type"
-                | "search_context_size"
-                | "user_location"
-                | "external_web_access"
-                | "search_content_types"
-        ) {
-            return Err(format!(
-                "UnmappedOutboundFields target_protocol=openai_chat paths={path}.{key}"
-            ));
-        }
-    }
-    let content_types = row
-        .get("search_content_types")
-        .cloned()
-        .unwrap_or_else(|| Value::Array(vec![Value::String("text".to_string())]));
-    if !content_types
-        .as_array()
-        .is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_string))
+fn push_provider_tool_with_refresh_precedence(
+    tools: &mut Vec<Value>,
+    tool_indexes: &mut HashMap<String, usize>,
+    tool: Value,
+    target_protocol: &str,
+    refreshed_provider_tool_names: &BTreeSet<String>,
+) -> Result<(), String> {
+    if provider_function_tool_name(&tool)
+        .is_some_and(|name| refreshed_provider_tool_names.contains(name))
     {
-        return Err(format!(
-            "MalformedOutboundField target_protocol=openai_chat path={path}.search_content_types"
-        ));
+        replace_provider_function_tool(tools, tool_indexes, tool);
+        Ok(())
+    } else {
+        push_unique_provider_function_tool(tools, tool_indexes, tool, target_protocol)
     }
-    let mut properties = Map::new();
-    properties.insert(
-        "query".to_string(),
-        serde_json::json!({
-            "type":"string",
-            "description":"The search query. Construct a concise query with the key terms for the information the user needs."
-        }),
-    );
-    properties.insert(
-        "search_content_types".to_string(),
-        serde_json::json!({
-            "type":"array",
-            "items":{"type":"string","enum":content_types},
-            "default":content_types
-        }),
-    );
-    if let Some(value) = row.get("search_context_size") {
-        properties.insert(
-            "search_context_size".to_string(),
-            serde_json::json!({"type":"string","default":value}),
-        );
-    }
-    if let Some(value) = row.get("user_location") {
-        properties.insert(
-            "user_location".to_string(),
-            serde_json::json!({"type":"object","default":value}),
-        );
-    }
-    normalize_openai_chat_function_tool(
-        &Map::from_iter([
-            ("type".to_string(), Value::String("function".to_string())),
-            (
-                "name".to_string(),
-                Value::String(local_tool_name.to_string()),
-            ),
-            (
-                "description".to_string(),
-                Value::String("Search the web for up-to-date information.".to_string()),
-            ),
-            (
-                "parameters".to_string(),
-                Value::Object(Map::from_iter([
-                    ("type".to_string(), Value::String("object".to_string())),
-                    ("properties".to_string(), Value::Object(properties)),
-                    (
-                        "required".to_string(),
-                        Value::Array(vec![Value::String("query".to_string())]),
-                    ),
-                    ("additionalProperties".to_string(), Value::Bool(false)),
-                ])),
-            ),
-        ]),
-        &path,
-    )
 }
 
 fn merge_openai_chat_web_search_options(

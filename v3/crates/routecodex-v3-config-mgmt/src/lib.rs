@@ -18,11 +18,11 @@ pub use provider::{
     write_provider_file, ProviderFileEntry, V2_PROVIDER_CONFIG_FILE_NAME,
 };
 pub use route::{
-    apply_route_group_view_to_authoring, apply_user_route_group_view, new_default_pool_view,
-    pool_view_from_authoring, port_view_from_authoring, route_groups_from_authoring,
-    user_route_groups_from_selection, RouteGroupView, RouteMemberView, RoutePoolView,
-    RoutePortView, RouteTierView, UserRouteGroupView, UserRouteMemberView, UserRoutePoolView,
-    UserRouteTierView,
+    apply_route_group_view_to_authoring, apply_user_route_group_view, bind_user_route_member,
+    new_default_pool_view, pool_view_from_authoring, port_view_from_authoring,
+    route_groups_from_authoring, user_route_groups_from_selection, RouteGroupView, RouteMemberView,
+    RoutePoolView, RoutePortView, RouteTierView, UserRouteGroupView, UserRouteMemberBinding,
+    UserRouteMemberView, UserRoutePoolView, UserRouteTierView,
 };
 pub use store::{
     default_revision_store_path, ConfigMgmtStore, ConfigRevision, RevisionStore, V3ConfigMgmtError,

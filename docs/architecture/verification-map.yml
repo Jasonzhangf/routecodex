@@ -283,7 +283,8 @@ verification:
   notes:
   - Positive tests lock one Responses Direct/Relay routed request block and one terminal
     response block when runtime observability is present, exact 24/20/36 human columns
-    including oversized ASCII/CJK, fixed 52-column diagnostic scope, bright headline
+    including oversized ASCII/CJK, 96-column diagnostic session scope padded without
+    truncating the safe session id and without a `sessionIDFull` suffix, bright headline
     color, blank separator, complete diagnostics, plain output, and preservation of
     the original Direct SSE Error01 kind/stage/code/message.
   - Positive disconnect coverage locks source stage V3ServerRespOutbound06ClientFrame,

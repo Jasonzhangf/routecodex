@@ -87,6 +87,7 @@ pub enum V3OpenAiChatSseTerminalState {
     ToolCalls,
     ContentFilter,
     FunctionCall,
+    Opaque,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +107,8 @@ pub struct V3OpenAiChatSseMaterializedToolCall {
     pub call_id: Option<String>,
     pub kind: Option<String>,
     pub function_name: Option<String>,
-    pub function_arguments: String,
+    pub function_arguments: Option<String>,
+    pub extensions: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -117,9 +119,94 @@ pub struct V3OpenAiChatSseMaterializedChoice {
     pub refusal: String,
     pub finish_reason: Option<String>,
     pub tool_calls: BTreeMap<usize, V3OpenAiChatSseMaterializedToolCall>,
+    /// Choice-level fields other than `index`/`delta`/`finish_reason`, for
+    /// example `logprobs`, preserved on the materialized choice object.
+    pub extensions: BTreeMap<String, Value>,
+    /// Delta-level fields that are not consumed as Chat semantics, preserved
+    /// on the materialized message object.
+    pub message_extensions: BTreeMap<String, Value>,
+    pub active_tool_call_by_wire_index: BTreeMap<usize, usize>,
+    pub tool_call_by_wire_index_and_id: BTreeMap<(usize, String), usize>,
 }
 
 impl V3OpenAiChatSseMaterializedChoice {
+    fn record_tool_call_for_wire_index(
+        &mut self,
+        wire_index: usize,
+        incoming_id: Option<&str>,
+    ) -> usize {
+        let active_index = self
+            .active_tool_call_by_wire_index
+            .get(&wire_index)
+            .copied();
+        let active_id_is_empty = active_index
+            .and_then(|index| self.tool_calls.get(&index))
+            .and_then(|call| call.call_id.as_deref())
+            .map_or(true, str::is_empty);
+        let materialized_index = if let Some(id) = incoming_id {
+            let identity = (wire_index, id.to_string());
+            if let Some(&index) = self.tool_call_by_wire_index_and_id.get(&identity) {
+                index
+            } else if let Some(index) = active_index.filter(|_| active_id_is_empty) {
+                self.tool_call_by_wire_index_and_id.insert(identity, index);
+                index
+            } else {
+                let index = self.tool_calls.len();
+                self.tool_calls
+                    .insert(index, V3OpenAiChatSseMaterializedToolCall::default());
+                self.tool_call_by_wire_index_and_id.insert(identity, index);
+                index
+            }
+        } else if let Some(index) = active_index {
+            index
+        } else {
+            let index = self.tool_calls.len();
+            self.tool_calls
+                .insert(index, V3OpenAiChatSseMaterializedToolCall::default());
+            index
+        };
+        self.active_tool_call_by_wire_index
+            .insert(wire_index, materialized_index);
+        materialized_index
+    }
+
+    fn apply_tool_call(&mut self, call: &V3OpenAiChatSseToolCall) {
+        let incoming_id = call
+            .call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let materialized_index = self.record_tool_call_for_wire_index(call.position, incoming_id);
+        let tool_call = self
+            .tool_calls
+            .get_mut(&materialized_index)
+            .expect("materialized call slot must exist");
+        if let Some(id) = incoming_id {
+            tool_call.call_id = Some(id.to_string());
+        }
+        if call
+            .name
+            .as_deref()
+            .is_some_and(|name| !name.trim().is_empty())
+        {
+            tool_call.function_name = call.name.clone();
+        }
+        if let Some(arguments) = &call.arguments {
+            tool_call
+                .function_arguments
+                .get_or_insert_with(String::new)
+                .push_str(arguments);
+        }
+        if tool_call.kind.is_none() {
+            tool_call.kind = Some("function".to_owned());
+        }
+        for extension in &call.extensions {
+            tool_call
+                .extensions
+                .insert(extension.name.clone(), extension.value.clone());
+        }
+    }
+
     fn apply_delta(
         &mut self,
         choice: &V3OpenAiChatSseChoice,
@@ -127,31 +214,45 @@ impl V3OpenAiChatSseMaterializedChoice {
         if let Some(finish_reason) = &choice.finish_reason {
             self.finish_reason = Some(finish_reason.clone());
         }
+        for extension in &choice.extensions {
+            accumulate_choice_extension(&mut self.extensions, extension);
+        }
         match &choice.delta {
             V3OpenAiChatSseDelta::Empty => {}
             V3OpenAiChatSseDelta::Role(role) => self.role = Some(role.clone()),
             V3OpenAiChatSseDelta::Text(text) => self.content.push_str(text),
             V3OpenAiChatSseDelta::Reasoning(text) => self.reasoning_content.push_str(text),
             V3OpenAiChatSseDelta::Refusal(text) => self.refusal.push_str(text),
-            V3OpenAiChatSseDelta::ToolCall(call) => {
-                let tool_call = self.tool_calls.entry(call.position).or_default();
-                if call.call_id.is_some() {
-                    tool_call.call_id = call.call_id.clone();
-                }
-                if call
-                    .name
-                    .as_deref()
-                    .is_some_and(|name| !name.trim().is_empty())
-                {
-                    tool_call.function_name = call.name.clone();
-                }
-                if let Some(arguments) = &call.arguments {
-                    tool_call.function_arguments.push_str(arguments);
-                }
-                if tool_call.kind.is_none() {
-                    tool_call.kind = Some("function".to_owned());
+            V3OpenAiChatSseDelta::ToolCall(call) => self.apply_tool_call(call),
+            V3OpenAiChatSseDelta::ToolCalls(calls) => {
+                for call in calls {
+                    self.apply_tool_call(call);
                 }
             }
+        }
+        for extension in &choice.delta_extensions {
+            if let Some(text) = extension.value.as_str() {
+                match extension.name.as_str() {
+                    "content" => {
+                        self.content.push_str(text);
+                        continue;
+                    }
+                    "reasoning_content" | "reasoning" => {
+                        self.reasoning_content.push_str(text);
+                        continue;
+                    }
+                    "refusal" => {
+                        self.refusal.push_str(text);
+                        continue;
+                    }
+                    "role" => {
+                        self.role = Some(text.to_owned());
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            accumulate_extension(&mut self.message_extensions, extension);
         }
         Ok(())
     }
@@ -185,19 +286,39 @@ impl V3OpenAiChatSseMaterializedChoice {
                         "Chat tool call[{position}] at choice[{index}] is missing function name"
                     ))
                 })?;
-                calls.push(serde_json::json!({
+                let mut function = serde_json::json!({"name": name});
+                if let Some(arguments) = &call.function_arguments {
+                    function["arguments"] = Value::String(arguments.clone());
+                }
+                let mut projected = serde_json::json!({
                     "id": id,
                     "type": call.kind.clone().unwrap_or_else(|| "function".to_owned()),
-                    "function": {"name": name, "arguments": call.function_arguments}
-                }));
+                    "function": function
+                });
+                for (name, value) in &call.extensions {
+                    projected[name] = value.clone();
+                }
+                calls.push(projected);
             }
             message.insert("tool_calls".to_owned(), Value::Array(calls));
         }
-        Ok(serde_json::json!({
-            "index": index,
-            "message": Value::Object(message),
-            "finish_reason": self.finish_reason.clone().map(Value::String).unwrap_or(Value::Null)
-        }))
+        for (name, value) in &self.message_extensions {
+            message.entry(name.clone()).or_insert_with(|| value.clone());
+        }
+        let mut choice = serde_json::Map::new();
+        choice.insert("index".to_owned(), Value::from(index));
+        choice.insert("message".to_owned(), Value::Object(message));
+        choice.insert(
+            "finish_reason".to_owned(),
+            self.finish_reason
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        for (name, value) in &self.extensions {
+            choice.entry(name.clone()).or_insert_with(|| value.clone());
+        }
+        Ok(Value::Object(choice))
     }
 }
 
@@ -218,9 +339,12 @@ impl Default for V3OpenAiChatSseReducerState {
 
 impl V3OpenAiChatSseReducerState {
     pub fn has_tool_calls(&self) -> bool {
-        self.choices
-            .iter()
-            .any(|choice| matches!(choice.delta, V3OpenAiChatSseDelta::ToolCall(_)))
+        self.choices.iter().any(|choice| {
+            matches!(
+                choice.delta,
+                V3OpenAiChatSseDelta::ToolCall(_) | V3OpenAiChatSseDelta::ToolCalls(_)
+            )
+        })
     }
 
     pub fn apply_chunk(&mut self, chunk: &Value) -> Result<(), V3OpenAiChatSseTreeError> {
@@ -232,13 +356,22 @@ impl V3OpenAiChatSseReducerState {
             .system_fingerprint
             .or(self.system_fingerprint.take());
         let semantic = classify_v3_openai_chat_sse_chunk(chunk)?;
-        for choice in semantic.choices {
+        for extension in &semantic.extensions {
+            self.extensions.push(extension.clone());
+        }
+        for mut choice in semantic.choices {
             if let Some(reason) = choice
                 .finish_reason
                 .as_deref()
-                .filter(|reason| !reason.is_empty())
+                .filter(|reason| !reason.trim().is_empty())
             {
-                self.terminal = Some(parse_terminal_state(reason)?);
+                let normalized = match reason.to_ascii_lowercase().as_str() {
+                    "max_tokens" | "max-tokens" => "length".to_owned(),
+                    "max_output_tokens" | "max-output-tokens" => "length".to_owned(),
+                    _ => reason.to_owned(),
+                };
+                choice.finish_reason = Some(normalized.clone());
+                self.terminal = Some(parse_terminal_state(&normalized)?);
             }
             self.choices.push(choice);
         }
@@ -288,6 +421,17 @@ impl V3OpenAiChatSseReducerState {
         }
         if let Some(created) = self.created {
             response.insert("created".to_owned(), Value::from(created));
+        }
+        if let Some(fingerprint) = &self.system_fingerprint {
+            response.insert(
+                "system_fingerprint".to_owned(),
+                Value::String(fingerprint.clone()),
+            );
+        }
+        for extension in &self.extensions {
+            response
+                .entry(extension.name.clone())
+                .or_insert_with(|| extension.value.clone());
         }
         if let Some(usage) = &self.usage {
             let mut usage_value = serde_json::Map::new();
@@ -416,6 +560,28 @@ pub struct V3OpenAiChatSseChoice {
     pub delta_extensions: Vec<V3OpenAiChatSseExtension>,
 }
 
+impl V3OpenAiChatSseToolCall {
+    fn to_value(&self) -> Value {
+        let mut function = serde_json::Map::new();
+        if let Some(name) = &self.name {
+            function.insert("name".to_owned(), Value::String(name.clone()));
+        }
+        if let Some(arguments) = &self.arguments {
+            function.insert("arguments".to_owned(), Value::String(arguments.clone()));
+        }
+        let mut tool_call = serde_json::Map::new();
+        tool_call.insert("index".to_owned(), Value::from(self.position));
+        if let Some(id) = &self.call_id {
+            tool_call.insert("id".to_owned(), Value::String(id.clone()));
+        }
+        tool_call.insert("function".to_owned(), Value::Object(function));
+        for extension in &self.extensions {
+            tool_call.insert(extension.name.clone(), extension.value.clone());
+        }
+        Value::Object(tool_call)
+    }
+}
+
 impl V3OpenAiChatSseChoice {
     pub fn to_normalized_value(&self) -> Value {
         let mut delta = serde_json::Map::new();
@@ -430,22 +596,17 @@ impl V3OpenAiChatSseChoice {
                 delta.insert("refusal".to_owned(), Value::String(refusal.clone()));
             }
             V3OpenAiChatSseDelta::ToolCall(call) => {
-                let mut function = serde_json::Map::new();
-                if let Some(name) = &call.name {
-                    function.insert("name".to_owned(), Value::String(name.clone()));
-                }
-                if let Some(arguments) = &call.arguments {
-                    function.insert("arguments".to_owned(), Value::String(arguments.clone()));
-                }
-                let mut tool_call = serde_json::Map::new();
-                tool_call.insert("index".to_owned(), Value::from(call.position));
-                if let Some(id) = &call.call_id {
-                    tool_call.insert("id".to_owned(), Value::String(id.clone()));
-                }
-                tool_call.insert("function".to_owned(), Value::Object(function));
+                delta.insert("tool_calls".to_owned(), Value::Array(vec![call.to_value()]));
+            }
+            V3OpenAiChatSseDelta::ToolCalls(calls) => {
                 delta.insert(
                     "tool_calls".to_owned(),
-                    Value::Array(vec![Value::Object(tool_call)]),
+                    Value::Array(
+                        calls
+                            .iter()
+                            .map(V3OpenAiChatSseToolCall::to_value)
+                            .collect(),
+                    ),
                 );
             }
             V3OpenAiChatSseDelta::Empty | V3OpenAiChatSseDelta::Role(_) => {}
@@ -482,6 +643,7 @@ pub enum V3OpenAiChatSseDelta {
     Reasoning(String),
     Refusal(String),
     ToolCall(V3OpenAiChatSseToolCall),
+    ToolCalls(Vec<V3OpenAiChatSseToolCall>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -490,6 +652,7 @@ pub struct V3OpenAiChatSseToolCall {
     pub call_id: Option<String>,
     pub name: Option<String>,
     pub arguments: Option<String>,
+    pub extensions: Vec<V3OpenAiChatSseExtension>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -518,8 +681,6 @@ pub enum V3OpenAiChatSseTreeError {
     ToolCallNotObject,
     #[error("OpenAI Chat SSE usage must be an object")]
     UsageNotObject,
-    #[error("OpenAI Chat SSE finish reason is unsupported: {finish_reason}")]
-    UnknownFinishReason { finish_reason: String },
     #[error("OpenAI Chat SSE finish reason must be a string or null")]
     FinishReasonNotString,
     #[error("OpenAI Chat SSE content rewrite is incompatible with the delta")]
@@ -592,6 +753,17 @@ pub fn rewrite_v3_openai_chat_sse_content(
             *value = rewritten;
             Ok(())
         }
+        (
+            V3OpenAiChatSseDelta::ToolCalls(calls),
+            V3OpenAiChatSseContentRewrite::FunctionArguments(rewritten),
+        ) => {
+            if let Some(call) = calls.iter_mut().find(|call| call.arguments.is_some()) {
+                call.arguments = Some(rewritten);
+                Ok(())
+            } else {
+                Err(V3OpenAiChatSseTreeError::IncompatibleContentRewrite)
+            }
+        }
         _ => Err(V3OpenAiChatSseTreeError::IncompatibleContentRewrite),
     }
 }
@@ -645,46 +817,31 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
         .get("tool_calls")
         .and_then(Value::as_array)
         .is_some_and(|calls| !calls.is_empty());
-    // A tool-call delta may carry the Resp03 toolreason projection in the
-    // same delta. Keep the reasoning field as an extension in that shape;
-    // otherwise the tool-call semantic branch would consume the call and
-    // silently drop the co-located reasoning projection.
-    let delta_extensions = if has_tool_calls {
-        object_extensions(delta_object, &["content", "refusal", "tool_calls"])
-    } else {
-        object_extensions(
-            delta_object,
-            &[
-                "content",
-                "reasoning_content",
-                "reasoning",
-                "refusal",
-                "role",
-                "tool_calls",
-            ],
-        )
-    };
     let semantic_delta = if has_tool_calls {
         let tool_calls = delta_object
             .get("tool_calls")
             .and_then(Value::as_array)
             .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;
-        let call = tool_calls
-            .first()
-            .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;
-        let call_object = call
-            .as_object()
-            .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;
-        let function = call_object.get("function").and_then(Value::as_object);
-        V3OpenAiChatSseDelta::ToolCall(V3OpenAiChatSseToolCall {
-            position: call_object
-                .get("index")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as usize,
-            call_id: string_field(call_object, "id"),
-            name: function.and_then(|value| string_field(value, "name")),
-            arguments: function.and_then(|value| string_field(value, "arguments")),
-        })
+        let calls = tool_calls
+            .iter()
+            .map(|call| {
+                let call_object = call
+                    .as_object()
+                    .ok_or(V3OpenAiChatSseTreeError::ToolCallNotObject)?;
+                let function = call_object.get("function").and_then(Value::as_object);
+                Ok(V3OpenAiChatSseToolCall {
+                    position: call_object
+                        .get("index")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize,
+                    call_id: string_field(call_object, "id"),
+                    name: function.and_then(|value| string_field(value, "name")),
+                    arguments: function.and_then(|value| argument_text_field(value, "arguments")),
+                    extensions: tool_call_extensions(call_object, &["index", "id", "function"]),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        V3OpenAiChatSseDelta::ToolCalls(calls)
     } else if let Some(value) = delta_object.get("content").and_then(Value::as_str) {
         V3OpenAiChatSseDelta::Text(value.to_owned())
     } else if let Some(value) = delta_object
@@ -700,6 +857,17 @@ fn classify_choice(choice: &Value) -> Result<V3OpenAiChatSseChoice, V3OpenAiChat
     } else {
         V3OpenAiChatSseDelta::Empty
     };
+    // Only the primary semantic field is consumed. Co-located fields remain
+    // available to both wire projection and complete-response materialization.
+    let consumed: &[&str] = match &semantic_delta {
+        V3OpenAiChatSseDelta::Text(_) => &["content"],
+        V3OpenAiChatSseDelta::Reasoning(_) => &["reasoning_content", "reasoning"],
+        V3OpenAiChatSseDelta::Refusal(_) => &["refusal"],
+        V3OpenAiChatSseDelta::Role(_) => &["role"],
+        V3OpenAiChatSseDelta::ToolCall(_) | V3OpenAiChatSseDelta::ToolCalls(_) => &["tool_calls"],
+        V3OpenAiChatSseDelta::Empty => &[],
+    };
+    let delta_extensions = object_extensions(delta_object, consumed);
     let extensions = object_extensions(object, &["index", "delta", "finish_reason"]);
     let finish_reason = match object.get("finish_reason") {
         None | Some(Value::Null) => None,
@@ -729,6 +897,69 @@ fn object_extensions(
         .collect()
 }
 
+/// Store the first observation of a chunk extension. Chat providers emit
+/// repeatable extension keys only when they intend to overwrite an earlier
+/// value, and materialization must stay deterministic on the observed order.
+fn accumulate_extension(
+    target: &mut BTreeMap<String, Value>,
+    extension: &V3OpenAiChatSseExtension,
+) {
+    target
+        .entry(extension.name.clone())
+        .or_insert_with(|| extension.value.clone());
+}
+
+/// Choice extensions can repeat across chunks. `logprobs` in particular is
+/// emitted one token per chunk, so merge it in stream order instead of keeping
+/// only the first observation.
+fn accumulate_choice_extension(
+    target: &mut BTreeMap<String, Value>,
+    extension: &V3OpenAiChatSseExtension,
+) {
+    if extension.name != "logprobs" {
+        accumulate_extension(target, extension);
+        return;
+    }
+    match target.get_mut("logprobs") {
+        Some(existing) => merge_logprobs_value(existing, &extension.value),
+        None => {
+            target.insert("logprobs".to_owned(), extension.value.clone());
+        }
+    }
+}
+
+fn merge_logprobs_value(existing: &mut Value, incoming: &Value) {
+    if incoming.is_null() {
+        return;
+    }
+    if existing.is_null() {
+        *existing = incoming.clone();
+        return;
+    }
+    if !(existing.is_object() && incoming.is_object()) {
+        *existing = incoming.clone();
+        return;
+    }
+    let incoming = incoming.as_object().expect("object checked");
+    let existing = existing.as_object_mut().expect("object checked");
+    for (name, value) in incoming {
+        match existing.get_mut(name) {
+            // A later chunk can repeat a field with an explicit null while the
+            // other fields still carry accumulated tokens. A null observation
+            // must never erase a value that was already received.
+            Some(slot) if value.is_null() && !slot.is_null() => {}
+            Some(slot) if slot.is_null() => *slot = value.clone(),
+            Some(Value::Array(slot)) if value.is_array() => {
+                slot.extend(value.as_array().expect("array checked").iter().cloned());
+            }
+            Some(slot) => *slot = value.clone(),
+            None => {
+                existing.insert(name.clone(), value.clone());
+            }
+        }
+    }
+}
+
 fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {
     object
         .get(field)
@@ -736,18 +967,52 @@ fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<
         .map(ToOwned::to_owned)
 }
 
+fn argument_text_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {
+    match object.get(field) {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(value) => Some(value.to_string()),
+        None => None,
+    }
+}
+
+fn tool_call_extensions(
+    object: &serde_json::Map<String, Value>,
+    known: &[&str],
+) -> Vec<V3OpenAiChatSseExtension> {
+    let mut extensions = object_extensions(object, known);
+    if object
+        .get("function")
+        .and_then(|function| function.get("arguments"))
+        .is_some_and(|arguments| !arguments.is_string())
+    {
+        let mut association = object
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        association.insert(
+            "responses_arguments_serialized".to_string(),
+            Value::Bool(true),
+        );
+        extensions.retain(|extension| extension.name != "routecodex_chat_extension");
+        extensions.push(V3OpenAiChatSseExtension {
+            name: "routecodex_chat_extension".to_string(),
+            value: Value::Object(association),
+        });
+    }
+    extensions
+}
+
 fn parse_terminal_state(
     finish_reason: &str,
 ) -> Result<V3OpenAiChatSseTerminalState, V3OpenAiChatSseTreeError> {
     match finish_reason {
         "stop" => Ok(V3OpenAiChatSseTerminalState::Stop),
-        "length" => Ok(V3OpenAiChatSseTerminalState::Length),
+        "length" | "max_tokens" | "max_output_tokens" => Ok(V3OpenAiChatSseTerminalState::Length),
         "tool_calls" => Ok(V3OpenAiChatSseTerminalState::ToolCalls),
         "content_filter" => Ok(V3OpenAiChatSseTerminalState::ContentFilter),
         "function_call" => Ok(V3OpenAiChatSseTerminalState::FunctionCall),
-        other => Err(V3OpenAiChatSseTreeError::UnknownFinishReason {
-            finish_reason: other.to_owned(),
-        }),
+        _ => Ok(V3OpenAiChatSseTerminalState::Opaque),
     }
 }
 
@@ -1179,8 +1444,8 @@ fn parse_v3_openai_chat_json_tool_call(
         call_id: string_field(object, "id"),
         call_type: string_field(object, "type"),
         function_name: string_field(function, "name"),
-        function_arguments: string_field(function, "arguments"),
-        extensions: object_extensions(object, &["id", "type", "function"]),
+        function_arguments: argument_text_field(function, "arguments"),
+        extensions: tool_call_extensions(object, &["id", "type", "function"]),
     })
 }
 

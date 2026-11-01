@@ -130,7 +130,7 @@ fn sse_characterization_preserves_individual_delta_events_without_materializatio
 }
 
 #[test]
-fn provider_error_protocol_and_side_channel_fail_closed() {
+fn provider_error_protocol_fail_closed_and_business_names_preserved() {
     let error =
         json!({"error":{"message":"bad request","type":"invalid_request_error","code":"bad"}});
     let semantic = characterize_v3_openai_chat_provider_raw_to_hub_response_semantic(
@@ -174,14 +174,13 @@ fn provider_error_protocol_and_side_channel_fail_closed() {
             .as_object_mut()
             .unwrap()
             .insert(leaked.to_string(), json!(true));
-        assert!(matches!(
-            characterize_v3_openai_chat_client_input_to_hub_semantic(
-                payload,
-                V3HubEntryProtocol::OpenAiChat,
-                V3HubTransportIntent::Json
-            ),
-            Err(V3OpenAiChatCodecError::SideChannelLeaked { .. })
-        ));
+        let semantic = characterize_v3_openai_chat_client_input_to_hub_semantic(
+            payload.clone(),
+            V3HubEntryProtocol::OpenAiChat,
+            V3HubTransportIntent::Json,
+        )
+        .expect("business names do not establish control provenance");
+        assert_eq!(semantic.payload(), &payload);
     }
     assert!(matches!(
         characterize_v3_openai_chat_client_input_to_hub_semantic(

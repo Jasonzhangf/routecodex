@@ -9,10 +9,12 @@ fn target() -> V3ResponsesProviderTarget {
     V3ResponsesProviderTarget {
         provider_id: "selected-provider".to_string(),
         provider_type: "responses".to_string(),
+        interface_id: "default".to_string(),
         base_url: "https://provider.invalid/v1".to_string(),
         canonical_model_id: "provider-model-id".to_string(),
         wire_model: "provider-wire-model".to_string(),
         compatibility_profile: None,
+        headers: Default::default(),
         auth: V3ProviderAuthHandle {
             alias: "primary".to_string(),
             secret: V3ProviderAuthSecretHandle::Environment("TEST_KEY".to_string()),

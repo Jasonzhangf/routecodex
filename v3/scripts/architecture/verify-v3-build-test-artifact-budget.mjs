@@ -17,7 +17,6 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   requireMatch(sources.wrapper, /function verifyV3DebugBudget|export function verifyV3DebugBudget/u, 'V3 test wrapper must verify the post-test budget');
   requireMatch(sources.wrapper, /function enforceV3DebugBudget|export function enforceV3DebugBudget/u, 'V3 test wrapper must own over-budget cache eviction');
   requireMatch(sources.wrapper, /refusing cache eviction while V3 builders are active/u, 'V3 test wrapper must refuse cache eviction during another active build');
-  requireMatch(sources.wrapper, /spawnSync\('ps',\s*\['-axo',\s*'pid=,ucomm=,command='\]/u, 'V3 builder scan must use the untruncated executable name separately from command arguments');
   requireMatch(sources.wrapper, /function parseV3BuilderProcessLine|export function parseV3BuilderProcessLine/u, 'V3 builder scan must parse executable identity before classifying Cargo or rustc work');
   requireMatch(sources.wrapper, /basename\(match\[2\]\)[\s\S]*executable !== 'cargo' && executable !== 'rustc'/u, 'V3 builder scan must reject shell commands that merely mention cargo or rustc');
   requireMatch(sources.wrapper, /'clean',[\s\S]*'--profile',[\s\S]*'test'/u, 'V3 test wrapper must use Cargo test-profile cleanup for over-budget eviction');
@@ -25,7 +24,12 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   requireMatch(sources.wrapper, /isAbsolute\(suppliedCargoTargetDir\)[\s\S]*resolve\(v3Root,\s*suppliedCargoTargetDir\)[\s\S]*external CARGO_TARGET_DIR is forbidden[\s\S]*join\(v3Root,\s*'target'\)/u, 'V3 test wrapper must reject target directories outside V3 before falling back to v3/target');
   requireMatch(sources.wrapper, /CARGO_TARGET_DIR:\s*targetDir/u, 'V3 test wrapper must pass the normalized absolute CARGO_TARGET_DIR to Cargo');
   requireMatch(sources.wrapper, /owner\.json[\s\S]*createOwnedLock[\s\S]*reclaimStaleLock[\s\S]*ownProcessIdentity[\s\S]*currentProcessIdentity[\s\S]*lockOwnerMatchesProcess/u, 'V3 test wrapper must initialize locks without process enumeration and recover stale locks by validating PID and process-start identity');
-  requireMatch(sources.wrapper, /function writeLockOwner\(\)\s*\{\s*const identity = ownProcessIdentity\(\);/u, 'V3 test lock acquisition must derive the current wrapper identity without process enumeration');
+  requireMatch(sources.wrapper, /function writeLockOwner\([^)]*\)\s*\{\s*const identity = ownProcessIdentity\(\);/u, 'V3 test lock acquisition must derive the current wrapper identity without process enumeration');
+  requireMatch(sources.wrapper, /owner\?\.unreapedProcessGroup[\s\S]*probeProcessGroup/u, 'V3 test lock recovery must probe a persisted unreaped process group before reusing the target');
+  requireMatch(sources.wrapper, /owner\.unreapedProcessGroup\s*=\s*unreapedProcessGroup;/u, 'V3 test wrapper must persist the unreaped process group identity with the lock owner');
+  requireMatch(sources.wrapper, /writeLockOwner\(\{\s*processGroupId:\s*terminalError\.processGroupId/u, 'V3 test wrapper must write the unreaped group identity into the lock owner before retaining the lock');
+  requireMatch(sources.wrapper, /writeFileSync\(lockExecutionPath/u, 'V3 test lock must persist an execution marker before any owner write');
+  requireMatch(sources.wrapper, /executionInProgress[\s\S]*lockExecutionPath/u, 'V3 test lock recovery must refuse to reclaim a target while an execution marker is retained');
   requireMatch(sources.wrapper, /spawnSync\('ps',[\s\S]*LC_ALL:\s*'C'/u, 'V3 test lock inspection must use locale-stable process-start output');
   requireMatch(sources.wrapper, /function currentProcessIdentity\(pid\)\s*\{[\s\S]*if \(!processExists\(pid\)\) return null;[\s\S]*if \(result\.error\) return \{ pid, processStartedAt: null \};[\s\S]*if \(result\.status !== 0\) return \{ pid, processStartedAt: null \};/u, 'V3 test lock inspection must not require ps access when the PID is still alive');
   requireMatch(sources.wrapper, /processStartedAt:\s*identity\.processStartedAt[\s\S]*owner\.processStartedAt\s*===\s*liveIdentity\?\.processStartedAt/u, 'V3 test lock owner must record and compare the process-start identity');
@@ -40,6 +44,9 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
   }
   if (/unable to inspect process/u.test(sources.wrapper)) {
     failures.push('V3 test wrapper must not fail Cargo tests when ps inspection is unavailable');
+  }
+  if (/spawnSync\('ps',\s*\['-axo'/u.test(sources.wrapper)) {
+    failures.push('V3 builder scan must not buffer every process command line synchronously');
   }
   requireMatch(sources.runner, /runV3CargoTest/u, 'The canonical V3 test entry must delegate to runV3CargoTest');
   requireMatch(sources.moduleRegistry, /^status:\s*active$/mu, 'V3 build-tool module registry must be active');
@@ -57,18 +64,20 @@ export function collectV3BuildTestArtifactBudgetFailures(sources) {
 }
 
 export function readV3BuildTestArtifactBudgetSources(root) {
+  const repoRoot = resolve(root, '..');
   const read = (path) => readFileSync(resolve(root, path), 'utf8');
+  const readRepo = (path) => readFileSync(resolve(repoRoot, path), 'utf8');
   return {
     packageJson: read('package.json'),
     cargoManifest: read('Cargo.toml'),
     wrapper: read('scripts/run-v3-cargo-test.mjs'),
     runner: read('scripts/cargo-test-artifact-runner.mjs'),
-    moduleRegistry: read('build-contracts/architecture-admission/repo/docs/architecture/v3-build-tool-module-registry.yml'),
+    moduleRegistry: readRepo('docs/architecture/v3-build-tool-module-registry.yml'),
   };
 }
 
 function main() {
-  const root = resolve(process.argv[2] ?? '.');
+  const root = resolve(process.argv[2] ?? fileURLToPath(new URL('../..', import.meta.url)));
   let failures;
   try {
     failures = collectV3BuildTestArtifactBudgetFailures(readV3BuildTestArtifactBudgetSources(root));

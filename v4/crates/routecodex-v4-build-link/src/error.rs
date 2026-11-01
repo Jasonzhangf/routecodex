@@ -14,10 +14,6 @@ pub enum ActiveLinkError {
     ManifestInvalid(String),
     #[error("ActiveLinkErr03ArtifactMissing: {0}")]
     ArtifactMissing(String),
-    #[error("ActiveLinkErr04ArtifactHashMismatch: {0}")]
-    ArtifactHashMismatch(String),
-    #[error("ActiveLinkErr05PublicApiHashMismatch: {0}")]
-    PublicApiHashMismatch(String),
     #[error("ActiveLinkErr06TargetMismatch: {0}")]
     TargetMismatch(String),
     #[error("ActiveLinkErr07DependencyClosureMismatch: {0}")]
@@ -26,8 +22,6 @@ pub enum ActiveLinkError {
     SourcePathForbidden(String),
     #[error("ActiveLinkErr09SymlinkOrPathEscape: {0}")]
     SymlinkOrPathEscape(String),
-    #[error("ActiveLinkErr10StaleOrMissingRecord: {0}")]
-    StaleOrMissingRecord(String),
     #[error("ActiveLinkErr11ActiveWriteForbidden: {0}")]
     ActiveWriteForbidden(String),
     #[error("ActiveLinkErr12LinkFailed: {0}")]

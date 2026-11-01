@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,33 +21,10 @@ const files = {
 };
 const installedV3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? '').trim();
-const explicitRootIsV3Root = explicitSourceRoot
-  && existsSync(resolve(explicitSourceRoot, 'crates'))
-  && existsSync(resolve(explicitSourceRoot, 'package.json'));
-const runningFromV3Root = !explicitSourceRoot
-  && existsSync(resolve(process.cwd(), 'crates'))
-  && existsSync(resolve(process.cwd(), 'package.json'));
-const sourceRoot = explicitSourceRoot
+const architectureRoot = explicitSourceRoot
   ? resolve(explicitSourceRoot)
-  : process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-    ? resolve(process.cwd())
-    : runningFromV3Root
-      ? resolve(process.cwd(), '..')
-      : resolve(installedV3Root, 'build-contracts', 'architecture-admission', 'repo');
-const v3Root = explicitRootIsV3Root || runningFromV3Root
-  ? explicitRootIsV3Root
-    ? sourceRoot
-    : resolve(process.cwd())
-  : process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1' || explicitSourceRoot
-    ? resolve(sourceRoot, 'v3')
-    : installedV3Root;
-const architectureRoot = explicitRootIsV3Root || runningFromV3Root
-  ? explicitRootIsV3Root
-    ? resolve(sourceRoot, '..')
-    : resolve(process.cwd(), '..')
-  : runningFromV3Root
-    ? resolve(process.cwd(), '..')
-    : sourceRoot;
+  : resolve(installedV3Root, '..');
+const v3Root = resolve(architectureRoot, 'v3');
 const resolveFile = (file) => file.startsWith('v3/')
   ? resolve(v3Root, file.slice(3))
   : resolve(architectureRoot, file);
@@ -82,7 +59,7 @@ for (const phrase of [
   'async fn execute_responses_relay_websocket_output(',
   'if let Some(handoff) = relay_output.protocol_direct_handoff.take()',
   'send_responses_relay_websocket_output(',
-  'execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
+  'execute_v3_responses_relay_runtime_with_default_transport_health(',
   'send_responses_websocket_committed_sse_stream(',
   'SseIncrementalDecoder::new(SseTransportLimits::default())',
   'client_message = socket.next() =>',
@@ -102,7 +79,10 @@ for (const phrase of [
   'responses_inbound_websocket_rejects_malformed_client_event_without_provider_send',
   'responses_inbound_websocket_rejects_second_previous_response_id_without_provider_send',
   'responses_inbound_websocket_scope_mismatch_fails_before_provider_send',
-  'responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback',
+  'responses_inbound_websocket_transport_failure_closes_without_fabricated_event',
+  'responses_inbound_websocket_provider_429_never_reaches_the_client',
+  'responses_inbound_websocket_binary_provider_error_body_never_reaches_the_client',
+  'responses_inbound_websocket_upstream_502_closes_without_fabricated_event',
   'responses_inbound_websocket_client_disconnect_drops_incremental_runtime_stream',
   'responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime',
   'responses_relay_websocket_consumes_direct_handoff_instead_of_projecting_null',
@@ -207,7 +187,7 @@ const directRuntimeCalls = text.directOutcome.match(/execute_v3_responses_direct
 if (directRuntimeCalls.length !== 1) {
   failures.push(files.server + ': expected one existing Direct Runtime entry call, got ' + directRuntimeCalls.length);
 }
-const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state\(/g) ?? [];
+const relayRuntimeCalls = text.websocket.match(/execute_v3_responses_relay_runtime_with_default_transport_health\(/g) ?? [];
 if (relayRuntimeCalls.length !== 2) {
   failures.push(files.server + ': expected planned and unplanned WebSocket Relay Runtime entry calls, got ' + relayRuntimeCalls.length);
 }

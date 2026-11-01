@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-anthropic-json/v3-protocol-live-mock-lifecycle-WQGMet/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/gemini-to-anthropic-json/v3-protocol-live-mock-lifecycle-WQGMet/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 56952
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 56953
+    }
+  ],
+  "admin_bind": "127.0.0.1:56953",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:56953"
+  },
+  "mode": "relay",
+  "model": "mock.anthropic-model",
+  "wire_model": "anthropic-model",
+  "runtime_setup": null
+}

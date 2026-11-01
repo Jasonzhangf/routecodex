@@ -1,8 +1,8 @@
 use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -82,16 +82,24 @@ impl Default for V3AttemptStoreLimits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3AttemptStoreError {
+    ResidenceDeadlineExceeded(String),
+    TransportAttemptsExhausted(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
+    /// The complete-attempt text governance must decide a committed tail, but
+    /// the registered owner refused to project it as business content. The
+    /// transport ends detectably without projecting further frames.
+    PostCommitGovernedTail(String),
 }
 
 impl fmt::Display for V3AttemptStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::LocalResourceExhausted(message) | Self::InvalidAttemptState(message) => {
-                formatter.write_str(message)
-            }
+            Self::ResidenceDeadlineExceeded(message)
+            | Self::TransportAttemptsExhausted(message)
+            | Self::LocalResourceExhausted(message)
+            | Self::InvalidAttemptState(message)
+            | Self::PostCommitGovernedTail(message) => formatter.write_str(message),
         }
     }
 }
@@ -129,10 +137,44 @@ impl V3RequestExecutionControl {
         self.attempt_budget.clone()
     }
 
+    pub fn refill_used(&self) -> u32 {
+        self.attempt_budget
+            .inner
+            .refill_used
+            .load(Ordering::Acquire)
+    }
+
+    /// Consume one refill execution slot. Returns true only when a slot was
+    /// available (used < max) and was incremented atomically.
+    pub(crate) fn try_admit_refill(&self, max_consecutive_refills: u32) -> bool {
+        if max_consecutive_refills == 0 {
+            return false;
+        }
+        self.attempt_budget
+            .inner
+            .refill_used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                (current < max_consecutive_refills).then_some(current + 1)
+            })
+            .is_ok()
+    }
+
+    /// Open one more execution of the same request.
+    ///
+    /// A bounded refill is a new execution of the Runtime mainline, so it owns
+    /// its own provider transport attempt allowance; the request-scoped refill
+    /// budget, residence deadline and resident-byte accounting stay unchanged.
+    pub(crate) fn begin_refill_execution(&self) {
+        self.attempt_budget
+            .inner
+            .transport_attempts
+            .store(0, Ordering::Release);
+    }
+
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
         let now = Instant::now();
         if now >= self.attempt_budget.inner.deadline {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(
+            return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
                 "request execution deadline has expired".to_string(),
             ));
         }
@@ -167,11 +209,19 @@ impl V3RequestExecutionControl {
 
 struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
-    transport_attempt_limit: AtomicUsize,
     transport_attempts: AtomicUsize,
+    rate_limited_attempts: AtomicUsize,
+    target_recovery_cursor: Mutex<V3TargetRecoveryCursor>,
+    refill_used: AtomicU32,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
+}
+
+#[derive(Default)]
+struct V3TargetRecoveryCursor {
+    step_index: usize,
+    step_due_at: Option<Instant>,
 }
 
 enum V3ProcessResidentBytes {
@@ -238,8 +288,10 @@ impl V3AttemptBudget {
                 limits,
                 // Zero means no Target10 candidate plan has been installed;
                 // admission then uses the configured request ceiling.
-                transport_attempt_limit: AtomicUsize::new(0),
                 transport_attempts: AtomicUsize::new(0),
+                rate_limited_attempts: AtomicUsize::new(0),
+                target_recovery_cursor: Mutex::new(V3TargetRecoveryCursor::default()),
+                refill_used: AtomicU32::new(0),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
                 deadline: Instant::now() + limits.residence_timeout,
@@ -260,7 +312,7 @@ impl V3AttemptBudget {
 
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
         if Instant::now() >= self.inner.deadline {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(
+            return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
                 "provider SSE attempt exceeded the request residence deadline".to_string(),
             ));
         }
@@ -271,32 +323,71 @@ impl V3AttemptBudget {
         self.inner.deadline
     }
 
+    pub(crate) fn target_recovery_started(&self) -> tokio::time::Instant {
+        tokio::time::Instant::from_std(self.inner.deadline - self.inner.limits.residence_timeout)
+    }
+
+    pub(crate) fn current_target_recovery_deadline(&self, now: Instant) -> Option<Instant> {
+        if now >= self.inner.deadline {
+            return None;
+        }
+        let mut cursor = self
+            .inner
+            .target_recovery_cursor
+            .lock()
+            .expect("request recovery cursor lock should not be poisoned");
+        let wait_ms = routecodex_v3_config::internal::v3_internal_target_recovery()
+            .wait_ms(cursor.step_index);
+        let due_at = *cursor
+            .step_due_at
+            .get_or_insert_with(|| (now + Duration::from_millis(wait_ms)).min(self.inner.deadline));
+        Some(due_at.min(self.inner.deadline))
+    }
+
+    pub(crate) fn advance_target_recovery_step_if_due(&self, now: Instant) {
+        let mut cursor = self
+            .inner
+            .target_recovery_cursor
+            .lock()
+            .expect("request recovery cursor lock should not be poisoned");
+        if cursor.step_due_at.is_some_and(|due_at| now >= due_at) {
+            cursor.step_index = cursor.step_index.saturating_add(1);
+            cursor.step_due_at = None;
+        }
+    }
+
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
         self.ensure_resident()?;
-        let planned_limit = self.inner.transport_attempt_limit.load(Ordering::Acquire);
-        let limit = if planned_limit == 0 {
-            self.inner.limits.request_max_attempts
-        } else {
-            planned_limit.min(self.inner.limits.request_max_attempts)
-        };
+        let limit = self.inner.limits.request_max_attempts;
         self.inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                (current < limit).then_some(current + 1)
+                // A received 429 consumed a real attempt (keep its sequence),
+                // but its recovery is bounded by the request residence deadline,
+                // not the non-rate-limit candidate-failure count.
+                let rate_limited = self.inner.rate_limited_attempts.load(Ordering::Acquire);
+                (current.saturating_sub(rate_limited) < limit).then_some(current + 1)
             })
             .map(|previous| previous + 1)
             .map_err(|_| {
-                V3AttemptStoreError::LocalResourceExhausted(format!(
+                V3AttemptStoreError::TransportAttemptsExhausted(format!(
                     "request provider transport attempt limit {} exhausted",
                     limit
                 ))
             })
     }
 
-    pub(crate) fn set_transport_attempt_limit(&self, candidate_count: usize) {
+    pub(crate) fn record_rate_limited_attempt(&self) {
         self.inner
-            .transport_attempt_limit
-            .fetch_max(candidate_count.max(1), Ordering::AcqRel);
+            .rate_limited_attempts
+            .fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Settle the pending admission when transport reports no wire send.
+    /// Every caller owns one successful admit_transport_attempt reservation.
+    pub(crate) fn release_unsent_transport_attempt(&self) {
+        let previous = self.inner.transport_attempts.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "unsent release requires a pending admission");
     }
 
     pub(crate) fn transport_attempts(&self) -> usize {
@@ -396,6 +487,16 @@ pub struct V3CommittedClientSseStream {
     inner: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
     next_frame_index: usize,
     terminal_frame_index: usize,
+    /// Number of committed frames already handed to the client channel before
+    /// sealing. The sealed replay only carries the remainder, so this prefix
+    /// count lets the Direct refill assembly avoid re-emitting content the
+    /// client already received.
+    flushed_prefix_frames: usize,
+    /// Complete committed business result of the sealed attempt, shared with
+    /// the replay iterator instead of copied. Chat Process governance reads it
+    /// to decide bounded refill from the governed result; the client stream
+    /// keeps replaying exactly the same frames.
+    sealed_frames: Option<std::sync::Arc<Vec<Vec<u8>>>>,
 }
 
 /// Runtime-issued proof that one provider attempt reached a protocol-valid
@@ -434,7 +535,8 @@ impl V3AttemptSuccessReceipt {
 }
 
 struct V3ReservedCommittedSseReplay {
-    frames: std::vec::IntoIter<Vec<u8>>,
+    frames: std::sync::Arc<Vec<Vec<u8>>>,
+    next: usize,
     _reservation: V3AttemptReservation,
 }
 
@@ -442,7 +544,11 @@ impl Stream for V3ReservedCommittedSseReplay {
     type Item = Vec<u8>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.frames.next())
+        let item = self.frames.get(self.next).cloned();
+        if item.is_some() {
+            self.next += 1;
+        }
+        Poll::Ready(item)
     }
 }
 
@@ -474,6 +580,8 @@ impl V3CommittedClientSseStream {
     ) -> Self {
         let next_frame_index = self.next_frame_index;
         let terminal_frame_index = self.terminal_frame_index;
+        let flushed_prefix_frames = self.flushed_prefix_frames;
+        let sealed_frames = self.sealed_frames.clone();
         Self {
             inner: Box::pin(V3ObservedCommittedSseStream {
                 source: self,
@@ -483,7 +591,27 @@ impl V3CommittedClientSseStream {
             }),
             next_frame_index,
             terminal_frame_index,
+            flushed_prefix_frames,
+            sealed_frames,
         }
+    }
+
+    /// Number of committed frames already delivered to the client before the
+    /// sealed stream was produced. Zero means the attempt was fully buffered.
+    pub(crate) fn flushed_prefix_frames(&self) -> usize {
+        self.flushed_prefix_frames
+    }
+
+    /// Every committed business frame of the sealed attempt, in order.
+    ///
+    /// The sealed stream only replays frames that were not already handed to
+    /// the client, so the intermediate refill decision cannot read the
+    /// delivered remainder and call it the complete result. This accessor
+    /// exposes the whole committed attempt that the seal validated.
+    pub(crate) fn sealed_frames(&self) -> std::sync::Arc<Vec<Vec<u8>>> {
+        self.sealed_frames
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::new(Vec::new()))
     }
 }
 
@@ -548,6 +676,84 @@ pub(crate) struct V3CommittedClientSseBuilder {
     terminal_frame_index: Option<usize>,
     limits: V3AttemptStoreLimits,
     reservation: V3AttemptReservation,
+    /// Frames already handed to the client channel after the first business
+    /// frame committed the attempt. Zero means the attempt is still fully
+    /// buffered, which is the only state that may run a whole-attempt rewrite.
+    flushed_frames: usize,
+    client_sink: Option<V3CommittedClientFrameSink>,
+    /// Suspends live projection while the newest committed text may still be
+    /// governed. `push` keeps appending to `frames` but does not hand them to
+    /// the sink, so the complete-attempt hook can still decide them.
+    flush_held: bool,
+}
+
+/// Runtime-owned sink for client frames that already crossed the commit point.
+///
+/// The server transport consumes the paired receiver; a dropped receiver means
+/// the client transport is gone, so a send failure is not a runtime failure.
+#[derive(Clone)]
+pub struct V3CommittedClientFrameSink {
+    sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    committed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Request-wide offset applied to each frame's round-local `output_index`
+    /// just before the frame reaches the client channel. The Direct refill
+    /// loop supplies the number of business items already delivered by earlier
+    /// rounds so two executions never both address index 0.
+    output_index_offset: usize,
+}
+
+impl V3CommittedClientFrameSink {
+    pub fn channel() -> (Self, tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>) {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        (
+            Self {
+                sender,
+                committed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                output_index_offset: 0,
+            },
+            receiver,
+        )
+    }
+
+    /// Return a sink that shifts each committed frame's `output_index` by
+    /// `offset` before sending. The committed marker stays shared with the
+    /// original sink, so the commit point is still request-wide.
+    pub(crate) fn with_output_index_offset(mut self, offset: usize) -> Self {
+        self.output_index_offset = offset;
+        self
+    }
+
+    /// True once the attempt crossed the client commit point. A committed
+    /// attempt can never be retracted or replaced by another candidate.
+    pub fn is_committed(&self) -> bool {
+        self.committed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn mark_committed(&self) {
+        self.committed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn send(&self, frame: Vec<u8>) {
+        let frame = if self.output_index_offset == 0 {
+            frame
+        } else {
+            crate::kernel::shift_direct_sse_output_index(&frame, self.output_index_offset)
+        };
+        let _ = self.sender.send(frame);
+    }
+
+    /// Send a frame whose `output_index` is already request-wide.
+    ///
+    /// A refill round's governed remainder is prepared by the runtime before a
+    /// later round may emit live frames, so the round-local offset must not be
+    /// applied a second time. Reaching the client now is what keeps the
+    /// request-level event order intact: the next round can commit its first
+    /// business frame as soon as it exists, and a remainder held back would
+    /// then arrive after it.
+    pub(crate) fn send_prepared(&self, frame: Vec<u8>) {
+        let _ = self.sender.send(frame);
+    }
 }
 
 impl V3CommittedClientSseBuilder {
@@ -566,6 +772,9 @@ impl V3CommittedClientSseBuilder {
             terminal_frame_index: None,
             limits,
             reservation: V3AttemptReservation { budget, bytes: 0 },
+            flushed_frames: 0,
+            client_sink: None,
+            flush_held: false,
         })
     }
 
@@ -595,7 +804,64 @@ impl V3CommittedClientSseBuilder {
         self.reservation.reserve(frame.len())?;
         self.byte_len = byte_len;
         self.frames.push(frame);
+        self.flush_client_frames();
         Ok(())
+    }
+
+    /// Commit the attempt to the client channel: every frame pushed from now on
+    /// is handed to `sink` as soon as it exists. Callers must prove that no
+    /// whole-attempt rewrite can rewrite or replace an already-flushed frame.
+    pub(crate) fn commit_client_stream(&mut self, sink: V3CommittedClientFrameSink) {
+        sink.mark_committed();
+        self.client_sink = Some(sink);
+        self.flush_client_frames();
+    }
+
+    /// Flushed frame count, used by the builder's own tests to prove that a
+    /// hold keeps frames buffered while projection is suspended.
+    #[cfg(test)]
+    pub(crate) fn client_frames_flushed(&self) -> usize {
+        self.flushed_frames
+    }
+
+    /// Stop projecting new frames while provider text may still be governed.
+    /// The frames keep accumulating in the attempt, so the registered
+    /// complete-attempt hook still sees and may rewrite them. Nothing that was
+    /// already flushed is affected.
+    pub(crate) fn hold_client_flush(&mut self) {
+        self.flush_held = true;
+    }
+
+    /// Resume projection. The registered hook (or the attempt's own decision not
+    /// to run one) has already disposed of the held frames, so they are handed
+    /// to the sink in order.
+    pub(crate) fn release_client_flush(&mut self) {
+        self.flush_held = false;
+        self.flush_client_frames();
+    }
+
+    pub(crate) fn flush_client_frames(&mut self) {
+        if self.flush_held {
+            return;
+        }
+        let Some(sink) = self.client_sink.as_ref() else {
+            return;
+        };
+        while self.flushed_frames < self.frames.len() {
+            let frame = self.frames[self.flushed_frames].clone();
+            sink.send(frame);
+            self.flushed_frames += 1;
+        }
+    }
+
+    fn ensure_fully_buffered(&self, owner: &str) -> Result<(), V3AttemptStoreError> {
+        if self.flushed_frames == 0 {
+            return Ok(());
+        }
+        Err(V3AttemptStoreError::InvalidAttemptState(format!(
+            "{owner} cannot run after {} client frames were already flushed",
+            self.flushed_frames
+        )))
     }
 
     pub(crate) fn mark_last_frame_as_terminal(&mut self) -> Result<(), V3AttemptStoreError> {
@@ -615,6 +881,7 @@ impl V3CommittedClientSseBuilder {
         &mut self,
         mut rewrite: impl FnMut(Vec<u8>) -> Vec<u8>,
     ) -> Result<(), V3AttemptStoreError> {
+        self.ensure_fully_buffered("committed SSE frame rewrite")?;
         let old_bytes = self.byte_len;
         let mut new_bytes = 0usize;
         let mut rewritten = Vec::with_capacity(self.frames.len());
@@ -646,6 +913,97 @@ impl V3CommittedClientSseBuilder {
         Ok(())
     }
 
+    /// Whole-attempt response hooks run before sealing and remain inside the
+    /// same reservation, frame limit and byte limit as the original attempt.
+    pub(crate) fn rewrite_complete_attempt<E>(
+        &mut self,
+        rewrite: impl FnOnce(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<V3AttemptStoreError>,
+    {
+        self.ensure_fully_buffered("whole-attempt response hook")?;
+        let Some((frames, terminal)) = rewrite(&self.frames)? else {
+            return Ok(());
+        };
+        self.adopt_rewritten_attempt(frames, terminal)
+    }
+
+    /// Whole-attempt response hook invocation that is also allowed after the
+    /// client commit point, provided the registered governance leaves every
+    /// already-flushed client frame byte-identical. Callers use it to keep the
+    /// complete-attempt text governance on the first-frame-commit path instead
+    /// of skipping it. A rewrite that would change a flushed frame cannot be
+    /// retracted, so it is rejected with [`V3AttemptStoreError::PostCommitGovernedTail`]
+    /// and the caller terminates the committed transport without projecting
+    /// new frames.
+    pub(crate) fn rewrite_complete_attempt_preserving_client_prefix<E>(
+        &mut self,
+        rewrite: impl FnOnce(&[Vec<u8>], usize) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
+    ) -> Result<(), E>
+    where
+        E: From<V3AttemptStoreError>,
+    {
+        let flushed = self.flushed_frames;
+        let flushed_frames = self.frames[..flushed].to_vec();
+        let Some((frames, terminal)) = rewrite(&self.frames, flushed)? else {
+            return Ok(());
+        };
+        if frames.len() < flushed || frames[..flushed] != flushed_frames[..] {
+            return Err(V3AttemptStoreError::PostCommitGovernedTail(format!(
+                "whole-attempt response hook would rewrite {flushed} client frames that were already flushed"
+            ))
+            .into());
+        }
+        self.adopt_rewritten_attempt(frames, terminal)
+    }
+
+    fn adopt_rewritten_attempt<E>(&mut self, frames: Vec<Vec<u8>>, terminal: usize) -> Result<(), E>
+    where
+        E: From<V3AttemptStoreError>,
+    {
+        let bytes = frames
+            .iter()
+            .try_fold(0usize, |n, f| n.checked_add(f.len()))
+            .ok_or_else(|| {
+                V3AttemptStoreError::LocalResourceExhausted(
+                    "rewritten attempt byte count overflowed".into(),
+                )
+            })?;
+        if frames.len() > self.limits.attempt_max_frames || bytes > self.limits.attempt_max_bytes {
+            return Err(V3AttemptStoreError::LocalResourceExhausted(
+                "rewritten attempt exceeds configured limits".into(),
+            )
+            .into());
+        }
+        if terminal >= frames.len() || frames.iter().any(Vec::is_empty) {
+            return Err(V3AttemptStoreError::InvalidAttemptState(
+                "rewritten attempt requires nonempty frames and a terminal".into(),
+            )
+            .into());
+        }
+        if bytes > self.byte_len {
+            self.reservation
+                .reserve(bytes - self.byte_len)
+                .map_err(E::from)?;
+        } else {
+            self.reservation.budget.release(self.byte_len - bytes);
+            self.reservation.bytes = bytes;
+        }
+        self.byte_len = bytes;
+        self.frames = frames;
+        self.terminal_frame_index = Some(terminal);
+        Ok(())
+    }
+
+    pub(crate) fn frames(&self) -> &[Vec<u8>] {
+        &self.frames
+    }
+
+    pub(crate) fn last_marked_terminal_frame_index(&self) -> Option<usize> {
+        self.terminal_frame_index
+    }
+
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {
@@ -661,13 +1019,24 @@ impl V3CommittedClientSseBuilder {
                     .to_string(),
             )
         })?;
+        // The sealed stream replays only the held remainder. Its frame indices
+        // therefore start at zero, and the terminal index shares that
+        // remainder-relative coordinate system after subtracting the prefix
+        // already handed to the client.
+        let relative_terminal_frame_index =
+            terminal_frame_index.saturating_sub(self.flushed_frames);
+        let sealed_frames = std::sync::Arc::new(self.frames);
+        let replay_frames = std::sync::Arc::clone(&sealed_frames);
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
-                frames: self.frames.into_iter(),
+                frames: replay_frames,
+                next: self.flushed_frames,
                 _reservation: self.reservation,
             }),
             next_frame_index: 0,
-            terminal_frame_index,
+            terminal_frame_index: relative_terminal_frame_index,
+            flushed_prefix_frames: self.flushed_frames,
+            sealed_frames: Some(sealed_frames),
         })
     }
 }

@@ -19,10 +19,12 @@ mod tests {
             V3ResponsesProviderTarget {
                 provider_id: "neutral-provider".into(),
                 provider_type: "responses".into(),
+                interface_id: "default".into(),
                 base_url: "http://upstream.invalid/v1".into(),
                 canonical_model_id: "canonical-model".into(),
                 wire_model: "upstream-model".into(),
                 compatibility_profile: None,
+                headers: Default::default(),
                 auth: V3ProviderAuthHandle {
                     alias: "primary".into(),
                     secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -142,6 +144,181 @@ mod tests {
     }
 
     #[test]
+    fn official_deepseek_reasoning_history_gains_reasoning_text_and_keeps_summary() {
+        // 线上缺陷：DeepSeek 官方 Responses 在 thinking 模式下，会话以工具输出结尾时
+        // 必须回传历史 reasoning 明文；客户端历史只有 summary 时上游 400
+        // `The reasoning_text in the thinking mode must be passed back to the API.`。
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_1", "content": null,
+                 "summary": [{"type": "summary_text", "text": "run ls"}],
+                 "encrypted_content": "rsn_foreign"},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"},
+                {"type": "reasoning", "id": "rs_2",
+                 "content": [{"type": "reasoning_text", "text": "already plain"}]},
+                {"type": "reasoning", "id": "rs_3", "summary": [], "encrypted_content": null}
+            ]
+        });
+        let mut official = target();
+        official.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-official-reasoning",
+            official.clone(),
+            body.clone(),
+        )
+        .unwrap();
+        let input = wire.body()["input"].as_array().expect("input array");
+        assert_eq!(
+            input[0]["content"],
+            json!([{"type": "reasoning_text", "text": "run ls"}]),
+            "summary-only reasoning must gain reasoning_text"
+        );
+        assert_eq!(
+            input[0]["summary"],
+            json!([{"type": "summary_text", "text": "run ls"}]),
+            "official endpoint accepts summary alongside content; it must be preserved"
+        );
+        assert!(
+            input[0].get("encrypted_content").is_none(),
+            "foreign ciphertext must not reach the provider"
+        );
+        assert_eq!(
+            input[3]["content"],
+            json!([{"type": "reasoning_text", "text": "already plain"}]),
+            "existing plaintext content must stay byte-identical"
+        );
+        assert_eq!(
+            input[4]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}])
+        );
+        let rebuild = build_v3_provider_12_responses_wire_payload(
+            "req-deepseek-official-reasoning",
+            official,
+            body,
+        )
+        .unwrap();
+        assert_eq!(
+            wire.body(),
+            rebuild.body(),
+            "the reasoning rewrite must be deterministic for upstream cache prefixes"
+        );
+    }
+
+    #[test]
+    fn official_deepseek_reasoning_rewrite_ignores_requested_model_family() {
+        // 线上缺陷：真实路由的 canonical/requested 模型是客户端模型 gpt-5.5
+        // （gpt 家族），provider 实际模型在 wire_model。契约若挂在
+        // `is_v3_gpt_family_model(canonical_model_id)` 分支上就永不生效，
+        // deepseek 官方端点持续 400 `reasoning_text must be passed back`。
+        let body = json!({
+            "model": "upstream-model", "stream": false, "input": [
+                {"type": "reasoning", "id": "rs_1", "content": null,
+                 "summary": [{"type": "summary_text", "text": "run ls"}],
+                 "encrypted_content": null},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let mut routed = target();
+        routed.canonical_model_id = "gpt-5.5".into();
+        routed.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire = build_v3_provider_12_responses_wire_payload("req-official-routed", routed, body)
+            .unwrap();
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "run ls"}]),
+            "official deepseek contract must apply when the requested model is gpt family"
+        );
+        assert!(
+            wire.body()["input"][0].get("encrypted_content").is_none(),
+            "ciphertext is meaningless for the official endpoint and must be stripped"
+        );
+    }
+
+    #[test]
+    fn official_deepseek_synthesizes_when_content_has_no_usable_text() {
+        // content 数组非空但没有任何可用明文（空 text / 缺 text）时，必须走合成：
+        // 上游要求可回传的 `reasoning_text`，缺 text 的 part 会被上游拒绝。
+        let body = json!({
+            "model": "upstream-model", "stream": false, "input": [
+                {"type": "reasoning", "id": "rs_empty_text",
+                 "content": [{"type": "reasoning_text", "text": ""}],
+                 "summary": [{"type": "summary_text", "text": "from summary"}]},
+                {"type": "reasoning", "id": "rs_missing_text",
+                 "content": [{"type": "reasoning_text"}]},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let mut official = target();
+        official.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-official-empty-text", official, body)
+                .unwrap();
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "from summary"}]),
+            "empty reasoning_text must be replaced by usable plaintext"
+        );
+        assert_eq!(
+            wire.body()["input"][1]["content"],
+            json!([{"type": "reasoning_text", "text": "[thinking redacted]"}]),
+            "content part without text must be replaced by the deterministic placeholder"
+        );
+    }
+
+    #[test]
+    fn official_deepseek_rewrites_mixed_usable_and_unusable_content_parts() {
+        let body = json!({
+            "model": "upstream-model", "stream": false, "input": [
+                {"type": "reasoning", "id": "rs_mixed",
+                 "content": [
+                    {"type": "reasoning_text"},
+                    {"type": "reasoning_text", "text": "usable"}
+                 ]},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let mut official = target();
+        official.compatibility_profile = Some("responses:deepseek-official".into());
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-official-mixed-text", official, body)
+                .unwrap();
+        assert_eq!(
+            wire.body()["input"][0]["content"],
+            json!([{"type": "reasoning_text", "text": "usable"}]),
+            "a content part without text must not be forwarded even when another part is usable"
+        );
+    }
+
+    #[test]
+    fn non_official_target_keeps_narrow_reasoning_cleanup() {
+        let body = json!({
+            "model": "upstream-model", "input": [
+                {"type": "reasoning", "id": "rs_1", "content": null,
+                 "summary": [{"type": "summary_text", "text": "run ls"}],
+                 "encrypted_content": "rsn_foreign"},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-narrow-cleanup", target(), body)
+                .unwrap();
+        assert!(
+            wire.body()["input"][0]["content"].is_null(),
+            "non-official targets must not gain a synthesized reasoning_text: {}",
+            wire.body()["input"][0]
+        );
+        assert_eq!(
+            wire.body()["input"][0]["summary"],
+            json!([{"type": "summary_text", "text": "run ls"}])
+        );
+    }
+
+    #[test]
     fn current_turn_invalid_png_data_image_is_rejected_before_provider_transport() {
         let body = json!({
             "model": "upstream-model", "input": [
@@ -162,10 +339,12 @@ mod tests {
         let target = V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
             provider_type: "responses".into(),
+            interface_id: "default".into(),
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "model".into(),
             wire_model: "model".into(),
             compatibility_profile: None,
+            headers: Default::default(),
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -193,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_routecodex_control_keys_before_provider_transport() {
+    fn wire_preserves_business_names_before_provider_transport() {
         let body = json!({
             "model":"upstream-model", "input":[{
                 "role":"user", "content":"hello",
@@ -202,46 +381,50 @@ mod tests {
             "metadata":{"client":"kept"},
             "client_metadata":{"session_id":"client-owned"}
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-control", target(), body)
-            .expect_err("provider wire body must reject internal control fields");
-        assert!(matches!(
-            error,
-            V3ProviderError::ControlFieldInWireBody {
-                request_id,
-                field: "metadataCenter"
-            } if request_id == "req-control"
-        ));
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-control", target(), body.clone())
+                .expect("business names do not establish control provenance");
+        assert_eq!(wire.body(), &body);
     }
 
     #[test]
-    fn wire_rejects_invalid_input_tool_name_before_provider_send() {
+    fn wire_preserves_invalid_historical_responses_tool_name_and_matching_result() {
         let body = json!({
             "model": "upstream-model",
-            "input": [{"type": "function_call", "name": "servertool.exec!"}]
+            "input": [
+                {"type": "function_call", "call_id": "call_bad", "name": "read 1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_bad", "output": "unsupported call: read 1"}
+            ]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-tool-name", target(), body)
-            .expect_err("invalid tool name must be rejected locally");
-        assert!(error.to_string().contains("input[0].name"));
+        let expected = body.clone();
+        let wire = build_v3_provider_12_responses_wire_payload("req-tool-name", target(), body)
+            .expect("historical call and result must reach the next model turn");
+        assert_eq!(wire.body(), &expected);
     }
 
     #[test]
-    fn wire_rejects_invalid_nested_tool_use_name_before_provider_send() {
+    fn wire_preserves_invalid_historical_anthropic_tool_use_and_result() {
         let body = json!({
-            "model": "upstream-model",
-            "messages": [{"role": "assistant", "content": [
-                {"type": "tool_use", "name": "invalid.tool!", "input": {}}
-            ]}]
+            "model": "upstream-model", "messages": [
+                {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": "call_bad", "name": "read 1", "input": {}}
+                ]},
+                {"role": "user", "content": [
+                    {"type": "tool_result", "tool_use_id": "call_bad", "content": "unsupported call: read 1"}
+                ]}
+            ]
         });
-        let error =
-            build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
-                .expect_err("invalid nested tool name must be rejected locally");
-        assert!(error
-            .to_string()
-            .contains("body.messages[0].content[0].name"));
+        let expected = body.clone();
+        let wire = build_v3_provider_12_responses_wire_payload("req-tool-use-name", target(), body)
+            .expect("historical Anthropic call and result must reach the next model turn");
+        assert_eq!(wire.body(), &expected);
     }
 
     #[test]
-    fn wire_maps_historical_namespace_tool_use_name_in_anthropic_messages() {
+    fn wire_preserves_undeclared_anthropic_dotted_tool_use_name() {
+        // An undeclared dotted history name is not a declared namespace
+        // identity, so the wire forwards it verbatim instead of guessing a
+        // flattened provider name from a string convention.
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
         let body = json!({
@@ -255,15 +438,51 @@ mod tests {
             anthropic_target,
             body,
         )
-        .expect("Anthropic tool-use history names must be normalized before provider transport");
+        .expect("undeclared Anthropic tool-use history name must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_legacy_functions_mcp_names_before_provider_validation() {
+    fn wire_preserves_declared_anthropic_custom_dotted_tool_history() {
+        let mut anthropic_target = target();
+        anthropic_target.provider_type = "anthropic".into();
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"name":"mcp__mcpx.exec","input_schema":{"type":"object","properties":{"input":{"type":"string"}}}}],
+            "messages": [
+                {"role":"assistant","content":[{"type":"tool_use","id":"call_dotted","name":"mcp__mcpx.exec","input":{"input":"pwd"}}]},
+                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call_dotted","content":"/tmp"}]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-anthropic-custom-dotted",
+            anthropic_target,
+            body,
+        )
+        .expect("declared Anthropic custom tool and result must reach provider");
+        assert_eq!(wire.body()["tools"][0]["name"], "mcp__mcpx.exec");
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["name"],
+            "mcp__mcpx.exec"
+        );
+        assert_eq!(
+            wire.body()["messages"][0]["content"][0]["id"],
+            "call_dotted"
+        );
+        assert_eq!(
+            wire.body()["messages"][1]["content"][0]["tool_use_id"],
+            "call_dotted"
+        );
+    }
+
+    #[test]
+    fn wire_preserves_undeclared_legacy_prefixed_history_names() {
+        // `functions.`-prefixed and dotted history names with no matching
+        // declaration keep their exact spelling; the wire no longer guesses a
+        // canonical MCP name from a legacy string prefix.
         let mut anthropic_target = target();
         anthropic_target.provider_type = "anthropic".into();
         let body = json!({
@@ -278,34 +497,51 @@ mod tests {
             anthropic_target,
             body,
         )
-        .expect("legacy MCP names must be normalized before provider wire validation");
+        .expect("undeclared legacy history names must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
+            "functions.mcp__codex_review.review_start"
         );
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "functions.mcp__codex_review__review_start"
         );
     }
 
     #[test]
-    fn wire_rejects_invalid_openai_chat_tool_call_name_before_provider_send() {
+    fn wire_preserves_invalid_historical_openai_chat_tool_call_and_result() {
         let body = json!({
             "model": "upstream-model",
-            "messages": [{"role": "assistant", "content": "", "tool_calls": [
-                {"id": "call-review", "type": "function", "function": {
-                    "name": "invalid.tool!",
-                    "arguments": "{}"
-                }}
-            ]}]
+            "messages": [
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "call_bad", "type": "function", "function": {
+                        "name": "read 1", "arguments": "{}"
+                    }}
+                ]},
+                {"role": "tool", "tool_call_id": "call_bad", "content": "unsupported call: read 1"}
+            ]
         });
-        let error =
+        let expected = body.clone();
+        let wire =
             build_v3_provider_12_responses_wire_payload("req-chat-tool-call-name", target(), body)
-                .expect_err("invalid openai_chat tool call name must be rejected locally");
-        assert!(error
-            .to_string()
-            .contains("body.messages[0].tool_calls[0].function.name"));
+                .expect("historical Chat call and result must reach the next model turn");
+        assert_eq!(wire.body(), &expected);
+    }
+
+    #[test]
+    fn wire_preserves_current_tool_declaration_name_for_provider_decision() {
+        let body = json!({
+            "model": "upstream-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [{"type": "function", "name": "read 1", "function": {
+                "name": "read 1", "parameters": {"type": "object"}
+            }}]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-invalid-declaration", target(), body)
+                .expect("provider decides whether its tool declaration name is acceptable");
+        assert_eq!(wire.body()["tools"][0]["name"], "read 1");
+        assert_eq!(wire.body()["tools"][0]["function"]["name"], "read 1");
     }
 
     #[test]
@@ -331,12 +567,15 @@ mod tests {
         assert_eq!(
             tools[1],
             json!({
-                "type": "function", "name": "mcp__node_repl__js", "description": "run js",
+                "type": "function", "name": "mcp__node_repl__mcp__node_repl__js", "description": "run js",
                 "parameters": {"type": "object", "properties": {}}, "strict": false
             })
         );
         assert_eq!(tools[2]["type"], json!("function"));
-        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
+        assert_eq!(
+            tools[2]["name"],
+            json!("mcp__node_repl__mcp__node_repl__npm")
+        );
         assert!(
             tools.iter().all(|tool| tool["type"] != json!("namespace")),
             "no namespace container may cross provider wire payload: {tools:?}"
@@ -362,7 +601,11 @@ mod tests {
         )
         .expect("identical provider declarations must collapse to one wire tool");
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1, "duplicate provider tools must be removed: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            1,
+            "duplicate provider tools must be removed: {tools:?}"
+        );
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
     }
 
@@ -381,7 +624,11 @@ mod tests {
         )
         .expect("identical flat Responses provider declarations must collapse to one wire tool");
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1, "duplicate flat provider tools must be removed: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            1,
+            "duplicate flat provider tools must be removed: {tools:?}"
+        );
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
     }
 
@@ -399,8 +646,14 @@ mod tests {
             body,
         )
         .expect_err("conflicting flat provider declarations must fail explicitly");
-        assert!(error.to_string().contains("ConflictingOutboundFields"), "{error}");
-        assert!(error.to_string().contains("mcp__mcpx__workspace"), "{error}");
+        assert!(
+            error.to_string().contains("ConflictingOutboundFields"),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("mcp__mcpx__workspace"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -421,8 +674,14 @@ mod tests {
             body,
         )
         .expect_err("conflicting provider declarations must fail explicitly");
-        assert!(error.to_string().contains("ConflictingOutboundFields"), "{error}");
-        assert!(error.to_string().contains("mcp__mcpx__workspace"), "{error}");
+        assert!(
+            error.to_string().contains("ConflictingOutboundFields"),
+            "{error}"
+        );
+        assert!(
+            error.to_string().contains("mcp__mcpx__workspace"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -442,24 +701,26 @@ mod tests {
         )
         .expect("Chat normalization must not leave duplicate provider tool names");
         let tools = wire.body()["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1, "normalized provider tools must be unique: {tools:?}");
+        assert_eq!(
+            tools.len(),
+            1,
+            "normalized provider tools must be unique: {tools:?}"
+        );
         assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
         assert_eq!(tools[0]["function"]["name"], "mcp__mcpx__workspace");
     }
 
     #[test]
-    fn wire_namespace_tool_empty_children_fails_explicitly() {
+    fn wire_namespace_tool_empty_children_has_no_callable_binding() {
         let body = json!({
             "model": "upstream-model", "input": "hello", "tools": [
                 {"type": "namespace", "name": "mcp__node_repl", "tools": []}
             ]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body)
-            .expect_err("empty namespace container must fail explicitly, not reach provider");
-        assert!(matches!(
-            error,
-            V3ProviderError::NamespaceToolFlattenFailed { request_id, .. } if request_id == "req-empty-ns"
-        ));
+        let wire = build_v3_provider_12_responses_wire_payload("req-empty-ns", target(), body)
+            .expect("empty namespace grants no callable identity");
+        assert_eq!(wire.body()["tools"], json!([]));
+        assert!(wire.namespace_identities().is_empty());
     }
 
     #[test]
@@ -542,7 +803,10 @@ mod tests {
     }
 
     #[test]
-    fn wire_maps_namespace_qualified_openai_chat_tool_call_names_by_convention() {
+    fn wire_preserves_undeclared_openai_chat_dotted_tool_call_name() {
+        // Without a matching namespace declaration the dotted call name is not
+        // a known client identity, so it is forwarded verbatim rather than
+        // rewritten by a name-shape convention.
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -559,15 +823,15 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("convention namespace call names must be mapped before provider transport");
+        .expect("undeclared Chat dotted call name must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "mcp__node_repl__js"
+            "mcp__node_repl.js"
         );
     }
 
     #[test]
-    fn wire_maps_multi_agent_tool_names_in_chat_history_before_provider_validation() {
+    fn wire_preserves_undeclared_multi_agent_history_names() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -594,19 +858,19 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("multi-agent history names must be normalized before provider validation");
+        .expect("undeclared multi-agent history names must be forwarded verbatim");
         assert_eq!(
             wire.body()["messages"][0]["content"][0]["name"],
-            "multi_agent_v1__spawn_agent"
+            "multi_agent_v1.spawn_agent"
         );
         assert_eq!(
             wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
-            "multi_agent_v1__spawn_agent"
+            "multi_agent_v1.spawn_agent"
         );
     }
 
     #[test]
-    fn wire_keeps_openai_chat_tool_declaration_name_when_it_matches_namespace_alias() {
+    fn wire_keeps_openai_chat_tool_declaration_name_without_guessing_namespace_alias() {
         let mut chat_target = target();
         chat_target.provider_type = "openai_chat".into();
         let body = json!({
@@ -623,21 +887,18 @@ mod tests {
                 }}
             ]
         });
-        let error =
+        let wire =
             build_v3_provider_12_responses_wire_payload("req-declaration-name", chat_target, body)
-                .expect_err("ordinary tool declaration must not be rewritten before validation");
-        assert!(
-            error.to_string().contains("body.tools[1].function.name"),
-            "declaration path must be rejected without mapping: {error}"
-        );
-        assert!(
-            !error.to_string().contains("mcp__node_repl__js"),
-            "declaration names must not be rewritten from call-history aliases: {error}"
+                .expect("ordinary declaration name must reach the provider unchanged");
+        assert_eq!(wire.body()["tools"][1]["name"], "mcp__node_repl.js");
+        assert_eq!(
+            wire.body()["tools"][1]["function"]["name"],
+            "mcp__node_repl.js"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_without_current_tools() {
+    fn wire_preserves_undeclared_dotted_call_without_current_tools() {
         let body = json!({
             "model": "upstream-model",
             "input": [{"type": "function_call", "name": "mcp__codex_review.review_start"}]
@@ -647,15 +908,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("undeclared historical dotted call must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_with_empty_current_tools() {
+    fn wire_preserves_undeclared_dotted_call_with_empty_current_tools() {
         let body = json!({
             "model": "upstream-model",
             "tools": [],
@@ -666,15 +927,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("undeclared historical dotted call must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_tool_use_name_in_input() {
+    fn wire_preserves_undeclared_dotted_tool_use_name_in_input() {
         let body = json!({
             "model": "upstream-model",
             "input": [{"type": "tool_use", "name": "mcp__codex_review.review_start"}]
@@ -684,15 +945,15 @@ mod tests {
             target(),
             body,
         )
-        .expect("historical MCP tool_use names must be normalized");
+        .expect("undeclared historical tool_use name must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_with_empty_current_tools_for_openai_chat() {
+    fn wire_preserves_undeclared_dotted_call_with_empty_current_tools_for_openai_chat() {
         let body = json!({
             "model": "upstream-model",
             "tools": [],
@@ -709,16 +970,107 @@ mod tests {
             chat_target,
             body,
         )
-        .expect("known historical MCP namespace call must be normalized");
+        .expect("undeclared historical dotted call must be forwarded verbatim");
 
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
     #[test]
-    fn wire_maps_historical_namespace_call_when_namespace_declaration_is_incomplete() {
+    fn wire_preserves_undeclared_codex_dotted_calls_for_both_provider_shapes() {
+        for provider_type in ["responses", "openai_chat"] {
+            let mut provider = target();
+            provider.provider_type = provider_type.into();
+            let body = json!({
+                "model": "upstream-model",
+                "tools": [],
+                "input": [
+                    {"type": "function_call", "name": "functions.exec", "call_id": "call_exec", "arguments": "{}"},
+                    {"type": "custom_tool_call", "name": "functions.exec", "call_id": "call_custom_exec", "input": "pwd"}
+                ],
+                "messages": [{"role": "assistant", "content": [{"type": "tool_use", "name": "functions.exec"}],
+                    "tool_calls": [{"type": "function", "function": {"name": "functions.exec", "arguments": "{}"}}]}]
+            });
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-historical-codex-namespace",
+                provider,
+                body,
+            )
+            .expect("undeclared historical Codex dotted calls must be forwarded verbatim");
+            assert_eq!(wire.body()["input"][0]["name"], "functions.exec");
+            assert_eq!(wire.body()["input"][1]["name"], "functions.exec");
+            assert_eq!(
+                wire.body()["messages"][0]["content"][0]["name"],
+                "functions.exec"
+            );
+            assert_eq!(
+                wire.body()["messages"][0]["tool_calls"][0]["function"]["name"],
+                "functions.exec"
+            );
+        }
+    }
+
+    #[test]
+    fn wire_preserves_unrelated_dotted_history_without_adopting_flat_tool_identity() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"type": "function", "name": "billing__charge", "parameters": {"type": "object"}}],
+            "input": [{"type": "function_call", "call_id": "call_old", "name": "billing.charge", "arguments": "{}"}]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-unrelated-dotted-history",
+            target(),
+            body,
+        )
+        .expect("unknown historical call may be paired with a failed result later");
+        assert_eq!(wire.body()["input"][0]["name"], "billing.charge");
+    }
+
+    #[test]
+    fn wire_preserves_declared_flat_dotted_tool_call_name() {
+        let body = json!({
+            "model": "upstream-model",
+            "tools": [{"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}],
+            "input": [{"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-flat-dotted-tool", target(), body)
+                .expect("flat declaration and call retain their exact matching name");
+        assert_eq!(wire.body()["tools"][0]["name"], "functions.exec_command");
+        assert_eq!(wire.body()["input"][0]["name"], "functions.exec_command");
+    }
+
+    #[test]
+    fn wire_preserves_additional_tools_flat_dotted_tool_call_name() {
+        let body = json!({
+            "model": "upstream-model",
+            "input": [
+                {"type": "additional_tools", "tools": [
+                    {"type": "function", "name": "functions.exec_command", "parameters": {"type": "object"}}
+                ]},
+                {"type": "function_call", "call_id": "call_exec", "name": "functions.exec_command", "arguments": "{}"}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-flat-dotted-additional-tool",
+            target(),
+            body,
+        )
+        .expect("additional declaration and call retain their exact matching name");
+        assert_eq!(
+            wire.body()["input"][0]["tools"][0]["name"],
+            "functions.exec_command"
+        );
+        assert_eq!(wire.body()["input"][1]["name"], "functions.exec_command");
+    }
+
+    #[test]
+    fn wire_preserves_dotted_call_not_covered_by_incomplete_namespace_declaration() {
+        // The declaration only contains `other`; `review_start` is not a
+        // declared child, so the call name is forwarded verbatim instead of
+        // being guessed from the namespace prefix.
         let body = json!({
             "model": "upstream-model",
             "tools": [{"type": "namespace", "name": "mcp__codex_review", "tools": [
@@ -731,10 +1083,10 @@ mod tests {
             target(),
             body,
         )
-        .expect("incomplete namespace declarations still require convention mapping");
+        .expect("undeclared call name must be forwarded verbatim");
         assert_eq!(
             wire.body()["input"][0]["name"],
-            "mcp__codex_review__review_start"
+            "mcp__codex_review.review_start"
         );
     }
 
@@ -771,9 +1123,9 @@ mod tests {
         assert_eq!(
             tools[1],
             json!({
-                "type": "function", "name": "mcp__node_repl__js",
+                "type": "function", "name": "mcp__node_repl__mcp__node_repl__js",
                 "function": {
-                    "name": "mcp__node_repl__js", "description": "run js",
+                    "name": "mcp__node_repl__mcp__node_repl__js", "description": "run js",
                     "parameters": {"type": "object", "properties": {}}, "strict": false
                 }
             }),
@@ -781,8 +1133,14 @@ mod tests {
             tools[1]
         );
         assert_eq!(tools[2]["type"], json!("function"));
-        assert_eq!(tools[2]["name"], json!("mcp__node_repl__npm"));
-        assert_eq!(tools[2]["function"]["name"], json!("mcp__node_repl__npm"));
+        assert_eq!(
+            tools[2]["name"],
+            json!("mcp__node_repl__mcp__node_repl__npm")
+        );
+        assert_eq!(
+            tools[2]["function"]["name"],
+            json!("mcp__node_repl__mcp__node_repl__npm")
+        );
         assert!(
             tools.iter().all(|tool| tool["type"] != json!("namespace")),
             "no namespace container may cross provider wire payload: {tools:?}"
@@ -833,44 +1191,41 @@ mod tests {
     }
 
     #[test]
-    fn wire_rejects_routing_capability_control_keys_before_provider_transport() {
+    fn wire_preserves_business_capability_names_before_provider_transport() {
         let body = json!({
             "model":"upstream-model", "input":"hello", "request_capabilities":["vision"]
         });
-        let error = build_v3_provider_12_responses_wire_payload("req-cap", target(), body)
-            .expect_err("request capability facts are control-plane, not provider payload");
-        assert!(matches!(
-            error,
-            V3ProviderError::ControlFieldInWireBody {
-                request_id,
-                field: "request_capabilities"
-            } if request_id == "req-cap"
-        ));
+        let wire = build_v3_provider_12_responses_wire_payload("req-cap", target(), body.clone())
+            .expect("business fields named like capabilities remain data");
+        assert_eq!(wire.body(), &body);
     }
 
     #[test]
-    fn canonical_control_key_guard_rejects_route_facts_and_keeps_client_metadata_data_plane() {
-        assert!(!V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS.contains(&"metadata"));
-        assert!(!V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS.contains(&"client_metadata"));
+    fn bug03df769_typed_transport_writer_isolates_control_from_business_body() {
+        let mut selected = target();
+        selected.base_url = "https://typed-control.invalid/v1".into();
+        selected
+            .headers
+            .insert("x-route-owner".into(), "typed-writer-only".into());
+        let body = json!({
+            "model": "upstream-model", "input": "hello",
+            "selected_target": {"base_url": "https://business.invalid", "headers": {"x-route-owner": "business"}},
+            "requiredCapabilities": ["business-value"]
+        });
+        let wire =
+            build_v3_provider_12_responses_wire_payload("req-writer", selected, body.clone())
+                .expect("typed target and business data have separate writers");
+        assert_eq!(wire.body(), &body);
+        assert_eq!(wire.target().base_url, "https://typed-control.invalid/v1");
+        assert_eq!(wire.target().headers["x-route-owner"], "typed-writer-only");
+        assert!(!wire.body().to_string().contains("typed-writer-only"));
+        let transport = crate::build_v3_transport_13_responses_request_from_v3_provider_12(wire)
+            .expect("production transport writer uses typed target without sending");
         assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "metadata": {"client": "kept"},
-                "client_metadata": {"session_id": "client-owned"}
-            })),
-            None
+            transport.url(),
+            "https://typed-control.invalid/v1/responses"
         );
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "input": "hello", "routeHint": {"route": "must-not-enter-wire"}
-            })),
-            Some("routeHint")
-        );
-        assert_eq!(
-            find_v3_routecodex_control_payload_key(&json!({
-                "input": "hello", "opaque_target": {"target": "must-not-enter-wire"}
-            })),
-            Some("opaque_target")
-        );
+        assert_eq!(transport.body(), &body);
     }
 
     #[test]
@@ -924,7 +1279,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_compat_does_not_strip_tool_choice_outside_thinking_mode() {
+    fn deepseek_compat_projects_tool_choice_outside_thinking_mode() {
         let mut selected = target();
         selected.provider_id = "opencode-go".into();
         selected.provider_type = "responses".into();
@@ -940,18 +1295,20 @@ mod tests {
                     "tools": [{"type": "function", "name": "exec_command"}]
             }),
         )
-        .expect("non-thinking DeepSeek request must remain valid");
-        assert_eq!(wire.body().get("tool_choice"), Some(&json!("required")));
+        .expect("non-thinking DeepSeek request must remain provider-valid");
+        assert_eq!(wire.body().get("tool_choice"), Some(&json!("auto")));
     }
 
     fn target() -> V3ResponsesProviderTarget {
         V3ResponsesProviderTarget {
             provider_id: "neutral-provider".into(),
             provider_type: "responses".into(),
+            interface_id: "default".into(),
             base_url: "http://upstream.invalid/v1".into(),
             canonical_model_id: "canonical-model".into(),
             wire_model: "upstream-model".into(),
             compatibility_profile: None,
+            headers: Default::default(),
             auth: V3ProviderAuthHandle {
                 alias: "primary".into(),
                 secret: V3ProviderAuthSecretHandle::Environment("NEUTRAL_KEY".into()),
@@ -1901,7 +2258,7 @@ mod tests {
     }
 
     #[test]
-    fn response_cipher_policy_strips_codex_cipher_but_keeps_anthropic_signature() {
+    fn response_cipher_policy_strips_all_non_tool_cipher_without_typed_anthropic_source() {
         let mut payload = json!({
             "status": "completed",
             "output": [
@@ -1919,13 +2276,63 @@ mod tests {
                 },
                 {
                     "type": "reasoning",
+                    "id": "rs_uuid",
+                    "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                    "summary": [{"type": "summary_text", "text": "uuid visible"}]
+                },
+                {
+                    "type": "reasoning",
+                    "id": "rs_opaque",
+                    "encrypted_content": "113833ee-native-cipher",
+                    "summary": [{"type": "summary_text", "text": "opaque visible"}]
+                },
+                {
+                    "type": "reasoning",
                     "id": "rs_sig",
                     "encrypted_content": "anthropic-signature-value",
                     "summary": [{"type": "summary_text", "text": "signed"}]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "tool-output-business-value",
+                    "output": [{
+                        "encrypted_content": "nested-tool-output-business-value"
+                    }]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "name": "echo",
+                    "arguments": {
+                        "encrypted_content": "structured-tool-argument-business-value",
+                        "nested": {"encrypted_content": "nested-tool-argument-business-value"}
+                    }
+                },
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_3",
+                    "name": "freeform",
+                    "input": {
+                        "encrypted_content": "custom-tool-input-business-value"
+                    }
+                },
+                {
+                    "type": "custom_tool_call_output",
+                    "call_id": "call_3",
+                    "output": {
+                        "encrypted_content": "custom-tool-output-business-value"
+                    }
+                },
+                {
+                    "type": "tool_search_call",
+                    "arguments": {
+                        "encrypted_content": "tool-search-argument-business-value"
+                    }
                 }
             ]
         });
-        apply_v3_response_cipher_policy(&mut payload, false);
+        apply_v3_response_cipher_policy(&mut payload, false, false);
         assert!(
             !payload.to_string().contains("rsn_CIPHERTEXT"),
             "rsn_ cipher must be stripped"
@@ -1934,19 +2341,123 @@ mod tests {
             !payload.to_string().contains("gAAAA_cipher"),
             "gAAAA cipher must be stripped"
         );
-        assert_eq!(
-            payload["output"][2]["encrypted_content"], "anthropic-signature-value",
-            "non-rsn_/gAAAA signature carrier is not Codex cipher and must be kept"
+        assert!(
+            !payload
+                .to_string()
+                .contains("411bd3dd-47a6-49c0-8eef-6a826f349bf6-0"),
+            "UUID-shaped cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("113833ee-native-cipher"),
+            "opaque cipher must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("anthropic-signature-value"),
+            "cipher shape must not infer an Anthropic source"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
+        assert_eq!(payload["output"][2]["summary"][0]["text"], "uuid visible");
+        assert_eq!(payload["output"][3]["summary"][0]["text"], "opaque visible");
+        assert_eq!(
+            payload["output"][5]["encrypted_content"], "tool-output-business-value",
+            "function_call_output is business data and must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][0]["encrypted_content"],
+            "nested-tool-output-business-value",
+            "the complete function_call_output business subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][6]["arguments"]["encrypted_content"],
+            "structured-tool-argument-business-value",
+            "function_call structured arguments are business data"
+        );
+        assert_eq!(
+            payload["output"][6]["arguments"]["nested"]["encrypted_content"],
+            "nested-tool-argument-business-value",
+            "the complete function_call arguments subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][7]["input"]["encrypted_content"],
+            "custom-tool-input-business-value",
+            "custom_tool_call input is business data"
+        );
+        assert_eq!(
+            payload["output"][8]["output"]["encrypted_content"],
+            "custom-tool-output-business-value",
+            "custom_tool_call_output is business data"
+        );
+        assert_eq!(
+            payload["output"][9]["arguments"]["encrypted_content"],
+            "tool-search-argument-business-value",
+            "tool_search_call arguments are business data"
+        );
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
-        apply_v3_response_cipher_policy(&mut retained, true);
+        apply_v3_response_cipher_policy(&mut retained, true, false);
         assert_eq!(
             retained["output"][0]["encrypted_content"], "rsn_KEEP",
             "retain=true must keep cipher verbatim"
+        );
+
+        let mut anthropic =
+            json!({"output": [{"type": "reasoning", "encrypted_content": "typed-signature"}]});
+        apply_v3_response_cipher_policy(&mut anthropic, false, true);
+        assert_eq!(
+            anthropic["output"][0]["encrypted_content"], "typed-signature",
+            "typed Anthropic source must keep its signature verbatim"
+        );
+    }
+
+    #[test]
+    fn chat_reasoning_cipher_policy_keeps_business_values_and_strips_codex_shapes() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "preserved cipher",
+                    "summary": [{"type": "summary_text", "text": "business reasoning"}]
+                },
+                {"type": "reasoning", "encrypted_content": "rsn_CODEX_CIPHER"},
+                {"type": "reasoning", "encrypted_content": "gAAAA_CODEX_CIPHER"},
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "encrypted_content": "tool-business-cipher"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_2",
+                    "arguments": {
+                        "encrypted_content": "rsn_CALL_ARGUMENT_BUSINESS",
+                        "nested": {"encrypted_content": "gAAAA_CALL_ARGUMENT_BUSINESS"}
+                    }
+                }
+            ]
+        });
+
+        apply_v3_chat_reasoning_cipher_policy(&mut payload, false);
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"], "preserved cipher",
+            "OpenAI Chat reasoning business shape must survive JSON admission"
+        );
+        assert!(payload["output"][1].get("encrypted_content").is_none());
+        assert!(payload["output"][2].get("encrypted_content").is_none());
+        assert_eq!(
+            payload["output"][3]["encrypted_content"], "tool-business-cipher",
+            "function_call_output remains business data on Chat wire"
+        );
+        assert_eq!(
+            payload["output"][4]["arguments"]["encrypted_content"], "rsn_CALL_ARGUMENT_BUSINESS",
+            "tool calls must not lose codex-shaped structured argument values"
+        );
+        assert_eq!(
+            payload["output"][4]["arguments"]["nested"]["encrypted_content"],
+            "gAAAA_CALL_ARGUMENT_BUSINESS",
+            "the complete Chat tool argument subtree must be preserved"
         );
     }
 

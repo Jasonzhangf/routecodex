@@ -8,9 +8,9 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     build_v3_provider_global_probe_target,
-    execute_v3_openai_chat_relay_runtime_with_provider_health, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeError, V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput,
-    V3ResponsesRelayProviderHealthHandle,
+    execute_v3_openai_chat_relay_runtime_with_provider_health, probe_v3_provider_global_target,
+    V3OpenAiChatRelayClientBody, V3OpenAiChatRelayRuntimeError, V3OpenAiChatRelayRuntimeInput,
+    V3OpenAiChatRelayRuntimeOutput, V3ResponsesRelayProviderHealthHandle,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -21,6 +21,11 @@ use tokio::net::TcpListener;
 fn ensure_openai_chat_relay_test_state_dir() {
     static INITIALIZE: std::sync::Once = std::sync::Once::new();
     INITIALIZE.call_once(|| {
+        // This binary owns projection, routing and lifecycle parity cases. Their
+        // fixtures replay one completed provider response, so the bounded Chat
+        // Process continuation is pinned off; refill coverage lives in the
+        // public server entry tests.
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock must follow the Unix epoch")
@@ -74,19 +79,11 @@ async fn serve_one_openai_chat_probe(
     String::from_utf8_lossy(&request).into_owned()
 }
 
-async fn serve_two_openai_chat_probes(
-    listener: TcpListener,
-    status_line: &'static str,
-    body: &'static str,
-) -> (String, String) {
-    let first = serve_one_openai_chat_probe(
-        &listener,
-        "200 OK",
-        r#"{"choices":[{"finish_reason":null}]}"#,
-    )
-    .await;
-    let second = serve_one_openai_chat_probe(&listener, status_line, body).await;
-    (first, second)
+fn probe_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("test clock must follow the Unix epoch")
+        .as_millis() as u64
 }
 
 async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
@@ -104,6 +101,44 @@ async fn execute_v3_openai_chat_relay_runtime<T: ResponsesTransport>(
         provider_health.runtime_health(),
     )
     .await
+}
+
+struct FailSecondaryThenRecoverPrimaryTransport {
+    primary_provider_id: String,
+    captures: Mutex<Vec<(String, String, Value)>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for FailSecondaryThenRecoverPrimaryTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.captures.lock().unwrap().push((
+            request.provider_id().to_string(),
+            request.url().to_string(),
+            request.body().clone(),
+        ));
+        if request.provider_id() != self.primary_provider_id {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id: request.provider_id().to_string(),
+                    status: 503,
+                    headers: vec![],
+                    body: br#"{"error":{"message":"controlled secondary business failure"}}"#
+                        .to_vec(),
+                    body_read_failure: None,
+                }),
+            });
+        }
+        JsonTransport {
+            captured_url: Mutex::new(None),
+            captured_body: Mutex::new(None),
+        }
+        .send(request)
+        .await
+    }
 }
 
 struct JsonTransport {
@@ -223,15 +258,18 @@ async fn run_openai_chat_same_protocol_field_parity_request_response_matrix() {
     );
     let captured = transport.captured_body.lock().unwrap().clone().unwrap();
     assert_eq!(captured["model"], "chat-wire-model");
-    assert_eq!(captured["messages"], payload["messages"]);
+    let expected_messages = payload["messages"]
+        .as_array()
+        .expect("payload messages")
+        .clone();
     assert_eq!(
-        captured["tools"],
-        json!([{
-            "type": "function",
-            "name": "lookup",
-            "function": {"name": "lookup", "parameters": {"type": "object"}}
-        }]),
-        "openai_chat provider wire normalizes tools to dual-field shape (top-level name + nested function)"
+        captured["messages"],
+        Value::Array(expected_messages),
+        "openai_chat provider wire preserves the client history verbatim"
+    );
+    assert_eq!(
+        captured["tools"], payload["tools"],
+        "already projected standard Chat tools must reach transport without a second wire rewrite"
     );
     assert_eq!(captured["tool_choice"], payload["tool_choice"]);
     assert_eq!(
@@ -416,6 +454,75 @@ impl ResponsesTransport for ClientDisconnectTransport {
     }
 }
 
+struct PartialClientDisconnectSseTransport {
+    provider_ids: Mutex<Vec<String>>,
+    typed_disconnect: bool,
+}
+
+#[async_trait]
+impl ResponsesTransport for PartialClientDisconnectSseTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        let request_id = request.request_id().to_string();
+        if provider_id.ends_with("_primary") {
+            let partial = Ok::<Vec<u8>, V3ProviderError>(
+                br#"data: {"id":"chatcmpl-client-disconnect","object":"chat.completion.chunk","model":"chat-wire-model","choices":[{"index":0,"delta":{"role":"assistant","content":"partial-before-client-disconnect"},"finish_reason":null}]}
+
+"#
+                .to_vec(),
+            );
+            return Ok(V3ProviderResp14Raw::from_sse(
+                request_id.clone(),
+                provider_id.clone(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(futures_util::stream::iter([
+                    partial,
+                    Err(if self.typed_disconnect {
+                        V3ProviderError::ClientDisconnect {
+                            request_id,
+                            provider_id,
+                        }
+                    } else {
+                        // Counterexample: the pre-fix codec stringified the typed
+                        // disconnect, so the collector saw an ordinary transport
+                        // failure after partial business content.
+                        V3ProviderError::Transport {
+                            request_id,
+                            provider_id,
+                            reason: "client disconnected without typed handoff".to_string(),
+                        }
+                    }),
+                ])),
+            ));
+        }
+        Ok(V3ProviderResp14Raw::from_sse(
+            request_id,
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([
+                Ok(br#"data: {"id":"chatcmpl-secondary","object":"chat.completion.chunk","model":"chat-wire-model","choices":[{"index":0,"delta":{"content":"secondary-must-not-run"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#
+                .to_vec()),
+            ])),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_action_gate() {
     let manifest = manifest();
@@ -460,6 +567,199 @@ async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_actio
     );
     assert!(availability.available);
     assert!(availability.blocked_scopes.is_empty());
+}
+
+#[tokio::test]
+async fn partial_client_disconnect_is_health_neutral_and_never_reselects() {
+    let scope = "openai_chat_partial_client_disconnect";
+    let manifest = manifest_with_two_providers_for_scope(scope, false);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let primary = format!("{scope}_primary");
+    let secondary = format!("{scope}_secondary");
+    let secondary_availability = provider_health.store().availability(
+        secondary.as_str(),
+        Some(secondary.as_str()),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        secondary_availability.available,
+        "the second candidate must be eligible before the disconnect"
+    );
+    let transport = PartialClientDisconnectSseTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        typed_disconnect: true,
+    };
+    let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "partial-client-disconnect",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-partial-client-disconnect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"disconnect after partial output"}],
+                "stream":true
+            }),
+        },
+        &transport,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("client disconnect must produce a typed terminal projection");
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        [primary.as_str()],
+        "a client disconnect after partial content must not reselect another provider"
+    );
+    assert_eq!(output.status, 499);
+    assert_eq!(output.error_chain.as_ref().map(Vec::len), Some(6));
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    assert!(
+        output.provider_failure_attempts.is_empty(),
+        "client disconnect must not publish a provider failure attempt: {:?}",
+        output.provider_failure_attempts
+    );
+    let client_error = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(value) => value,
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            panic!("client disconnect must not commit partial client SSE")
+        }
+    };
+    assert!(client_error.to_string().contains("client disconnected"));
+    let diagnostic = output
+        .diagnostic_source
+        .as_ref()
+        .expect("client disconnect must retain its typed Error01 source");
+    assert_eq!(
+        diagnostic.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+        "the collector must observe the typed cancellation handoff, not a provider failure"
+    );
+
+    let availability = provider_health.store().availability(
+        primary.as_str(),
+        Some(primary.as_str()),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        availability.available && availability.blocked_scopes.is_empty(),
+        "client disconnect must not cool the provider: {:?}",
+        availability.blocked_scopes
+    );
+}
+
+/// Counterexample for the typed cancellation handoff. The same partial frame
+/// followed by an untyped transport error must cool the primary candidate and
+/// reselect the eligible secondary. The transport-stage diagnostics also prove
+/// the partial frame was observed as business content: without that observation
+/// the collector would classify the failure on the response-body lane instead.
+#[tokio::test]
+async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexample() {
+    use futures_util::StreamExt;
+    let scope = "openai_chat_partial_untyped_disconnect_counterexample";
+    let manifest = manifest_with_two_providers_for_scope(scope, true);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let primary = format!("{scope}_primary");
+    let secondary = format!("{scope}_secondary");
+    let transport = PartialClientDisconnectSseTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        typed_disconnect: false,
+    };
+    let output = execute_v3_openai_chat_relay_runtime_with_provider_health(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: scope.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "partial-client-disconnect-counterexample",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-partial-untyped-disconnect".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"untyped disconnect after partial output"}],
+                "stream":true
+            }),
+        },
+        &transport,
+        provider_health.runtime_health(),
+    )
+    .await
+    .expect("untyped transport failure must be recovered by reselection");
+
+    assert_eq!(
+        transport.provider_ids.lock().unwrap().as_slice(),
+        [primary.as_str(), secondary.as_str()],
+        "an untyped disconnect after partial content must cool primary and use the eligible secondary"
+    );
+    assert_eq!(output.status, 200);
+    assert!(
+        output.node_trace.contains(&"V3TargetLocalReselected"),
+        "counterexample must exercise provider reselection: {:?}",
+        output.node_trace
+    );
+    let failure = output
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .expect("counterexample must publish its failed primary attempt");
+    let diagnostic = failure
+        .diagnostic_source
+        .as_ref()
+        .expect("counterexample must retain the failed primary source");
+    assert_eq!(
+        diagnostic.source_stage, "V3ProviderReqOutbound09TransportRequest",
+        "the partial frame must be observed as business content before the untyped failure"
+    );
+    let primary_availability = provider_health.store().availability(
+        primary.as_str(),
+        Some(primary.as_str()),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        !primary_availability.available,
+        "an untyped disconnect after partial content must cool the failed primary"
+    );
+    let secondary_availability = provider_health.store().availability(
+        secondary.as_str(),
+        Some(secondary.as_str()),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        secondary_availability.available,
+        "the successful secondary must remain eligible"
+    );
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body from the secondary");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(
+        text.contains("secondary-must-not-run"),
+        "counterexample must deliver the secondary payload: {text}"
+    );
+    assert!(
+        !text.contains("partial-before-client-disconnect"),
+        "the failed primary attempt must not commit partial content: {text}"
+    );
 }
 
 struct ReselectTransport {
@@ -555,17 +855,28 @@ impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
                         b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"primary-partial-must-not-commit\"},\"finish_reason\":null}]}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(
-                        b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}\n\n".to_vec(),
+                        b"data: {\"id\":\"chatcmpl-primary-incomplete\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-wire-model\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"content_filter\"}]}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
                 ]
             } else {
+                // A well-formed refusal stream preserves its text and terminal
+                // meaning through the Chat projection without reselection.
                 vec![
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-primary-refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec(),
+                    ),
                     Ok::<Vec<u8>, V3ProviderError>(
                         b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"primary-partial-must-not-commit\"}}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(
-                        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
+                        b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec(),
+                    ),
+                    Ok::<Vec<u8>, V3ProviderError>(
+                        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
                     ),
                     Ok::<Vec<u8>, V3ProviderError>(
                         b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
@@ -583,6 +894,54 @@ impl ResponsesTransport for IncompleteWireThenChatSuccessTransport {
                 Ok::<Vec<u8>, V3ProviderError>(b"data: [DONE]\n\n".to_vec()),
             ]
         };
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            provider_id,
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter(frames)),
+        ))
+    }
+}
+
+struct AnthropicOutputCapThroughChatEntryTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for AnthropicOutputCapThroughChatEntryTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids.lock().unwrap().push(provider_id.clone());
+        // A well-formed Anthropic stream that stops at the provider output cap
+        // while carrying real partial text. An output-cap terminal is valid
+        // partial output, so this attempt must be admitted rather than reselected.
+        let frames = vec![
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-primary-cap\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"MiniMax-M3\",\"content\":[],\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"capped-partial-output\"}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":2}}\n\n".to_vec(),
+            ),
+            Ok::<Vec<u8>, V3ProviderError>(
+                b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec(),
+            ),
+        ];
         Ok(V3ProviderResp14Raw::from_sse(
             request.request_id().to_string(),
             provider_id,
@@ -798,8 +1157,13 @@ async fn responses_provider_usage_respects_chat_client_opt_out() {
 }
 
 #[tokio::test]
-async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
+async fn responses_provider_empty_incomplete_reselects_and_delivers_healthy_secondary() {
     use futures_util::StreamExt;
+    // The primary Responses attempt ends at `response.incomplete` carrying usage
+    // but no deliverable business content. The active v8 policy classifies that
+    // complete attempt as an internal 502 (`provider_response_empty`) and
+    // reselects, so the healthy Chat secondary must deliver the real business
+    // result. The primary usage frame must never leak into the client projection.
     let server_id = "openai_chat_responses_incomplete_reselect";
     let manifest = manifest_with_two_responses_providers_for_scope(server_id);
     let transport = ResponsesIncompleteThenChatSuccessTransport {
@@ -827,11 +1191,35 @@ async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
         &transport,
     )
     .await
-    .expect("empty incomplete terminal must reach Chat projection");
-    assert_eq!(output.status, 200);
+    .expect("empty incomplete attempt must reselect and deliver the healthy secondary");
+    assert_eq!(output.status, 200, "{output:?}");
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
-        [format!("{server_id}_primary")]
+        [
+            format!("{server_id}_primary"),
+            format!("{server_id}_secondary")
+        ],
+        "empty primary attempt must reselect exactly once into the healthy secondary"
+    );
+    assert!(
+        output.node_trace.contains(&"V3TargetLocalReselected"),
+        "empty primary attempt must be classified and reselected, not projected: {:?}",
+        output.node_trace
+    );
+    let reselected_position = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3TargetLocalReselected")
+        .expect("empty primary attempt must record the reselection node");
+    let first_client_frame_position = output
+        .node_trace
+        .iter()
+        .position(|node| *node == "V3ServerRespOutbound06ClientFrame")
+        .expect("the healthy secondary attempt must project a client frame");
+    assert!(
+        reselected_position < first_client_frame_position,
+        "V3TargetLocalReselected must be recorded before the client frame commit: {:?}",
+        output.node_trace
     );
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
@@ -843,15 +1231,31 @@ async fn responses_provider_empty_incomplete_reaches_chat_terminal() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
-    assert!(text.contains("\"choices\":[]"), "{text}");
+    let frames: Vec<Value> = text
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()
+        .expect("every secondary client data frame must be valid JSON");
+    let content: String = frames
+        .iter()
+        .filter_map(|frame| frame["choices"][0]["delta"]["content"].as_str())
+        .collect();
+    assert_eq!(content, "secondary-after-incomplete", "{text}");
+    assert!(text.contains("\"finish_reason\":\"stop\""), "{text}");
     assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(!text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(!text.contains("\"choices\":[]"), "{text}");
+    assert!(!text.contains("\"prompt_tokens\":10"), "{text}");
+    assert!(!text.contains("\"usage\""), "{text}");
 }
 
 #[tokio::test]
-async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
+async fn openai_chat_provider_incomplete_preserves_original_attempt() {
     use futures_util::StreamExt;
-    let server_id = "openai_chat_wire_incomplete_reselect";
+    let server_id = "openai_chat_wire_content_filter";
     let manifest = manifest_with_two_providers_for_scope(server_id, true);
     let transport = IncompleteWireThenChatSuccessTransport {
         provider_ids: Mutex::new(Vec::new()),
@@ -866,27 +1270,21 @@ async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-openai-chat-wire-incomplete-reselect".into(),
+            request_id: "req-openai-chat-wire-content-filter".into(),
             payload: json!({
                 "model":"chat-client-alias",
-                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "messages":[{"role":"user","content":"provider content filter terminal"}],
                 "stream":true
             }),
         },
         &transport,
     )
     .await
-    .expect("incomplete OpenAI Chat provider attempt must reselect");
+    .expect("incomplete OpenAI Chat provider attempt must pass through");
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
-    assert_eq!(
-        provider_ids,
-        [
-            format!("{server_id}_primary"),
-            format!("{server_id}_secondary")
-        ]
-    );
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(provider_ids, [format!("{server_id}_primary")]);
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
     };
@@ -897,14 +1295,18 @@ async fn openai_chat_provider_incomplete_reselects_before_client_commit() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("secondary-after-incomplete"), "{text}");
-    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(!text.contains("secondary-after-incomplete"), "{text}");
+    assert!(text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(
+        text.contains("\"finish_reason\":\"content_filter\""),
+        "{text}"
+    );
 }
 
 #[tokio::test]
-async fn anthropic_provider_incomplete_reselects_before_client_commit() {
+async fn anthropic_provider_refusal_preserves_original_attempt() {
     use futures_util::StreamExt;
-    let server_id = "anthropic_wire_incomplete_reselect";
+    let server_id = "anthropic_wire_refusal_terminal";
     let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
     let transport = IncompleteWireThenChatSuccessTransport {
         provider_ids: Mutex::new(Vec::new()),
@@ -919,26 +1321,80 @@ async fn anthropic_provider_incomplete_reselects_before_client_commit() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-anthropic-wire-incomplete-reselect".into(),
+            request_id: "req-anthropic-wire-refusal-terminal".into(),
             payload: json!({
                 "model":"chat-client-alias",
-                "messages":[{"role":"user","content":"recover after incomplete"}],
+                "messages":[{"role":"user","content":"provider refusal terminal"}],
                 "stream":true
             }),
         },
         &transport,
     )
     .await
-    .expect("incomplete Anthropic provider attempt must reselect");
+    .expect("a refused Anthropic provider attempt must pass through");
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(output.status, 200, "{provider_ids:?} {output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert_eq!(provider_ids, [format!("{server_id}_primary")]);
+    let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
+        panic!("expected Chat SSE client body");
+    };
+    let text = stream
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .map(String::from_utf8)
+        .collect::<Result<String, _>>()
+        .unwrap();
+    assert!(!text.contains("secondary-after-incomplete"), "{text}");
+    assert!(text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(
+        text.contains("\"finish_reason\":\"content_filter\""),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_provider_output_cap_through_chat_entry_commits_partial_output() {
+    use futures_util::StreamExt;
+    let server_id = "anthropic_wire_incomplete_reselect";
+    let manifest = manifest_with_two_anthropic_providers_for_scope(server_id);
+    let transport = AnthropicOutputCapThroughChatEntryTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-anthropic-wire-output-cap-chat-entry".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"cap the output"}],
+                "stream":true,
+                "max_tokens":16
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("an Anthropic output-cap terminal is valid partial output and must be admitted");
+    let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(
         provider_ids,
-        [
-            format!("{server_id}_primary"),
-            format!("{server_id}_secondary")
-        ]
+        [format!("{server_id}_primary")],
+        "an admitted output-cap truncation must not reselect"
+    );
+    assert_eq!(output.status, 200, "{output:?}");
+    assert!(
+        !output.node_trace.contains(&"V3TargetLocalReselected"),
+        "output-cap terminal must not reselect: {:?}",
+        output.node_trace
     );
     let V3OpenAiChatRelayClientBody::Sse(stream) = output.client_body else {
         panic!("expected Chat SSE client body");
@@ -950,8 +1406,9 @@ async fn anthropic_provider_incomplete_reselects_before_client_commit() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("secondary-after-incomplete"), "{text}");
-    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
+    assert!(text.contains("capped-partial-output"), "{text}");
+    assert!(text.contains("\"finish_reason\":\"length\""), "{text}");
+    assert!(text.contains("[DONE]"), "{text}");
 }
 
 #[tokio::test]
@@ -1275,7 +1732,7 @@ routing_group = "g"
 endpoints = ["openai_chat"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.malformed_mm]
@@ -1800,10 +2257,16 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
         }
     }
 
-    // 合法 terminal finish_reason 后 EOF（无 [DONE]）：provider 合法关闭流，
-    // 网关必须补齐客户端协议终止帧。
+    // 合法 terminal finish_reason 后 EOF（无 [DONE]）：provider 在真实内容 delta
+    // 之后以空 stop terminal 关闭流。合法终止只证明流完整，不证明整次尝试有业务
+    // 内容；有内容的完整尝试必须成功交付，并由网关补齐恰好一次客户端终止帧。
+    let expected_content = "terminal-with-content";
     let transport = StaticSseTransport {
         chunks: Mutex::new(Some(vec![
+            format!(
+                "data: {{\"id\":\"ok\",\"object\":\"chat.completion.chunk\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"{expected_content}\"}},\"finish_reason\":null}}]}}\n\n"
+            )
+            .into_bytes(),
             br#"data: {"id":"ok","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 "#
@@ -1833,21 +2296,115 @@ async fn sse_done_before_terminal_fails_and_terminal_without_done_succeeds() {
     )
     .await
     .unwrap();
+    assert_eq!(output.status, 200, "{output:?}");
     let stream = match output.client_body {
         V3OpenAiChatRelayClientBody::Sse(stream) => stream,
         V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
     };
     let items = stream.collect::<Vec<_>>().await;
-    assert!(
-        !items.is_empty(),
-        "terminal finish_reason must project success"
+    let projected_content: String = items
+        .iter()
+        .filter_map(|chunk| {
+            let line = std::str::from_utf8(chunk).ok()?;
+            let data = line.strip_prefix("data: ")?.trim();
+            if data == "[DONE]" {
+                return None;
+            }
+            let value: Value = serde_json::from_str(data).ok()?;
+            value["choices"][0]["delta"]["content"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(
+        projected_content, expected_content,
+        "client content must equal the provider content delta: {items:?}"
     );
     assert!(
-        items
-            .iter()
-            .any(|chunk| chunk.as_slice() == b"data: [DONE]\n\n"),
-        "gateway must terminate the client SSE stream with [DONE]: {items:?}"
+        items.iter().any(|chunk| {
+            std::str::from_utf8(chunk)
+                .map(|line| line.contains("\"finish_reason\":\"stop\""))
+                .unwrap_or(false)
+        }),
+        "gateway must project the provider stop terminal: {items:?}"
     );
+    let done_frames = items
+        .iter()
+        .filter(|chunk| chunk.as_slice() == b"data: [DONE]\n\n")
+        .count();
+    assert_eq!(
+        done_frames, 1,
+        "gateway must append exactly one client [DONE]: {items:?}"
+    );
+    assert_eq!(
+        items.last().map(Vec::as_slice),
+        Some(b"data: [DONE]\n\n".as_slice()),
+        "the single [DONE] must be the final client frame: {items:?}"
+    );
+}
+
+#[tokio::test]
+async fn sse_empty_terminal_without_done_is_rejected_as_provider_response_empty() {
+    // Negative control: a Chat attempt whose only terminal is an empty stop
+    // delta followed by EOF carries no deliverable business content. The legal
+    // terminal shape (and the missing provider [DONE]) must not admit the empty
+    // attempt as success; it stays a typed internal 502
+    // (`provider_response_empty`) on the Error chain and never projects SSE.
+    let server_id = "openai_chat_sse_empty_terminal_no_done";
+    let manifest = manifest_with_identity(server_id);
+    let transport = StaticSseTransport {
+        chunks: Mutex::new(Some(vec![
+            br#"data: {"id":"empty","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+"#
+            .to_vec(),
+        ])),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "openai-chat-sse-empty-terminal-no-done",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-sse-empty-terminal-no-done".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"empty terminal stream"}],
+                "stream":true
+            }),
+        },
+        &transport,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 502, "{output:?}");
+    assert_eq!(
+        output.error_class,
+        Some("provider_failure"),
+        "empty attempt must be classified as a provider failure: {output:?}"
+    );
+    assert_eq!(
+        output.error_detail.as_deref(),
+        Some("provider_response_empty"),
+        "empty attempt must retain the typed provider_response_empty reason: {output:?}"
+    );
+    assert_eq!(
+        output.error_chain.as_ref().map(Vec::len),
+        Some(6),
+        "empty attempt must travel the typed Error01-06 chain: {output:?}"
+    );
+    let body = match output.client_body {
+        V3OpenAiChatRelayClientBody::Json(body) => body,
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            panic!("empty provider attempt must never become a success SSE client body")
+        }
+    };
+    assert_eq!(body["error"]["code"], "network_error", "{body:?}");
+    assert_eq!(body["error"]["message"], "network error", "{body:?}");
 }
 
 #[tokio::test]
@@ -1907,64 +2464,133 @@ async fn failed_sse_attempt_projects_only_error06_after_pool_exhaustion() {
 }
 
 #[tokio::test]
-async fn openai_chat_provider_pool_exhaustion_holds_between_failed_and_successful_rescue_probes() {
+async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_rescue_probe() {
     let scope = "openai_chat_pool_exhausted_network_error";
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("provider probe listener must bind");
+    let primary = format!("{scope}_primary");
+    let secondary = format!("{scope}_secondary");
+    let listener = std::sync::Arc::new(
+        TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("provider probe listener must bind"),
+    );
     let base_url = format!(
         "http://{}/v1",
         listener.local_addr().expect("probe listener address")
     );
-    let mut manifest = manifest_with_identity(scope);
+    let mut manifest = manifest_with_two_providers_for_scope(scope, false);
     let provider = manifest
         .providers
-        .get_mut(scope)
+        .get_mut(&primary)
         .expect("probe provider must exist");
-    provider.base_url = base_url;
+    provider.base_url = base_url.clone();
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("default interface must exist")
+        .base_url = base_url.clone();
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
     provider.health = Some(routecodex_v3_config::V3ProviderHealthAuthoringConfig {
         enabled: true,
         failure_threshold: 3,
         cooldown_ms: 900_000,
         probe_interval_ms: Some(5_000),
+        advisory_probe: false,
     });
     std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
+    std::env::set_var("V3_OPENAI_CHAT_SECONDARY_KEY", "secondary-test-key");
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("test clock must follow the Unix epoch")
-        .as_millis() as u64;
+    let seed_now_ms = probe_now_ms();
     provider_health
         .store()
         .record_provider_cooldown_failure(
-            scope,
-            Some(scope),
+            &primary,
+            Some(&primary),
             Some("chat-wire-model"),
             "controlled network outage",
-            now_ms,
+            seed_now_ms,
             900_000,
         )
         .expect("test provider must enter cooldown");
-    let probe_server = tokio::spawn(serve_two_openai_chat_probes(
-        listener,
-        "200 OK",
-        r#"{"choices":[{"finish_reason":"stop"}]}"#,
-    ));
+    let seeded = provider_health.store().availability(
+        &primary,
+        Some(&primary),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        !seeded.available,
+        "the fixture must start with the exact provider identity cooled: {seeded:?}"
+    );
+    // A real eligible sibling makes this a multi-candidate health fixture. The
+    // independent recovery probe fails; the following request must use the
+    // eligible sibling without waiting for another probe.
+    let failed_probe_listener = listener.clone();
+    let failed_probe_server = tokio::spawn(async move {
+        serve_one_openai_chat_probe(
+            &failed_probe_listener,
+            "503 Service Unavailable",
+            r#"{"error":{"message":"probe temporarily unavailable"}}"#,
+        )
+        .await
+    });
+    let probe_health = provider_health.runtime_health();
+    probe_health
+        .run_due_provider_health_probes(
+            probe_now_ms(),
+            true,
+            |provider_id, interface_id, auth_alias, model_id| {
+                let manifest = manifest.clone();
+                async move {
+                    let target = build_v3_provider_global_probe_target(
+                        &manifest,
+                        &provider_id,
+                        &interface_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
+                    )
+                    .map_err(routecodex_v3_runtime::V3ProviderHealthProbeFailure::Internal)?;
+                    probe_v3_provider_global_target(target).await
+                }
+            },
+        )
+        .await
+        .expect("the controlled provider probe failure must stay provider-local");
+    let failed_probe_request = tokio::time::timeout(Duration::from_secs(4), failed_probe_server)
+        .await
+        .expect("the failed recovery probe must reach the local provider listener")
+        .expect("provider probe task must not panic");
+    assert!(
+        failed_probe_request.starts_with("POST /v1/chat/completions HTTP/1.1"),
+        "the recovery probe must use the provider HTTP endpoint: {failed_probe_request:?}"
+    );
+    assert!(
+        failed_probe_request.contains("routecodex-test-key"),
+        "the recovery probe must carry the declared provider auth: {failed_probe_request:?}"
+    );
+    let post_probe_availability = provider_health.store().availability(
+        &primary,
+        Some(&primary),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        !post_probe_availability.available,
+        "the failed recovery probe must keep the exact provider identity cooled: {post_probe_availability:?}"
+    );
 
-    let transport = JsonTransport {
-        captured_url: Mutex::new(None),
-        captured_body: Mutex::new(None),
+    let transport = FailSecondaryThenRecoverPrimaryTransport {
+        primary_provider_id: primary.clone(),
+        captures: Mutex::new(Vec::new()),
     };
-    let health = provider_health.runtime_health();
     let failure_session_scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
         "test-server",
         scope,
         "pool-exhausted-network-error",
     )
     .expect("test provider failure session scope");
-    let runtime = tokio::spawn(async move {
+    let first = tokio::time::timeout(
+        Duration::from_secs(8),
         execute_v3_openai_chat_relay_runtime_with_provider_health(
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
@@ -1978,37 +2604,174 @@ async fn openai_chat_provider_pool_exhaustion_holds_between_failed_and_successfu
                 }),
             },
             &transport,
-            health,
+            provider_health.runtime_health(),
+        ),
+    )
+    .await
+    .expect("a failed recovery probe must not hold the request open")
+    .expect("the exhausted request must still return its internal typed exhaustion projection");
+    assert_ne!(
+        first.status, 200,
+        "request-local exhaustion must not fabricate a successful client response"
+    );
+    assert!(
+        first.error_chain.is_some(),
+        "request-local exhaustion must retain the typed internal error chain"
+    );
+    assert!(
+        first.node_trace.contains(&"V3Error06ClientProjected"),
+        "exhaustion must publish the typed internal outcome: {:?}",
+        first.node_trace
+    );
+    assert_eq!(
+        first.error_chain.as_ref().map(Vec::len),
+        Some(6),
+        "the final eligible failure must retain the complete typed Error01-06 chain"
+    );
+    let source = first
+        .diagnostic_source
+        .as_ref()
+        .expect("request-local exhaustion must retain the original typed source");
+    assert_eq!(
+        source.source_kind,
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
+    );
+    let external = source
+        .external_error
+        .as_ref()
+        .expect("the terminal source must retain the actual upstream failure");
+    assert_eq!(external.code.as_deref(), Some("provider_failure"));
+    assert_eq!(external.provider_id.as_deref(), Some(secondary.as_str()));
+    assert!(
+        external
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("controlled secondary business failure")),
+        "the terminal source must preserve the sibling's actual failure: {external:?}"
+    );
+    let secondary_availability = provider_health.store().availability(
+        &secondary,
+        Some(&secondary),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        secondary_availability.available && secondary_availability.blocked_scopes.is_empty(),
+        "the final eligible failure must not mutate sibling health: {secondary_availability:?}"
+    );
+    let first_captures = transport.captures.lock().unwrap();
+    assert_eq!(first_captures.len(), 1);
+    assert_eq!(first_captures[0].0, secondary);
+    assert_eq!(
+        first_captures[0].1,
+        "http://secondary.invalid/v1/chat/completions"
+    );
+    assert_eq!(first_captures[0].2["model"], "chat-wire-model");
+    drop(first_captures);
+
+    let deadline = provider_health
+        .store()
+        .provider_cooldown_probe_next_deadline_ms(&primary, Some(&primary), Some("chat-wire-model"))
+        .expect("probe deadline readable")
+        .expect("failed probe retains its recovery deadline");
+    let now = probe_now_ms();
+    assert!(
+        deadline > now,
+        "failed probe must schedule a later recovery"
+    );
+    tokio::time::sleep(Duration::from_millis(deadline - now + 50)).await;
+    let due_probe_listener = listener.clone();
+    let due_probe_server = tokio::spawn(async move {
+        serve_one_openai_chat_probe(
+            &due_probe_listener,
+            "200 OK",
+            r#"{"id":"probe","choices":[{"finish_reason":"stop"}]}"#,
         )
         .await
-        .map(|output| (output, transport))
     });
-    let (first_request, second_request) =
-        tokio::time::timeout(Duration::from_secs(8), probe_server)
-            .await
-            .expect("failed and successful rescue probes must reach the local provider listener")
-            .expect("provider probe task must not panic");
-    assert!(
-        first_request.starts_with("POST /v1/chat/completions HTTP/1.1"),
-        "last-try rescue must send the provider probe through the provider HTTP endpoint: {first_request:?}"
-    );
-    assert!(
-        second_request.starts_with("POST /v1/chat/completions HTTP/1.1"),
-        "the scheduled retry must use the provider HTTP endpoint: {second_request:?}"
-    );
-    let (output, transport) = tokio::time::timeout(Duration::from_secs(8), runtime)
+    probe_health
+        .run_due_provider_health_probes(
+            probe_now_ms(),
+            false,
+            |provider_id, interface_id, auth_alias, model_id| {
+                let manifest = manifest.clone();
+                async move {
+                    let target = build_v3_provider_global_probe_target(
+                        &manifest,
+                        &provider_id,
+                        &interface_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
+                    )
+                    .map_err(routecodex_v3_runtime::V3ProviderHealthProbeFailure::Internal)?;
+                    probe_v3_provider_global_target(target).await
+                }
+            },
+        )
         .await
-        .expect("failed last-try probe must keep the request held until the next scheduled probe")
-        .expect("runtime task must not panic")
-        .expect("the later rescue probe must resume normal execution");
+        .expect("the due scheduled probe must succeed");
+    let due_probe_request = tokio::time::timeout(Duration::from_secs(4), due_probe_server)
+        .await
+        .expect("the due scheduled probe must reach the local provider listener")
+        .expect("provider probe task must not panic");
     assert!(
-        transport.captured_url.lock().unwrap().is_some(),
-        "the held request must reach the normal provider transport after probe recovery"
+        due_probe_request.starts_with("POST /v1/chat/completions HTTP/1.1"),
+        "the scheduled recovery probe must use the provider HTTP endpoint: {due_probe_request:?}"
     );
-    assert_eq!(output.status, 200);
-    assert!(output.error_chain.is_none());
+    assert!(
+        due_probe_request.contains("routecodex-test-key"),
+        "the scheduled recovery probe must carry the declared provider auth: {due_probe_request:?}"
+    );
+
+    let restored = provider_health.store().availability(
+        &primary,
+        Some(&primary),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        restored.available && restored.blocked_scopes.is_empty(),
+        "the authenticated 2xx probe must restore the exact provider identity: {restored:?}"
+    );
+
+    // A fresh request through the same public Runtime consumer must now select
+    // the recovered primary and release the previous request's lane.
+    let recovered = tokio::time::timeout(
+        Duration::from_secs(4),
+        execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: scope.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    scope,
+                    "pool-exhausted-network-error-recovered",
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-pool-exhausted-network-error-recovered".into(),
+                payload: json!({
+                    "model": "chat-client-alias",
+                    "messages": [{"role":"user","content":"recovered"}],
+                    "stream": false
+                }),
+            },
+            &transport,
+            provider_health.runtime_health(),
+        ),
+    )
+    .await
+    .expect("a restored provider must not hang a fresh request")
+    .expect("a restored provider must serve the fresh request");
+    let captures = transport.captures.lock().unwrap();
+    assert_eq!(captures.len(), 2);
+    assert_eq!(captures[1].0, primary);
+    assert_eq!(captures[1].1, format!("{base_url}/chat/completions"));
+    assert_eq!(captures[1].2["model"], "chat-wire-model");
+    drop(captures);
+    assert_eq!(recovered.status, 200);
+    assert!(recovered.error_chain.is_none());
     assert!(matches!(
-        output.client_body,
+        recovered.client_body,
         V3OpenAiChatRelayClientBody::Json(_)
     ));
 }
@@ -2029,6 +2792,11 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
         .get_mut(scope)
         .expect("probe provider must exist");
     provider.base_url = base_url.clone();
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("default interface must exist")
+        .base_url = base_url.clone();
     provider.auth.entries[0].env = Some("ROUTECODEX_V3_POOL_PROBE_TEST_KEY".into());
     std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
     let provider_health =
@@ -2057,6 +2825,30 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
         captured_body: Mutex::new(None),
     };
 
+    // Single-route requests do not rescue cooled candidates. The independent
+    // Provider probe owner restores this exact identity before the fresh turn.
+    provider_health
+        .runtime_health()
+        .run_due_provider_health_probes(
+            u64::MAX,
+            false,
+            |provider_id, interface_id, auth_alias, model_id| {
+                let manifest = manifest.clone();
+                async move {
+                    let target = build_v3_provider_global_probe_target(
+                        &manifest,
+                        &provider_id,
+                        &interface_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
+                    )
+                    .map_err(routecodex_v3_runtime::V3ProviderHealthProbeFailure::Internal)?;
+                    probe_v3_provider_global_target(target).await
+                }
+            },
+        )
+        .await
+        .expect("the actual HTTP probe restores this provider");
     let output = tokio::time::timeout(
         Duration::from_secs(3),
         execute_v3_openai_chat_relay_runtime_with_provider_health(
@@ -2476,8 +3268,12 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn request_side_channel_is_rejected_before_provider_transport() {
-    let error = execute_v3_openai_chat_relay_runtime(
+async fn request_business_names_are_preserved_before_provider_transport() {
+    let transport = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
         &manifest(),
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2495,21 +3291,23 @@ async fn request_side_channel_is_rejected_before_provider_transport() {
                 "stream":false
             }),
         },
-        &ErrorTransport,
+        &transport,
     )
     .await
-    .unwrap_err();
-    assert!(error.to_string().contains("metadata_center"));
+    .unwrap();
+    assert_eq!(output.status, 200);
+    let body = transport.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(body["metadata_center"], json!({"route":"must-not-leak"}));
 }
 
 #[tokio::test]
-async fn openai_chat_unknown_direct_provider_model_returns_model_not_found() {
+async fn openai_chat_unknown_direct_provider_model_falls_back_to_default_pool() {
     let manifest = manifest();
     let runtime = JsonTransport {
         captured_url: Mutex::new(None),
         captured_body: Mutex::new(None),
     };
-    let error = execute_v3_openai_chat_relay_runtime(
+    execute_v3_openai_chat_relay_runtime(
         &manifest,
         V3OpenAiChatRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2529,12 +3327,169 @@ async fn openai_chat_unknown_direct_provider_model_returns_model_not_found() {
         &runtime,
     )
     .await
-    .unwrap_err();
+    .unwrap();
+    let body = runtime.captured_body.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        body["model"], "chat-wire-model",
+        "an enabled provider that declares no such model must fall back to normal pool routing"
+    );
+}
+
+fn projection_drop_log_path(label: &str) -> std::path::PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock must follow the Unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "rcc-projection-drops-{label}-{}-{nonce}.jsonl",
+        std::process::id()
+    ))
+}
+
+fn manifest_with_projection_drop_log(
+    drop_log_file: &std::path::Path,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = manifest();
+    manifest.debug.projection_drop_log_file = Some(drop_log_file.display().to_string());
+    manifest
+}
+
+/// RED→GREEN: a client-sent non-array `tools` must NOT produce a client error
+/// (no HTTP 598 `provider_request_payload_invalid`); stage 3 drops it, records
+/// it to the dedicated drop log, and the request continues to the provider.
+#[tokio::test]
+async fn non_array_tools_is_dropped_recorded_and_request_continues() {
+    let drop_log = projection_drop_log_path("non-array-tools");
+    let _ = std::fs::remove_file(&drop_log);
+    let manifest = manifest_with_projection_drop_log(&drop_log);
+    let runtime = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-non-array-tools".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"hello"}],
+                "tools":"not-an-array",
+                "stream":false
+            }),
+        },
+        &runtime,
+    )
+    .await
+    .expect("non-array tools must not fail the request (no 598 provider_request_payload_invalid)");
+    assert_ne!(output.status, 598, "runtime output: {output:?}");
+    if let V3OpenAiChatRelayClientBody::Json(body) = &output.client_body {
+        let text = body.to_string();
+        assert!(
+            !text.contains("provider_request_payload_invalid"),
+            "client must not receive provider_request_payload_invalid: {text}"
+        );
+    }
+
+    let wire_body = runtime
+        .captured_body
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("request must continue to provider transport");
     assert!(
-        error
-            .to_string()
-            .contains("direct provider model controlled.unknown-model is not configured"),
-        "openai_chat provider.model absence must surface ModelNotFound: {error}"
+        wire_body.get("tools").is_none(),
+        "non-array tools must be dropped from the provider wire: {wire_body}"
+    );
+
+    let log = std::fs::read_to_string(&drop_log)
+        .expect("the dedicated projection drop log must exist after a drop");
+    let lines = log
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1, "exactly one drop record expected: {log}");
+    let record: Value = serde_json::from_str(lines[0]).expect("drop record must be JSON");
+    assert_eq!(record["request_id"], "req-non-array-tools", "{record}");
+    assert_eq!(record["entry_port"], "1", "{record}");
+    assert!(
+        record["ts"]
+            .as_u64()
+            .is_some_and(|ts| ts > 1_700_000_000_000),
+        "drop record must carry a real epoch-ms timestamp: {record}"
+    );
+    assert_eq!(
+        record["stage"], "outbound_target_protocol_projection",
+        "{record}"
+    );
+    assert_eq!(record["target_protocol"], "openai_chat", "{record}");
+    assert_eq!(record["json_path"], "$.tools", "{record}");
+    assert_eq!(record["source_value"], json!("not-an-array"), "{record}");
+    assert_eq!(record["canonical_value"], json!("not-an-array"), "{record}");
+    assert!(
+        record["drop_site"]
+            .as_str()
+            .is_some_and(|site| site.contains("project_openai_chat_provider_tools")),
+        "{record}"
+    );
+    let _ = std::fs::remove_file(&drop_log);
+}
+
+/// A valid array `tools` must NEVER be recorded as dropped.
+#[tokio::test]
+async fn valid_array_tools_is_never_recorded_as_dropped() {
+    let drop_log = projection_drop_log_path("valid-array-tools");
+    let _ = std::fs::remove_file(&drop_log);
+    let manifest = manifest_with_projection_drop_log(&drop_log);
+    let runtime = JsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_openai_chat_relay_runtime(
+        &manifest,
+        V3OpenAiChatRelayRuntimeInput {
+            server_id: "controlled".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-valid-array-tools".into(),
+            payload: json!({
+                "model":"chat-client-alias",
+                "messages":[{"role":"user","content":"hello"}],
+                "tools":[{
+                    "type":"function",
+                    "function":{"name":"lookup","parameters":{"type":"object"}}
+                }],
+                "stream":false
+            }),
+        },
+        &runtime,
+    )
+    .await
+    .expect("valid array tools must succeed");
+    assert_ne!(output.status, 598, "runtime output: {output:?}");
+    let wire_body = runtime
+        .captured_body
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("valid array tools request must reach provider transport");
+    assert!(
+        wire_body.get("tools").is_some(),
+        "valid array tools must survive projection: {wire_body}"
+    );
+    assert!(
+        !drop_log.exists(),
+        "a valid array tools must never create a projection drop record"
     );
 }
 
@@ -2551,7 +3506,7 @@ routing_group = "controlled"
 endpoints = ["openai_chat"]
 [servers.controlled.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.controlled]
@@ -2590,7 +3545,7 @@ routing_group = "controlled"
 endpoints = ["openai_chat"]
 [servers.controlled.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.controlled]
@@ -2630,7 +3585,7 @@ routing_group = "{identity}"
 endpoints = ["openai_chat"]
 [servers.{identity}.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {{}}
 [providers.{identity}]
@@ -2663,6 +3618,7 @@ fn global_probe_rejects_explicit_unrouted_model() {
     let error = build_v3_provider_global_probe_target(
         &manifest,
         identity,
+        "default",
         Some(identity),
         Some("model-that-is-not-routed"),
     )
@@ -2690,7 +3646,7 @@ routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__PRIMARY__]
@@ -2733,7 +3689,7 @@ targets = [
     .replace(
         "__ERROR_SECTION__",
         if reselect_before_same_candidate_retry {
-            "[error]\nprovider_error_default_path = [\n  { step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 },\n  { step = \"cooldown\", scope = \"provider_model\", duration_ms = 900000 },\n  { step = \"project\", status = 503, reason_code = \"provider_failure\", message_mode = \"code_only\" }\n]"
+            "[error]\nprovider_error_default_path = [\n  { step = \"wait_retry\", retry_mode = \"reselect_before_client_projection\", max_attempts = 1, backoff_ms = 0 },\n  { step = \"cooldown\", scope = \"provider_model\", duration_ms = 900000 },\n  { step = \"project\", reason_code = \"provider_failure\" }\n]"
         } else {
             ""
         },
@@ -2756,7 +3712,7 @@ routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__PRIMARY__]
@@ -2814,7 +3770,7 @@ routing_group = "__SCOPE__"
 endpoints = ["openai_chat"]
 [servers.__SCOPE__.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__PRIMARY__]
@@ -3206,7 +4162,7 @@ routing_group = "cross_protocol"
 endpoints = ["openai_chat", "responses"]
 [servers.cross_protocol.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.__MM_PROVIDER__]
@@ -3308,7 +4264,7 @@ routing_group = "model_pool"
 endpoints = ["openai_chat", "responses"]
 [servers.model_pool.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.mm]
@@ -3341,7 +4297,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "deepseek-v4-fl
     .unwrap()
 }
 
-fn manifest_with_anthropic_mode_b_websearch() -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest_with_anthropic_hosted_websearch() -> routecodex_v3_config::V3Config05ManifestPublished {
     ensure_openai_chat_relay_test_state_dir();
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -3354,7 +4310,7 @@ routing_group = "cross_protocol"
 endpoints = ["openai_chat", "responses"]
 [servers.cross_protocol.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.mm]
@@ -3365,8 +4321,6 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "multimodal", "vision", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
 [route_groups.cross_protocol.pools.web_search]
 selection = { strategy = "priority" }
 match = { precedence = 20, required_capabilities = ["web_search"] }
@@ -3417,67 +4371,8 @@ impl ResponsesTransport for AnthropicWebSearchWireTransport {
     }
 }
 
-#[tokio::test]
-async fn openai_chat_entry_mode_b_web_search_intercepted_must_fail_fast_not_silently_strip() {
-    // 红测：chat 入口 + Mode B web_search 拦截后无结果投影路径，
-    // 必须显式 WebSearchInterceptedUnprojected，禁止静默剥离成普通文本。
-    let manifest = manifest_with_anthropic_mode_b_websearch();
-    let payload = json!({
-        "model": "MiniMax-M3",
-        "messages": [{"role": "user", "content": "search routecodex"}],
-        "tools": [{"type": "function", "function": {"name": "websearch", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}}],
-        "stream": false
-    });
-    let transport = AnthropicWebSearchWireTransport {
-        captured_request: Mutex::new(None),
-    };
-    let output = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "cross_protocol".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-mode-b-ws",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-mode-b-ws-1".into(),
-            payload,
-        },
-        &transport,
-    )
-    .await;
-    // 请求 wire 必须保留 web_search 工具（Mode B outbound 投影）。
-    let wire = transport
-        .captured_request
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("provider request wire must be captured");
-    let tool_names: Vec<&str> = wire["tools"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|tool| {
-            tool.get("name")
-                .and_then(Value::as_str)
-                .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
-        })
-        .collect();
-    assert!(
-        tool_names.iter().any(|name| *name == "web_search"),
-        "provider wire must keep web_search server tool, got: {tool_names:?}"
-    );
-    let err =
-        output.expect_err("Mode B web_search interception must fail fast, not silently strip");
-    match err {
-        routecodex_v3_runtime::V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {}
-        other => panic!("expected WebSearchInterceptedUnprojected, got: {other:?}"),
-    }
-}
-
 #[test]
-fn routing_image_attachment_is_current_turn_only_not_history() {
+fn routing_only_current_turn_image_drives_multimodal() {
     let chat_history_image_then_text = json!({
         "model": "deepseek-v4-flash",
         "messages": [
@@ -3553,212 +4448,11 @@ fn routing_image_attachment_is_current_turn_only_not_history() {
 }
 
 #[tokio::test]
-async fn openai_chat_sse_mode_b_web_search_rejects_stream_before_silent_passthrough() {
-    // 红测：OpenAiChat wire SSE + Mode B 激活时，流式帧无法逐 chunk 拦截，
-    // 必须 fail-fast（WebSearchInterceptedUnprojected），禁止静默透传。
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.ws]
-bind = "127.0.0.1"
-port = 1
-routing_group = "ws"
-endpoints = ["openai_chat"]
-[servers.ws.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {}
-[providers.wschat]
-type = "openai_chat"
-base_url = "http://wschat.invalid/v1"
-default_model = "ws-wire-model"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
-[providers.wschat.models.ws-wire-model]
-wire_name = "ws-wire-model"
-supports_streaming = true
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
-[route_groups.ws.pools.web_search]
-selection = { strategy = "priority" }
-match = { precedence = 20, required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-[route_groups.ws.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    struct SseWsTransport;
-    #[async_trait]
-    impl ResponsesTransport for SseWsTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let stream = futures_util::stream::iter([
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_ws\",\"type\":\"function\",\"function\":{\"name\":\"websearch\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_vec()),
-            ]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream),
-            ))
-        }
-    }
-
-    let result = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "ws".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-sse-mode-b-ws",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-sse-mode-b-ws-1".into(),
-            payload: json!({
-                "model": "ws-wire-model",
-                "messages": [{"role": "user", "content": "search the web for x"}],
-                "tools": [{"type": "function", "function": {"name": "websearch",
-                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
-                "stream": true
-            }),
-        },
-        &SseWsTransport,
-    )
-    .await;
-    let error = match result {
-        Ok(_) => panic!("Mode B governance rejection must not commit a client stream"),
-        Err(error) => error,
-    };
-    assert!(
-        error.to_string().contains("web_search"),
-        "governance rejection must remain explicit: {error}"
-    );
-}
-
-#[tokio::test]
-async fn openai_chat_sse_mode_b_plain_text_stream_passes_through_without_websearch_call() {
-    // 防误伤：Mode B 激活 + OpenAiChat wire SSE 纯文本流（无 websearch tool call）
-    // 必须正常透传（逐帧判定只在出现本地 websearch tool call 时 fail-fast）。
-    use futures_util::StreamExt;
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.ws]
-bind = "127.0.0.1"
-port = 1
-routing_group = "ws"
-endpoints = ["openai_chat"]
-[servers.ws.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {}
-[providers.wschat]
-type = "openai_chat"
-base_url = "http://wschat.invalid/v1"
-default_model = "ws-wire-model"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
-[providers.wschat.models.ws-wire-model]
-wire_name = "ws-wire-model"
-supports_streaming = true
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
-[route_groups.ws.pools.web_search]
-selection = { strategy = "priority" }
-match = { precedence = 20, required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-[route_groups.ws.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    struct SseWsTextTransport;
-    #[async_trait]
-    impl ResponsesTransport for SseWsTextTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let stream = futures_util::stream::iter([
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-text\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"plain text\"},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-text\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".to_vec()),
-            ]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream),
-            ))
-        }
-    }
-
-    let output = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "ws".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-sse-mode-b-ws-text",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-sse-mode-b-ws-text-1".into(),
-            payload: json!({
-                "model": "ws-wire-model",
-                "messages": [{"role": "user", "content": "hello"}],
-                "stream": true
-            }),
-        },
-        &SseWsTextTransport,
-    )
-    .await
-    .expect("plain text SSE stream must succeed under Mode B");
-    assert_eq!(output.status, 200);
-    let stream = match output.client_body {
-        V3OpenAiChatRelayClientBody::Sse(stream) => stream,
-        V3OpenAiChatRelayClientBody::Json(_) => panic!("expected SSE client body"),
-    };
-    let frames = stream.collect::<Vec<_>>().await;
-    let text = String::from_utf8_lossy(&frames.concat()).to_string();
-    assert!(
-        text.contains("plain text") && text.contains("[DONE]"),
-        "client frames must carry plain text and [DONE]: {text:?}"
-    );
-}
-
-#[tokio::test]
-async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_websearch_call() {
-    // 候选 Mode B（pool 直连）但请求侧未激活 websearch surface（model 缺失
-    // 导致 Req04 不激活）。provider 返回 hosted `web_search` server tool →
-    // 按 2026-08-08 语义透传为 chat tool_calls（客户端执行搜索，MEMORY 4241）；
-    // 仅本地 `websearch` function tool call 才 fail-fast。
-    let manifest = manifest_with_anthropic_mode_b_websearch();
+async fn openai_chat_hosted_web_search_tool_use_passes_through_as_chat_tool_calls() {
+    // Provider-owned hosted `web_search` server tool stays transparent to the
+    // client (MEMORY 4241): project it to chat tool_calls instead of treating
+    // it as a local search request.
+    let manifest = manifest_with_anthropic_hosted_websearch();
     let transport = AnthropicWebSearchWireTransport {
         captured_request: Mutex::new(None),
     };
@@ -3774,10 +4468,10 @@ async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_we
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
                 "test-server",
                 "test-group",
-                "openai-chat-mode-b-mismatch",
+                "openai-chat-hosted-web-search",
             )
             .expect("scope"),
-            request_id: "openai-chat-mode-b-mismatch-1".into(),
+            request_id: "openai-chat-hosted-web-search-1".into(),
             payload,
         },
         &transport,
@@ -3799,110 +4493,10 @@ async fn openai_chat_mode_b_mismatch_without_request_activation_fails_fast_on_we
 }
 
 #[tokio::test]
-async fn openai_chat_sse_mode_b_mismatch_fails_fast_on_delta_websearch_tool_call() {
-    // 红测：OpenAiChat wire SSE + 候选 Mode B + 请求侧未激活（无 model）时，
-    // provider 在 delta.tool_calls 里返回 websearch call 必须 fail-fast，
-    // 禁止静默透传。
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.ws]
-bind = "127.0.0.1"
-port = 1
-routing_group = "ws"
-endpoints = ["openai_chat"]
-[servers.ws.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {}
-[providers.wschat]
-type = "openai_chat"
-base_url = "http://wschat.invalid/v1"
-default_model = "ws-wire-model"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "WS_KEY" }] }
-[providers.wschat.models.ws-wire-model]
-wire_name = "ws-wire-model"
-supports_streaming = true
-capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
-[route_groups.ws.pools.web_search]
-selection = { strategy = "priority" }
-match = { precedence = 20, required_capabilities = ["web_search"] }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-[route_groups.ws.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "wschat", model = "ws-wire-model", key = "key1", priority = 1 }]
-"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-
-    struct SseWsMismatchTransport;
-    #[async_trait]
-    impl ResponsesTransport for SseWsMismatchTransport {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let stream = futures_util::stream::iter([
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_ws\",\"type\":\"function\",\"function\":{\"name\":\"websearch\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"query\\\":\\\"x\\\"}\"}}]},\"finish_reason\":null}]}\n\n".to_vec()),
-                Ok(b"data: {\"id\":\"chatcmpl-sse-ws-m\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_vec()),
-            ]);
-            Ok(V3ProviderResp14Raw::from_sse(
-                request.request_id().to_string(),
-                request.provider_id().to_string(),
-                200,
-                vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"text/event-stream".to_vec(),
-                }],
-                Box::pin(stream),
-            ))
-        }
-    }
-
-    let result = execute_v3_openai_chat_relay_runtime(
-        &manifest,
-        V3OpenAiChatRelayRuntimeInput {
-            server_id: "ws".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                "openai-chat-sse-mode-b-mismatch",
-            )
-            .expect("scope"),
-            request_id: "openai-chat-sse-mode-b-mismatch-1".into(),
-            payload: json!({
-                "messages": [{"role": "user", "content": "search the web for x"}],
-                "tools": [{"type": "function", "function": {"name": "websearch",
-                 "description": "Search the web", "parameters": {"type":"object","properties":{}}}}],
-                "stream": true
-            }),
-        },
-        &SseWsMismatchTransport,
-    )
-    .await;
-    let error = match result {
-        Ok(_) => panic!("governance mismatch must not commit a client stream"),
-        Err(error) => error,
-    };
-    assert!(error.to_string().contains("web_search"), "{error}");
-}
-
-#[tokio::test]
-async fn openai_chat_mode_b_mismatch_with_non_mode_b_forwarder_model_fails_fast() {
-    // 复现生产：请求 model 是存在的 forwarder（gpt-5.5 -> cc-sol 非 Mode B），
-    // 但 VR 因 web_search 意图路由到 Mode B pool（minimax_anthropic）。
-    // 候选 Mode B + 请求侧未激活（forwarder 非 Mode B）→ provider 返回 hosted
-    // `web_search` server tool（anthropic wire）→ 按 2026-08-08 语义透传为
-    // chat tool_calls 由客户端执行（MEMORY 4241：Chat function calls named
-    // web_search project back to web_search_call）；仅本地 `websearch` function
-    // tool call 才 fail-fast。
+async fn openai_chat_forwarder_hosted_web_search_tool_use_passes_through_as_chat_tool_calls() {
+    // A forwarder model routes a web_search intent to an Anthropic-wire pool.
+    // The provider-owned hosted `web_search` tool_use must stay transparent and
+    // project to chat tool_calls for client execution (MEMORY 4241).
     let manifest = compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
             r#"
@@ -3914,7 +4508,7 @@ routing_group = "g"
 endpoints = ["openai_chat"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 attempt_store = {}
 [providers.mm]
@@ -3925,8 +4519,6 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models."MiniMax-M3"]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
 [providers.text]
 type = "openai_chat"
 base_url = "http://text.invalid/v1"
@@ -3991,10 +4583,10 @@ targets = [{ kind = "provider_model", provider = "text", model = "plain-model", 
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
                 "test-server",
                 "test-group",
-                "openai-chat-mode-b-fwd-mismatch",
+                "openai-chat-forwarder-hosted-web-search",
             )
             .expect("scope"),
-            request_id: "openai-chat-mode-b-fwd-mismatch-1".into(),
+            request_id: "openai-chat-forwarder-hosted-web-search-1".into(),
             payload: json!({
                 "model": "gpt-5.5",
                 "messages": [{"role": "user", "content": "search the web for RouteCodex release"}],
@@ -4090,15 +4682,19 @@ data: {"type":"message_stop"}
         .find(|frame| frame.contains("\"usage\""))
         .unwrap_or_else(|| panic!("client stream must emit a usage chunk: {joined:?}"));
     assert!(
-        usage_chunk.contains("\"prompt_tokens\":37"),
-        "MiniMax message_delta input_tokens must override the message_start placeholder zero: {usage_chunk}"
+        usage_chunk.contains("\"prompt_tokens\":165"),
+        "MiniMax message_delta input_tokens must override the message_start placeholder zero and fold cache_read_input_tokens into the OpenAI Chat prompt total: {usage_chunk}"
+    );
+    assert!(
+        usage_chunk.contains("\"prompt_tokens_details\":{\"cached_tokens\":128}"),
+        "MiniMax cache_read_input_tokens must project as the OpenAI Chat cached sub-count: {usage_chunk}"
     );
     assert!(
         usage_chunk.contains("\"completion_tokens\":10"),
         "MiniMax message_delta output_tokens must project: {usage_chunk}"
     );
     assert!(
-        usage_chunk.contains("\"total_tokens\":47"),
-        "MiniMax usage total must sum input+output: {usage_chunk}"
+        usage_chunk.contains("\"total_tokens\":175"),
+        "MiniMax usage total must sum prompt+completion: {usage_chunk}"
     );
 }

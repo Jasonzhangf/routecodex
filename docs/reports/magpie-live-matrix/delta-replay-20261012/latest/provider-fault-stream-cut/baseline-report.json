@@ -1,0 +1,2328 @@
+{
+  "harness_id": "v3.protocol_live_mock_matrix",
+  "status": "passed",
+  "evidence_root": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut",
+  "fixture_root": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/v3/fixtures/protocol-live-mock-matrix",
+  "binary": {
+    "path": "/Users/fanzhang/.local/bin/rccv3",
+    "version": "rccv3 0.90.4887 (crate 0.1.0)",
+    "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+    "version_stderr": "",
+    "exit_code": 0,
+    "signal": null,
+    "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+    "size": 35945136,
+    "mtime_ms": 1791826625740.5696,
+    "error": null,
+    "kind": "installed"
+  },
+  "source_identity": {
+    "repo": null,
+    "sha": "88715b2fe74ce4e6254f4d29ef1528b6848d4dff",
+    "fixture_sha": "bfaedf18301d02a423bd5422d22e41432d231ab8"
+  },
+  "fixture_source": {
+    "repo": "https://github.com/yetone/magpie",
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8"
+  },
+  "fixture_digest": "e061d1833bbc6106786b8a45c2408c83483e255b5df23c21fc3b243c5e454fcb",
+  "corpus": {
+    "findings": [],
+    "coverage": {
+      "base_cells": 16,
+      "base_cells_covered": 16,
+      "base_variants": 32,
+      "base_variants_covered": 32,
+      "variants": [
+        {
+          "entry_protocol": "openai_chat",
+          "provider_protocol": "openai_chat",
+          "covered": true,
+          "json": [
+            "chat-to-chat-json",
+            "provider-error-exhaustion",
+            "same-protocol-relay-chat-to-chat-json",
+            "terminal-length",
+            "unregistered-request-field-continuation",
+            "unregistered-response-field-preserved",
+            "usage-missing-or-null-preserved"
+          ],
+          "sse": [
+            "chat-to-chat-sse",
+            "provider-fault-stream-cut"
+          ],
+          "modes": [
+            "direct",
+            "relay"
+          ],
+          "case_ids": [
+            "chat-to-chat-json",
+            "chat-to-chat-sse",
+            "provider-error-exhaustion",
+            "provider-fault-stream-cut",
+            "same-protocol-relay-chat-to-chat-json",
+            "terminal-length",
+            "unregistered-request-field-continuation",
+            "unregistered-response-field-preserved",
+            "usage-missing-or-null-preserved"
+          ]
+        },
+        {
+          "entry_protocol": "openai_chat",
+          "provider_protocol": "responses",
+          "covered": true,
+          "json": [
+            "chat-to-responses-json",
+            "terminal-content-filter"
+          ],
+          "sse": [
+            "chat-to-responses-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "chat-to-responses-json",
+            "chat-to-responses-sse",
+            "terminal-content-filter"
+          ]
+        },
+        {
+          "entry_protocol": "openai_chat",
+          "provider_protocol": "anthropic",
+          "covered": true,
+          "json": [
+            "chat-to-anthropic-json"
+          ],
+          "sse": [
+            "chat-to-anthropic-sse",
+            "usage-cache-writes-chat-entry"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "chat-to-anthropic-json",
+            "chat-to-anthropic-sse",
+            "usage-cache-writes-chat-entry"
+          ]
+        },
+        {
+          "entry_protocol": "openai_chat",
+          "provider_protocol": "gemini",
+          "covered": true,
+          "json": [
+            "chat-to-gemini-json"
+          ],
+          "sse": [
+            "chat-to-gemini-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "chat-to-gemini-json",
+            "chat-to-gemini-sse"
+          ]
+        },
+        {
+          "entry_protocol": "responses",
+          "provider_protocol": "openai_chat",
+          "covered": true,
+          "json": [
+            "responses-to-chat-json"
+          ],
+          "sse": [
+            "namespace-custom-complete-args",
+            "responses-to-chat-sse",
+            "tool-followup-responses-to-chat"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "namespace-custom-complete-args",
+            "responses-to-chat-json",
+            "responses-to-chat-sse",
+            "tool-followup-responses-to-chat"
+          ]
+        },
+        {
+          "entry_protocol": "responses",
+          "provider_protocol": "responses",
+          "covered": true,
+          "json": [
+            "responses-to-responses-json"
+          ],
+          "sse": [
+            "responses-to-responses-sse"
+          ],
+          "modes": [
+            "direct"
+          ],
+          "case_ids": [
+            "responses-to-responses-json",
+            "responses-to-responses-sse"
+          ]
+        },
+        {
+          "entry_protocol": "responses",
+          "provider_protocol": "anthropic",
+          "covered": true,
+          "json": [
+            "responses-to-anthropic-json"
+          ],
+          "sse": [
+            "responses-to-anthropic-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "responses-to-anthropic-json",
+            "responses-to-anthropic-sse"
+          ]
+        },
+        {
+          "entry_protocol": "responses",
+          "provider_protocol": "gemini",
+          "covered": true,
+          "json": [
+            "responses-to-gemini-json"
+          ],
+          "sse": [
+            "responses-to-gemini-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "responses-to-gemini-json",
+            "responses-to-gemini-sse"
+          ]
+        },
+        {
+          "entry_protocol": "anthropic",
+          "provider_protocol": "openai_chat",
+          "covered": true,
+          "json": [
+            "anthropic-to-chat-json",
+            "media-anthropic-older-turn-tool-image"
+          ],
+          "sse": [
+            "anthropic-to-chat-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "anthropic-to-chat-json",
+            "anthropic-to-chat-sse",
+            "media-anthropic-older-turn-tool-image"
+          ]
+        },
+        {
+          "entry_protocol": "anthropic",
+          "provider_protocol": "responses",
+          "covered": true,
+          "json": [
+            "anthropic-to-responses-json"
+          ],
+          "sse": [
+            "anthropic-to-responses-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "anthropic-to-responses-json",
+            "anthropic-to-responses-sse"
+          ]
+        },
+        {
+          "entry_protocol": "anthropic",
+          "provider_protocol": "anthropic",
+          "covered": true,
+          "json": [
+            "anthropic-to-anthropic-json"
+          ],
+          "sse": [
+            "anthropic-to-anthropic-sse"
+          ],
+          "modes": [
+            "direct"
+          ],
+          "case_ids": [
+            "anthropic-to-anthropic-json",
+            "anthropic-to-anthropic-sse"
+          ]
+        },
+        {
+          "entry_protocol": "anthropic",
+          "provider_protocol": "gemini",
+          "covered": true,
+          "json": [
+            "anthropic-to-gemini-json",
+            "reasoning-provided-signature-not-invented",
+            "reasoning-signature-anthropic-to-gemini"
+          ],
+          "sse": [
+            "anthropic-to-gemini-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "anthropic-to-gemini-json",
+            "anthropic-to-gemini-sse",
+            "reasoning-provided-signature-not-invented",
+            "reasoning-signature-anthropic-to-gemini"
+          ]
+        },
+        {
+          "entry_protocol": "gemini",
+          "provider_protocol": "openai_chat",
+          "covered": true,
+          "json": [
+            "gemini-to-chat-json",
+            "media-gemini-function-response-file"
+          ],
+          "sse": [
+            "gemini-to-chat-sse",
+            "media-gemini-function-response-image"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "gemini-to-chat-json",
+            "gemini-to-chat-sse",
+            "media-gemini-function-response-file",
+            "media-gemini-function-response-image"
+          ]
+        },
+        {
+          "entry_protocol": "gemini",
+          "provider_protocol": "responses",
+          "covered": true,
+          "json": [
+            "gemini-to-responses-json"
+          ],
+          "sse": [
+            "gemini-to-responses-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "gemini-to-responses-json",
+            "gemini-to-responses-sse"
+          ]
+        },
+        {
+          "entry_protocol": "gemini",
+          "provider_protocol": "anthropic",
+          "covered": true,
+          "json": [
+            "gemini-to-anthropic-json"
+          ],
+          "sse": [
+            "gemini-to-anthropic-sse"
+          ],
+          "modes": [
+            "relay"
+          ],
+          "case_ids": [
+            "gemini-to-anthropic-json",
+            "gemini-to-anthropic-sse"
+          ]
+        },
+        {
+          "entry_protocol": "gemini",
+          "provider_protocol": "gemini",
+          "covered": true,
+          "json": [
+            "gemini-to-gemini-json"
+          ],
+          "sse": [
+            "gemini-to-gemini-sse"
+          ],
+          "modes": [
+            "direct"
+          ],
+          "case_ids": [
+            "gemini-to-gemini-json",
+            "gemini-to-gemini-sse"
+          ]
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "case_id": "provider-fault-stream-cut",
+      "cell": {
+        "entry_protocol": "openai_chat",
+        "provider_protocol": "openai_chat",
+        "transport": "sse",
+        "mode": "direct"
+      },
+      "classification": "pass",
+      "status": "passed",
+      "diagnostic": "case flow assertions passed",
+      "product_failures": 0,
+      "runner_failures": 0,
+      "provider_attempt_count": 2,
+      "probe_attempt_count": 0,
+      "turn_results": [
+        {
+          "turn": 1,
+          "turn_id": null,
+          "status": "passed",
+          "request_source": "fixture",
+          "provider_attempts": 2,
+          "scripted_attempts": 2,
+          "probe_attempts": 0,
+          "client_status": 200,
+          "client_closed": false,
+          "diagnostics": []
+        }
+      ],
+      "first_divergence": null,
+      "observations": {
+        "live": [
+          {
+            "kind": "turn",
+            "turn": 1,
+            "turn_id": null,
+            "request_source": "fixture",
+            "request": {
+              "method": "POST",
+              "path": "/v1/chat/completions",
+              "headers": {
+                "content-type": "application/json"
+              },
+              "body_bytes": 88,
+              "body_sha256": "bc5d38964a5a34256d3befa7f01e8142c6a9ef6ec5bde62dad4ffdbc64395af8"
+            },
+            "client": {
+              "status": 200,
+              "status_text": "OK",
+              "headers": {
+                "content-type": "application/json",
+                "connection": "close",
+                "transfer-encoding": "chunked",
+                "date": "Mon, 12 Oct 2026 18:33:00 GMT"
+              },
+              "body_bytes": 214,
+              "closed": false,
+              "truncated": false,
+              "response_ended": true,
+              "complete": true,
+              "error": null,
+              "error_code": null
+            },
+            "provider_attempts": 2,
+            "scripted_attempts": 2,
+            "probe_attempts": 0,
+            "diagnostics": [],
+            "evidence": [
+              "captures/provider-fault-stream-cut-turn-1-client.json",
+              "captures/provider-fault-stream-cut-turn-1-provider.json"
+            ]
+          }
+        ],
+        "infra": []
+      },
+      "source_provenance": {
+        "verified": false,
+        "note": "module evidence only; no provenance claim from an installed binary"
+      },
+      "evidence_refs": [
+        "captures/provider-fault-stream-cut-turn-1-provider.json",
+        "captures/provider-fault-stream-cut-turn-1-client.json"
+      ],
+      "captures": [
+        "captures/provider-fault-stream-cut-turn-1-provider.json"
+      ],
+      "client_evidence": [
+        "captures/provider-fault-stream-cut-turn-1-client.json"
+      ],
+      "fixture": "cases/provider-fault-stream-cut.json",
+      "source": {
+        "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+        "files": [
+          "internal/gateway/stream_cut_test.go"
+        ],
+        "tests": [
+          "internal/gateway/stream_cut_test.go::TestStreamCutBeforeContentTriedAgain"
+        ],
+        "adaptation": "The first attempt cuts before content; the second returns a complete response. RCC must not expose the cut or the EOF."
+      },
+      "setup": {
+        "config_check": {
+          "exit_code": 0,
+          "signal": null,
+          "stdout": "config ok: version=3 servers=1\n",
+          "stderr": "",
+          "error": null
+        },
+        "health": {
+          "url": "http://127.0.0.1:57248/health",
+          "method": "GET",
+          "request_headers": {},
+          "status": 200,
+          "status_text": "OK",
+          "headers": {
+            "content-type": "application/json",
+            "content-length": "131",
+            "connection": "close",
+            "date": "Mon, 12 Oct 2026 18:32:59 GMT"
+          },
+          "raw_headers": [
+            "content-type",
+            "application/json",
+            "content-length",
+            "131",
+            "connection",
+            "close",
+            "date",
+            "Mon, 12 Oct 2026 18:32:59 GMT"
+          ],
+          "body": {
+            "bind": "127.0.0.1",
+            "build_version": "0.90.4887",
+            "manifest_version": 3,
+            "port": 57248,
+            "server_id": "loopback",
+            "status": "ok",
+            "version": 3
+          },
+          "bodyText": "{\"bind\":\"127.0.0.1\",\"build_version\":\"0.90.4887\",\"manifest_version\":3,\"port\":57248,\"server_id\":\"loopback\",\"status\":\"ok\",\"version\":3}",
+          "bodyBytes": {
+            "0": 123,
+            "1": 34,
+            "2": 98,
+            "3": 105,
+            "4": 110,
+            "5": 100,
+            "6": 34,
+            "7": 58,
+            "8": 34,
+            "9": 49,
+            "10": 50,
+            "11": 55,
+            "12": 46,
+            "13": 48,
+            "14": 46,
+            "15": 48,
+            "16": 46,
+            "17": 49,
+            "18": 34,
+            "19": 44,
+            "20": 34,
+            "21": 98,
+            "22": 117,
+            "23": 105,
+            "24": 108,
+            "25": 100,
+            "26": 95,
+            "27": 118,
+            "28": 101,
+            "29": 114,
+            "30": 115,
+            "31": 105,
+            "32": 111,
+            "33": 110,
+            "34": 34,
+            "35": 58,
+            "36": 34,
+            "37": 48,
+            "38": 46,
+            "39": 57,
+            "40": 48,
+            "41": 46,
+            "42": 52,
+            "43": 56,
+            "44": 56,
+            "45": 55,
+            "46": 34,
+            "47": 44,
+            "48": 34,
+            "49": 109,
+            "50": 97,
+            "51": 110,
+            "52": 105,
+            "53": 102,
+            "54": 101,
+            "55": 115,
+            "56": 116,
+            "57": 95,
+            "58": 118,
+            "59": 101,
+            "60": 114,
+            "61": 115,
+            "62": 105,
+            "63": 111,
+            "64": 110,
+            "65": 34,
+            "66": 58,
+            "67": 51,
+            "68": 44,
+            "69": 34,
+            "70": 112,
+            "71": 111,
+            "72": 114,
+            "73": 116,
+            "74": 34,
+            "75": 58,
+            "76": 53,
+            "77": 55,
+            "78": 50,
+            "79": 52,
+            "80": 56,
+            "81": 44,
+            "82": 34,
+            "83": 115,
+            "84": 101,
+            "85": 114,
+            "86": 118,
+            "87": 101,
+            "88": 114,
+            "89": 95,
+            "90": 105,
+            "91": 100,
+            "92": 34,
+            "93": 58,
+            "94": 34,
+            "95": 108,
+            "96": 111,
+            "97": 111,
+            "98": 112,
+            "99": 98,
+            "100": 97,
+            "101": 99,
+            "102": 107,
+            "103": 34,
+            "104": 44,
+            "105": 34,
+            "106": 115,
+            "107": 116,
+            "108": 97,
+            "109": 116,
+            "110": 117,
+            "111": 115,
+            "112": 34,
+            "113": 58,
+            "114": 34,
+            "115": 111,
+            "116": 107,
+            "117": 34,
+            "118": 44,
+            "119": 34,
+            "120": 118,
+            "121": 101,
+            "122": 114,
+            "123": 115,
+            "124": 105,
+            "125": 111,
+            "126": 110,
+            "127": 34,
+            "128": 58,
+            "129": 51,
+            "130": 125
+          },
+          "bodyBytesBase64": "eyJiaW5kIjoiMTI3LjAuMC4xIiwiYnVpbGRfdmVyc2lvbiI6IjAuOTAuNDg4NyIsIm1hbmlmZXN0X3ZlcnNpb24iOjMsInBvcnQiOjU3MjQ4LCJzZXJ2ZXJfaWQiOiJsb29wYmFjayIsInN0YXR1cyI6Im9rIiwidmVyc2lvbiI6M30=",
+          "response_ended": true,
+          "complete": true,
+          "closed": false,
+          "aborted": false,
+          "truncated": false,
+          "elapsed_ms": 2,
+          "error": null,
+          "error_detail": null
+        }
+      },
+      "cleanup": {
+        "complete": true,
+        "case_id": "provider-fault-stream-cut",
+        "rcc": {
+          "complete": true,
+          "pid": 27570,
+          "process_exit_observed": true,
+          "exit_code": 0,
+          "signal": null,
+          "force_killed": false,
+          "kill_error": null,
+          "socket_closed": true,
+          "socket_close_error": null,
+          "all_listeners_closed": true,
+          "listener_closures": [
+            {
+              "role": "primary",
+              "server_id": "loopback",
+              "host": "127.0.0.1",
+              "port": 57248,
+              "closed": true,
+              "error": null
+            },
+            {
+              "role": "admin_webui",
+              "server_id": "admin_webui",
+              "host": "127.0.0.1",
+              "port": 57249,
+              "closed": true,
+              "error": null
+            }
+          ],
+          "elapsed_ms": 37,
+          "failures": []
+        },
+        "mock_closed": true,
+        "config_state_removed": true,
+        "retained_state": null
+      },
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "openai_chat",
+      "transport": "sse",
+      "mode": "direct",
+      "scope": "boundary",
+      "raw_status": "passed",
+      "duplicate_count": 1
+    }
+  ],
+  "cleanup": {
+    "complete": true,
+    "cases": [
+      {
+        "complete": true,
+        "case_id": "provider-fault-stream-cut",
+        "rcc": {
+          "complete": true,
+          "pid": 27570,
+          "process_exit_observed": true,
+          "exit_code": 0,
+          "signal": null,
+          "force_killed": false,
+          "kill_error": null,
+          "socket_closed": true,
+          "socket_close_error": null,
+          "all_listeners_closed": true,
+          "listener_closures": [
+            {
+              "role": "primary",
+              "server_id": "loopback",
+              "host": "127.0.0.1",
+              "port": 57248,
+              "closed": true,
+              "error": null
+            },
+            {
+              "role": "admin_webui",
+              "server_id": "admin_webui",
+              "host": "127.0.0.1",
+              "port": 57249,
+              "closed": true,
+              "error": null
+            }
+          ],
+          "elapsed_ms": 37,
+          "failures": []
+        },
+        "mock_closed": true,
+        "config_state_removed": true,
+        "retained_state": null
+      }
+    ]
+  },
+  "halt_reason": null,
+  "schema_version": 2,
+  "report_schema_version": 2,
+  "source_status": "baseline_complete",
+  "entries": [
+    {
+      "case_id": "provider-fault-stream-cut",
+      "cell": {
+        "entry_protocol": "openai_chat",
+        "provider_protocol": "openai_chat",
+        "transport": "sse",
+        "mode": "direct"
+      },
+      "classification": "pass",
+      "status": "passed",
+      "diagnostic": "case flow assertions passed",
+      "product_failures": 0,
+      "runner_failures": 0,
+      "provider_attempt_count": 2,
+      "probe_attempt_count": 0,
+      "turn_results": [
+        {
+          "turn": 1,
+          "turn_id": null,
+          "status": "passed",
+          "request_source": "fixture",
+          "provider_attempts": 2,
+          "scripted_attempts": 2,
+          "probe_attempts": 0,
+          "client_status": 200,
+          "client_closed": false,
+          "diagnostics": []
+        }
+      ],
+      "first_divergence": null,
+      "observations": {
+        "live": [
+          {
+            "kind": "turn",
+            "turn": 1,
+            "turn_id": null,
+            "request_source": "fixture",
+            "request": {
+              "method": "POST",
+              "path": "/v1/chat/completions",
+              "headers": {
+                "content-type": "application/json"
+              },
+              "body_bytes": 88,
+              "body_sha256": "bc5d38964a5a34256d3befa7f01e8142c6a9ef6ec5bde62dad4ffdbc64395af8"
+            },
+            "client": {
+              "status": 200,
+              "status_text": "OK",
+              "headers": {
+                "content-type": "application/json",
+                "connection": "close",
+                "transfer-encoding": "chunked",
+                "date": "Mon, 12 Oct 2026 18:33:00 GMT"
+              },
+              "body_bytes": 214,
+              "closed": false,
+              "truncated": false,
+              "response_ended": true,
+              "complete": true,
+              "error": null,
+              "error_code": null
+            },
+            "provider_attempts": 2,
+            "scripted_attempts": 2,
+            "probe_attempts": 0,
+            "diagnostics": [],
+            "evidence": [
+              "captures/provider-fault-stream-cut-turn-1-client.json",
+              "captures/provider-fault-stream-cut-turn-1-provider.json"
+            ]
+          }
+        ],
+        "infra": []
+      },
+      "source_provenance": {
+        "verified": false,
+        "note": "module evidence only; no provenance claim from an installed binary"
+      },
+      "evidence_refs": [
+        "captures/provider-fault-stream-cut-turn-1-provider.json",
+        "captures/provider-fault-stream-cut-turn-1-client.json"
+      ],
+      "captures": [
+        "captures/provider-fault-stream-cut-turn-1-provider.json"
+      ],
+      "client_evidence": [
+        "captures/provider-fault-stream-cut-turn-1-client.json"
+      ],
+      "fixture": "cases/provider-fault-stream-cut.json",
+      "source": {
+        "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+        "files": [
+          "internal/gateway/stream_cut_test.go"
+        ],
+        "tests": [
+          "internal/gateway/stream_cut_test.go::TestStreamCutBeforeContentTriedAgain"
+        ],
+        "adaptation": "The first attempt cuts before content; the second returns a complete response. RCC must not expose the cut or the EOF."
+      },
+      "setup": {
+        "config_check": {
+          "exit_code": 0,
+          "signal": null,
+          "stdout": "config ok: version=3 servers=1\n",
+          "stderr": "",
+          "error": null
+        },
+        "health": {
+          "url": "http://127.0.0.1:57248/health",
+          "method": "GET",
+          "request_headers": {},
+          "status": 200,
+          "status_text": "OK",
+          "headers": {
+            "content-type": "application/json",
+            "content-length": "131",
+            "connection": "close",
+            "date": "Mon, 12 Oct 2026 18:32:59 GMT"
+          },
+          "raw_headers": [
+            "content-type",
+            "application/json",
+            "content-length",
+            "131",
+            "connection",
+            "close",
+            "date",
+            "Mon, 12 Oct 2026 18:32:59 GMT"
+          ],
+          "body": {
+            "bind": "127.0.0.1",
+            "build_version": "0.90.4887",
+            "manifest_version": 3,
+            "port": 57248,
+            "server_id": "loopback",
+            "status": "ok",
+            "version": 3
+          },
+          "bodyText": "{\"bind\":\"127.0.0.1\",\"build_version\":\"0.90.4887\",\"manifest_version\":3,\"port\":57248,\"server_id\":\"loopback\",\"status\":\"ok\",\"version\":3}",
+          "bodyBytes": {
+            "0": 123,
+            "1": 34,
+            "2": 98,
+            "3": 105,
+            "4": 110,
+            "5": 100,
+            "6": 34,
+            "7": 58,
+            "8": 34,
+            "9": 49,
+            "10": 50,
+            "11": 55,
+            "12": 46,
+            "13": 48,
+            "14": 46,
+            "15": 48,
+            "16": 46,
+            "17": 49,
+            "18": 34,
+            "19": 44,
+            "20": 34,
+            "21": 98,
+            "22": 117,
+            "23": 105,
+            "24": 108,
+            "25": 100,
+            "26": 95,
+            "27": 118,
+            "28": 101,
+            "29": 114,
+            "30": 115,
+            "31": 105,
+            "32": 111,
+            "33": 110,
+            "34": 34,
+            "35": 58,
+            "36": 34,
+            "37": 48,
+            "38": 46,
+            "39": 57,
+            "40": 48,
+            "41": 46,
+            "42": 52,
+            "43": 56,
+            "44": 56,
+            "45": 55,
+            "46": 34,
+            "47": 44,
+            "48": 34,
+            "49": 109,
+            "50": 97,
+            "51": 110,
+            "52": 105,
+            "53": 102,
+            "54": 101,
+            "55": 115,
+            "56": 116,
+            "57": 95,
+            "58": 118,
+            "59": 101,
+            "60": 114,
+            "61": 115,
+            "62": 105,
+            "63": 111,
+            "64": 110,
+            "65": 34,
+            "66": 58,
+            "67": 51,
+            "68": 44,
+            "69": 34,
+            "70": 112,
+            "71": 111,
+            "72": 114,
+            "73": 116,
+            "74": 34,
+            "75": 58,
+            "76": 53,
+            "77": 55,
+            "78": 50,
+            "79": 52,
+            "80": 56,
+            "81": 44,
+            "82": 34,
+            "83": 115,
+            "84": 101,
+            "85": 114,
+            "86": 118,
+            "87": 101,
+            "88": 114,
+            "89": 95,
+            "90": 105,
+            "91": 100,
+            "92": 34,
+            "93": 58,
+            "94": 34,
+            "95": 108,
+            "96": 111,
+            "97": 111,
+            "98": 112,
+            "99": 98,
+            "100": 97,
+            "101": 99,
+            "102": 107,
+            "103": 34,
+            "104": 44,
+            "105": 34,
+            "106": 115,
+            "107": 116,
+            "108": 97,
+            "109": 116,
+            "110": 117,
+            "111": 115,
+            "112": 34,
+            "113": 58,
+            "114": 34,
+            "115": 111,
+            "116": 107,
+            "117": 34,
+            "118": 44,
+            "119": 34,
+            "120": 118,
+            "121": 101,
+            "122": 114,
+            "123": 115,
+            "124": 105,
+            "125": 111,
+            "126": 110,
+            "127": 34,
+            "128": 58,
+            "129": 51,
+            "130": 125
+          },
+          "bodyBytesBase64": "eyJiaW5kIjoiMTI3LjAuMC4xIiwiYnVpbGRfdmVyc2lvbiI6IjAuOTAuNDg4NyIsIm1hbmlmZXN0X3ZlcnNpb24iOjMsInBvcnQiOjU3MjQ4LCJzZXJ2ZXJfaWQiOiJsb29wYmFjayIsInN0YXR1cyI6Im9rIiwidmVyc2lvbiI6M30=",
+          "response_ended": true,
+          "complete": true,
+          "closed": false,
+          "aborted": false,
+          "truncated": false,
+          "elapsed_ms": 2,
+          "error": null,
+          "error_detail": null
+        }
+      },
+      "cleanup": {
+        "complete": true,
+        "case_id": "provider-fault-stream-cut",
+        "rcc": {
+          "complete": true,
+          "pid": 27570,
+          "process_exit_observed": true,
+          "exit_code": 0,
+          "signal": null,
+          "force_killed": false,
+          "kill_error": null,
+          "socket_closed": true,
+          "socket_close_error": null,
+          "all_listeners_closed": true,
+          "listener_closures": [
+            {
+              "role": "primary",
+              "server_id": "loopback",
+              "host": "127.0.0.1",
+              "port": 57248,
+              "closed": true,
+              "error": null
+            },
+            {
+              "role": "admin_webui",
+              "server_id": "admin_webui",
+              "host": "127.0.0.1",
+              "port": 57249,
+              "closed": true,
+              "error": null
+            }
+          ],
+          "elapsed_ms": 37,
+          "failures": []
+        },
+        "mock_closed": true,
+        "config_state_removed": true,
+        "retained_state": null
+      },
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "openai_chat",
+      "transport": "sse",
+      "mode": "direct",
+      "scope": "boundary",
+      "raw_status": "passed",
+      "duplicate_count": 1
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "entries": 1,
+    "duplicate_case_ids": [],
+    "duplicate_entries": 0,
+    "passed": 1,
+    "failed": 0,
+    "not_run": 0,
+    "skipped": 0,
+    "infra_failure": 0,
+    "product_failures": 0,
+    "runner_failures": 0
+  },
+  "matrix_cells": [
+    {
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "openai_chat",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "responses",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "anthropic",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "gemini",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "responses",
+      "provider_protocol": "openai_chat",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "responses",
+      "provider_protocol": "responses",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "responses",
+      "provider_protocol": "anthropic",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "responses",
+      "provider_protocol": "gemini",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "anthropic",
+      "provider_protocol": "openai_chat",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "anthropic",
+      "provider_protocol": "responses",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "anthropic",
+      "provider_protocol": "anthropic",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "anthropic",
+      "provider_protocol": "gemini",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "gemini",
+      "provider_protocol": "openai_chat",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "gemini",
+      "provider_protocol": "responses",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "gemini",
+      "provider_protocol": "anthropic",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "relay",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "gemini",
+      "provider_protocol": "gemini",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    }
+  ],
+  "supplemental_relay_cells": [
+    {
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "openai_chat",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "responses",
+      "provider_protocol": "responses",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "anthropic",
+      "provider_protocol": "anthropic",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    },
+    {
+      "entry_protocol": "gemini",
+      "provider_protocol": "gemini",
+      "scope": "base",
+      "status": "not_covered",
+      "required_variant_count": 2,
+      "covered_required_variant_count": 0,
+      "variants": [
+        {
+          "transport": "json",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "sse",
+          "mode": "direct",
+          "supplemental": false,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        },
+        {
+          "transport": "json",
+          "mode": "relay",
+          "supplemental": true,
+          "case_ids": [],
+          "case_count": 0,
+          "status": "not_run",
+          "status_counts": {
+            "passed": 0,
+            "failed": 0,
+            "not_run": 0,
+            "infra_failure": 0
+          }
+        }
+      ]
+    }
+  ],
+  "boundary_cases": [
+    {
+      "case_id": "provider-fault-stream-cut",
+      "cell": {
+        "entry_protocol": "openai_chat",
+        "provider_protocol": "openai_chat",
+        "transport": "sse",
+        "mode": "direct"
+      },
+      "classification": "pass",
+      "status": "passed",
+      "diagnostic": "case flow assertions passed",
+      "product_failures": 0,
+      "runner_failures": 0,
+      "provider_attempt_count": 2,
+      "probe_attempt_count": 0,
+      "turn_results": [
+        {
+          "turn": 1,
+          "turn_id": null,
+          "status": "passed",
+          "request_source": "fixture",
+          "provider_attempts": 2,
+          "scripted_attempts": 2,
+          "probe_attempts": 0,
+          "client_status": 200,
+          "client_closed": false,
+          "diagnostics": []
+        }
+      ],
+      "first_divergence": null,
+      "observations": {
+        "live": [
+          {
+            "kind": "turn",
+            "turn": 1,
+            "turn_id": null,
+            "request_source": "fixture",
+            "request": {
+              "method": "POST",
+              "path": "/v1/chat/completions",
+              "headers": {
+                "content-type": "application/json"
+              },
+              "body_bytes": 88,
+              "body_sha256": "bc5d38964a5a34256d3befa7f01e8142c6a9ef6ec5bde62dad4ffdbc64395af8"
+            },
+            "client": {
+              "status": 200,
+              "status_text": "OK",
+              "headers": {
+                "content-type": "application/json",
+                "connection": "close",
+                "transfer-encoding": "chunked",
+                "date": "Mon, 12 Oct 2026 18:33:00 GMT"
+              },
+              "body_bytes": 214,
+              "closed": false,
+              "truncated": false,
+              "response_ended": true,
+              "complete": true,
+              "error": null,
+              "error_code": null
+            },
+            "provider_attempts": 2,
+            "scripted_attempts": 2,
+            "probe_attempts": 0,
+            "diagnostics": [],
+            "evidence": [
+              "captures/provider-fault-stream-cut-turn-1-client.json",
+              "captures/provider-fault-stream-cut-turn-1-provider.json"
+            ]
+          }
+        ],
+        "infra": []
+      },
+      "source_provenance": {
+        "verified": false,
+        "note": "module evidence only; no provenance claim from an installed binary"
+      },
+      "evidence_refs": [
+        "captures/provider-fault-stream-cut-turn-1-provider.json",
+        "captures/provider-fault-stream-cut-turn-1-client.json"
+      ],
+      "captures": [
+        "captures/provider-fault-stream-cut-turn-1-provider.json"
+      ],
+      "client_evidence": [
+        "captures/provider-fault-stream-cut-turn-1-client.json"
+      ],
+      "fixture": "cases/provider-fault-stream-cut.json",
+      "source": {
+        "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+        "files": [
+          "internal/gateway/stream_cut_test.go"
+        ],
+        "tests": [
+          "internal/gateway/stream_cut_test.go::TestStreamCutBeforeContentTriedAgain"
+        ],
+        "adaptation": "The first attempt cuts before content; the second returns a complete response. RCC must not expose the cut or the EOF."
+      },
+      "setup": {
+        "config_check": {
+          "exit_code": 0,
+          "signal": null,
+          "stdout": "config ok: version=3 servers=1\n",
+          "stderr": "",
+          "error": null
+        },
+        "health": {
+          "url": "http://127.0.0.1:57248/health",
+          "method": "GET",
+          "request_headers": {},
+          "status": 200,
+          "status_text": "OK",
+          "headers": {
+            "content-type": "application/json",
+            "content-length": "131",
+            "connection": "close",
+            "date": "Mon, 12 Oct 2026 18:32:59 GMT"
+          },
+          "raw_headers": [
+            "content-type",
+            "application/json",
+            "content-length",
+            "131",
+            "connection",
+            "close",
+            "date",
+            "Mon, 12 Oct 2026 18:32:59 GMT"
+          ],
+          "body": {
+            "bind": "127.0.0.1",
+            "build_version": "0.90.4887",
+            "manifest_version": 3,
+            "port": 57248,
+            "server_id": "loopback",
+            "status": "ok",
+            "version": 3
+          },
+          "bodyText": "{\"bind\":\"127.0.0.1\",\"build_version\":\"0.90.4887\",\"manifest_version\":3,\"port\":57248,\"server_id\":\"loopback\",\"status\":\"ok\",\"version\":3}",
+          "bodyBytes": {
+            "0": 123,
+            "1": 34,
+            "2": 98,
+            "3": 105,
+            "4": 110,
+            "5": 100,
+            "6": 34,
+            "7": 58,
+            "8": 34,
+            "9": 49,
+            "10": 50,
+            "11": 55,
+            "12": 46,
+            "13": 48,
+            "14": 46,
+            "15": 48,
+            "16": 46,
+            "17": 49,
+            "18": 34,
+            "19": 44,
+            "20": 34,
+            "21": 98,
+            "22": 117,
+            "23": 105,
+            "24": 108,
+            "25": 100,
+            "26": 95,
+            "27": 118,
+            "28": 101,
+            "29": 114,
+            "30": 115,
+            "31": 105,
+            "32": 111,
+            "33": 110,
+            "34": 34,
+            "35": 58,
+            "36": 34,
+            "37": 48,
+            "38": 46,
+            "39": 57,
+            "40": 48,
+            "41": 46,
+            "42": 52,
+            "43": 56,
+            "44": 56,
+            "45": 55,
+            "46": 34,
+            "47": 44,
+            "48": 34,
+            "49": 109,
+            "50": 97,
+            "51": 110,
+            "52": 105,
+            "53": 102,
+            "54": 101,
+            "55": 115,
+            "56": 116,
+            "57": 95,
+            "58": 118,
+            "59": 101,
+            "60": 114,
+            "61": 115,
+            "62": 105,
+            "63": 111,
+            "64": 110,
+            "65": 34,
+            "66": 58,
+            "67": 51,
+            "68": 44,
+            "69": 34,
+            "70": 112,
+            "71": 111,
+            "72": 114,
+            "73": 116,
+            "74": 34,
+            "75": 58,
+            "76": 53,
+            "77": 55,
+            "78": 50,
+            "79": 52,
+            "80": 56,
+            "81": 44,
+            "82": 34,
+            "83": 115,
+            "84": 101,
+            "85": 114,
+            "86": 118,
+            "87": 101,
+            "88": 114,
+            "89": 95,
+            "90": 105,
+            "91": 100,
+            "92": 34,
+            "93": 58,
+            "94": 34,
+            "95": 108,
+            "96": 111,
+            "97": 111,
+            "98": 112,
+            "99": 98,
+            "100": 97,
+            "101": 99,
+            "102": 107,
+            "103": 34,
+            "104": 44,
+            "105": 34,
+            "106": 115,
+            "107": 116,
+            "108": 97,
+            "109": 116,
+            "110": 117,
+            "111": 115,
+            "112": 34,
+            "113": 58,
+            "114": 34,
+            "115": 111,
+            "116": 107,
+            "117": 34,
+            "118": 44,
+            "119": 34,
+            "120": 118,
+            "121": 101,
+            "122": 114,
+            "123": 115,
+            "124": 105,
+            "125": 111,
+            "126": 110,
+            "127": 34,
+            "128": 58,
+            "129": 51,
+            "130": 125
+          },
+          "bodyBytesBase64": "eyJiaW5kIjoiMTI3LjAuMC4xIiwiYnVpbGRfdmVyc2lvbiI6IjAuOTAuNDg4NyIsIm1hbmlmZXN0X3ZlcnNpb24iOjMsInBvcnQiOjU3MjQ4LCJzZXJ2ZXJfaWQiOiJsb29wYmFjayIsInN0YXR1cyI6Im9rIiwidmVyc2lvbiI6M30=",
+          "response_ended": true,
+          "complete": true,
+          "closed": false,
+          "aborted": false,
+          "truncated": false,
+          "elapsed_ms": 2,
+          "error": null,
+          "error_detail": null
+        }
+      },
+      "cleanup": {
+        "complete": true,
+        "case_id": "provider-fault-stream-cut",
+        "rcc": {
+          "complete": true,
+          "pid": 27570,
+          "process_exit_observed": true,
+          "exit_code": 0,
+          "signal": null,
+          "force_killed": false,
+          "kill_error": null,
+          "socket_closed": true,
+          "socket_close_error": null,
+          "all_listeners_closed": true,
+          "listener_closures": [
+            {
+              "role": "primary",
+              "server_id": "loopback",
+              "host": "127.0.0.1",
+              "port": 57248,
+              "closed": true,
+              "error": null
+            },
+            {
+              "role": "admin_webui",
+              "server_id": "admin_webui",
+              "host": "127.0.0.1",
+              "port": 57249,
+              "closed": true,
+              "error": null
+            }
+          ],
+          "elapsed_ms": 37,
+          "failures": []
+        },
+        "mock_closed": true,
+        "config_state_removed": true,
+        "retained_state": null
+      },
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "openai_chat",
+      "transport": "sse",
+      "mode": "direct",
+      "scope": "boundary",
+      "raw_status": "passed",
+      "duplicate_count": 1
+    }
+  ],
+  "p2_handoff": [],
+  "infra_failures": [],
+  "runtime_identity": {
+    "path": "/Users/fanzhang/.local/bin/rccv3",
+    "version": "rccv3 0.90.4887 (crate 0.1.0)",
+    "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+    "version_stderr": "",
+    "exit_code": 0,
+    "signal": null,
+    "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+    "size": 35945136,
+    "mtime_ms": 1791826625740.5696,
+    "error": null,
+    "kind": "installed"
+  },
+  "evidence": {
+    "root": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut",
+    "persistent": true,
+    "references": [
+      {
+        "reference": "captures/provider-fault-stream-cut-turn-1-provider.json",
+        "original": "captures/provider-fault-stream-cut-turn-1-provider.json",
+        "persistent": true
+      },
+      {
+        "reference": "captures/provider-fault-stream-cut-turn-1-client.json",
+        "original": "captures/provider-fault-stream-cut-turn-1-client.json",
+        "persistent": true
+      }
+    ]
+  }
+}

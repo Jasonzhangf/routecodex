@@ -10,9 +10,9 @@
 2. 先看 function map / mainline call map / verification map / mainline source / wiki，再改实现。必须先定位模块边界、允许路径、禁止路径、主线调用边、required gates 和 review surface。
 3. 先找唯一 owner，再改实现。允许路径和禁止路径必须先锁定。
 4. 先红后绿。必须先证明当前问题存在，再改唯一真源。
-5. 先 build/install，再 live verify。能影响运行时的改动，不能只停在局部测试。
+5. 运行时改动先完成必要构建，再按受影响行为做安装与真实入口验证。工具、文档和 gate 改动使用对应公开入口，不触发无关生产重启。
 6. 先样本复测，再宣布完成。若存在真实失败样本，必须在线重放同一入口/同一语义样本。
-7. 验证结束后必须做架构 review。要判断：
+7. 完整且重大的 milestone 完成作者验收、准备提交或集成时，做一次整体功能与架构 review。内部节点和纯文档不单独触发。要判断：
    - 结果是否正确
    - 架构是否正确
    - 是否存在 fallback / 临时绕路 / 补丁式修复 / 错层修复
@@ -27,12 +27,12 @@
   -> 根因与唯一 owner
   -> red test / failing sample
   -> 修改唯一真源
-  -> build / necessary compile
-  -> global install / managed restart
-  -> live health / smoke
-  -> exact old-sample replay or same-entry real replay
-  -> full gate / broader regression
-  -> 记录结论
+  -> affected tests / necessary compile
+  -> applicable install and authorized managed restart
+  -> affected public-entry replay or scoped consumer verification
+  -> one overall milestone review at integration boundary
+  -> commit / CI / merge main / push / cleanup
+  -> 记录结果与未完成项
 ```
 
 ## 证据门槛

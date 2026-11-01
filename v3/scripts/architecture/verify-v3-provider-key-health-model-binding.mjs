@@ -17,12 +17,6 @@ function readYaml(relativePath) {
   return YAML.parse(read(relativePath));
 }
 
-function symbolExists(text, symbol) {
-  const [owner, method = null] = symbol.split('::');
-  if (method) return text.includes(owner) && text.includes(method);
-  return new RegExp(`\\b(?:fn|struct|enum|trait)\\s+${symbol}\\b`).test(text);
-}
-
 const failures = [];
 const mainline = readYaml('docs/architecture/v3-mainline-call-map.yml');
 const resources = readYaml('docs/architecture/v3-resource-operation-map.yml').resources ?? [];
@@ -92,13 +86,8 @@ for (const expected of expectedEdges) {
   if (edge.caller_file !== expected.callerFile || edge.callee_file !== expected.calleeFile) {
     failures.push(`${expected.id} caller/callee files do not match the registered modules`);
   }
-  for (const [role, file, symbol] of [
-    ['caller', expected.callerFile, expected.callerSymbol],
-    ['callee', expected.calleeFile, expected.calleeSymbol],
-  ]) {
-    if (!symbolExists(read(file), symbol)) {
-      failures.push(`${expected.id} ${role} symbol is not source-bound: ${symbol}`);
-    }
+  if (edge.caller_symbol !== expected.callerSymbol || edge.callee_symbol !== expected.calleeSymbol) {
+    failures.push(`${expected.id} declared caller/callee do not match the registered owner edge`);
   }
   for (const resourceId of [...expected.consumes, ...expected.produces]) {
     if (!resourceById.has(resourceId)) failures.push(`${expected.id} references unknown resource ${resourceId}`);

@@ -1,0 +1,95 @@
+{
+  "case_id": "anthropic-to-responses-sse",
+  "turn": 1,
+  "turn_id": null,
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "anthropic-to-responses-sse",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "responses",
+      "method": "POST",
+      "path": "/v1/responses",
+      "query": "",
+      "headers": {
+        "accept": "text/event-stream",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:56846",
+        "content-length": "156"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"input\":[{\"content\":[{\"text\":\"hello\",\"type\":\"input_text\"}],\"role\":\"user\",\"type\":\"message\"}],\"max_output_tokens\":64,\"model\":\"responses-model\",\"stream\":true}",
+      "body": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "hello",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "max_output_tokens": 64,
+        "model": "responses-model",
+        "stream": true
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791823037996,
+      "response_script": {
+        "protocol": "responses",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {
+            "event": "response.created",
+            "data": {
+              "type": "response.created",
+              "response": {
+                "id": "resp_anthropic_to_responses_sse",
+                "status": "in_progress",
+                "output": []
+              }
+            }
+          },
+          {
+            "event": "response.output_text.delta",
+            "data": {
+              "type": "response.output_text.delta",
+              "output_index": 0,
+              "content_index": 0,
+              "item_id": "msg_1",
+              "delta": "ok"
+            }
+          },
+          {
+            "event": "response.completed",
+            "data": {
+              "type": "response.completed",
+              "response": {
+                "id": "resp_anthropic_to_responses_sse",
+                "status": "completed",
+                "output": [],
+                "usage": {
+                  "input_tokens": 7,
+                  "output_tokens": 2,
+                  "total_tokens": 9
+                }
+              }
+            }
+          }
+        ]
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "business_attempts": 1,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

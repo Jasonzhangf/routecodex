@@ -1,4 +1,90 @@
 use super::*;
+
+#[test]
+fn chat_structured_arguments_survive_json_and_sse_normalization_without_string_repair() {
+    for arguments in [
+        json!({"q":" exact input \n","nested":{"retain":[1,2]}}),
+        json!([]),
+        Value::Null,
+        json!(true),
+        json!(7),
+        json!("{\"q\":"),
+        json!(""),
+        json!("{\"q\":\" x \"}"),
+    ] {
+        let expected = arguments
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| arguments.to_string());
+        let function = json!({"name":"lookup","arguments":arguments});
+        let call = json!({"index":0,"id":"call_original","type":"function","function":function});
+        let mut reducer = V3OpenAiChatSseReducerState::default();
+        reducer
+            .apply_chunk(
+                &json!({"id":"chatcmpl-structured","object":"chat.completion.chunk","model":"model",
+            "choices":[{"index":0,"delta":{"tool_calls":[call]},"finish_reason":"tool_calls"}]}),
+            )
+            .unwrap();
+        let completion = reducer.materialize_completion().unwrap();
+        assert_eq!(
+            completion["choices"][0]["message"]["tool_calls"][0]["id"],
+            "call_original"
+        );
+        assert_eq!(
+            completion["choices"][0]["message"]["tool_calls"][0]["function"]["name"],
+            "lookup"
+        );
+        assert_eq!(
+            completion["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"],
+            expected
+        );
+        let typed = parse_v3_openai_chat_json_tool_call(&call).unwrap();
+        assert_eq!(typed.function_arguments, Some(expected));
+    }
+    let call = json!({"id":"call_missing","type":"function","function":{"name":"lookup"}});
+    assert_eq!(
+        parse_v3_openai_chat_json_tool_call(&call)
+            .unwrap()
+            .function_arguments,
+        None
+    );
+}
+
+#[test]
+fn chat_sse_co_located_refusal_survives_materialization() {
+    for delta in [
+        json!({"content":"partial text","refusal":"provider declined"}),
+        json!({"reasoning_content":"partial reasoning","refusal":"provider declined"}),
+        json!({"role":"assistant","content":" partial text ","reasoning_content":" partial reasoning ","refusal":" provider declined "}),
+        json!({"tool_calls":[{"index":0,"id":"call_opaque","type":"function","function":{"name":"lookup","arguments":"not JSON {"}}],"refusal":"provider declined"}),
+        json!({"content":"partial text","reasoning_content":"partial reasoning","tool_calls":[{"index":0,"id":"call_opaque","type":"function","function":{"name":"lookup","arguments":"not JSON {"}}],"refusal":"provider declined"}),
+    ] {
+        let mut reducer = V3OpenAiChatSseReducerState::default();
+        reducer.apply_chunk(&json!({"id":"chat_refusal","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":delta,"finish_reason":null}]})).unwrap();
+        reducer.apply_chunk(&json!({"id":"chat_refusal","object":"chat.completion.chunk","model":"wire-test","choices":[{"index":0,"delta":{},"finish_reason":"content_filter"}]})).unwrap();
+        let completion = reducer.materialize_completion().unwrap();
+        let message = &completion["choices"][0]["message"];
+        assert_eq!(message["refusal"], delta["refusal"], "{delta}");
+        assert_eq!(completion["choices"][0]["finish_reason"], "content_filter");
+        if let Some(text) = delta.get("content") {
+            assert_eq!(&message["content"], text);
+        }
+        if let Some(reasoning) = delta.get("reasoning_content") {
+            assert_eq!(&message["reasoning_content"], reasoning);
+        }
+        if let Some(role) = delta.get("role") {
+            assert_eq!(&message["role"], role);
+        }
+        if delta.get("tool_calls").is_some() {
+            assert_eq!(message["tool_calls"][0]["id"], "call_opaque");
+            assert_eq!(message["tool_calls"][0]["function"]["name"], "lookup");
+            assert_eq!(
+                message["tool_calls"][0]["function"]["arguments"],
+                "not JSON {"
+            );
+        }
+    }
+}
 use serde_json::json;
 
 struct RewriteChatHook {
@@ -37,7 +123,7 @@ fn chat_sse_keeps_text_and_tool_call_semantics_distinct() {
     ));
     assert!(matches!(
         semantic.choices[1].delta,
-        V3OpenAiChatSseDelta::ToolCall(_)
+        V3OpenAiChatSseDelta::ToolCalls(_)
     ));
 }
 
@@ -350,6 +436,222 @@ fn chat_reducer_still_rejects_tool_call_that_never_has_a_name() {
 }
 
 #[test]
+fn chat_reducer_keeps_every_tool_call_emitted_in_one_delta() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_two_calls",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{}"}},
+                {"index":1,"id":"call_2","function":{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}
+            ]},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "call_1");
+    assert_eq!(calls[1]["id"], "call_2");
+    assert_eq!(calls[1]["function"]["name"], "exec_command");
+}
+
+#[test]
+fn chat_reducer_keeps_late_tool_call_id_from_next_delta_after_multi_call_delta() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_late_tool_call_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"function":{"name":"lookup","arguments":"{}"}},
+                {"index":1,"id":"call_2","function":{"name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_late_tool_call_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{}"}}
+            ]},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "call_1");
+    assert_eq!(calls[1]["id"], "call_2");
+}
+
+#[test]
+fn chat_reducer_splits_reused_wire_index_when_tool_call_id_changes() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_reused_index",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_first","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"fir"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_reused_index",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_second","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"second\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_reused_index",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_first","function":{"arguments":"st\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_reused_index",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":1,"id":"call_third","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"third\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_reused_index",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[0]["id"], "call_first");
+    assert_eq!(calls[1]["id"], "call_second");
+    assert_eq!(calls[2]["id"], "call_third");
+    for (call, expected) in calls.iter().zip(["first", "second", "third"]) {
+        let arguments = call["function"]["arguments"].as_str().unwrap();
+        let parsed: Value = serde_json::from_str(arguments).unwrap();
+        assert_eq!(parsed["cmd"], expected);
+    }
+}
+
+#[test]
+fn chat_reducer_keeps_same_id_continuation_and_parallel_index_separate() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_same_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_same","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"sa"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_same_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":1,"id":"call_parallel","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"pa"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_same_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_same","function":{"arguments":"me\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_same_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":1,"function":{"arguments":"rallel\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_same_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "call_same");
+    assert_eq!(calls[0]["function"]["arguments"], "{\"cmd\":\"same\"}");
+    assert_eq!(calls[1]["id"], "call_parallel");
+    assert_eq!(calls[1]["function"]["arguments"], "{\"cmd\":\"parallel\"}");
+}
+
+#[test]
+fn chat_reducer_preserves_cross_index_duplicate_ids_for_resp03_validation() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_duplicate_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":0,"id":"call_duplicate","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"first\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_duplicate_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"tool_calls":[
+                {"index":1,"id":"call_duplicate","type":"function","function":{"name":"exec_command","arguments":"{\"cmd\":\"second\"}"}}
+            ]},"finish_reason":null}]
+        }))
+        .unwrap();
+    reducer
+        .apply_chunk(&json!({
+            "id":"chatcmpl_duplicate_id",
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]
+        }))
+        .unwrap();
+
+    let output = reducer.materialize_completion().unwrap();
+    let calls = output["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["id"], "call_duplicate");
+    assert_eq!(calls[0]["function"]["arguments"], "{\"cmd\":\"first\"}");
+    assert_eq!(calls[1]["id"], "call_duplicate");
+    assert_eq!(calls[1]["function"]["arguments"], "{\"cmd\":\"second\"}");
+}
+
+#[test]
 fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
     let mut reducer = V3OpenAiChatSseReducerState::default();
     reducer
@@ -376,17 +678,47 @@ fn chat_reducer_keeps_tool_call_when_terminal_delta_also_has_empty_content() {
 }
 
 #[test]
-fn chat_reducer_rejects_unknown_finish_reason() {
-    let error = V3OpenAiChatSseReducerState::default()
+fn chat_reducer_preserves_unknown_finish_reason() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
         .apply_chunk(&json!({
             "object":"chat.completion.chunk",
             "choices":[{"index":0,"delta":{},"finish_reason":"future_reason"}]
         }))
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        V3OpenAiChatSseTreeError::UnknownFinishReason { .. }
-    ));
+        .unwrap();
+    assert_eq!(reducer.terminal, Some(V3OpenAiChatSseTerminalState::Opaque));
+    assert_eq!(
+        reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+        "future_reason"
+    );
+}
+
+#[test]
+fn chat_reducer_materializes_length_and_max_token_aliases_as_length() {
+    for finish_reason in [
+        "length",
+        "max_tokens",
+        "max_output_tokens",
+        "max-tokens",
+        "max-output-tokens",
+    ] {
+        let mut reducer = V3OpenAiChatSseReducerState::default();
+        reducer
+            .apply_chunk(&json!({
+                "object":"chat.completion.chunk",
+                "choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":finish_reason}]
+            }))
+            .unwrap();
+
+        assert!(matches!(
+            reducer.terminal,
+            Some(V3OpenAiChatSseTerminalState::Length)
+        ));
+        assert_eq!(
+            reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+            "length"
+        );
+    }
 }
 
 #[test]
@@ -403,6 +735,28 @@ fn chat_reducer_treats_empty_sse_finish_reason_as_nonterminal() {
         reducer.choices[0].to_normalized_value()["finish_reason"],
         ""
     );
+    reducer
+        .apply_chunk(&json!({
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{},"finish_reason":"stop"}]
+        }))
+        .unwrap();
+    assert_eq!(
+        reducer.materialize_completion().unwrap()["choices"][0]["finish_reason"],
+        "stop"
+    );
+}
+
+#[test]
+fn chat_reducer_treats_blank_sse_finish_reason_as_nonterminal() {
+    let mut reducer = V3OpenAiChatSseReducerState::default();
+    reducer
+        .apply_chunk(&json!({
+            "object":"chat.completion.chunk",
+            "choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"  "}]
+        }))
+        .unwrap();
+    assert!(reducer.terminal.is_none());
     reducer
         .apply_chunk(&json!({
             "object":"chat.completion.chunk",

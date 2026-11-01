@@ -1,6 +1,145 @@
 use super::*;
 
 #[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_before_content_merges_metadata() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup","type":"message","role":"assistant","content":[],"model":"claude-fable-5","usage":{"input_tokens":7}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"cache_read_input_tokens":5,"output_tokens":0,"service_tier":"standard"}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"duplicate start tolerated"}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#
+            .to_vec()),
+        ]));
+    let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("compatible duplicate message_start must be provider codec compatible");
+
+    assert_eq!(response["id"], "msg_dup");
+    assert_eq!(response["model"], "claude-fable-5");
+    assert_eq!(response["status"], "completed");
+    // Responses objects carry no `finish_reason`; terminality is `status` alone.
+    assert!(response.get("finish_reason").is_none(), "{response}");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "duplicate start tolerated"
+    );
+    // Anthropic provider usage folds cache reads into the Responses client
+    // `input_tokens`, exposes `input_tokens_details.cached_tokens`, and must not
+    // leak the Anthropic-private cache fields.
+    let usage = &response["usage"];
+    assert_eq!(usage["input_tokens"], 12);
+    assert_eq!(usage["output_tokens"], 3);
+    assert_eq!(usage["total_tokens"], 15);
+    assert_eq!(usage["input_tokens_details"]["cached_tokens"], 5);
+    assert!(usage.get("cache_read_input_tokens").is_none());
+    assert!(usage.get("cache_creation_input_tokens").is_none());
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_eof_without_stop_still_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_dup_eof","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":7}}}
+
+"#
+            .to_vec()),
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_eof","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"output_tokens":0}}}
+
+"#
+            .to_vec()),
+        ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("Anthropic provider event stream ended without message_stop"));
+    assert!(!error.to_string().contains("duplicate message_start"));
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_different_id_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_one\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_two\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+        ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("duplicate message_start with different id"));
+}
+
+#[tokio::test]
+async fn anthropic_provider_sse_duplicate_message_start_after_content_start_fails() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
+        ]));
+    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("duplicate message_start after content_block_start"));
+}
+
+#[tokio::test]
 async fn responses_provider_sse_codex_rate_limits_extension_does_not_abort_stream() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![
@@ -154,54 +293,6 @@ async fn anthropic_provider_sse_live_malformed_tool_json_unquoted_session_id_fai
 }
 
 #[test]
-fn web_search_state_machine_advances_to_search_result_captured_via_hop() {
-    // 搜索 hop 的状态迁移契约：ToolCallObserved -> SearchResultCaptured
-    // 携带归一化结果；非相邻迁移必须被拒绝。
-    let observed = V3WebSearchCenterState::new()
-        .transition_to(
-            V3WebSearchCenterPhase::LocalToolSurfaceActive,
-            "req04_web_search_surface_active",
-        )
-        .expect("idle -> local_tool_surface_active")
-        .with_original_call_id(Some("call_ws_1"))
-        .with_query(Some("routecodex v3"))
-        .transition_to(
-            V3WebSearchCenterPhase::ToolCallObserved,
-            "resp03_websearch_call_observed",
-        )
-        .expect("local_tool_surface_active -> tool_call_observed");
-    let prepared = observed
-        .transition_to(
-            V3WebSearchCenterPhase::SearchDispatchPrepared,
-            "search_hop_dispatch_prepared",
-        )
-        .expect("tool_call_observed -> search_dispatch_prepared");
-    let in_flight = prepared
-        .transition_to(
-            V3WebSearchCenterPhase::SearchInFlight,
-            "search_hop_in_flight",
-        )
-        .expect("search_dispatch_prepared -> search_in_flight");
-    let captured = in_flight
-        .transition_to(
-            V3WebSearchCenterPhase::SearchResultCaptured,
-            "search_hop_result_captured",
-        )
-        .expect("search_in_flight -> search_result_captured");
-    assert_eq!(
-        captured.phase(),
-        V3WebSearchCenterPhase::SearchResultCaptured
-    );
-    assert_eq!(captured.original_call_id(), Some("call_ws_1"));
-    assert_eq!(captured.query(), Some("routecodex v3"));
-    // 非法迁移：SearchResultCaptured -> SearchInFlight 必须拒绝
-    let error = captured
-        .transition_to(V3WebSearchCenterPhase::SearchInFlight, "backwards")
-        .expect_err("terminal captured must not move backwards");
-    assert!(error.contains("invalid web_search ServerTool transition"));
-}
-
-#[test]
 fn relay_runtime_failure_propagates_supplied_observability() {
     // Red guard: project_v3_responses_relay_runtime_failure 之前对所有
     // source raised 路径都丢弃 observability。本次修复后调用方可显式
@@ -224,7 +315,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     observability.provider_status = Some(598);
 
     let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("red-test propagation".to_string()),
+        V3ResponsesRelayRuntimeError::RuntimeTiming("red-test propagation".to_string()),
         Some(observability.clone()),
     );
     assert_eq!(output.status, 598);
@@ -253,7 +344,7 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
     assert_eq!(
         body["error"]["message"],
-        "web_search local search hop failed: red-test propagation"
+        "V3 Responses Relay Runtime timing failed: red-test propagation"
     );
     assert!(
         body["error"].get("stage").is_none()
@@ -267,11 +358,274 @@ fn relay_runtime_failure_propagates_supplied_observability() {
     );
 
     let none_output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed("no-obs".to_string()),
+        V3ResponsesRelayRuntimeError::RuntimeTiming("no-obs".to_string()),
         None,
     );
     assert!(
         none_output.observability.is_none(),
         "no observability input must keep output.observability None to preserve previous behavior"
     );
+}
+
+#[tokio::test]
+async fn anthropic_sse_namespaced_custom_call_keeps_identity_and_result_pairing() {
+    let observation = V3RuntimeStreamObservation::default();
+    let tools = json!([{"type":"namespace","name":"functions","tools":[
+        {"type":"custom","name":"exec","format":{"type":"text"}}
+    ]}]);
+    let inbound = json!({"model":"kimi-k3","input":[
+        {"type":"additional_tools","role":"developer","tools":tools.clone()},
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"Run pwd"}]}
+    ]});
+    let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&inbound)
+        .expect("additional_tools must enter the canonical request");
+    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&canonical)
+        .expect("projection context");
+    let event = |kind: &str, body: serde_json::Value| {
+        Ok(format!("event: {kind}\ndata: {body}\n\n").into_bytes())
+    };
+    let input = "const r=await tools.exec_command({cmd:\"pwd\"}); text(r.output);";
+    let provider = Box::pin(stream::iter(vec![
+        event(
+            "message_start",
+            json!({"type":"message_start","message":{"id":"msg_exec","type":"message","role":"assistant","model":"kimi-k3","content":[],"usage":{"input_tokens":10}}}),
+        ),
+        event(
+            "content_block_start",
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_a721e55043a14035a8611be4","name":"functions__exec"}}),
+        ),
+        event(
+            "content_block_delta",
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":json!({"input":input}).to_string()}}),
+        ),
+        event(
+            "content_block_stop",
+            json!({"type":"content_block_stop","index":0}),
+        ),
+        event(
+            "message_delta",
+            json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":2}}),
+        ),
+        event("message_stop", json!({"type":"message_stop"})),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+            V3HubProviderWireProtocol::Anthropic,
+            provider,
+            &observation,
+            &context,
+        )
+        .await
+        .expect("tool use must reach Responses");
+    let call = &response["output"][0];
+    assert_eq!(call["type"], "custom_tool_call");
+    assert_eq!(call["namespace"], "functions");
+    assert_eq!(call["name"], "exec");
+    assert_eq!(call["call_id"], "call_a721e55043a14035a8611be4");
+    assert_eq!(call["input"], input);
+    let followup = json!({"model":"kimi-k3","tools":tools,"input":[
+        call.clone(),
+        {"type":"custom_tool_call_output","call_id":call["call_id"],"output":"/tmp"}
+    ]});
+    let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&followup)
+        .expect("client tool result must enter the next turn");
+    let next_request =
+        super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(canonical)
+            .expect("call and result must project together to Anthropic");
+    assert_eq!(
+        next_request["messages"][0]["content"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        next_request["messages"][0]["content"][0]["name"],
+        "functions__exec"
+    );
+    assert_eq!(
+        next_request["messages"][1]["content"][0]["tool_use_id"],
+        call["call_id"]
+    );
+}
+
+#[tokio::test]
+async fn anthropic_sse_top_level_dotted_custom_names_roundtrip_with_results() {
+    for client_name in [
+        "functions.exec",
+        "mcp__mcpx.exec",
+        "functions.mcp__mcpx.exec",
+    ] {
+        let tools = json!([{"type":"custom","name":client_name,"format":{"type":"text"}}]);
+        let inbound = json!({"model":"glm-5.3","tools":tools,"input":[
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"Run the tool"}]}
+        ]});
+        let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&inbound)
+            .expect("top-level custom declaration must enter Chat Process");
+        let outbound =
+            super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical.clone(),
+            )
+            .expect("top-level custom declaration must reach Anthropic");
+        let provider_name = outbound["tools"][0]["name"]
+            .as_str()
+            .expect("provider tool name must come from this request's outbound projection");
+        let context =
+            V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&canonical)
+                .expect("projection context");
+        let event = |kind: &str, body: serde_json::Value| {
+            Ok(format!("event: {kind}\ndata: {body}\n\n").into_bytes())
+        };
+        let provider = Box::pin(stream::iter(vec![
+            event(
+                "message_start",
+                json!({"type":"message_start","message":{"id":"msg_dotted","type":"message","role":"assistant","model":"glm-5.3","content":[],"usage":{"input_tokens":10}}}),
+            ),
+            event(
+                "content_block_start",
+                json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_dotted","name":provider_name}}),
+            ),
+            event(
+                "content_block_delta",
+                json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"pwd\"}"}}),
+            ),
+            event(
+                "content_block_stop",
+                json!({"type":"content_block_stop","index":0}),
+            ),
+            event(
+                "message_delta",
+                json!({"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":2}}),
+            ),
+            event("message_stop", json!({"type":"message_stop"})),
+        ]));
+        let response =
+            build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context(
+                V3HubProviderWireProtocol::Anthropic,
+                provider,
+                &V3RuntimeStreamObservation::default(),
+                &context,
+            )
+            .await
+            .expect("provider tool use must reach Responses");
+        let call = &response["output"][0];
+        assert_eq!(call["type"], "custom_tool_call", "{client_name}");
+        assert_eq!(call["name"], client_name);
+        assert!(call.get("namespace").is_none(), "{client_name}");
+        assert_eq!(call["call_id"], "call_dotted");
+        assert_eq!(call["input"], "pwd");
+        let followup = json!({"model":"glm-5.3","tools":tools,"input":[
+            call.clone(),
+            {"type":"custom_tool_call_output","call_id":"call_dotted","output":"/tmp"}
+        ]});
+        let canonical = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload(&followup)
+            .expect("tool call and result must enter next turn");
+        let next_request =
+            super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .expect("tool call and result must return to Anthropic");
+        assert_eq!(
+            next_request["messages"][0]["content"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            next_request["messages"][0]["content"][0]["name"],
+            provider_name
+        );
+        assert_eq!(
+            next_request["messages"][1]["content"][0]["tool_use_id"],
+            "call_dotted"
+        );
+    }
+}
+
+#[test]
+fn anthropic_dotted_custom_name_survives_request_entry_and_hooks() {
+    let request = json!({
+        "model": "glm-5.3",
+        "stream": true,
+        "tools": [{"type":"custom","name":"mcp__mcpx.exec","format":{"type":"text"}}],
+        "input": [
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"Run the tool"}]},
+            {"type":"custom_tool_call","id":"item_dotted","call_id":"call_dotted","name":"mcp__mcpx.exec","input":"pwd"},
+            {"type":"custom_tool_call_output","call_id":"call_dotted","output":"/tmp"}
+        ]
+    });
+    let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+        request,
+        V3HubEntryProtocol::Responses,
+        V3HubInvocationSource::Client,
+        V3HubTransportIntent::Sse,
+    );
+    let normalized =
+        super::super::build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("Responses entry canonicalization");
+    assert_eq!(
+        normalized.payload()["messages"][1]["tool_calls"][0]["routecodex_chat_extension"]
+            ["responses_tool_call_type"],
+        "custom_tool_call"
+    );
+    let governed = super::super::compile_v3_hub_relay_request_hooks()
+        .run_from_normalized(
+            normalized,
+            &super::super::V3HubRequestHookProfile::disabled(),
+        )
+        .expect("request hooks");
+    let semantic = governed.payload_arc().as_ref();
+    assert_eq!(
+        semantic["messages"][1]["tool_calls"][0]["routecodex_chat_extension"]
+            ["responses_tool_call_type"],
+        "custom_tool_call"
+    );
+    let source = super::super::request_outbound_format::build_v3_anthropic_provider_request_source_from_chat_canonical(
+        semantic,
+        V3HubEntryProtocol::Responses,
+    )
+    .expect("Anthropic outbound source");
+    assert_eq!(
+        source["messages"][1]["tool_calls"][0]["routecodex_chat_extension"]
+            ["responses_tool_call_type"],
+        "custom_tool_call"
+    );
+    let wire =
+        super::super::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(source)
+            .expect("Anthropic wire projection");
+    assert_eq!(wire["tools"][0]["name"], "mcp__mcpx__exec");
+    let content = wire["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .collect::<Vec<_>>();
+    assert!(
+        content
+            .iter()
+            .any(|part| part["type"] == "tool_use" && part["name"] == "mcp__mcpx__exec"),
+        "{wire}"
+    );
+    assert!(
+        content
+            .iter()
+            .any(|part| part["type"] == "tool_result" && part["tool_use_id"] == "call_dotted"),
+        "{wire}"
+    );
+}
+#[tokio::test]
+async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![Ok(
+            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
+        )]));
+    let error =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("response.reasoning_summary.delta is unsupported"));
 }

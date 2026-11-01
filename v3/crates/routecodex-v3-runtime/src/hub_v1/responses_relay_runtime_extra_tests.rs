@@ -1,30 +1,102 @@
 use super::*;
 
+#[path = "responses_relay_runtime_extra_tests_notifications.rs"]
+mod notification_tests;
+
+#[path = "responses_relay_internal_transport_tests.rs"]
+mod internal_transport_tests;
+
 #[test]
-fn named_unpaired_tool_output_without_call_id_is_not_rejected() {
-    // Live P0 shape (bug f29d7db): a standalone Codex notification output carries
-    // name+namespace but no call_id. codex-rs models.rs
-    // named_unpaired_function_call_output_round_trips_without_call_id documents it
-    // as a valid client item that must survive unchanged.
-    let payload = serde_json::json!({
-        "input": [
-            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]},
+fn responses_relay_json_projects_legacy_output_text_items_without_losing_fields() {
+    let provider_response = json!({
+        "id": "resp_json_legacy_output_items",
+        "status": "completed",
+        "output": [
             {
-                "type": "function_call_output",
-                "id": "fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
-                "name": "send_message_to_thread",
-                "namespace": "codex_tui",
-                "output": "<codex_delegation>cross-thread notification</codex_delegation>"
+                "type": "output_text",
+                "id": "legacy_structured_text",
+                "text": {"segments": ["alpha", 2, true, null]},
+                "annotations": [{
+                    "type": "url_citation",
+                    "url": "https://example.test/source",
+                    "start_index": 0,
+                    "end_index": 5
+                }],
+                "unknown_attr": {"nested": ["value", 7]}
+            },
+            {
+                "type": "output_text",
+                "id": "legacy_missing_text",
+                "annotations": [],
+                "unknown_attr": "keep-missing-text-absence"
+            },
+            {
+                "type": "message",
+                "id": "standard_message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "already standard"}],
+                "unknown_message_attr": {"kept": true}
+            },
+            {
+                "type": "function_call",
+                "id": "standard_tool",
+                "call_id": "call_standard_tool",
+                "name": "lookup",
+                "arguments": "{\"query\":\"unchanged\"}"
             }
         ]
     });
+    let response = project_v3_responses_client_completed_response(&provider_response);
 
-    let ids = find_responses_tool_output_ids(&payload)
-        .expect("named unpaired tool output is a valid client semantic");
+    let output = response["output"]
+        .as_array()
+        .expect("client output must remain an array");
+    assert_eq!(output.len(), 4, "output item order must be preserved");
+
+    let structured = &output[0];
+    assert_eq!(structured["type"], "message");
+    assert_eq!(structured["role"], "assistant");
+    assert_eq!(structured["id"], "legacy_structured_text");
+    let structured_part = &structured["content"][0];
+    assert_eq!(structured_part["type"], "output_text");
+    assert_eq!(
+        structured_part["text"],
+        serde_json::to_string(&provider_response["output"][0]["text"]).unwrap()
+    );
+    assert_eq!(
+        structured_part["annotations"],
+        provider_response["output"][0]["annotations"]
+    );
+    assert_eq!(
+        structured_part["unknown_attr"],
+        provider_response["output"][0]["unknown_attr"]
+    );
     assert!(
-        ids.consumed_ids.is_empty(),
-        "named unpaired output has no call identity to consume: {:?}",
-        ids.consumed_ids
+        structured_part.get("id").is_none(),
+        "the legacy item id belongs on the message wrapper: {structured}"
+    );
+
+    let missing_text = &output[1];
+    assert_eq!(missing_text["type"], "message");
+    assert_eq!(missing_text["id"], "legacy_missing_text");
+    let missing_text_part = &missing_text["content"][0];
+    assert_eq!(missing_text_part["type"], "output_text");
+    assert!(
+        missing_text_part.get("text").is_none(),
+        "a missing provider text must stay absent instead of becoming an empty string"
+    );
+    assert_eq!(
+        missing_text_part["unknown_attr"],
+        "keep-missing-text-absence"
+    );
+
+    assert_eq!(
+        output[2], provider_response["output"][2],
+        "an existing standard message must pass through unchanged"
+    );
+    assert_eq!(
+        output[3], provider_response["output"][3],
+        "an existing tool item must pass through unchanged after the legacy items"
     );
 }
 
@@ -178,58 +250,12 @@ fn provider_response_projection_failure_projects_internal_599() {
 }
 
 #[test]
-fn internal_web_search_canonicalization_failure_is_not_client_invalid_request() {
-    let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchDispatchFailed(
-            "servertool followup canonicalization failed".to_string(),
-        ),
-        None,
+fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![("retry-after".to_string(), b"17".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
     );
-
-    assert_eq!(output.status, 598);
-    let body = match &output.client_body {
-        V3ResponsesRelayClientBody::Json(body) => body,
-        V3ResponsesRelayClientBody::Sse(_) => {
-            panic!("internal web search invariant failure must project as JSON")
-        }
-    };
-    assert_eq!(body["error"]["code"], "responses_relay_runtime_error");
-    assert_ne!(body["error"]["code"], "invalid_responses_request");
-}
-
-#[test]
-fn web_search_sidecar_failure_preserves_typed_code_and_response_lane_without_control_leak() {
-    let output = project_v3_responses_relay_runtime_failure(
-        V3ResponsesRelayRuntimeError::WebSearchSidecarFailed {
-            call_id: "call_ws_1".to_string(),
-            code: "search_unavailable".to_string(),
-            message: "controlled failure".to_string(),
-            retryable: true,
-        },
-        None,
-    );
-
-    assert_eq!(output.status, 599);
-    let body = match &output.client_body {
-        V3ResponsesRelayClientBody::Json(body) => body,
-        V3ResponsesRelayClientBody::Sse(_) => {
-            panic!("typed web_search sidecar failure must project as JSON")
-        }
-    };
-    assert_eq!(body["error"]["code"], "search_unavailable");
-    assert_eq!(
-        body["error"]["message"],
-        "web_search hooks sidecar failed for call call_ws_1: controlled failure"
-    );
-    assert!(!body.to_string().contains("retryable"));
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
-}
-
-#[test]
-fn provider_failure_output_projects_error_chain_body_without_success_wrapping() {
     let terminal_projection = V3ErrorHandlingCenter::project_terminal_decision(
         V3ErrorHandlingCenter::decide_provider(
             V3ErrorHandlingCenterInput {
@@ -262,22 +288,30 @@ fn provider_failure_output_projects_error_chain_body_without_success_wrapping() 
     );
     let output = provider_failure_output(
         V3ResponsesRelayProviderFailure {
+            attempt_source: None,
             status: 429,
+            provider_status: Some(429),
+            provider_body_read_failure: None,
             policy_error_type: "rate_limit_error".to_string(),
             policy_error_message: "controlled rate limit".to_string(),
             provider_id: "controlled".to_string(),
             source_stage: "V3ProviderReqOutbound09TransportRequest",
             terminal_projection: Some(terminal_projection),
+            terminal_disposition: Some(
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            ),
+            error_operator_fault: None,
             observability: None,
+            failed_attempt_evidence: None,
             matched_policy: None,
+            response_processing_code: None,
         },
         vec!["V3ProviderReqOutbound09TransportRequest"],
         0,
     );
-
     assert_eq!(
-        output.status, 502,
-        "Error06 terminal exhaustion uses the declared public network error"
+        output.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
     );
     let body = match &output.client_body {
         V3ResponsesRelayClientBody::Json(body) => body,
@@ -324,43 +358,10 @@ fn provider_runtime_http_status_preserves_upstream_429_for_policy_projection() {
         "goaichat",
         None,
     );
-
     assert_eq!(failure.status, 429);
-    assert_eq!(failure.policy_error_type, "provider_runtime_error");
-}
-
-#[test]
-fn provider_internal_transport_request_lane_projects_598_without_provider_policy() {
-    let failure = super::responses_relay_failures::provider_runtime_failure(
-        V3ProviderError::InternalTransport {
-            request_id: "req-internal".to_string(),
-            provider_id: "goaichat".to_string(),
-            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
-            reason: "handoff transition failed".to_string(),
-        },
-        "goaichat",
-        None,
-    );
-
-    assert_eq!(failure.status, 598);
-    assert!(failure.terminal_projection.is_some());
-}
-
-#[test]
-fn provider_internal_transport_response_lane_projects_599_without_provider_policy() {
-    let failure = super::responses_relay_failures::provider_runtime_failure(
-        V3ProviderError::InternalTransport {
-            request_id: "req-internal".to_string(),
-            provider_id: "goaichat".to_string(),
-            lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
-            reason: "provider frame sequence mismatch".to_string(),
-        },
-        "goaichat",
-        None,
-    );
-
-    assert_eq!(failure.status, 599);
-    assert!(failure.terminal_projection.is_some());
+    // A real upstream 429 takes the typed upstream code, not a catch-all.
+    assert_eq!(failure.policy_error_type, "provider_http_429");
+    assert_eq!(failure.provider_status, Some(429));
 }
 
 fn test_provider_request(
@@ -372,7 +373,7 @@ fn test_provider_request(
             "https://provider.example/v1/responses",
             V3ProviderAuthHandle {
                 alias: "provider_snap:key1:test".to_string(),
-                secret: V3ProviderAuthSecretHandle::Environment(
+                secret: routecodex_v3_provider_responses::V3ProviderAuthSecretHandle::Environment(
                     "ROUTECODEX_TEST_KEY".to_string(),
                 ),
             },
@@ -710,29 +711,20 @@ async fn provider_sse_json_completed_wins_over_opaque_event_label() {
 }
 
 #[tokio::test]
-async fn provider_sse_incomplete_enters_error_chain_with_usage_observation() {
+async fn provider_sse_content_filter_incomplete_preserves_terminal_and_usage() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
+            b"event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete_filtered\",\"status\":\"incomplete\",\"incomplete_details\":{\"reason\":\"content_filter\"},\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n".to_vec(),
         )]));
-    let error =
+    let response =
         build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
             .await
-            .expect_err("provider response.incomplete must enter the error chain");
-
-    assert!(
-        error
-            .to_string()
-            .contains("provider response ended before completion: max_output_tokens"),
-        "unexpected provider error: {error}"
-    );
+            .expect("content_filter is a representable business terminal");
+    assert_eq!(response["status"], "incomplete");
+    assert_eq!(response["incomplete_details"]["reason"], "content_filter");
+    assert_eq!(response["usage"]["output_tokens"], 5);
     let snapshot = observation.snapshot().unwrap();
     assert_eq!(snapshot.response_status.as_deref(), Some("incomplete"));
-    assert_eq!(
-        snapshot.finish_reason.as_deref(),
-        Some("length"),
-        "max_output_tokens incomplete terminal must record finish_reason=length"
-    );
 }
 
 #[tokio::test]
@@ -793,8 +785,8 @@ async fn client_sse_function_call_projection_preserves_missing_arguments_without
         .expect("missing arguments must not turn a native tool call into 502");
     let text = frames.join("\n");
     assert!(text.contains("\"call_id\":\"call_missing_args\""));
-    assert!(text.contains("\"arguments\":\"\""));
-    assert!(text.contains("response.function_call_arguments.done"));
+    assert!(!text.contains("\"arguments\""));
+    assert!(!text.contains("response.function_call_arguments.done"));
     assert!(text.contains("response.completed"));
 }
 
@@ -849,21 +841,48 @@ async fn client_sse_completed_response_projects_output_text_items_to_message_sha
             completed.contains(r#""output":[{"content":[{"text":"done","type":"output_text"}],"role":"assistant","type":"message"}]"#),
             "completed response.output must use message shape consistent with output_item.done: {completed}"
         );
-    let done = text
-        .find("event: response.done")
-        .map(|index| &text[index..])
-        .expect("response.done frame must be present");
+    // Responses 客户端帧序列与上游 provider/Direct 路径一致：协议没有
+    // `response.done` 事件，`data: [DONE]` 是 Chat Completions 约定，终态只能由
+    // response.completed/response.incomplete/response.failed 承载。
     assert!(
-            done.contains(r#""output":[{"content":[{"text":"done","type":"output_text"}],"role":"assistant","type":"message"}]"#),
-            "done response.output must use message shape consistent with output_item.done: {done}"
-        );
+        !text.contains("event: response.done"),
+        "Responses client stream must not carry a response.done frame: {text}"
+    );
+    assert!(
+        !text.contains("data: [DONE]"),
+        "Responses client stream must not carry a Chat-completions [DONE] terminator: {text}"
+    );
+    assert!(
+        text.contains("event: response.in_progress"),
+        "response.in_progress frame must be present: {text}"
+    );
+    let created_frame = {
+        let rest = text
+            .find("event: response.created")
+            .map(|index| &text[index..])
+            .expect("response.created frame must be present");
+        // 截到该 SSE 帧结束（空行）；只截首个换行会退化成 `event:` 行而永真。
+        &rest[..rest.find("\n\n").unwrap_or(rest.len())]
+    };
+    assert!(
+        created_frame.contains(r#""status":"in_progress""#)
+            && created_frame.contains(r#""output":[]"#),
+        "response.created must carry an in-progress snapshot with empty output: {created_frame}"
+    );
+    // in-progress 快照必须以 null 显式表达终态字段尚未产生，而不是省略或填充。
+    for absent in [r#""usage":{"#, r#""incomplete_details":{"#] {
+        assert!(!created_frame.contains(absent), "{created_frame}");
+    }
+    for present in [r#""usage":null"#, r#""incomplete_details":null"#] {
+        assert!(created_frame.contains(present), "{created_frame}");
+    }
 }
 
 #[tokio::test]
 async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
     // response.incomplete 是 Responses 协议合法终态：必须保留部分输出并投影
-    // response.created + output_item.done + response.incomplete + response.done
-    // + [DONE]，禁止映射成 response.failed 丢弃部分输出。
+    // response.created + output_item.done + response.incomplete，禁止映射成
+    // response.failed 丢弃部分输出，也不得追加非协议终止帧。
     let projected = collect_projected_sse(
         build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(json!({
             "id": "resp_incomplete_shape",
@@ -907,9 +926,160 @@ async fn client_sse_incomplete_terminal_streams_partial_output_not_failed() {
         "partial output must not be dropped: {text}"
     );
     assert!(
-        text.contains("event: response.done") && text.contains("data: [DONE]"),
-        "incomplete terminal must close with response.done + [DONE]: {text}"
+        !text.contains("event: response.done"),
+        "incomplete terminal must not add a non-protocol response.done frame: {text}"
     );
+    assert!(
+        !text.contains("data: [DONE]"),
+        "incomplete terminal must not add a Chat-completions [DONE] terminator: {text}"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_refusal_without_stop_details_survives_materialization_and_projection() {
+    let raw = br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_refusal","type":"message","role":"assistant","model":"wire-test","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"provider declined this request"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null},"usage":{"output_tokens":5}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+    let response = materialize_v3_provider_sse_as_canonical_response(
+        V3HubProviderWireProtocol::Anthropic,
+        Box::pin(stream::iter(vec![Ok(raw.to_vec())])),
+    )
+    .await
+    .expect("representable Anthropic refusal must materialize");
+    assert_eq!(response["status"], "incomplete");
+    assert_eq!(response["incomplete_details"]["reason"], "content_filter");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "provider declined this request"
+    );
+    assert!(response.get("stop_details").is_none());
+    let projected = collect_projected_sse(
+        build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05(response),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()
+    .expect("refusal must project")
+    .concat();
+    assert!(projected.contains("event: response.incomplete"));
+    assert!(projected.contains("provider declined this request"));
+    assert!(!projected.contains("event: response.completed"));
+
+    struct RefusalTransport(Vec<u8>);
+    #[async_trait::async_trait]
+    impl ResponsesTransport for RefusalTransport {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            if request.url() != "http://controlled.invalid/v1/messages?beta=true" {
+                eprintln!(
+                    "fixture first divergence: unmatched Anthropic URL {} -> HTTP 404",
+                    request.url()
+                );
+                return Err(V3ProviderError::HttpStatus {
+                    response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                        request_id: request.request_id().to_string(),
+                        provider_id: request.provider_id().to_string(),
+                        status: 404,
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                        body_read_failure: None,
+                    }),
+                });
+            }
+            Ok(V3ProviderResp14Raw::from_sse(
+                request.request_id().to_string(),
+                request.provider_id().to_string(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"text/event-stream".to_vec(),
+                }],
+                Box::pin(stream::iter(
+                    String::from_utf8(self.0.clone())
+                        .unwrap()
+                        .split("\n\n")
+                        .filter(|frame| !frame.is_empty())
+                        .map(|frame| Ok(format!("{frame}\n\n").into_bytes()))
+                        .collect::<Vec<_>>(),
+                )),
+            ))
+        }
+    }
+    std::env::set_var("V3_REFUSAL_HARNESS_KEY", "controlled-secret");
+    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(r#"
+version = 3
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+[providers.test]
+type = "anthropic"
+base_url = "http://controlled.invalid"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "V3_REFUSAL_HARNESS_KEY" }] }
+health = { enabled = false, failure_threshold = 1, cooldown_ms = 5000 }
+responses = { process = "chat", streaming = "always" }
+[providers.test.models.test]
+wire_name = "wire-test"
+capabilities = ["text", "tools"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }]
+"#).unwrap()).unwrap();
+    let output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new("test", "default", "refusal-no-details").unwrap(),
+            request_id: "refusal-no-details".to_string(),
+            payload: json!({"model":"test.test","input":"controlled response regression","stream":true,
+                "tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{"q":{"type":"string"}},"required":["q"]}}]}),
+        },
+        &RefusalTransport(raw.to_vec()),
+        V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
+        V3ResponsesRelayRetryPolicy::default(), false,
+        Some(Arc::new(|_, failure| eprintln!("refusal harness typed failure: {failure:?}"))),
+        None, None, None,
+        BTreeSet::new(), V3ResponsesRelayRuntimeSeeds::default(),
+    ).await.expect("real relay chain must accept representable refusal");
+    assert_eq!(output.status, 200, "relay failure: {:?}", output);
+    let body = match output.client_body {
+        V3ResponsesRelayClientBody::Sse(body) => body,
+        V3ResponsesRelayClientBody::Json(body) => panic!("relay failure instead of SSE: {body}"),
+    };
+    let text = body
+        .map(|item| String::from_utf8(item).unwrap())
+        .collect::<Vec<_>>()
+        .await
+        .concat();
+    assert!(text.contains("event: response.incomplete"), "{text}");
+    assert!(text.contains("provider declined this request"), "{text}");
+    assert!(!text.contains("event: response.completed"), "{text}");
 }
 
 #[tokio::test]
@@ -1013,156 +1183,23 @@ data: {"type":"message_stop"}
 }
 
 #[tokio::test]
-async fn anthropic_provider_sse_duplicate_message_start_before_content_merges_metadata() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(br#"event: message_start
-data: {"type":"message_start","message":{"id":"msg_dup","type":"message","role":"assistant","content":[],"model":"claude-fable-5","usage":{"input_tokens":7}}}
-
-"#
-            .to_vec()),
-            Ok(br#"event: message_start
-data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"cache_read_input_tokens":5,"output_tokens":0,"service_tier":"standard"}}}
-
-"#
-            .to_vec()),
-            Ok(br#"event: content_block_start
-data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
-
-"#
-            .to_vec()),
-            Ok(br#"event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"duplicate start tolerated"}}
-
-"#
-            .to_vec()),
-            Ok(br#"event: content_block_stop
-data: {"type":"content_block_stop","index":0}
-
-"#
-            .to_vec()),
-            Ok(br#"event: message_delta
-data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}
-
-"#
-            .to_vec()),
-            Ok(br#"event: message_stop
-data: {"type":"message_stop"}
-
-"#
-            .to_vec()),
-        ]));
-    let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
-        V3HubProviderWireProtocol::Anthropic,
-        provider,
-        &observation,
-    )
-    .await
-    .expect("compatible duplicate message_start must be provider codec compatible");
-
-    assert_eq!(response["id"], "msg_dup");
-    assert_eq!(response["model"], "claude-fable-5");
-    assert_eq!(response["status"], "completed");
-    assert_eq!(response["finish_reason"], "end_turn");
-    assert_eq!(
-        response["output"][0]["content"][0]["text"],
-        "duplicate start tolerated"
-    );
-    assert_eq!(response["usage"]["input_tokens"], 7);
-    assert_eq!(response["usage"]["output_tokens"], 3);
-    assert_eq!(response["usage"]["total_tokens"], 10);
-    assert_eq!(response["usage"]["cache_read_input_tokens"], 5);
-}
-
-#[tokio::test]
-async fn anthropic_provider_sse_duplicate_message_start_eof_without_stop_still_fails() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(br#"event: message_start
-data: {"type":"message_start","message":{"id":"msg_dup_eof","type":"message","role":"assistant","model":"claude-fable-5","content":[],"usage":{"input_tokens":7}}}
-
-"#
-            .to_vec()),
-            Ok(br#"event: message_start
-data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_dup_eof","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"output_tokens":0}}}
-
-"#
-            .to_vec()),
-        ]));
-    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
-        V3HubProviderWireProtocol::Anthropic,
-        provider,
-        &observation,
-    )
-    .await
-    .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("Anthropic provider event stream ended without message_stop"));
-    assert!(!error.to_string().contains("duplicate message_start"));
-}
-
-#[tokio::test]
-async fn anthropic_provider_sse_duplicate_message_start_different_id_fails() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_one\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
-            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_two\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
-        ]));
-    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
-        V3HubProviderWireProtocol::Anthropic,
-        provider,
-        &observation,
-    )
-    .await
-    .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("duplicate message_start with different id"));
-}
-
-#[tokio::test]
-async fn anthropic_provider_sse_duplicate_message_start_after_content_start_fails() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![
-            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
-            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n".to_vec()),
-            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_after_content\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
-        ]));
-    let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
-        V3HubProviderWireProtocol::Anthropic,
-        provider,
-        &observation,
-    )
-    .await
-    .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("duplicate message_start after content_block_start"));
-}
-
-#[tokio::test]
 async fn anthropic_provider_sse_message_stop_closes_open_thinking_block_without_502() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![
             Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_glmrelay\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"glm-5.2\",\"content\":[],\"usage\":{\"input_tokens\":210584,\"output_tokens\":0}}}\n\n".to_vec()),
             Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n".to_vec()),
             Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Working on it\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Visible answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n".to_vec()),
             Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":205404,\"cache_read_input_tokens\":203776,\"output_tokens\":28},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n".to_vec()),
             Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
     let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
-            V3HubProviderWireProtocol::Anthropic,
-            provider,
-            &observation,
-        )
-        .await
-        .expect(
-            "terminal Anthropic message_stop must preserve completed thinking instead of raising synthetic 502",
-        );
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("terminal Anthropic message_stop must preserve thinking alongside visible text");
 
     assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "reasoning");
@@ -1179,7 +1216,7 @@ async fn anthropic_provider_sse_rejects_thinking_text_alias() {
             Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_alias\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
             Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"text\":\"alias text\"}}\n\n".to_vec()),
             Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
-            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
     let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
         V3HubProviderWireProtocol::Anthropic,
@@ -1191,7 +1228,7 @@ async fn anthropic_provider_sse_rejects_thinking_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic codec malformed thinking"));
 }
 
 #[tokio::test]
@@ -1212,7 +1249,7 @@ async fn anthropic_provider_sse_rejects_thinking_delta_text_alias() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+        .contains("Anthropic thinking_delta requires thinking"));
 }
 
 #[tokio::test]
@@ -1221,6 +1258,8 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
     let provider = Box::pin(stream::iter(vec![
             Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_redacted_alias\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".to_vec()),
             Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"signature\":\"alias data\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
         ]));
     let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
         V3HubProviderWireProtocol::Anthropic,
@@ -1230,33 +1269,39 @@ async fn anthropic_provider_sse_rejects_redacted_signature_alias() {
     .await
     .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
+    assert!(error.to_string().contains("Anthropic codec malformed data"));
 }
 
 #[tokio::test]
-async fn anthropic_provider_sse_rejects_native_and_alias_dual_truth() {
+async fn anthropic_provider_sse_preserves_native_reasoning_with_extra_provider_fields() {
     for content_block in [
         r#"{"type":"thinking","thinking":"native","text":"alias"}"#,
         r#"{"type":"redacted_thinking","data":"native","signature":"alias"}"#,
     ] {
         let observation = V3RuntimeStreamObservation::default();
         let stream = format!(
-                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\n"
+                "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_dual\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{content_block}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\"}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
             );
-        let provider = Box::pin(stream::iter(vec![Ok(stream.into_bytes())]));
-        let error = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        let business = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Visible answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n";
+        let terminal = stream.find("event: message_delta").unwrap();
+        let provider = Box::pin(stream::iter(vec![
+            Ok(stream[..terminal].as_bytes().to_vec()),
+            Ok(business.as_bytes().to_vec()),
+            Ok(stream[terminal..].as_bytes().to_vec()),
+        ]));
+        let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
             V3HubProviderWireProtocol::Anthropic,
             provider,
             &observation,
         )
         .await
-        .unwrap_err();
-
-        assert!(error
-            .to_string()
-            .contains("Anthropic codec malformed reasoning content"));
+        .expect("representable reasoning with extra fields and visible text must not be rejected");
+        assert_eq!(response["status"], "completed");
+        let serialized = response["output"][0].to_string();
+        assert!(
+            serialized.contains("native") && serialized.contains("alias"),
+            "{serialized}"
+        );
     }
 }
 
@@ -1474,20 +1519,4 @@ async fn responses_provider_sse_stream_output_without_identity_does_not_overwrit
         response["output"][1]["summary"][0]["text"],
         "terminal reasoning"
     );
-}
-
-#[tokio::test]
-async fn responses_provider_sse_unknown_response_event_fails_instead_of_discarding() {
-    let observation = V3RuntimeStreamObservation::default();
-    let provider = Box::pin(stream::iter(vec![Ok(
-            b"event: response.reasoning_summary.delta\ndata: {\"type\":\"response.reasoning_summary.delta\",\"delta\":\"lost\"}\n\n".to_vec(),
-        )]));
-    let error =
-        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
-            .await
-            .unwrap_err();
-
-    assert!(error
-        .to_string()
-        .contains("response.reasoning_summary.delta is unsupported"));
 }

@@ -1,0 +1,55 @@
+[path-union] HEAD 4597c4a0e82153d76eaca50c65b20242e8d076f9
+[path-union] base f7fc9e17b9a0f7fb66f3dc906c8808634e551334
+[path-union] source-counts {"base...HEAD":814,"worktree-vs-HEAD":29,"staged":29,"untracked":0}
+[path-union] union-paths 834 code-in-scope 45 planned 29
+[path-union] index-blobs 3962 index-hash 1b2f2e46499b487b070fce07b662a54a31464ed45b1e59edb7afc9886c480527
+[path-union] workspace-hash a62adbc6a4a60e2429bcafab0bb6fb18f2d237c18184aba655550ce17cd40e0f
+[path-union] limit 500
+[path-union] planned files (path | sources | status | work | staged | blob):
+  NEW v3/scripts/tests/protocol-live-mock/assertions-client.mjs | staged+worktree-vs-HEAD | A | work=261 | staged=261 | c5758bec826a
+  NEW v3/scripts/tests/protocol-live-mock/assertions-client.test.mjs | staged+worktree-vs-HEAD | A | work=424 | staged=424 | d591d4ad6777
+  NEW v3/scripts/tests/protocol-live-mock/assertions-common.mjs | staged+worktree-vs-HEAD | A | work=168 | staged=168 | 4bbf85188f3e
+  NEW v3/scripts/tests/protocol-live-mock/assertions-test-support.mjs | staged+worktree-vs-HEAD | A | work=42 | staged=42 | 0239d2a0bc0e
+  MOD v3/scripts/tests/protocol-live-mock/assertions.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=245 | staged=245 | 5150f5bc936e
+  MOD v3/scripts/tests/protocol-live-mock/assertions.test.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=366 | staged=366 | 2e263be1bdcc
+  NEW v3/scripts/tests/protocol-live-mock/case-contract.mjs | staged+worktree-vs-HEAD | A | work=188 | staged=188 | af1dd4e7aad5
+  NEW v3/scripts/tests/protocol-live-mock/case-runner-test-support.mjs | staged+worktree-vs-HEAD | A | work=349 | staged=349 | baf5eac627c7
+  NEW v3/scripts/tests/protocol-live-mock/case-runner-tools.test.mjs | staged+worktree-vs-HEAD | A | work=129 | staged=129 | d7ec59603317
+  MOD v3/scripts/tests/protocol-live-mock/case-runner.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=457 | staged=457 | 29876837079a
+  MOD v3/scripts/tests/protocol-live-mock/case-runner.test.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=297 | staged=297 | 76193164e555
+  NEW v3/scripts/tests/protocol-live-mock/corpus-contract.mjs | staged+worktree-vs-HEAD | A | work=19 | staged=19 | ec257270fd9a
+  NEW v3/scripts/tests/protocol-live-mock/corpus-validation.mjs | staged+worktree-vs-HEAD | A | work=325 | staged=325 | 444db54dc744
+  MOD v3/scripts/tests/protocol-live-mock/corpus.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=186 | staged=186 | bb272f929b19
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-common.mjs | staged+worktree-vs-HEAD | A | work=22 | staged=22 | 8c6a9862e42a
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-config.mjs | staged+worktree-vs-HEAD | A | work=350 | staged=350 | 8aa9d72211da
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-http.mjs | staged+worktree-vs-HEAD | A | work=147 | staged=147 | cbc2ee8b5567
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-network.mjs | staged+worktree-vs-HEAD | A | work=175 | staged=175 | abfbede2505b
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-process.test.mjs | staged+worktree-vs-HEAD | A | work=324 | staged=324 | 59e8862a442c
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-test-support.mjs | staged+worktree-vs-HEAD | A | work=65 | staged=65 | 778b3be41ccd
+  NEW v3/scripts/tests/protocol-live-mock/lifecycle-transport.test.mjs | staged+worktree-vs-HEAD | A | work=139 | staged=139 | 9449ba212335
+  MOD v3/scripts/tests/protocol-live-mock/lifecycle.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=411 | staged=411 | 005fd876b8a7
+  MOD v3/scripts/tests/protocol-live-mock/lifecycle.test.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=273 | staged=273 | 445e574d85cc
+  NEW v3/scripts/tests/protocol-live-mock/protocol-semantics-fixtures.test.mjs | staged+worktree-vs-HEAD | A | work=236 | staged=236 | aa94ebaa2862
+  NEW v3/scripts/tests/protocol-live-mock/protocol-semantics-test-support.mjs | staged+worktree-vs-HEAD | A | work=30 | staged=30 | db2b0ad88291
+  NEW v3/scripts/tests/protocol-live-mock/protocol-semantics-tools.test.mjs | staged+worktree-vs-HEAD | A | work=345 | staged=345 | dbc6f5c69c50
+  MOD v3/scripts/tests/protocol-live-mock/protocol-semantics.test.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=229 | staged=229 | 367db8249e15
+  NEW v3/scripts/tests/protocol-live-mock/report-model.mjs | staged+worktree-vs-HEAD | A | work=404 | staged=404 | 84b9847c2dad
+  MOD v3/scripts/tests/protocol-live-mock/report.mjs | base...HEAD+staged+worktree-vs-HEAD | AM | work=115 | staged=115 | 81224c422716
+[path-union] other in-scope code paths (not this round): 16
+  other docs/reports/magpie-live-matrix/final-verification/native-positive-control-20261012/control.mjs | base...HEAD | A | work=232
+  other docs/reports/magpie-live-matrix/final-verification/native-positive-control-20261012/evidence/red-control/protocol-semantics.reverted.mjs | base...HEAD | A | work=480
+  other docs/reports/magpie-live-matrix/final-verification/native-positive-control-20261012/evidence/red-control/red-check.mjs | base...HEAD | A | work=11
+  other docs/reports/magpie-live-matrix/final-verification/native-positive-control-20261012/verify-saved-cases.mjs | base...HEAD | A | work=61
+  other docs/reports/magpie-live-matrix/native-echo-control-20261012/control.mjs | base...HEAD | A | work=232
+  other scripts/tests/protocol-live-mock-support-selftests.mjs | base...HEAD | A | work=48
+  other v3/scripts/tests/protocol-live-mock/corpus.test.mjs | base...HEAD | A | work=386
+  other v3/scripts/tests/protocol-live-mock/media-history.test.mjs | base...HEAD | A | work=110
+  other v3/scripts/tests/protocol-live-mock/mock-provider.mjs | base...HEAD | A | work=422
+  other v3/scripts/tests/protocol-live-mock/mock-provider.test.mjs | base...HEAD | A | work=373
+  other v3/scripts/tests/protocol-live-mock/protocol-semantics.mjs | base...HEAD | A | work=495
+  other v3/scripts/tests/protocol-live-mock/report.test.mjs | base...HEAD | A | work=255
+  other v3/scripts/tests/protocol-live-mock/tool-consumer.mjs | base...HEAD | A | work=116
+  other v3/scripts/tests/protocol-live-mock/tool-consumer.test.mjs | base...HEAD | A | work=190
+  other v3/scripts/tests/v3-protocol-live-mock-matrix.mjs | base...HEAD | A | work=280
+  other v3/scripts/verify-ci.mjs | base...HEAD | M | work=12
+[path-union] PASS: all planned code files present, <limit, staged==worktree

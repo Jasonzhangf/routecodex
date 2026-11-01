@@ -20,6 +20,7 @@ fn directory_compilation_uses_referenced_models_only() {
                 web_search_execution_mode: None,
                 web_search_backend: None,
                 features: BTreeMap::new(),
+                availability: None,
             },
         ),
         (
@@ -39,6 +40,7 @@ fn directory_compilation_uses_referenced_models_only() {
                 web_search_execution_mode: None,
                 web_search_backend: None,
                 features: BTreeMap::new(),
+                availability: None,
             },
         ),
     ]);
@@ -54,18 +56,16 @@ fn snake_case_web_search_mode_parses_via_alias() {
         r#"
 wireName = "MiniMax-M3"
 capabilities = ["web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
+web_search_execution_mode = "native_remote_search_tool_mix"
 "#,
     )
     .expect("parse");
     assert_eq!(
         parsed.web_search_execution_mode().as_str(),
-        "metadata_center_local_search",
+        "native_remote_search_tool_mix",
         "snake_case web_search_execution_mode must parse (found {:?})",
         parsed.web_search_execution_mode()
     );
-    assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
 }
 
 #[test]
@@ -73,16 +73,14 @@ fn camel_case_web_search_mode_still_parses() {
     let parsed: V2ProviderModelConfig = toml::from_str(
         r#"
 wireName = "MiniMax-M3"
-webSearchExecutionMode = "metadata_center_local_search"
-webSearchBackend = "MiniMax-M3"
+webSearchExecutionMode = "native_remote_search_tool_mix"
 "#,
     )
     .expect("parse");
     assert_eq!(
         parsed.web_search_execution_mode().as_str(),
-        "metadata_center_local_search"
+        "native_remote_search_tool_mix"
     );
-    assert_eq!(parsed.web_search_backend.as_deref(), Some("MiniMax-M3"));
 }
 
 #[test]
@@ -119,6 +117,7 @@ id = "test-provider"
 enabled = true
 type = "openai"
 baseURL = "http://127.0.0.1:9999/v1"
+local = true
 timeout = 900000
 defaultModel = "model"
 
@@ -159,6 +158,7 @@ id = "test-provider"
 enabled = true
 type = "openai"
 baseURL = "http://127.0.0.1:9999/v1"
+local = true
 timeout = 900000
 defaultModel = "model"
 
@@ -214,6 +214,7 @@ id = "test-provider"
 enabled = true
 type = "openai"
 baseURL = "http://127.0.0.1:9999/v1"
+local = true
 defaultModel = "model"
 sse_first_frame_timeout_ms = 600000
 
@@ -236,7 +237,7 @@ apiKey = "test-key"
     std::fs::remove_dir_all(&tmp_sse).ok();
 
     // (2b) 缺省字段端到点：无 timeout 时，V2→V3 fallback 必须等于
-    //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（300_000），不能为 0/默认
+    //      DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS（60_000），不能为 0/默认
     //      隐藏 bug。
     let tmp_default = std::env::temp_dir().join(format!(
         "rccv3-timeout-default-{}-{}",
@@ -276,7 +277,7 @@ apiKey = "test-key"
         .expect("provider compiled");
     assert_eq!(
         authoring_default.request_timeout_ms, DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS,
-        "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (300_000)"
+        "absent timeout must fall back to DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS (60_000)"
     );
     std::fs::remove_dir_all(&tmp_default).ok();
 
@@ -428,6 +429,7 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
             provider_type: "anthropic".into(),
             base_url: "https://api.example.com/v1".into(),
             default_model: "model-x".into(),
+            interfaces: BTreeMap::new(),
             auth: V2ProviderAuthConfig {
                 api_key: None,
                 env: Some("GEN_PROVIDER_KEY".into()),
@@ -445,8 +447,10 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
             compatibility_profile: None,
             models: BTreeMap::new(),
             v3: None,
+            local: None,
             timeout: None,
             sse_first_frame_timeout_ms: None,
+            headers: BTreeMap::new(),
         },
     };
     let generated = generate_v2_provider_config_file(&config).expect("generate");
@@ -555,4 +559,193 @@ fn provider_auth_secret_file_auto_discovery_rejects_mixed_authoring() {
     assert!(error
         .to_string()
         .contains("cannot combine entries with secretFile"));
+}
+
+#[test]
+fn provider_headers_parse_into_authoring_config() {
+    use std::io::Write;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "rccv3-provider-headers-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    let provider_dir = tmp.join("provider").join("test-provider");
+    std::fs::create_dir_all(&provider_dir).expect("create provider dir");
+    let mut file = std::fs::File::create(provider_dir.join("config.v2.toml")).expect("file");
+    file.write_all(
+        br#"
+providerId = "test-provider"
+
+[provider]
+id = "test-provider"
+enabled = true
+type = "responses"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "deepseek-v4.1-flash"
+
+[provider.auth]
+type = "apikey"
+apiKey = "test-key"
+
+[provider.headers]
+x-openai-actor-authorization = "local-image-extension"
+
+[provider.models."deepseek-v4.1-flash"]
+wireName = "deepseek-v4.1-flash"
+"#,
+    )
+    .expect("write");
+
+    let mut referenced_models: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    referenced_models.insert(
+        "test-provider".to_string(),
+        BTreeSet::from(["deepseek-v4.1-flash".to_string()]),
+    );
+    let (providers, _sources) =
+        compile_provider_directory(&tmp, &referenced_models).expect("compile provider directory");
+    let authoring = providers.get("test-provider").expect("provider compiled");
+    assert_eq!(
+        authoring
+            .headers
+            .get("x-openai-actor-authorization")
+            .map(String::as_str),
+        Some("local-image-extension")
+    );
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn configured_authorization_header_is_rejected_case_insensitively_after_trim() {
+    let source = r#"
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+endpoints = ["chat_completions"]
+
+[providers.test]
+type = "openai_chat"
+base_url = "https://provider.example/v1"
+default_model = "model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEST_KEY" }] }
+headers = { "  aUtHoRiZaTiOn  " = "Bearer replacement" }
+
+[providers.test.models.model]
+wire_name = "wire-model"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+
+[forwarders."fwd.primary"]
+model = "model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "test", model = "model", key = "key", priority = 1 }]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.primary", priority = 1 }]
+"#;
+    let authoring = crate::parse_v3_config_02_authoring(source).expect("config parses");
+    let error = crate::compile_v3_config_05_manifest(authoring)
+        .expect_err("provider Authorization header must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("headers cannot define Authorization"),
+        "unexpected error: {error}"
+    );
+}
+
+/// Minimal valid V3 authoring config whose provider model block is supplied by
+/// the caller, so the retired web_search arms can be exercised through the
+/// same public compile entry the real config loader uses.
+fn v3_config_with_model_block(model_block: &str) -> String {
+    let head = r#"
+version = 3
+
+[pipelines.hub_v1]
+skeleton = "hub_v1"
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "primary"
+endpoints = ["responses"]
+
+[providers.test]
+type = "openai_chat"
+base_url = "https://provider.example/v1"
+default_model = "model"
+auth = { type = "api_key", entries = [{ alias = "key", env = "TEST_KEY" }] }
+
+[providers.test.models.model]
+wire_name = "wire-model"
+capabilities = ["text", "tools"]
+supports_streaming = true
+supports_thinking = false
+"#;
+    let tail = r#"
+
+[forwarders."fwd.primary"]
+model = "model"
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "test", model = "model", key = "key", priority = 1 }]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "fwd.primary", priority = 1 }]
+"#;
+    format!("{head}{model_block}\n{tail}")
+}
+
+#[test]
+fn retired_metadata_center_local_search_mode_is_rejected_at_compile() {
+    // Regression lock: RouteCodex has no local search backend, so the retired
+    // mode must fail compile-time validation instead of silently reaching a
+    // runtime that cannot execute it.
+    let source =
+        v3_config_with_model_block("web_search_execution_mode = \"metadata_center_local_search\"");
+    let authoring = crate::parse_v3_config_02_authoring(&source).expect("config parses");
+    let error = crate::compile_v3_config_05_manifest(authoring)
+        .expect_err("metadata_center_local_search must be rejected at compile time");
+    let text = error.to_string();
+    assert!(
+        text.contains("metadata_center_local_search") && text.contains("no longer supported"),
+        "unexpected error: {text}"
+    );
+}
+
+#[test]
+fn retired_web_search_backend_binding_is_rejected_at_compile() {
+    // Regression lock: a non-empty web_search_backend implies the retired
+    // local-search path and must be rejected rather than ignored.
+    let source = v3_config_with_model_block("web_search_backend = \"MiniMax-M3\"");
+    let authoring = crate::parse_v3_config_02_authoring(&source).expect("config parses");
+    let error = crate::compile_v3_config_05_manifest(authoring)
+        .expect_err("web_search_backend must be rejected at compile time");
+    let text = error.to_string();
+    assert!(
+        text.contains("web_search_backend") && text.contains("no longer supported"),
+        "unexpected error: {text}"
+    );
+}
+
+#[test]
+fn provider_owned_hosted_web_search_still_compiles() {
+    // The rejection must stay narrow: provider-owned hosted web_search is the
+    // supported path and must keep compiling.
+    let source =
+        v3_config_with_model_block("web_search_execution_mode = \"native_remote_search_tool_mix\"");
+    let authoring = crate::parse_v3_config_02_authoring(&source).expect("config parses");
+    crate::compile_v3_config_05_manifest(authoring)
+        .expect("provider-owned hosted web_search must compile");
 }

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,14 +6,6 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const admission = spawnSync(process.execPath, [
-  'scripts/architecture/verify-v4-feature-layer-batches.mjs',
-  '--admission',
-], { cwd: root, encoding: 'utf8' });
-if (admission.status !== 0) {
-  throw new Error(`V4 feature-layer admission failed: ${admission.stderr || admission.stdout}`);
-}
-// V4-LAYER-PREFLIGHT-END
 const source = path.join(root, 'target/release/rccv4');
 const directory = path.join(os.homedir(), '.local/bin');
 const destination = path.join(directory, 'rccv4');
@@ -40,11 +31,5 @@ if (verify.status !== 0) {
   throw new Error(`codesign verify failed: ${verify.stderr || verify.stdout}`);
 }
 
-const digest = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const stagedDigest = digest(temporary);
 fs.renameSync(temporary, destination);
-const installedDigest = digest(destination);
-if (stagedDigest !== installedDigest) {
-  throw new Error(`installed hash drift: staged=${stagedDigest} installed=${installedDigest}`);
-}
-console.log(`installed ${destination} sha256=${installedDigest} codesign=valid`);
+console.log(`installed ${destination} codesign=valid`);

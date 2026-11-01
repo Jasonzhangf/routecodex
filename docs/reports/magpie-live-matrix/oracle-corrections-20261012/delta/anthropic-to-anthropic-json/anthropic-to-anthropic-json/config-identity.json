@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/anthropic-to-anthropic-json/anthropic-to-anthropic-json/v3-protocol-live-mock-lifecycle-fUTj79/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/anthropic-to-anthropic-json/anthropic-to-anthropic-json/v3-protocol-live-mock-lifecycle-fUTj79/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 64844
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 64845
+    }
+  ],
+  "admin_bind": "127.0.0.1:64845",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:64845"
+  },
+  "mode": "direct",
+  "model": "mock.anthropic-model",
+  "wire_model": "anthropic-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-anthropic",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/anthropic-to-anthropic-json/anthropic-to-anthropic-json/v3-protocol-live-mock-lifecycle-fUTj79/provider/mock-anthropic/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/anthropic-to-anthropic-json/anthropic-to-anthropic-json/provider.toml",
+      "model": "mock.anthropic-model",
+      "wire_model": "anthropic-model",
+      "sha256": "4a33db4a5717ceed4d0c7ba4196ebb44257bc70868d44aa1bcf20ff28cdb9716"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "anthropic",
+    "wire_model": "anthropic-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-anthropic/mock.anthropic-model",
+        "provider_id": "mock-anthropic",
+        "model": "mock.anthropic-model",
+        "wire_model": "anthropic-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/anthropic-to-anthropic-json/anthropic-to-anthropic-json/v3-protocol-live-mock-lifecycle-fUTj79/provider/mock-anthropic/config.v2.toml",
+        "provider_sha256": "4a33db4a5717ceed4d0c7ba4196ebb44257bc70868d44aa1bcf20ff28cdb9716",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-anthropic/mock.anthropic-model"
+  ]
+}

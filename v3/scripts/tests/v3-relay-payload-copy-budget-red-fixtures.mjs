@@ -12,15 +12,15 @@ const fixtures = [
   {
     name: 'unbounded deep copy',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'use serde_json::Value;',
-    mutation: 'use serde_json::Value;\nfn forbidden_copy(payload: &Value) { payload.deep_clone(); }',
+    marker: 'use serde_json::{json, Value};',
+    mutation: 'use serde_json::{json, Value};\nfn forbidden_copy(payload: &Value) { payload.deep_clone(); }',
     diagnostic: /forbidden unbounded deep copy/,
   },
   {
     name: 'JSON stringify parse roundtrip',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'use serde_json::Value;',
-    mutation: 'use serde_json::Value;\nfn forbidden_roundtrip(payload: &Value) { let encoded = serde_json::to_string(payload).unwrap(); let _: Value = serde_json::from_str(&encoded).unwrap(); }',
+    marker: 'use serde_json::{json, Value};',
+    mutation: 'use serde_json::{json, Value};\nfn forbidden_roundtrip(payload: &Value) { let encoded = serde_json::to_string(payload).unwrap(); let _: Value = serde_json::from_str(&encoded).unwrap(); }',
     diagnostic: /forbidden JSON serialization round-trip clone/,
   },
   {
@@ -103,8 +103,8 @@ const fixtures = [
   {
     name: 'Debug snapshot truth substitution',
     file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs',
-    marker: 'use serde_json::Value;',
-    mutation: 'use serde_json::Value;\nfn forbidden_snapshot(debug_snapshot: &Value) { let forbidden_debug_truth_payload = debug_snapshot; let _ = forbidden_debug_truth_payload; }',
+    marker: 'use serde_json::{json, Value};',
+    mutation: 'use serde_json::{json, Value};\nfn forbidden_snapshot(debug_snapshot: &Value) { let forbidden_debug_truth_payload = debug_snapshot; let _ = forbidden_debug_truth_payload; }',
     diagnostic: /forbidden Debug\/snapshot truth substitution/,
   },
   {

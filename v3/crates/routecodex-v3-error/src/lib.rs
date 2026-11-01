@@ -25,6 +25,9 @@ pub enum V3InternalErrorCode {
     V3Transport13ResponsesHttpRequest,
     V3ProviderResp14Raw,
     V3DirectResp14ProviderProjectionPrepared,
+    V3DirectResp14UnharvestableToolMarkup,
+    V3HubRelayResp03UnharvestableToolMarkup,
+    V3HubRelayResp03Processing,
     V3DirectResp15ClientPayloadReady,
     V3Server16HttpFrame,
     V3DebugArtifact,
@@ -173,6 +176,34 @@ impl V3InternalErrorCode {
                     title: "direct provider projection internal failure",
                 }
             }
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-211",
+                    lane: V3InternalErrorLane::Response,
+                    node_id: "V3DirectResp14ProviderProjectionPrepared",
+                    owner_feature_id: "v3.debug_error_foundation",
+                    module_block: "500-21x",
+                    title: "direct unharvestable tool markup internal failure",
+                }
+            }
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup => {
+                V3InternalErrorRegistryEntry {
+                    code: "500-231",
+                    lane: V3InternalErrorLane::Response,
+                    node_id: "V3HubRespChatProcess03Governed",
+                    owner_feature_id: "v3.anthropic_control_text_resp03",
+                    module_block: "500-23x",
+                    title: "relay unharvestable tool markup internal failure",
+                }
+            }
+            V3InternalErrorCode::V3HubRelayResp03Processing => V3InternalErrorRegistryEntry {
+                code: "500-230",
+                lane: V3InternalErrorLane::Response,
+                node_id: "V3HubRespChatProcess03Governed",
+                owner_feature_id: "v3.anthropic_control_text_resp03",
+                module_block: "500-23x",
+                title: "relay response governance processing failure",
+            },
             V3InternalErrorCode::V3DirectResp15ClientPayloadReady => V3InternalErrorRegistryEntry {
                 code: "500-220",
                 lane: V3InternalErrorLane::Response,
@@ -265,7 +296,6 @@ pub enum V3ErrorSourceKind {
     PayloadTooLarge,
     MethodNotAllowed,
     PathNotFound,
-    ModelNotFound,
     PendingEndpoint,
     ProviderFailure,
     ProviderCompatPayloadBoundaryViolation,
@@ -305,12 +335,12 @@ pub enum V3ErrorActionScope {
     ProviderInstance {
         provider_id: String,
     },
-    AuthKey {
+    /// Complete provider identity for an automatic provider failure. The
+    /// action must isolate the failed auth key and model; it never authorizes
+    /// provider-wide or auth-key-wide exclusion.
+    ProviderKeyModel {
         provider_id: String,
         auth_alias: String,
-    },
-    CanonicalModel {
-        provider_id: String,
         model_id: String,
     },
 }
@@ -337,6 +367,7 @@ pub struct V3Error04TargetExhaustionDecision {
     pub route_pool_remaining_after_exclusion: usize,
     pub default_pool_available: bool,
     pub same_provider_retry_available: bool,
+    pub target_recovery_pending: bool,
     pub target_exhausted: bool,
 }
 
@@ -345,6 +376,12 @@ pub struct V3ProviderFailureSessionScope {
     server_id: String,
     routing_group: String,
     session_id: String,
+    /// True when the session id came from a client control header and can
+    /// therefore carry cross-request sticky selection. The request-local
+    /// fallback (a synthesized `request-local-*` id) must not feed sticky
+    /// state, because it is a fresh key per request.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    client_session: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     transport_pipeline_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -373,10 +410,18 @@ impl V3ProviderFailureSessionScope {
             server_id: required(server_id.into(), "server_id")?,
             routing_group: required(routing_group.into(), "routing_group")?,
             session_id: required(session_id.into(), "session_id")?,
+            client_session: true,
             transport_pipeline_id: None,
             transport_port: None,
             transport_runtime_generation: None,
         })
+    }
+
+    /// Marks this scope as a synthesized per-request fallback rather than a
+    /// client session. Such a scope must not participate in sticky selection.
+    pub fn as_request_local(mut self) -> Self {
+        self.client_session = false;
+        self
     }
 
     pub fn with_transport_handoff_scope(
@@ -405,6 +450,12 @@ impl V3ProviderFailureSessionScope {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// True when the session id came from a client control header. Only such a
+    /// scope can carry sticky provider selection across requests.
+    pub fn is_client_session(&self) -> bool {
+        self.client_session
     }
 
     pub fn transport_handoff_scope(&self) -> Option<(&str, u16, u64)> {
@@ -488,6 +539,7 @@ impl V3Error05RecoveryAdmissionWitness {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum V3Error05ExecutionAction {
+    ReevaluateTarget,
     WaitThenRetrySame {
         recovery: V3Error05RecoveryAdmissionWitness,
     },
@@ -502,6 +554,7 @@ pub enum V3Error05ExecutionAction {
 impl V3Error05ExecutionAction {
     pub const fn observability_label(&self) -> &'static str {
         match self {
+            Self::ReevaluateTarget => "target_recovery_pending",
             Self::WaitThenRetrySame { .. } => "retry_same_provider",
             Self::WaitThenReselect { .. } => "target_local_reselect",
             Self::ProjectTerminal | Self::RejectNonProviderError => "project_client_error",
@@ -521,7 +574,10 @@ impl V3Error05ExecutionAction {
             Self::WaitThenRetrySame { recovery } | Self::WaitThenReselect { recovery } => {
                 Some(recovery)
             }
-            Self::ProjectTerminal | Self::ClientDisconnected | Self::RejectNonProviderError => None,
+            Self::ReevaluateTarget
+            | Self::ProjectTerminal
+            | Self::ClientDisconnected
+            | Self::RejectNonProviderError => None,
         }
     }
 }
@@ -536,8 +592,18 @@ impl V3Error05ExecutionDecision {
     #[allow(clippy::result_large_err)]
     pub fn try_into_terminal(self) -> Result<V3Error05TerminalDecision, Self> {
         let source_kind = &self.exhaustion.local_action.classified.source.source_kind;
+        let recoverable_response_processing = is_v3_recoverable_response_processing_source(
+            &self.exhaustion.local_action.classified.source,
+        );
         let valid_terminal = match source_kind {
             V3ErrorSourceKind::ProviderFailure => {
+                self.action == V3Error05ExecutionAction::ProjectTerminal
+                    && self.exhaustion.route_pool_remaining_after_exclusion == 0
+                    && !self.exhaustion.default_pool_available
+                    && !self.exhaustion.same_provider_retry_available
+                    && self.exhaustion.target_exhausted
+            }
+            V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
                     && self.exhaustion.route_pool_remaining_after_exclusion == 0
                     && !self.exhaustion.default_pool_available
@@ -570,6 +636,77 @@ impl V3Error05TerminalDecision {
     }
 }
 
+/// The provider's real external HTTP response, retained across provider
+/// attempts by the request owner. It keeps the status, headers, and original
+/// body bytes; the body is never reformatted or truncated, and a failed body
+/// read is recorded as such instead of being reported as a missing response.
+///
+/// The client *projection* eligibility rule (bug `705d624` keeps HTTP 502 out
+/// of any client response) is deliberately not part of this type. A response
+/// that is not eligible for client projection is still a real upstream
+/// response, and recording it as evidence must not be blocked by the rule that
+/// decides whether a client may see it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3ExternalHttpWitness {
+    status: u16,
+    headers: Vec<(String, Vec<u8>)>,
+    body: Vec<u8>,
+    body_read_failure: Option<String>,
+}
+
+impl V3ExternalHttpWitness {
+    pub fn new(status: u16, headers: Vec<(String, Vec<u8>)>, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            headers,
+            body,
+            body_read_failure: None,
+        }
+    }
+
+    /// Mark that the response head was received but its body could not be read
+    /// to completion. The status and headers are still real; only the body is
+    /// incomplete.
+    pub fn with_body_read_failure(mut self, reason: impl Into<String>) -> Self {
+        self.body_read_failure = Some(reason.into());
+        self
+    }
+
+    pub fn status(&self) -> u16 {
+        self.status
+    }
+
+    pub fn headers(&self) -> &[(String, Vec<u8>)] {
+        &self.headers
+    }
+
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    pub fn body_read_failure(&self) -> Option<&str> {
+        self.body_read_failure.as_deref()
+    }
+}
+
+/// The provider failure terminal is either the real upstream HTTP response the
+/// provider returned, or no HTTP response at all.
+///
+/// Provider failures never authorize a client error payload: neither branch
+/// fabricates a proxy 502, and neither branch decides what the client sees —
+/// every provider terminal is a client transport break. The real response is
+/// carried here only so the boundary can record it as provider-private
+/// evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V3ProviderTerminalDisposition {
+    /// A real upstream HTTP response was received and is recorded losslessly as
+    /// provider-private evidence, whatever its status.
+    ExternalHttp(V3ExternalHttpWitness),
+    /// No upstream HTTP response exists at all: the provider was never reached,
+    /// or the transport failed before any response head arrived.
+    NoResponse,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct V3Error06ClientProjected {
     pub status: u16,
@@ -585,9 +722,24 @@ pub struct V3Error06ClientProjected {
     pub error_detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health_action: Option<V3ErrorActionPlan>,
+    /// The complete Error01 source retained internally across the Error05 ->
+    /// Error06 boundary. It is private diagnostic state, never serialized into
+    /// the public client projection.
+    #[serde(skip)]
+    pub diagnostic_source: V3Error01SourceRaised,
 }
 
 fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
+    if source.internal_error.as_ref().is_some_and(|error| {
+        [
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+        ]
+        .iter()
+        .any(|code| error.internal_code == code.registry_entry().code)
+    }) {
+        return 502;
+    }
     match source.internal_error.as_ref().map(|error| error.lane) {
         Some(V3InternalErrorLane::Response) => 599,
         Some(V3InternalErrorLane::Request | V3InternalErrorLane::Other) => 598,
@@ -600,13 +752,39 @@ fn internal_client_status(source: &V3Error01SourceRaised) -> u16 {
     }
 }
 
-fn provider_client_status(source: &V3Error01SourceRaised) -> u16 {
-    source
-        .external_error
-        .as_ref()
-        .and_then(|external| external.status)
-        .filter(|status| *status == 429)
-        .unwrap_or(502)
+#[cfg(test)]
+#[test]
+fn issuee63d2f2_unharvestable_tool_is_502_while_processing_damage_stays_599() {
+    for code in [
+        V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+        V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+    ] {
+        let source = build_v3_error_01_source_raised_internal(
+            V3ErrorSourceKind::RuntimeFailure,
+            code.registry_entry().node_id,
+            "unharvestable",
+            "recognized incomplete tool invocation",
+            code,
+        );
+        assert_eq!(internal_client_status(&source), 502);
+    }
+    let damage = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3DirectResp14ProviderProjectionPrepared",
+        "projection_damage",
+        "genuine projection failure",
+        V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+    );
+    assert_eq!(internal_client_status(&damage), 599);
+    let relay_damage = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3HubRespChatProcess03Governed",
+        "relay_response_processing_failure",
+        "genuine Relay processing failure",
+        V3InternalErrorCode::V3HubRelayResp03Processing,
+    );
+    assert_eq!(internal_client_status(&relay_damage), 599);
+    assert!(is_v3_recoverable_response_processing_source(&relay_damage));
 }
 
 fn client_error_message(source: &V3Error01SourceRaised) -> String {
@@ -686,7 +864,6 @@ fn validate_internal_error_source_kind(source_kind: &V3ErrorSourceKind) {
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
         | V3ErrorSourceKind::PathNotFound
-        | V3ErrorSourceKind::ModelNotFound
         | V3ErrorSourceKind::PendingEndpoint
         | V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation
         | V3ErrorSourceKind::TargetPoolExhausted
@@ -714,14 +891,14 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
     if source.external_error.is_some() {
         validate_external_error_source_kind(&source.source_kind);
     }
+    let recoverable_response_processing = is_v3_recoverable_response_processing_source(&source);
     let (class, terminal_state) = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest
         | V3ErrorSourceKind::RequestConflict
         | V3ErrorSourceKind::UnsupportedMediaType
         | V3ErrorSourceKind::PayloadTooLarge
         | V3ErrorSourceKind::MethodNotAllowed
-        | V3ErrorSourceKind::PathNotFound
-        | V3ErrorSourceKind::ModelNotFound => ("client_input", "already_terminal"),
+        | V3ErrorSourceKind::PathNotFound => ("client_input", "already_terminal"),
         V3ErrorSourceKind::PendingEndpoint => ("pending_endpoint", "already_terminal"),
         V3ErrorSourceKind::ProviderFailure => {
             ("provider_failure", "non_terminal_if_candidates_remain")
@@ -731,6 +908,9 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
             "already_terminal",
         ),
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
+        V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+            ("runtime_failure", "non_terminal_if_candidates_remain")
+        }
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
         V3ErrorSourceKind::ClientDisconnect => ("client_disconnect", "already_terminal"),
         V3ErrorSourceKind::SuccessControl => ("success_control_violation", "already_terminal"),
@@ -768,6 +948,33 @@ pub fn is_v3_retryable_transient_source(source: &V3Error01SourceRaised) -> bool 
     false
 }
 
+/// Returns whether provider request/response processing carries an exact
+/// registered internal code that may recover by excluding the failed attempt
+/// and reselecting a later eligible candidate. The diagnostic reason string is
+/// never sufficient.
+pub fn is_v3_recoverable_response_processing_source(source: &V3Error01SourceRaised) -> bool {
+    source.source_kind == V3ErrorSourceKind::RuntimeFailure
+        && [
+            V3InternalErrorCode::V3Provider12ResponsesWirePayload,
+            V3InternalErrorCode::V3Transport13ResponsesHttpRequest,
+            V3InternalErrorCode::V3ProviderResp14Raw,
+            V3InternalErrorCode::V3DirectResp14UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup,
+            V3InternalErrorCode::V3HubRelayResp03Processing,
+        ]
+        .iter()
+        .any(|code| {
+            let expected = code.registry_entry();
+            matches!(
+            source.internal_error.as_ref(),
+            Some(error)
+                if error.internal_code == expected.code
+                    && error.lane == expected.lane
+                    && error.node_id == expected.node_id
+            )
+        })
+}
+
 /// Returns whether a provider failure is health-neutral and eligible for the
 /// transient same-provider retry budget at the given pipeline stage.
 pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> bool {
@@ -788,6 +995,19 @@ pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> b
 
 pub const V3_TRANSIENT_TRANSPORT_HANG_CODE: &str = "provider_response_header_timeout";
 
+/// Canonical prefix for a provider response-header timeout. Direct and relay
+/// policies classify any transport error carrying this reason prefix as the
+/// health-neutral transient transport hang instead of an ordinary provider
+/// transport failure.
+pub const V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX: &str =
+    "provider did not return response headers within configured SSE first-frame timeout";
+
+/// Returns whether a provider transport reason denotes the canonical
+/// response-header wait timeout shared by direct and relay failure policies.
+pub fn is_v3_provider_response_header_timeout_reason(reason: &str) -> bool {
+    reason.starts_with(V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX)
+}
+
 pub fn build_v3_error_03_target_local_action_from_v3_error_02(
     classified: V3Error02Classified,
     scope: V3ErrorActionScope,
@@ -797,23 +1017,20 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
         classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
+    let recoverable_response_processing =
+        is_v3_recoverable_response_processing_source(&classified.source);
     let client_disconnect = matches!(
         classified.source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
-    let model_not_found = matches!(
-        classified.source.source_kind,
-        V3ErrorSourceKind::ModelNotFound
-    );
-    let retry_eligible = provider_failure && candidates_remaining > 0;
+    let retry_eligible =
+        (provider_failure || recoverable_response_processing) && candidates_remaining > 0;
     // Provider failures, including SSE/transport failures, affect provider health.
     let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
     let exhaustion_effect = if retry_eligible {
         "target_local_reselect"
     } else if client_disconnect {
         "health_neutral_client_disconnect"
-    } else if model_not_found {
-        "project_client_error"
     } else if candidates_remaining == 0 {
         "target_pool_exhausted"
     } else {
@@ -841,32 +1058,62 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
     default_pool_available: bool,
     same_provider_retry_available: bool,
 ) -> V3Error04TargetExhaustionDecision {
+    build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+        local_action,
+        route_pool_remaining_after_exclusion,
+        default_pool_available,
+        same_provider_retry_available,
+        false,
+    )
+}
+
+pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+    local_action: V3Error03TargetLocalAction,
+    route_pool_remaining_after_exclusion: usize,
+    default_pool_available: bool,
+    same_provider_retry_available: bool,
+    target_recovery_pending: bool,
+) -> V3Error04TargetExhaustionDecision {
     let provider_failure = matches!(
         local_action.classified.source.source_kind,
         V3ErrorSourceKind::ProviderFailure
     );
-    let target_exhausted =
-        (provider_failure && route_pool_remaining_after_exclusion == 0 && !default_pool_available)
-            || matches!(
-                local_action.classified.source.source_kind,
-                V3ErrorSourceKind::PendingEndpoint
-                    | V3ErrorSourceKind::InvalidRequest
-                    | V3ErrorSourceKind::RequestConflict
-                    | V3ErrorSourceKind::UnsupportedMediaType
-                    | V3ErrorSourceKind::PayloadTooLarge
-                    | V3ErrorSourceKind::MethodNotAllowed
-                    | V3ErrorSourceKind::PathNotFound
-                    | V3ErrorSourceKind::ModelNotFound
-                    | V3ErrorSourceKind::TargetPoolExhausted
-                    | V3ErrorSourceKind::RuntimeFailure
-                    | V3ErrorSourceKind::ClientDisconnect
-                    | V3ErrorSourceKind::SuccessControl
-            );
+    let recoverable_response_processing =
+        is_v3_recoverable_response_processing_source(&local_action.classified.source);
+    let target_exhausted = if provider_failure || recoverable_response_processing {
+        route_pool_remaining_after_exclusion == 0
+            && !target_recovery_pending
+            && !default_pool_available
+            && !(same_provider_retry_available
+                && local_action
+                    .classified
+                    .source
+                    .external_error
+                    .as_ref()
+                    .and_then(|error| error.status)
+                    == Some(429))
+    } else {
+        matches!(
+            local_action.classified.source.source_kind,
+            V3ErrorSourceKind::PendingEndpoint
+                | V3ErrorSourceKind::InvalidRequest
+                | V3ErrorSourceKind::RequestConflict
+                | V3ErrorSourceKind::UnsupportedMediaType
+                | V3ErrorSourceKind::PayloadTooLarge
+                | V3ErrorSourceKind::MethodNotAllowed
+                | V3ErrorSourceKind::PathNotFound
+                | V3ErrorSourceKind::TargetPoolExhausted
+                | V3ErrorSourceKind::RuntimeFailure
+                | V3ErrorSourceKind::ClientDisconnect
+                | V3ErrorSourceKind::SuccessControl
+        )
+    };
     V3Error04TargetExhaustionDecision {
         local_action,
         route_pool_remaining_after_exclusion,
         default_pool_available,
         same_provider_retry_available,
+        target_recovery_pending,
         target_exhausted,
     }
 }
@@ -875,18 +1122,53 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
     exhaustion: V3Error04TargetExhaustionDecision,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> V3Error05ExecutionDecision {
+    let recoverable_response_processing =
+        is_v3_recoverable_response_processing_source(&exhaustion.local_action.classified.source);
+    let alternatives_available =
+        exhaustion.route_pool_remaining_after_exclusion > 0 || exhaustion.default_pool_available;
     let action = match exhaustion.local_action.classified.source.source_kind {
         V3ErrorSourceKind::ClientDisconnect => V3Error05ExecutionAction::ClientDisconnected,
-        V3ErrorSourceKind::ProviderFailure
-            if exhaustion.route_pool_remaining_after_exclusion > 0
-                || exhaustion.default_pool_available =>
+        V3ErrorSourceKind::ProviderFailure if exhaustion.target_recovery_pending => {
+            V3Error05ExecutionAction::ReevaluateTarget
+        }
+        V3ErrorSourceKind::RuntimeFailure
+            if recoverable_response_processing && exhaustion.target_recovery_pending =>
         {
+            V3Error05ExecutionAction::ReevaluateTarget
+        }
+        V3ErrorSourceKind::ProviderFailure
+            if exhaustion.same_provider_retry_available
+                && exhaustion
+                    .local_action
+                    .classified
+                    .source
+                    .external_error
+                    .as_ref()
+                    .and_then(|error| error.status)
+                    == Some(429) =>
+        {
+            V3Error05ExecutionAction::WaitThenRetrySame {
+                recovery: recovery.expect("429 retry requires global recovery admission"),
+            }
+        }
+        V3ErrorSourceKind::ProviderFailure if alternatives_available => {
             V3Error05ExecutionAction::WaitThenReselect {
                 recovery: recovery
                     .expect("reselect Error05 requires an exact recovery admission witness"),
             }
         }
         V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,
+        V3ErrorSourceKind::RuntimeFailure
+            if recoverable_response_processing && alternatives_available =>
+        {
+            V3Error05ExecutionAction::WaitThenReselect {
+                recovery: recovery
+                    .expect("reselect Error05 requires an exact recovery admission witness"),
+            }
+        }
+        V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+            V3Error05ExecutionAction::ProjectTerminal
+        }
         _ => V3Error05ExecutionAction::RejectNonProviderError,
     };
     V3Error05ExecutionDecision { exhaustion, action }
@@ -924,9 +1206,8 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
             V3ErrorSourceKind::PayloadTooLarge => 413,
             V3ErrorSourceKind::MethodNotAllowed => 405,
             V3ErrorSourceKind::PathNotFound => 404,
-            V3ErrorSourceKind::ModelNotFound => 404,
             V3ErrorSourceKind::PendingEndpoint => 501,
-            V3ErrorSourceKind::ProviderFailure => provider_client_status(source),
+            V3ErrorSourceKind::ProviderFailure => 502,
             V3ErrorSourceKind::ProviderCompatPayloadBoundaryViolation => 400,
             V3ErrorSourceKind::TargetPoolExhausted => 503,
             V3ErrorSourceKind::RuntimeFailure => internal_client_status(source),
@@ -966,6 +1247,7 @@ pub fn build_v3_error_06_client_projected_from_v3_error_05(
         error_class,
         error_detail,
         health_action,
+        diagnostic_source: source.clone(),
     }
 }
 
@@ -989,6 +1271,30 @@ pub struct V3ErrorHandlingCenterInput {
 pub struct V3ErrorHandlingCenter;
 
 impl V3ErrorHandlingCenter {
+    pub fn provider_terminal_disposition(
+        terminal: V3Error05TerminalDecision,
+        witness: Option<V3ExternalHttpWitness>,
+    ) -> V3ProviderTerminalDisposition {
+        debug_assert_eq!(
+            terminal
+                .execution()
+                .exhaustion
+                .local_action
+                .classified
+                .source
+                .source_kind,
+            V3ErrorSourceKind::ProviderFailure,
+        );
+        // The witness is evidence, never a client projection: exhaustion does
+        // not authorize a client error response, including a real upstream HTTP
+        // error, and the boundary records the witness as provider-private
+        // evidence before it breaks the client transport.
+        match witness {
+            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+            None => V3ProviderTerminalDisposition::NoResponse,
+        }
+    }
+
     pub fn project_terminal_decision(
         terminal: V3Error05TerminalDecision,
     ) -> V3Error06ClientProjected {
@@ -1074,10 +1380,9 @@ pub enum V3HttpBoundaryErrorKind {
     WebSocketBetaRequired,
 }
 
-pub fn project_v3_http_boundary_error(
+pub const fn v3_http_boundary_error_spec(
     kind: V3HttpBoundaryErrorKind,
-    detail: impl Into<String>,
-) -> V3Error06ClientProjected {
+) -> (V3ErrorSourceKind, &'static str, &'static str) {
     let (source_kind, code) = match kind {
         V3HttpBoundaryErrorKind::MalformedJson => {
             (V3ErrorSourceKind::InvalidRequest, "malformed_json")
@@ -1113,14 +1418,7 @@ pub fn project_v3_http_boundary_error(
             (V3ErrorSourceKind::InvalidRequest, "websocket_beta_required")
         }
     };
-    let source =
-        build_v3_error_01_source_raised(source_kind, "V3Server03HttpRequestRaw", code, detail);
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+    (source_kind, "V3Server03HttpRequestRaw", code)
 }
 
 fn project_v3_server_boundary_error(
@@ -1169,19 +1467,21 @@ pub fn project_v3_server_runtime_failure(
     )
 }
 
-pub fn project_v3_server_websocket_error(
+pub fn v3_server_websocket_error_spec(
     code: &'static str,
-    detail: impl Into<String>,
-) -> V3Error06ClientProjected {
+) -> (V3ErrorSourceKind, &'static str, u16) {
     if code == "invalid_client_event" {
-        return project_v3_server_invalid_request(
+        return (
+            V3ErrorSourceKind::InvalidRequest,
             "V3ServerRespOutbound06ClientFrame",
-            code,
-            detail,
             400,
         );
     }
-    project_v3_server_runtime_failure("V3ServerRespOutbound06ClientFrame", code, detail, 500)
+    (
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ServerRespOutbound06ClientFrame",
+        500,
+    )
 }
 
 pub fn raise_v3_sse_provider_failure(
@@ -1230,27 +1530,6 @@ pub fn is_v3_sse_recoverable_disconnect_source(source: &V3Error01SourceRaised) -
     matches!(
         crate::sse_disposition::v3_sse_post_commit_disposition(source),
         crate::sse_disposition::V3SsePostCommitDisposition::CloseEof
-    )
-}
-
-pub fn raise_v3_debug_artifact_failure(message: impl Into<String>) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_internal(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3DebugArtifact",
-        "codex_sample_persistence_failed",
-        message,
-        V3InternalErrorCode::V3DebugArtifact,
-    )
-}
-
-pub fn raise_v3_runtime_observability_contract_failure(
-    message: impl Into<String>,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3RuntimeObservability",
-        "runtime_observability_contract",
-        message,
     )
 }
 
@@ -1318,6 +1597,10 @@ pub fn project_v3_pending_endpoint_error(
 }
 
 mod sse_disposition;
+/// Consecutive real failures required by the default recoverable health policy.
+/// Authentication and explicitly terminal policies retain their own threshold.
+pub const V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD: u32 = 1;
+
 mod subscription;
 #[cfg(test)]
 mod tests;

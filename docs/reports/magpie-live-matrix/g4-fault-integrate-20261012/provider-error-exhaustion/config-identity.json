@@ -1,0 +1,66 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/g4-fault-integrate-20261012/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-ssYtyz/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/g4-fault-integrate-20261012/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-ssYtyz/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 64426
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 64427
+    }
+  ],
+  "admin_bind": "127.0.0.1:64427",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:64427"
+  },
+  "mode": "direct",
+  "model": "mock.unavailable-model",
+  "wire_model": "unavailable-model",
+  "runtime_setup": {
+    "provider_id": "mock-chat",
+    "model": "mock.unavailable-model",
+    "wire_model": "unavailable-model",
+    "candidate_ids": [
+      "mock-chat/mock.unavailable-model"
+    ],
+    "all_candidates_fail": true
+  },
+  "provider_files": [
+    {
+      "provider_id": "mock-chat",
+      "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/g4-fault-integrate-20261012/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-ssYtyz/provider/mock-chat/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/g4-fault-integrate-20261012/provider-error-exhaustion/provider.toml",
+      "model": "mock.unavailable-model",
+      "wire_model": "unavailable-model",
+      "sha256": "a8c5879141f3894c940e0f1f12f16a1cb0c572d74a5c5a0416585a6a4449f5ad"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "openai_chat",
+    "wire_model": "unavailable-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-chat/mock.unavailable-model",
+        "provider_id": "mock-chat",
+        "model": "mock.unavailable-model",
+        "wire_model": "unavailable-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/g4-fault-integrate-20261012/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-ssYtyz/provider/mock-chat/config.v2.toml",
+        "provider_sha256": "a8c5879141f3894c940e0f1f12f16a1cb0c572d74a5c5a0416585a6a4449f5ad",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-chat/mock.unavailable-model"
+  ]
+}

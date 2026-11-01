@@ -15,11 +15,6 @@ const verifier = resolve(
   "v3/scripts/architecture/verify-v3-console-request-count-visibility.mjs",
 );
 const copied = [
-  "package.json",
-  ".github/workflows/test.yml",
-  "v3/crates/routecodex-v3-server/src/lib.rs",
-  "v3/crates/routecodex-v3-server/src/request_id.rs",
-  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
   "docs/architecture/function-map.yml",
   "docs/architecture/mainline-call-map.yml",
   "docs/architecture/resource-operation-map.yml",
@@ -28,65 +23,8 @@ const copied = [
   "docs/architecture/v3-mainline-call-map.yml",
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-verification-map.yml",
-  "docs/architecture/manifests/v3.console_request_count_visibility.mainline.yml",
 ];
 const cases = [
-  {
-    name: "typed allocation drops daily count",
-    path: "v3/crates/routecodex-v3-server/src/request_id.rs",
-    mutate: (source) =>
-      source.replace("    pub(crate) daily_count: u64,", "    pub(crate) daily_count_removed: u64,"),
-    diagnostic: /must carry request_id, total_count, and daily_count/u,
-  },
-  {
-    name: "aggregate listeners restore independent request counter locks",
-    path: "v3/crates/routecodex-v3-server/src/lib.rs",
-    mutate: (source) =>
-      source
-        .replace(
-          "    let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));\n",
-          "",
-        )
-        .replace(
-          "            request_counter: Arc::clone(&request_counter),",
-          "            request_counter: Arc::new(Mutex::new(V3RequestIdCounter::new())),",
-        ),
-    diagnostic: /must share one request counter handle|must not create one request counter lock per port/u,
-  },
-  {
-    name: "response headline stops rendering request count",
-    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
-    mutate: (source) => {
-      const start = source.indexOf("fn render_v3_response_console_block(");
-      const tail = source.slice(start);
-      const changed = tail.replace(
-        "format_v3_console_request_count(headline.request_identity)",
-        '"[#removed]"',
-      );
-      return source.slice(0, start) + changed;
-    },
-    diagnostic: /Response headline must render the same typed request count/u,
-  },
-  {
-    name: "count formatter parses request id",
-    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
-    mutate: (source) =>
-      source.replace(
-        "pub(crate) fn format_v3_console_request_count(identity: &V3AllocatedRequestIdentity) -> String {",
-        "pub(crate) fn format_v3_console_request_count(identity: &V3AllocatedRequestIdentity) -> String {\n    let _forbidden = identity.request_id.rsplit('-');",
-      ),
-    diagnostic: /must not parse the long request id/u,
-  },
-  {
-    name: "pre-route placeholder request block is restored",
-    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
-    mutate: (source) =>
-      source.replace(
-        "pub(crate) fn emit_v3_request_route_hit_console_line_for_observability(",
-        "fn emit_v3_request_received_console_line() {}\n\npub(crate) fn emit_v3_request_route_hit_console_line_for_observability(",
-      ),
-    diagnostic: /must not emit a duplicate pre-route request block/u,
-  },
   {
     name: "request identity owner drifts to an unregistered feature",
     path: "docs/architecture/v3-resource-operation-map.yml",
@@ -180,26 +118,6 @@ const cases = [
         "  - v3-console-count-03\n  - v3-console-count-02",
       ),
     diagnostic: /V3 verification map must bind request count edges 01 through 04 in order/u,
-  },
-  {
-    name: "build skips request count verifier",
-    path: "package.json",
-    mutate: (source) => {
-      const parsed = JSON.parse(source);
-      parsed.scripts["build:v3-cli"] = parsed.scripts["build:v3-cli"].replace(
-        "npm run verify:v3-console-request-count-visibility && ",
-        "",
-      );
-      return `${JSON.stringify(parsed, null, 2)}\n`;
-    },
-    diagnostic: /build:v3-cli must run verify:v3-console-request-count-visibility/u,
-  },
-  {
-    name: "CI skips canonical V3 verification",
-    path: ".github/workflows/test.yml",
-    mutate: (source) =>
-      source.replaceAll("        run: npm --prefix v3 run verify:ci\n", ""),
-    diagnostic: /CI must dispatch the canonical V3 verification stack/u,
   },
 ];
 

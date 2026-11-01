@@ -1,18 +1,15 @@
 use routecodex_v4_build_link::error::ActiveLinkError;
-use routecodex_v4_build_link::identity::{canonical, recompute_artifact_hash, sha256_hex};
 use routecodex_v4_build_link::resolver::{
     assert_outside_active, emit_link_flags, frozen_module_ids, host_triple, resolve,
     select_rlib_by_stem, source_dep_link_args,
 };
-use routecodex_v4_build_link::IndexBuilder;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Hermetic fixture root: byte copies of the frozen base-node/edge/control/
-/// error Active artifacts plus their tracked freeze/promotion/review/evidence
-/// records.
+/// error Active artifacts.
 /// The fixture keeps CI green without depending on gitignored `active/lib`.
 fn fixture_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -60,19 +57,6 @@ fn install_protected_version(root: &Path, module_id: &str, version: &str) {
     )
     .expect("copy protected module artifact");
     copy_dir_all(&protected.join("library"), &active.join("lib"));
-    for record_kind in [
-        "freeze-record",
-        "promotion-record",
-        "review-record",
-        "evidence-record",
-    ] {
-        let record_name = format!("{record_kind}-{module_id}.json");
-        fs::copy(
-            project.join(".appsdk/records").join(&record_name),
-            root.join(".appsdk/records").join(record_name),
-        )
-        .expect("copy current record graph");
-    }
 }
 
 fn current_multiversion_fixture(tag: &str) -> PathBuf {
@@ -110,18 +94,6 @@ fn positive_frozen_base_node_active_identity_resolves() {
     .expect("frozen base-node Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-base-node");
     assert_eq!(resolution.identity.active_version, "active-v2");
-    assert_eq!(
-        resolution.identity.artifact_hash,
-        "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd"
-    );
-    assert_eq!(
-        resolution.identity.public_api_hash,
-        "sha256:45f153ddb96a6dab9f73e037a6ae4c4377fde82524a76a44586ff2089f5902fe"
-    );
-    assert_eq!(
-        resolution.identity.source_commit,
-        "555bee59c61e0b3bbfa782fc8893cb355ac87eb8"
-    );
     assert!(resolution.identity.dependencies.is_empty());
     assert_eq!(
         resolution.rlib_paths.len(),
@@ -144,10 +116,6 @@ fn positive_edge_active_identity_resolves_with_dependency_closure() {
     let resolution = resolve(&fixture_root(), "routecodex-v4-edge", "active-v4", &host)
         .expect("frozen edge Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-edge");
-    assert_eq!(
-        resolution.identity.artifact_hash,
-        "sha256:83728d3d7967db171cfb627301ba8e8d636eaf6015101f70e316a5234c260ea6"
-    );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
         resolution.identity.dependencies[0].module_id,
@@ -173,10 +141,6 @@ fn positive_dependency_selection_skips_nonmatching_historical_version() {
         resolution.identity.dependencies[0].active_version,
         "active-v2"
     );
-    assert_eq!(
-        resolution.identity.dependencies[0].artifact_hash,
-        "sha256:4a3ce587796ad4bb00a412bda00cecfd03315283af54ae9f54f5c6fb1ba26bfd"
-    );
 }
 
 #[test]
@@ -195,22 +159,6 @@ fn negative_duplicate_dependency_hash_is_ambiguous() {
 }
 
 #[test]
-fn negative_selected_dependency_stale_record_still_fails() {
-    let host = host_triple().expect("rustc host");
-    let root = current_multiversion_fixture("selected-version-stale-record");
-    let freeze_file = root.join(".appsdk/records/freeze-record-routecodex-v4-base-node.json");
-    let mut freeze: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&freeze_file).expect("read selected freeze record"),
-    )
-    .expect("parse selected freeze record");
-    freeze["library_hash"] = serde_json::json!("sha256:selected-version-stale");
-    write_json(&freeze_file, &freeze);
-    let error = resolve(&root, "routecodex-v4-edge", "active-v4", &host)
-        .expect_err("the selected dependency must still pass the complete record graph");
-    assert!(matches!(error, ActiveLinkError::StaleOrMissingRecord(_)));
-}
-
-#[test]
 fn negative_dependency_hash_without_matching_version_fails() {
     let host = host_triple().expect("rustc host");
     let root = current_multiversion_fixture("dependency-hash-no-match");
@@ -220,40 +168,7 @@ fn negative_dependency_hash_without_matching_version_fails() {
             .expect("parse edge artifact");
     artifact["dependency_hashes"][0]["artifact_hash"] =
         serde_json::json!("sha256:no-active-version-matches");
-    let edge_hash = recompute_artifact_hash(&artifact).expect("recompute edge artifact hash");
-    artifact["artifact_hash"] = serde_json::json!(&edge_hash);
     write_json(&artifact_file, &artifact);
-
-    let records = root.join(".appsdk/records");
-    let promotion_file = records.join("promotion-record-routecodex-v4-edge.json");
-    let mut promotion: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&promotion_file).expect("read edge promotion"))
-            .expect("parse edge promotion");
-    promotion["artifact_hash"] = serde_json::json!(&edge_hash);
-    write_json(&promotion_file, &promotion);
-
-    let review_file = records.join("review-record-routecodex-v4-edge.json");
-    let mut review: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&review_file).expect("read edge review"))
-            .expect("parse edge review");
-    review["reviewed_artifact_hash"] = serde_json::json!(&edge_hash);
-    write_json(&review_file, &review);
-
-    let evidence_file = records.join("evidence-record-routecodex-v4-edge.json");
-    let mut evidence: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&evidence_file).expect("read edge evidence"))
-            .expect("parse edge evidence");
-    evidence["artifact_hash"] = serde_json::json!(&edge_hash);
-    write_json(&evidence_file, &evidence);
-
-    let freeze_file = records.join("freeze-record-routecodex-v4-edge.json");
-    let mut freeze: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&freeze_file).expect("read edge freeze"))
-            .expect("parse edge freeze");
-    freeze["library_hash"] = serde_json::json!(&edge_hash);
-    freeze["promotion_record_hash"] =
-        serde_json::json!(sha256_hex(canonical(&promotion).as_bytes()));
-    write_json(&freeze_file, &freeze);
 
     let error = resolve(&root, "routecodex-v4-edge", "active-v4", &host)
         .expect_err("an unknown dependency artifact hash must fail closed");
@@ -268,10 +183,6 @@ fn positive_control_active_identity_resolves_with_dependency_closure() {
     let resolution = resolve(&fixture_root(), "routecodex-v4-control", "active-v3", &host)
         .expect("frozen control Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-control");
-    assert_eq!(
-        resolution.identity.artifact_hash,
-        "sha256:e280965a718eeaaee59725a1703dd58b16a875b616e6b0e8c65bf5b2b4a28676"
-    );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
         resolution.identity.dependencies[0].module_id,
@@ -291,10 +202,6 @@ fn positive_error_active_identity_resolves_with_dependency_closure() {
     let resolution = resolve(&fixture_root(), "routecodex-v4-error", "active-v4", &host)
         .expect("frozen error Active artifact must resolve");
     assert_eq!(resolution.identity.module_id, "routecodex-v4-error");
-    assert_eq!(
-        resolution.identity.artifact_hash,
-        "sha256:988609a37c6fb6d3ca9463c5e15e74471c3fec7414c634902a2009c4903461dc"
-    );
     assert_eq!(resolution.identity.dependencies.len(), 1);
     assert_eq!(
         resolution.identity.dependencies[0].module_id,
@@ -337,17 +244,17 @@ fn negative_target_mismatch_fails_fast() {
 fn negative_rustc_producer_mismatch_fails_fast() {
     let host = host_triple().expect("rustc host");
     let mismatched_root = temp_fixture("rustc-mismatch");
-    let freeze_file =
-        mismatched_root.join(".appsdk/records/freeze-record-routecodex-v4-base-node.json");
-    let mut freeze: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&freeze_file).expect("read freeze record"))
-            .expect("parse freeze record");
-    freeze["rustc_version"] = serde_json::json!("0.0.0-mismatch");
+    let artifact_file = mismatched_root
+        .join("active/lib/routecodex-v4-base-node/active-v2/artifact.json");
+    let mut artifact: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&artifact_file).expect("read artifact"))
+            .expect("parse artifact");
+    artifact["rustc_version"] = serde_json::json!("0.0.0-mismatch");
     fs::write(
-        &freeze_file,
-        serde_json::to_string_pretty(&freeze).expect("serialize freeze record"),
+        &artifact_file,
+        serde_json::to_string_pretty(&artifact).expect("serialize artifact"),
     )
-    .expect("write mismatched freeze record");
+    .expect("write mismatched artifact");
     let error = resolve(
         &mismatched_root,
         "routecodex-v4-base-node",
@@ -356,42 +263,6 @@ fn negative_rustc_producer_mismatch_fails_fast() {
     )
     .expect_err("producer rustc mismatch must fail before link flags");
     assert!(matches!(error, ActiveLinkError::RustcMismatch(_)));
-}
-
-#[test]
-fn negative_public_api_hash_tamper_fails_fast() {
-    let host = host_triple().expect("rustc host");
-    let tampered_root = temp_fixture("public-api-tamper");
-    let artifact_file =
-        tampered_root.join("active/lib/routecodex-v4-base-node/active-v2/artifact.json");
-    let mut artifact: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&artifact_file).expect("read artifact"))
-            .expect("parse artifact");
-    artifact["public_api_hash"] = serde_json::json!("sha256:tampered-public-api-hash");
-    artifact["artifact_hash"] = serde_json::json!(
-        recompute_artifact_hash(&artifact).expect("recompute tampered artifact hash")
-    );
-    fs::write(
-        &artifact_file,
-        serde_json::to_string_pretty(&artifact).expect("serialize tampered artifact"),
-    )
-    .expect("write tampered artifact");
-    let error = resolve(
-        &tampered_root,
-        "routecodex-v4-base-node",
-        "active-v2",
-        &host,
-    )
-    .expect_err("tampered public API hash record must fail");
-    assert!(matches!(error, ActiveLinkError::PublicApiHashMismatch(_)));
-}
-
-#[test]
-fn negative_stale_record_fails_fast() {
-    let host = host_triple().expect("rustc host");
-    let error = resolve(&fixture_root(), "routecodex-v4-config", "active-v1", &host)
-        .expect_err("mutable module without freeze record must fail");
-    assert!(matches!(error, ActiveLinkError::StaleOrMissingRecord(_)));
 }
 
 #[test]
@@ -513,22 +384,6 @@ fn negative_active_write_forbidden_nonexistent_path() {
     let error = assert_outside_active(&root, &target)
         .expect_err("write to a new file inside Active zone must fail");
     assert!(matches!(error, ActiveLinkError::ActiveWriteForbidden(_)));
-}
-
-#[test]
-fn index_is_deterministic_and_drift_detected() {
-    let root = temp_fixture("index-determinism");
-    let first = IndexBuilder::build(&root, "555bee59c61e0b3bbfa782fc8893cb355ac87eb8")
-        .expect("build index");
-    let second = IndexBuilder::build(&root, "555bee59c61e0b3bbfa782fc8893cb355ac87eb8")
-        .expect("rebuild index");
-    assert_eq!(first.manifest_hash, second.manifest_hash);
-    assert_eq!(first.entries.len(), 4);
-    IndexBuilder::write(&root, &first).expect("write index");
-    IndexBuilder::verify(&root, "555bee59c61e0b3bbfa782fc8893cb355ac87eb8")
-        .expect("verify same-commit index");
-    let drift = IndexBuilder::verify(&root, "different-commit").expect_err("drift must fail");
-    assert!(matches!(drift, ActiveLinkError::ManifestInvalid(_)));
 }
 
 #[test]

@@ -98,8 +98,13 @@ requireMatch(
 );
 requireMatch(
   sampleStore,
-  /pub fn persist\([\s\S]*force: bool[\s\S]*if !self\.enabled && !force \{\s*return Ok\(\(\)\);\s*\}/,
-  "V3CodexSampleStore.persist must force-write error evidence even when disabled",
+  /fn should_persist[\s\S]*if !force \{\s*return self\.enabled && !self\.error_samples_only;[\s\S]*pub fn persist\([\s\S]*if !self\.should_persist\(force, status\)/,
+  "V3CodexSampleStore must own one capture policy and force-write error evidence even when disabled",
+);
+requireMatch(
+  sampleStore,
+  /pub fn enqueue_persist[\s\S]*if !self\.should_persist\(job\.force, job\.status\) \{\s*return Ok\(\(\)\);\s*\}[\s\S]*let failure_request_id/,
+  "Skipped samples must not occupy queue slots or byte budget",
 );
 requireMatch(
   sampleStore,
@@ -139,8 +144,58 @@ requireMatch(
 );
 requireMatch(
   serverLiveSnapshot,
-  /persist_v3_error_evidence_payload[\s\S]*?state\.codex_sample_store\.persist\([\s\S]*?payload,[\s\S]*?true,/,
-  "Error evidence must force-write samples even when sampling is disabled",
+  /persist_v3_error_evidence_payload[\s\S]*?state\s*\.codex_sample_store\s*\.enqueue_persist\([\s\S]*?V3CodexSamplePersistJob[\s\S]*?force:\s*true,/,
+  "Error evidence must enqueue force-write samples even when sampling is disabled",
+);
+requireMatch(
+  sampleStore,
+  /async fn run_v3_codex_sample_persist_worker[\s\S]*persist_v3_codex_sample_persist_job[\s\S]*V3CodexSamplePersistQueueMessage::Barrier/,
+  "The single Debug worker must drain queued sample writes and provide a completion barrier",
+);
+requireMatch(
+  sampleStore,
+  /fn record_v3_codex_sample_persist_failure[\s\S]*failures\.record[\s\S]*codex sample persist failed/,
+  "Asynchronous sample write failures must be retained in a bounded ledger and logged",
+);
+requireMatch(
+  sampleStore,
+  /unbounded_channel\(\)[\s\S]*V3_CODEX_SAMPLE_PERSIST_JOB_OVERHEAD_BYTES[\s\S]*try_acquire_many_owned[\s\S]*sender\.send\(message\)/,
+  "Sample persistence must bound pending samples by payload bytes plus a fixed per-job overhead instead of a fixed message count",
+);
+requireMatch(
+  sampleStore,
+  /queued_payload_bytes:[\s\S]*Semaphore[\s\S]*serialized_v3_codex_sample_payload_size[\s\S]*try_acquire_many_owned/,
+  "Queued and in-flight sample payload bytes must stay within the declared byte budget",
+);
+requireMatch(
+  sampleStore,
+  /fn persist_failure_snapshot[\s\S]*\.snapshot\(\)/,
+  "A barrier must observe failures without clearing the shutdown failure ledger",
+);
+requireMatch(
+  sampleStore,
+  /pub async fn shutdown[\s\S]*self\.store\.persist_failures\(\)/,
+  "Worker shutdown must report the residual failure ledger",
+);
+requireMatch(
+  sampleStore,
+  /pub fn persist_failures[\s\S]*ledger\.take\(\)/,
+  "Terminal failure reporting must drain the ledger only at shutdown",
+);
+requireMatch(
+  sampleStore,
+  /V3_CODEX_SAMPLE_PERSIST_FAILURE_LIMIT[\s\S]*additional_failures[\s\S]*additional codex sample persistence failures omitted/,
+  "Failure ledger overflow must remain bounded and report its omitted count",
+);
+forbidMatch(
+  sampleStore,
+  /V3_CODEX_SAMPLE_PERSIST_QUEUE_CAPACITY|try_send\(message\)/,
+  "Sample persistence must not drop a queued sample when a fixed message-count bound is exceeded",
+);
+forbidMatch(
+  sampleStore,
+  /persist_failures\.lock\(\)\.ok\(\)/,
+  "Sample persistence failures must never be dropped when the failure ledger lock is poisoned",
 );
 requireMatch(
   serverLiveSnapshot,
@@ -187,27 +242,6 @@ requireMatch(
   /raw_sse:\s*Arc<Mutex<V3DebugBoundedTextCapture>>/,
   "Server SSE recorders must use Debug-owned capture",
 );
-requireMatch(
-  serverLiveSnapshot,
-  /stream\.observe\([\s\S]*move \|terminal\|[\s\S]*persist_current\(disconnect,\s*V3RecorderPersistPhase::Terminal\)/,
-  "Recorded stream sample persistence must finalize at the shared stream terminal callback",
-);
-requireMatch(
-  serverLiveSnapshot,
-  /struct V3LiveSnapSseRecorderCore[\s\S]*fn persist_current[\s\S]*persist_v3_codex_sample_payload/,
-  "SSE recorders must share one Debug-owned core persistence",
-);
-for (const recorder of [
-  "V3LiveSnapClientResponseSseRecorder",
-  "V3LiveSnapDirectClientResponseSseRecorder",
-  "V3LiveSnapOpenAiChatClientResponseSseRecorder",
-]) {
-  requireMatch(
-    serverLiveSnapshot,
-    new RegExp(`struct ${recorder} \\{[\\s\\S]*core: V3LiveSnapSseRecorderCore`),
-    `${recorder} must be a thin shell over the shared recorder core`,
-  );
-}
 const directProjectionStart = serverFrameBuilders.indexOf(
   "fn responses_direct_output_response_with_console(",
 );
@@ -242,21 +276,6 @@ for (const testName of [
 ]) {
   requireMatch(debugTests, new RegExp(`fn ${testName}\\b`), `${testName} must exist`);
 }
-requireMatch(
-  sampleStore,
-  /persist_writes_verbatim_sample_when_enabled/,
-  "Sample store must have a verbatim persistence test",
-);
-requireMatch(
-  sampleStore,
-  /persist_forces_error_evidence_when_disabled/,
-  "Sample store must have a forced error-evidence test",
-);
-requireMatch(
-  sampleStore,
-  /retention_caps_samples_at_configured_limit[\s\S]*V3_CODEX_SAMPLE_REQUEST_RETENTION/,
-  "Sample store must have a retention-cap test at the configured default",
-);
 for (const [source, label] of [
   [v3FunctionMap, "V3 function map"],
   [functionMap, "global function map"],

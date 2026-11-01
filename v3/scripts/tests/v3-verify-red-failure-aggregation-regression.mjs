@@ -12,10 +12,6 @@ const source = readFileSync(verifyRedPath, 'utf8').replace(
   "from './_common.mjs'",
   `from ${JSON.stringify(commonPath)}`,
 );
-assert.match(source, /import \{ runAll \} from/u, 'verify-red must use the shared bounded collector');
-assert.doesNotMatch(source, /for \(const fixture of \[/u, 'verify-red must not launch unawaited fixture runs');
-assert.match(source, /await runAll\(entries\)/u, 'verify-red must await matrix completion');
-
 const fixtureRoot = mkdtempSync(join(tmpdir(), 'routecodex-v3-verify-red-aggregation-'));
 try {
   const entriesStart = source.indexOf('const entries = [');

@@ -1,0 +1,15 @@
+{
+  "pid": 88376,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 88376,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823044803,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-chTTt3/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:24 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:57115, 127.0.0.1:57116\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:57115, 127.0.0.1:57116\n\u001b[38;2;64;190;212m[57115:openai_chat       ][-                   ][default:mock-openai_chat[key1].chat-model] ▶ [/v1/chat/completions] 09:37:24 [#1/1]             route=default target=mock-openai_chat[key1].chat-model reason=pool:default\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T093724747-1-1]        [virtual-router-hit]     09:37:24 req=openai-chat-router-mock.chat-model-20261012T093724747-1-1 event=route_selected route=default target=mock-openai_chat[key1].chat-model reason=pool:default\u001b[0m\n",
+  "stderr": "\u001b[31m[57115:openai_chat       ][-                   ][default:mock-openai_chat[key1].mock.chat-model] ❌ [provider-error]      09:37:24 req=openai-chat-router-mock.chat-model-20261012T093724747-1-1 \u001b[97mtarget=mock-openai_chat[default].key1\u001b[31m model=mock.chat-model result=terminal_default_floor_exhausted next=- \u001b[97mcauseStatus=502\u001b[31m failures=1 health=healthy waitMs=1000 type=provider_response_sse_invalid external=provider \u001b[97mexternalCode=PROVIDER_RESPONSE_SSE_INVALID\u001b[31m message=SSE stream ended before the final frame delimiter\u001b[0m\nV3 Front HTTP connection failed: Custom { kind: Other, error: hyper::Error(User(Body), Error { inner: Error { inner: Error { inner: Error { inner: Custom { kind: Other, error: \"provider pool exhausted; SSE transport unavailable\" } } } } }) }\n"
+}

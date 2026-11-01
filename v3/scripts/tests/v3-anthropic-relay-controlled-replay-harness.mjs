@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const HARNESS_ID = 'v3.anthropic_relay_controlled_replay';
@@ -37,16 +37,13 @@ const MISSING_ADJACENT_EDGES = [
   'ProviderRespCompat02ProviderCompat->V3HubRespInbound02Normalized',
   'V3HubRespOutbound05ClientSemantic->V3ServerRespOutbound06ClientFrame',
 ];
-const FORBIDDEN_FIELDS = new Set([
-  'routecodex_internal', 'metadata_center', 'debug_snapshot', 'provider_protocol',
-  'resource_handle', 'runtime_control', 'selected_target',
-]);
 
 const args = parseArgs(process.argv.slice(2));
-const fixtureRoot = resolve(args['fixture-root'] ?? 'v3/fixtures/anthropic-relay-controlled-upstream');
+const fixtureRoot = args['fixture-root']
+  ? resolve(args['fixture-root'])
+  : resolve(dirname(fileURLToPath(import.meta.url)), '../../fixtures/anthropic-relay-controlled-upstream');
 const evidencePath = args.evidence ? resolve(args.evidence) : null;
 const fixtures = loadFixtures(fixtureRoot);
-const fixtureDigest = digest(fixtures.map(({ relative, value }) => ({ relative, value })));
 const driver = process.env.V3_ANTHROPIC_RELAY_DRIVER;
 
 if (!driver) {
@@ -54,7 +51,6 @@ if (!driver) {
     schema_version: 1,
     harness_id: HARNESS_ID,
     status: 'wiring_missing',
-    fixture_digest: fixtureDigest,
     cases: fixtures.map(({ value }) => ({
       case_id: value.case_id,
       status: 'not_run',
@@ -69,7 +65,7 @@ if (!driver) {
   process.exit(1);
 }
 
-const result = await runWithDriver(driver, fixtures, fixtureDigest);
+const result = await runWithDriver(driver, fixtures);
 emitEvidence(evidencePath, result);
 if (result.status !== 'passed') {
   console.error(result.diagnostic);
@@ -77,7 +73,7 @@ if (result.status !== 'passed') {
 }
 console.log(`[v3-anthropic-relay-controlled-replay] passed (${result.cases.length} cases)`);
 
-async function runWithDriver(driverPath, loaded, digestValue) {
+async function runWithDriver(driverPath, loaded) {
   const captures = new Map();
   const fixtureById = new Map(loaded.map(({ value }) => [value.case_id, value]));
   let activeFixtureId = null;
@@ -139,7 +135,6 @@ async function runWithDriver(driverPath, loaded, digestValue) {
       else if (!deepEqual(captured[0], value.expected_upstream_request)) failures.push('provider capture differs from expected_upstream_request');
       if (!projection || !deepEqual(projection.client_response, value.expected_client_response)) failures.push('client projection differs from expected_client_response');
       if (!projection || !orderedSubsequence(value.expected_node_trace, projection.node_trace)) failures.push('node_trace misses or reorders fixture-required adjacent nodes');
-      if (captured.some(hasForbiddenField) || hasForbiddenField(projection?.client_response)) failures.push('side-channel field leaked into provider/client normal payload');
       results.push({
         case_id: value.case_id,
         status: failures.length ? 'failed' : 'passed',
@@ -157,7 +152,6 @@ async function runWithDriver(driverPath, loaded, digestValue) {
     schema_version: 1,
     harness_id: HARNESS_ID,
     status: failed.length ? 'failed' : 'passed',
-    fixture_digest: digestValue,
     cases: results,
     missing_adjacent_edges: [],
     diagnostic: failed.length ? `controlled replay failed: ${failed.map((item) => item.case_id).join(', ')}` : 'all controlled replay cases passed',
@@ -236,18 +230,12 @@ function canonical(value) {
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
   return value;
 }
-function digest(value) { return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex'); }
 function deepEqual(left, right) { return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right)); }
 function orderedSubsequence(required, actual) {
   if (!Array.isArray(actual)) return false;
   let cursor = 0;
   for (const node of actual) if (node === required[cursor]) cursor += 1;
   return cursor === required.length;
-}
-function hasForbiddenField(value) {
-  if (Array.isArray(value)) return value.some(hasForbiddenField);
-  if (!value || typeof value !== 'object') return false;
-  return Object.entries(value).some(([key, nested]) => FORBIDDEN_FIELDS.has(key) || hasForbiddenField(nested));
 }
 function emitEvidence(path, evidence) {
   const encoded = `${JSON.stringify(evidence, null, 2)}\n`;

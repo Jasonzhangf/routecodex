@@ -18,6 +18,11 @@ pub struct V3ProviderHttpFailure {
 
 #[derive(Debug, thiserror::Error)]
 pub enum V3ProviderError {
+    #[error("provider {provider_id} concurrency is full for request {request_id}")]
+    ConcurrencyBusy {
+        request_id: String,
+        provider_id: String,
+    },
     #[error("Responses wire body for request {request_id} must be a JSON object")]
     InvalidWireBody { request_id: String },
     #[error(
@@ -28,13 +33,6 @@ pub enum V3ProviderError {
         provider_id: String,
         expected_model: String,
         actual_model: Option<String>,
-    },
-    #[error(
-        "Responses wire body for request {request_id} contains RouteCodex control field {field}"
-    )]
-    ControlFieldInWireBody {
-        request_id: String,
-        field: &'static str,
     },
     #[error("Responses stream flag for request {request_id} must be boolean")]
     InvalidStreamIntent { request_id: String },
@@ -68,6 +66,13 @@ pub enum V3ProviderError {
         provider_id: String,
         auth_alias: String,
         reason: String,
+    },
+    #[error("provider {provider_id} OAuth credential failed for auth handle {auth_alias} on request {request_id}: {reason}")]
+    OAuthCredential {
+        request_id: String,
+        provider_id: String,
+        auth_alias: String,
+        reason: routecodex_v3_oauth::V3OAuthError,
     },
     #[error("provider {provider_id} transport failed for request {request_id}: {reason}")]
     Transport {
@@ -116,6 +121,18 @@ pub enum V3ProviderError {
         provider_id: String,
         expected: &'static str,
         content_type: Option<String>,
+        /// The head that really arrived. A content-type mismatch is decided
+        /// after the response head is read, so the head is real evidence.
+        status: u16,
+        headers: Vec<V3ProviderResponseHeader>,
+    },
+    #[error("provider {provider_id} returned HTTP {status} for request {request_id} but its response body could not be read: {reason}")]
+    ResponseBodyUnreadable {
+        request_id: String,
+        provider_id: String,
+        status: u16,
+        headers: Vec<V3ProviderResponseHeader>,
+        reason: String,
     },
     #[error("provider {provider_id} response body failed for request {request_id}: {reason}")]
     ResponseBody {

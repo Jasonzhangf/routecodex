@@ -1,0 +1,376 @@
+{
+  "schema_version": 1,
+  "case_id": "fe1ec4b-responses-tool-cipher-json-sse-followup",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "responses",
+    "transport": "json",
+    "mode": "direct"
+  },
+  "public_entry": {
+    "kind": "http-listener",
+    "consumer": "node-http",
+    "endpoint": "/v1/responses",
+    "isolation": "task-owned-loopback-listener",
+    "turn_transports": ["json", "sse"]
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "mock.responses-model",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "execute the structured echo tool"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "name": "echo",
+          "description": "Return the observed text argument unchanged.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "encrypted_content": {
+                "type": "object"
+              },
+              "nested": {
+                "type": "object"
+              }
+            },
+            "required": ["text"]
+          }
+        }
+      ],
+      "include": ["reasoning.encrypted_content"],
+      "stream": false
+    }
+  },
+  "runtime_setup": {
+    "provider_id": "mock-responses-a",
+    "model": "mock.responses-model",
+    "wire_model": "responses-model",
+    "candidate_ids": [
+      "mock-responses-a/mock.responses-model",
+      "mock-responses-b/mock.responses-model"
+    ]
+  },
+  "expected_provider": {
+    "paths": ["/v1/responses"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "responses-model",
+      "input.0.content.0.text": "execute the structured echo tool",
+      "tools.0.type": "function",
+      "tools.0.name": "echo",
+      "include.0": "reasoning.encrypted_content",
+      "stream": false
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "responses",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "resp_fe1ec4b_tool_json",
+      "object": "response",
+      "status": "completed",
+      "model": "responses-model",
+      "output": [
+        {
+          "id": "rs_fe1ec4b_tool_json",
+          "type": "reasoning",
+          "summary": [
+            {
+              "type": "summary_text",
+              "text": "tool dispatch plan"
+            }
+          ],
+          "encrypted_content": "tool-dispatch-reasoning-cipher-json"
+        },
+        {
+          "id": "fc_fe1ec4b_tool_json",
+          "type": "function_call",
+          "call_id": "call_fe1ec4b_tool",
+          "name": "echo",
+          "arguments": {
+            "text": "ping",
+            "encrypted_content": "structured-tool-argument-business-value",
+            "nested": {
+              "encrypted_content": "nested-tool-argument-business-value"
+            }
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 13,
+        "output_tokens": 6,
+        "total_tokens": 19
+      }
+    }
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output.0.type": "reasoning",
+      "output.0.summary.0.text": "tool dispatch plan",
+      "output.1.type": "function_call",
+      "output.1.call_id": "call_fe1ec4b_tool",
+      "output.1.name": "echo",
+      "output.1.arguments.text": "ping",
+      "output.1.arguments.encrypted_content": "structured-tool-argument-business-value",
+      "output.1.arguments.nested.encrypted_content": "nested-tool-argument-business-value"
+    },
+    "body_must_not": [
+      "output.0.encrypted_content",
+      "tool-dispatch-reasoning-cipher-json",
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "turns": [
+    {
+      "turn_id": "fe1ec4b-structured-tool-call",
+      "expected_client_must": {
+        "status": "completed",
+        "output.1.type": "function_call",
+        "output.1.call_id": "call_fe1ec4b_tool",
+        "output.1.name": "echo",
+        "output.1.arguments.encrypted_content": "structured-tool-argument-business-value",
+        "output.1.arguments.nested.encrypted_content": "nested-tool-argument-business-value"
+      }
+    },
+    {
+      "turn_id": "fe1ec4b-structured-tool-result-sse",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": "mock.responses-model",
+          "input": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "input_text",
+                  "text": "execute the structured echo tool"
+                }
+              ]
+            }
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "echo",
+              "description": "Return the observed text argument unchanged.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "encrypted_content": {
+                    "type": "object"
+                  },
+                  "nested": {
+                    "type": "object"
+                  }
+                },
+                "required": ["text"]
+              }
+            }
+          ],
+          "include": ["reasoning.encrypted_content"],
+          "stream": true
+        }
+      },
+      "expected_provider": {
+        "paths": ["/v1/responses"],
+        "method": "POST",
+        "auth_required": true,
+        "body_must": {
+          "model": "responses-model",
+          "input.0.content.0.text": "execute the structured echo tool",
+          "input.1.type": "function_call",
+          "input.1.call_id": "call_fe1ec4b_tool",
+          "input.1.name": "echo",
+          "input.1.arguments.text": "ping",
+          "input.1.arguments.encrypted_content": "structured-tool-argument-business-value",
+          "input.1.arguments.nested.encrypted_content": "nested-tool-argument-business-value",
+          "input.2.type": "function_call_output",
+          "input.2.call_id": "call_fe1ec4b_tool",
+          "input.2.output": "ping",
+          "stream": true
+        },
+        "body_must_not": [
+          "tool-dispatch-reasoning-cipher-json",
+          "routecodex_internal",
+          "metadata_center",
+          "debug_snapshot"
+        ],
+        "exact": null
+      },
+      "upstream_response": {
+        "protocol": "responses",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {
+            "event": "response.created",
+            "data": {
+              "type": "response.created",
+              "response": {
+                "id": "resp_fe1ec4b_tool_sse",
+                "status": "in_progress",
+                "output": []
+              }
+            }
+          },
+          {
+            "event": "response.output_item.done",
+            "data": {
+              "type": "response.output_item.done",
+              "output_index": 0,
+              "item": {
+                "id": "rs_fe1ec4b_tool_sse",
+                "type": "reasoning",
+                "summary": [
+                  {
+                    "type": "summary_text",
+                    "text": "tool result plan"
+                  }
+                ],
+                "encrypted_content": "tool-followup-reasoning-cipher-sse"
+              }
+            }
+          },
+          {
+            "event": "response.output_text.delta",
+            "data": {
+              "type": "response.output_text.delta",
+              "output_index": 1,
+              "content_index": 0,
+              "item_id": "msg_fe1ec4b_tool_sse",
+              "delta": "structured echo completed"
+            }
+          },
+          {
+            "event": "response.completed",
+            "data": {
+              "type": "response.completed",
+              "response": {
+                "id": "resp_fe1ec4b_tool_sse",
+                "status": "completed",
+                "output": [
+                  {
+                    "id": "rs_fe1ec4b_tool_sse",
+                    "type": "reasoning",
+                    "summary": [
+                      {
+                        "type": "summary_text",
+                        "text": "tool result plan"
+                      }
+                    ],
+                    "encrypted_content": "tool-followup-reasoning-cipher-sse"
+                  },
+                  {
+                    "id": "msg_fe1ec4b_tool_sse",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [
+                      {
+                        "type": "output_text",
+                        "text": "structured echo completed",
+                        "annotations": []
+                      }
+                    ]
+                  }
+                ],
+                "usage": {
+                  "input_tokens": 17,
+                  "output_tokens": 4,
+                  "total_tokens": 21
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expected_client_contract": {
+        "transport": "complete",
+        "status": 200,
+        "body_must_not": [
+          "output_items.0.encrypted_content",
+          "tool-followup-reasoning-cipher-sse",
+          "provider_error",
+          "internal_error",
+          "routecodex_internal",
+          "metadata_center"
+        ],
+        "semantic_terminal_required": true
+      },
+      "expected_client_must": {
+        "status": "completed",
+        "text": "structured echo completed",
+        "output_items.0.type": "reasoning",
+        "output_items.0.summary.0.text": "tool result plan",
+        "output_items.1.type": "message"
+      }
+    }
+  ],
+  "tool_followup": {
+    "consumer": "structured-echo",
+    "side_effect": "none",
+    "expected_output": "ping",
+    "assert_no_synthesized_tool_result": true,
+    "assert_declared_tool_binding_only": true,
+    "assert_tool_executed_once": true
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "files": [
+      "v3/crates/routecodex-v3-provider-responses/src/wire.rs",
+      "v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs"
+    ],
+    "tests": [
+      "v3/scripts/tests/v3-protocol-live-mock-matrix.mjs::--case fe1ec4b-responses-tool-cipher-json-sse-followup"
+    ],
+    "adaptation": "Issue-derived controlled payload. The provider returns a structured function_call, the test client executes its declared echo binding once using the observed call_id and complete argument object, and the real text result is sent back in the next request. JSON and SSE both verify reasoning ciphertext stripping while tool business fields survive."
+  },
+  "contract_differences": []
+}

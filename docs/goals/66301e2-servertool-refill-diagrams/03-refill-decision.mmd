@@ -1,0 +1,26 @@
+%%{init: {"theme":"base","themeVariables":{"lineColor":"#475569"}}}%%
+flowchart TD
+  S([完整治理结果及请求 typed 控制]):::boundary --> C{已取消或断开}:::decision
+  C -->|是| X[Runtime 取消 不再发起执行]:::failure
+  C -->|否| E{存在本执行真实错误}:::decision
+  E -->|是| ER[保留原错 交既有 Error 链]:::failure
+  E -->|否| T{存在真实完整工具调用}:::decision
+  T -->|是| TOOL[交付真实工具与保留内容]:::success
+  T -->|否| H{源显式 summary 非空}:::decision
+  H -->|是| DONE[交付真实业务结果]:::success
+  H -->|否| B{used 小于内部配置上限}:::decision
+  B -->|否 含上限0| LIMIT[交付已有结果 额度耗尽不是错误]:::success
+  B -->|是| NEXT[RequestRefill]:::action
+  X --> O([唯一输出：typed 处置]):::boundary
+  ER --> O
+  TOOL --> O
+  DONE --> O
+  LIMIT --> O
+  NEXT --> O
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F1EAFE,stroke:#7C3AED,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569

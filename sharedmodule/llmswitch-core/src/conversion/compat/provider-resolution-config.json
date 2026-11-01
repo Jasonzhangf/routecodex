@@ -19,7 +19,8 @@
     { "providerId": "lmstudio", "compatibilityProfile": "responses:lmstudio" },
     { "providerId": "minimax", "compatibilityProfile": "chat:minimax" },
     { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" },
-    { "providerId": "opencode-go", "compatibilityProfile": "responses:deepseek-console-go" }
+    { "providerId": "opencode-go", "compatibilityProfile": "responses:deepseek-console-go" },
+    { "providerId": "deepseek_official", "compatibilityProfile": "responses:deepseek-official" }
   ],
   "defaultCompatibilityProfile": "compat:passthrough"
 }

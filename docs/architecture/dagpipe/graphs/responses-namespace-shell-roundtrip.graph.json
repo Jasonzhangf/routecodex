@@ -1,0 +1,281 @@
+{
+  "id": "v3.responses_namespace_shell_roundtrip",
+  "version": "1",
+  "inputs": [
+    {
+      "id": "public-responses-roundtrip",
+      "schema": "Object",
+      "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.public_request"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "接收首轮请求",
+      "operator": "routecodex.v3.server.receive_responses_request",
+      "operator_version": "1",
+      "inputs": ["public-responses-roundtrip"],
+      "output": {
+        "id": "首轮客户端请求",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.client_request"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.client_payload"],
+        "writes": []
+      }
+    },
+    {
+      "id": "保留请求与工具声明",
+      "operator": "routecodex.v3.inbound.normalize_request_losslessly",
+      "operator_version": "1",
+      "inputs": ["首轮客户端请求"],
+      "output": {
+        "id": "归一化请求",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.normalized_request"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.normal_payload"],
+        "writes": []
+      }
+    },
+    {
+      "id": "绑定声明与目标名称",
+      "operator": "routecodex.v3.operation.bind_namespace_declarations",
+      "operator_version": "1",
+      "inputs": ["归一化请求"],
+      "output": {
+        "id": "首轮标准 provider 请求",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.first_provider_request"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.protocol_conversion.field_parity_contract",
+          "v3.protocol_conversion.attempt_tool_binding"
+        ],
+        "writes": ["v3.protocol_conversion.attempt_tool_binding"]
+      }
+    },
+    {
+      "id": "完成首轮上游尝试",
+      "operator": "routecodex.v3.provider.complete_first_attempt",
+      "operator_version": "1",
+      "inputs": ["首轮标准 provider 请求"],
+      "output": {
+        "id": "首轮 provider 业务响应",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.first_provider_response"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.provider_wire_payload"],
+        "writes": ["v3.response.provider_raw"]
+      }
+    },
+    {
+      "id": "还原客户端工具身份",
+      "operator": "routecodex.v3.response.restore_declared_tool_identity",
+      "operator_version": "1",
+      "inputs": ["首轮 provider 业务响应"],
+      "output": {
+        "id": "已还原身份的客户端响应",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.restored_client_response"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.protocol_conversion.attempt_tool_binding",
+          "v3.hub.response_semantic"
+        ],
+        "writes": ["v3.hub.response_semantic"]
+      }
+    },
+    {
+      "id": "写出首轮工具调用",
+      "operator": "routecodex.v3.server.write_client_frame",
+      "operator_version": "1",
+      "inputs": ["已还原身份的客户端响应"],
+      "output": {
+        "id": "客户端工具调用",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.client_tool_call"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.response.client_payload"],
+        "writes": []
+      }
+    },
+    {
+      "id": "执行声明中的客户端工具",
+      "operator": "test.consumer.execute_declared_shell_tool",
+      "operator_version": "1",
+      "inputs": ["客户端工具调用"],
+      "output": {
+        "id": "客户端工具执行结果",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.client_tool_result"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": []}
+    },
+    {
+      "id": "读取实际执行结果",
+      "operator": "test.consumer.read_shell_marker",
+      "operator_version": "1",
+      "inputs": ["客户端工具执行结果"],
+      "output": {
+        "id": "配对工具输出",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.paired_tool_output"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": []}
+    },
+    {
+      "id": "接收配对后续请求",
+      "operator": "routecodex.v3.server.receive_paired_followup",
+      "operator_version": "1",
+      "inputs": ["配对工具输出"],
+      "output": {
+        "id": "第二轮 leaf-only 请求",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.followup_request"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.request.client_payload"],
+        "writes": ["v3.request.normal_payload"]
+      }
+    },
+    {
+      "id": "关联后续历史身份",
+      "operator": "routecodex.v3.operation.bind_responses_history_identity",
+      "operator_version": "1",
+      "inputs": ["第二轮 leaf-only 请求"],
+      "output": {
+        "id": "第二轮标准 provider 请求",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.followup_provider_request"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.protocol_conversion.field_parity_contract",
+          "v3.protocol_conversion.attempt_tool_binding"
+        ],
+        "writes": ["v3.protocol_conversion.attempt_tool_binding"]
+      }
+    },
+    {
+      "id": "完成后续上游尝试",
+      "operator": "routecodex.v3.provider.complete_followup_attempt",
+      "operator_version": "1",
+      "inputs": ["第二轮标准 provider 请求"],
+      "output": {
+        "id": "后续 provider 业务响应",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.followup_provider_response"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.provider_wire_payload"],
+        "writes": ["v3.response.provider_raw"]
+      }
+    },
+    {
+      "id": "写出最终业务响应",
+      "operator": "routecodex.v3.server.write_client_frame",
+      "operator_version": "1",
+      "inputs": ["后续 provider 业务响应"],
+      "output": {
+        "id": "最终客户端响应",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.final_client_response"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.hub.response_semantic", "v3.response.client_payload"],
+        "writes": []
+      }
+    },
+    {
+      "id": "提交成功处置并释放请求资源",
+      "operator": "routecodex.v3.runtime.finalize_successful_roundtrip",
+      "operator_version": "1",
+      "inputs": ["最终客户端响应"],
+      "output": {
+        "id": "successful-roundtrip-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.responses_namespace_shell_roundtrip.arc.successful_disposition"
+      },
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.protocol_conversion.attempt_tool_binding",
+          "v3.response.provider_raw",
+          "v3.hub.response_semantic",
+          "v3.response.client_payload",
+          "v3.server.model_transport_outcome",
+          "v3.server.responses_session_admission",
+          "v3.front.request_activity_gate"
+        ],
+        "writes": [
+          "v3.protocol_conversion.attempt_tool_binding",
+          "v3.response.provider_raw",
+          "v3.hub.response_semantic",
+          "v3.response.client_payload",
+          "v3.server.model_transport_outcome",
+          "v3.server.responses_session_admission",
+          "v3.front.request_activity_gate"
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {"from": "接收首轮请求", "to": "保留请求与工具声明", "arc_id": "首轮客户端请求"},
+    {"from": "保留请求与工具声明", "to": "绑定声明与目标名称", "arc_id": "归一化请求"},
+    {"from": "绑定声明与目标名称", "to": "完成首轮上游尝试", "arc_id": "首轮标准 provider 请求"},
+    {"from": "完成首轮上游尝试", "to": "还原客户端工具身份", "arc_id": "首轮 provider 业务响应"},
+    {"from": "还原客户端工具身份", "to": "写出首轮工具调用", "arc_id": "已还原身份的客户端响应"},
+    {"from": "写出首轮工具调用", "to": "执行声明中的客户端工具", "arc_id": "客户端工具调用"},
+    {"from": "执行声明中的客户端工具", "to": "读取实际执行结果", "arc_id": "客户端工具执行结果"},
+    {"from": "读取实际执行结果", "to": "接收配对后续请求", "arc_id": "配对工具输出"},
+    {"from": "接收配对后续请求", "to": "关联后续历史身份", "arc_id": "第二轮 leaf-only 请求"},
+    {"from": "关联后续历史身份", "to": "完成后续上游尝试", "arc_id": "第二轮标准 provider 请求"},
+    {"from": "完成后续上游尝试", "to": "写出最终业务响应", "arc_id": "后续 provider 业务响应"},
+    {"from": "写出最终业务响应", "to": "提交成功处置并释放请求资源", "arc_id": "最终客户端响应"}
+  ],
+  "outputs": ["successful-roundtrip-disposition"]
+}

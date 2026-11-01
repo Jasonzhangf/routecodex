@@ -3,7 +3,9 @@ mod markdown;
 mod parse;
 
 pub use capture::{
-    capture_responses_chat, capture_responses_json, strip_memory_envelope_from_responses_payload,
+    capture_responses_chat, capture_responses_json,
+    strip_memory_envelope_from_responses_output_item,
+    strip_memory_envelope_from_responses_output_part, strip_memory_envelope_from_responses_payload,
     strip_memory_envelope_from_text, ResponsesSseAccumulator,
 };
 pub use markdown::{publish_l3_entry, render_l3_markdown, stable_host_id};

@@ -18,10 +18,10 @@ pub(crate) use crate::execution_control::{
 };
 
 pub(crate) type V3SseAttemptStream =
-    Pin<Box<dyn Stream<Item = Result<V3SseAttemptFrame, V3Error01SourceRaised>> + Send>>;
+    Pin<Box<dyn Stream<Item = crate::shared::V3DirectSourceResult<V3SseAttemptFrame>> + Send>>;
 pub use crate::execution_control::{
-    V3AttemptSuccessReceipt, V3CommittedClientSseStream, V3CommittedSseTerminal,
-    V3RequestExecutionControl,
+    V3AttemptSuccessReceipt, V3CommittedClientFrameSink, V3CommittedClientSseStream,
+    V3CommittedSseTerminal, V3RequestExecutionControl,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -169,7 +169,7 @@ pub struct V3Req04StandardizedResponses {
 }
 
 /// Chat 入口标准化（与 V3Req04StandardizedResponses 同构，协议不同）：
-/// 校验 chat 协议必需字段（messages），应用唯一登记的历史图片占位清理；
+/// 校验 chat 协议必需字段（messages）；历史图片与工具配对保持原值。
 /// chat 不携带 Responses continuation 字段。
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3Req04StandardizedChat {
@@ -228,18 +228,20 @@ pub struct V3Execution11ProtocolDecision {
 
 pub type V3ClientSseStream =
     Pin<Box<dyn Stream<Item = Result<Vec<u8>, V3Error01SourceRaised>> + Send>>;
+pub(crate) type V3ProviderAttemptSseInnerStream =
+    Pin<Box<dyn Stream<Item = crate::shared::V3DirectSourceResult<Vec<u8>>> + Send>>;
 pub(crate) struct V3ProviderAttemptSseStream {
-    inner: V3ClientSseStream,
+    inner: V3ProviderAttemptSseInnerStream,
 }
 
 impl V3ProviderAttemptSseStream {
-    pub(crate) fn new(inner: V3ClientSseStream) -> Self {
+    pub(crate) fn new(inner: V3ProviderAttemptSseInnerStream) -> Self {
         Self { inner }
     }
 }
 
 impl Stream for V3ProviderAttemptSseStream {
-    type Item = Result<Vec<u8>, V3Error01SourceRaised>;
+    type Item = crate::shared::V3DirectSourceResult<Vec<u8>>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.inner).poll_next(cx)
@@ -288,12 +290,7 @@ pub struct V3Resp15ClientPayload {
 pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> Result<V3Req04StandardizedResponses, String> {
-    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
-        return Err(format!(
-            "RouteCodex side-channel field {key} cannot enter request payload"
-        ));
-    }
-    let mut body = raw.body;
+    let body = raw.body;
     match body.get("previous_response_id") {
         None | Some(Value::Null) => None,
         Some(Value::String(value)) => {
@@ -307,9 +304,6 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
             return Err("previous_response_id must be null or a non-empty string".to_string())
         }
     };
-    // 与 chat direct / relay req_inbound 一致：历史轮图片占位符做语义等价归一化
-    // （只清理历史轮图片引用，不影响当前轮输入；禁止在不可变区做任何修补）。
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedResponses {
         memory_raw_capture_guidance_injected: false,
         server_id: raw.server_id,
@@ -329,16 +323,10 @@ pub fn build_v3_req_04_standardized_responses_from_v3_server_03(
 pub fn build_v3_chat_req_04_standardized_from_v3_server_03(
     raw: V3Server03HttpRequestRaw,
 ) -> Result<V3Req04StandardizedChat, String> {
-    if let Some(key) = crate::hub_v1::find_v3_hub_side_channel_key(&raw.body) {
-        return Err(format!(
-            "RouteCodex side-channel field {key} cannot enter request payload"
-        ));
-    }
-    let mut body = raw.body;
+    let body = raw.body;
     if body.get("messages").and_then(Value::as_array).is_none() {
         return Err("Chat request payload must contain a messages array".to_string());
     }
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut body);
     Ok(V3Req04StandardizedChat {
         server_id: raw.server_id,
         port: raw.port,
@@ -398,12 +386,9 @@ pub fn build_v3_router_request_facts_for_entry(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    // 与真实路由一致：路由判定必须基于历史轮图片已归一化的 payload
-    // （禁止 diagnostics dry-run / tests 与 cleaned 标准化路径发散）。
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
+    // 分类只读取当前轮 typed 投影，不读取或改写业务历史 payload。
     build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         false,
@@ -418,10 +403,8 @@ pub(crate) fn build_v3_router_request_facts_for_entry_and_endpoint(
     longcontext_threshold_tokens: Option<u64>,
     manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
     let mut facts = build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         is_v3_compaction_endpoint(endpoint),
@@ -434,20 +417,16 @@ pub(crate) fn build_v3_router_request_facts_for_entry_and_endpoint(
 }
 
 /// relay 目标解析（provider_failure_runtime_policy）使用的 facts 构建：
-/// 携带 manifest，使 Mode B（web_search_execution_mode=metadata_center_local_search）
-/// 的 web_search 声明贡献路由能力。真实故障 20260808：无 manifest 的
-/// `build_v3_router_request_facts_for_entry` 使 Mode B 判定失效 → web_search
-/// pool 不命中 → 落 default。
+/// Hosted web_search declarations contribute native provider routing capability.
+/// RCC does not execute search locally.
 pub(crate) fn build_v3_router_request_facts_for_entry_with_manifest(
     body: &Value,
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     manifest: &routecodex_v3_config::V3Config05ManifestPublished,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
-    let mut normalized = body.clone();
-    crate::hub_v1::normalize_v3_history_image_placeholders(&mut normalized);
     build_v3_router_request_facts_for_entry_with_control(
-        &normalized,
+        body,
         entry_protocol,
         longcontext_threshold_tokens,
         false,
@@ -460,16 +439,17 @@ fn build_v3_router_request_facts_for_entry_with_control(
     entry_protocol: &str,
     longcontext_threshold_tokens: Option<u64>,
     is_compaction: bool,
-    manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
+    _manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
 ) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
     let mut capabilities = BTreeSet::from(["text".to_string()]);
     let input_tokens = estimate_v3_routing_input_tokens(body);
+    let current_turn_tokens = crate::token_estimation::estimate_v3_current_turn_tokens(body);
     let active_turn = build_v3_current_turn_route_facts_from_value(body);
     let has_image_attachment = active_turn.has_current_turn_image;
-    let declares_web_search_tool = request_declares_v3_web_search_tool(body, manifest);
+    let declares_web_search_tool = request_declares_v3_web_search_tool(body);
     let route_facts = V3CurrentTurnRouteFacts {
         reached_long_context: longcontext_threshold_tokens
-            .is_some_and(|threshold| input_tokens >= threshold),
+            .is_some_and(|threshold| current_turn_tokens >= threshold),
         is_compaction: is_compaction || active_turn.is_compaction,
         has_image_attachment,
         latest_message_from_user: active_turn.latest_message_from_user,
@@ -480,6 +460,7 @@ fn build_v3_router_request_facts_for_entry_with_control(
             .last_assistant_tool
             .as_ref()
             .map(|tool| tool.category.clone()),
+        current_turn_tool_categories: active_turn.current_turn_tool_categories.clone(),
         has_background_keyword: false,
         current_user_text: active_turn.current_user_text.clone(),
     };
@@ -510,8 +491,33 @@ fn build_v3_router_request_facts_for_entry_with_control(
             .map(ToOwned::to_owned),
         capabilities,
         input_tokens,
+        current_turn_input_tokens: current_turn_tokens,
         route_classification,
     }
+}
+
+/// Resolve-target uses the same complete facts builder as direct routing,
+/// including compaction and current-turn context.
+pub(crate) fn build_v3_router_request_facts_for_resolve_target(
+    body: &Value,
+    entry_protocol: &str,
+    endpoint: &str,
+    longcontext_threshold_tokens: Option<u64>,
+    is_compaction: bool,
+    manifest: &routecodex_v3_config::V3Config05ManifestPublished,
+) -> routecodex_v3_virtual_router::V3RouterRequestFacts {
+    let compaction = is_compaction || is_v3_compaction_endpoint(endpoint);
+    let mut facts = build_v3_router_request_facts_for_entry_with_control(
+        body,
+        entry_protocol,
+        longcontext_threshold_tokens,
+        compaction,
+        Some(manifest),
+    );
+    if compaction && entry_protocol != "openai_chat" {
+        facts.client_model = None;
+    }
+    facts
 }
 
 fn is_v3_compaction_endpoint(endpoint: &str) -> bool {
@@ -549,13 +555,9 @@ fn request_declares_v3_client_tool_surface(body: &Value) -> bool {
 ///   hosted `web_search` 能力——否则 Codex/DSH 的普通工具列表会把请求收窄到
 ///   仅 web_search-capable 候选、cooldown 时 pool 耗尽投影 502。
 /// - 标准 hosted 声明 `{"type":"web_search"}` / `{"type":"web_search_preview"}` /
-///   `{"type":"web_search_20250305","name":"web_search"}`：仅当请求 model 配置
-///   Mode B（metadata_center_local_search）时贡献（v2-parity：非 Mode B 模型的
-///   原生 hosted 搜索由 provider 直接处理，声明不改变路由）。
-fn request_declares_v3_web_search_tool(
-    body: &Value,
-    manifest: Option<&routecodex_v3_config::V3Config05ManifestPublished>,
-) -> bool {
+///   `{"type":"web_search_20250305","name":"web_search"}` contributes the
+///   hosted search routing capability for native provider passthrough.
+fn request_declares_v3_web_search_tool(body: &Value) -> bool {
     let declares = |tools: &Value, predicate: fn(&Value) -> bool| {
         tools
             .as_array()
@@ -578,21 +580,7 @@ fn request_declares_v3_web_search_tool(
     };
     // 仅标准 hosted 声明贡献；客户端 function/custom 工具（含名为 web_search）
     // 由 tools 面承载，不进入 hosted web_search 路由。
-    let Some(manifest) = manifest else {
-        return false;
-    };
-    let Some(model) = body
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return false;
-    };
-    let mode =
-        crate::hub_v1::web_search_hop::resolve_web_search_mode_and_backend(manifest, model).0;
-    mode.is_metadata_center_local_search()
-        && declares_anywhere(is_v3_web_search_standard_declaration)
+    declares_anywhere(is_v3_web_search_standard_declaration)
 }
 
 fn is_v3_web_search_standard_declaration(tool: &Value) -> bool {
@@ -685,6 +673,17 @@ pub fn build_v3_responses_direct_11_policy_from_v3_target_10(
         request_id: standardized.request_id.clone(),
         request_body: standardized.body.clone(),
     }
+}
+
+pub(crate) fn raise_v3_execution_11_protocol_decision_failure(
+    source: V3Error01SourceRaised,
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
+        source.source_kind,
+        source.source_stage,
+        source.code,
+        source.message,
+    )
 }
 
 pub fn build_v3_execution_11_protocol_decision_from_v3_target_10(
@@ -795,6 +794,7 @@ mod tests {
         build_v3_req_04_standardized_responses_from_v3_server_03,
         build_v3_router_request_facts_for_entry,
         build_v3_router_request_facts_for_entry_with_control,
+        build_v3_router_request_facts_from_v3_req_04,
         build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
         build_v3_server_03_http_request_raw_with_purpose,
         build_v3_server_03_http_request_raw_with_purpose_and_scope, V3RequestPurpose,
@@ -882,6 +882,44 @@ mod tests {
     }
 
     #[test]
+    fn req04_responses_keeps_history_tool_image_and_call_pairing() {
+        let raw = build_v3_server_03_http_request_raw(
+            "server".to_string(),
+            V3ProviderFailureSessionScope::new("server", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"look"}]},
+                    {"type":"function_call","call_id":"call_hist","name":"read_image","arguments":"{}"},
+                    {"type":"function_call_output","call_id":"call_hist","output":[
+                        {"type":"input_image","image_url":"data:image/png;base64,HISTORY_TOOL"}
+                    ]},
+                    {"type":"message","role":"assistant","content":[{"type":"output_text","text":"seen"}]},
+                    {"type":"message","role":"user","content":[{"type":"input_text","text":"explain"}]}
+                ]
+            }),
+        );
+
+        let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("Responses Req04 must normalize");
+
+        assert_eq!(
+            normalized.body["input"][2]["call_id"], "call_hist",
+            "history tool call pairing must survive standardization"
+        );
+        assert_eq!(
+            normalized.body["input"][2]["output"][0]["image_url"],
+            "data:image/png;base64,HISTORY_TOOL",
+            "history tool image bytes must survive standardization"
+        );
+    }
+
+    #[test]
     fn anthropic_messages_req04_preserves_entry_protocol_for_route_facts() {
         let raw = build_v3_server_03_http_request_raw(
             "server".to_string(),
@@ -901,7 +939,7 @@ mod tests {
             .expect("Anthropic messages request must normalize");
         let facts = super::build_v3_router_request_facts_from_v3_req_04(
             &normalized,
-            &manifest_mode_b_websearch_for_routing_facts(),
+            &hosted_websearch_manifest_for_routing_facts(),
         );
 
         assert_eq!(facts.entry_protocol, "anthropic");
@@ -927,7 +965,7 @@ mod tests {
             .expect("auxiliary compaction must normalize as Responses");
         let facts = super::build_v3_router_request_facts_from_v3_req_04(
             &normalized,
-            &manifest_mode_b_websearch_for_routing_facts(),
+            &hosted_websearch_manifest_for_routing_facts(),
         );
 
         assert_eq!(facts.route_classification.route_name, "compact");
@@ -990,7 +1028,7 @@ mod tests {
 
     #[test]
     fn hosted_search_declaration_does_not_route_tool_result_continuation() {
-        let manifest = manifest_mode_b_websearch_for_routing_facts();
+        let manifest = hosted_websearch_manifest_for_routing_facts();
         let request = serde_json::json!({
             "model": "MiniMax-M3",
             "messages": [
@@ -1012,11 +1050,11 @@ mod tests {
     }
 
     #[test]
-    fn mode_b_model_client_function_tool_named_web_search_stays_tools_only() {
-        // 即使请求 model 是 Mode B，客户端本地 function 工具 web_search 依然不是
-        // hosted 声明：只有标准 hosted 形状（type=web_search / web_search_preview
-        // / web_search_20250305）才贡献 hosted web_search 能力。
-        let manifest = manifest_mode_b_websearch_for_routing_facts();
+    fn client_function_tool_named_web_search_stays_tools_only_with_manifest() {
+        // 客户端本地 function 工具 web_search 依然不是 hosted 声明：只有标准
+        // hosted 形状（type=web_search / web_search_preview / web_search_20250305）
+        // 才贡献 hosted web_search 能力。
+        let manifest = hosted_websearch_manifest_for_routing_facts();
         let request = serde_json::json!({
             "model": "MiniMax-M3",
             "messages": [{"role": "user", "content": "search routecodex"}],
@@ -1035,12 +1073,12 @@ mod tests {
         );
         assert!(
             facts.capabilities.contains("tools"),
-            "Mode B client-local function tool must still contribute tools surface: {:?}",
+            "client-local function tool must still contribute tools surface: {:?}",
             facts.capabilities
         );
         assert!(
             !facts.capabilities.contains("web_search"),
-            "Mode B client-local function tool must not force hosted web_search capability: {:?}",
+            "client-local function tool must not force hosted web_search capability: {:?}",
             facts.capabilities
         );
     }
@@ -1184,7 +1222,7 @@ mod tests {
             build_v3_chat_req_04_standardized_from_v3_server_03(raw).expect("chat req04 normalize");
         let facts = build_v3_router_request_facts_from_v3_req_04_chat(
             &normalized,
-            &manifest_mode_b_websearch_for_routing_facts(),
+            &hosted_websearch_manifest_for_routing_facts(),
         );
         assert!(
             facts.capabilities.contains("multimodal"),
@@ -1345,7 +1383,177 @@ mod tests {
         );
         assert_eq!(
             at_configured_threshold.route_classification.candidates,
-            ["longcontext", "default"]
+            ["longcontext", "thinking", "default"]
+        );
+    }
+
+    #[test]
+    fn v3_routing_long_context_ignores_long_completed_history() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"alpha beta gamma delta ".repeat(4_000)},
+                {"role":"assistant","content":"history response"},
+                {"role":"user","content":"short current request"}
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses", Some(1_000));
+
+        assert!(
+            facts.input_tokens >= 1_000,
+            "complete request tokens must remain available for provider capacity: {}",
+            facts.input_tokens
+        );
+        assert!(
+            facts.current_turn_input_tokens < 1_000
+                && facts.current_turn_input_tokens < facts.input_tokens,
+            "current-turn tokens must exclude completed history: current={} full={}",
+            facts.current_turn_input_tokens,
+            facts.input_tokens
+        );
+        assert_eq!(
+            facts.route_classification.route_name, "thinking",
+            "completed history must not satisfy the current-turn longcontext threshold"
+        );
+        assert!(!facts
+            .route_classification
+            .candidates
+            .iter()
+            .any(|candidate| candidate == "longcontext"));
+    }
+
+    #[test]
+    fn v3_routing_long_context_isolation_reaches_public_router_facts_builder() {
+        let manifest = compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(
+                r#"
+version = 3
+[servers.controlled]
+bind = "127.0.0.1"
+port = 1
+routing_group = "controlled"
+[providers.mm]
+type = "anthropic"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
+[providers.mm.models.MiniMax-M3]
+wire_name = "MiniMax-M3"
+capabilities = ["text", "tools"]
+[route_groups.controlled.pools.longcontext]
+selection = { strategy = "priority" }
+match = { precedence = 1, min_input_tokens = 1_000 }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+[route_groups.controlled.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
+"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let raw = build_v3_server_03_http_request_raw(
+            "controlled".to_string(),
+            V3ProviderFailureSessionScope::new("controlled", "default", "request")
+                .expect("failure scope"),
+            "request".to_string(),
+            "execution".to_string(),
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            json!({
+                "model": "gpt-5.5",
+                "input": [
+                    {"role":"user","content":"alpha beta gamma delta ".repeat(4_000)},
+                    {"role":"assistant","content":"history response"},
+                    {"role":"user","content":"short current request"}
+                ]
+            }),
+        );
+        let standardized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+            .expect("Responses req04 must normalize");
+        let facts = build_v3_router_request_facts_from_v3_req_04(&standardized, &manifest);
+
+        assert!(
+            facts.input_tokens >= 1_000,
+            "public builder must preserve complete request capacity tokens: {}",
+            facts.input_tokens
+        );
+        assert!(
+            facts.current_turn_input_tokens < 1_000
+                && facts.current_turn_input_tokens < facts.input_tokens,
+            "public builder must keep current-turn tokens separate from full capacity: current={} full={}",
+            facts.current_turn_input_tokens,
+            facts.input_tokens
+        );
+        assert_eq!(
+            facts.route_classification.route_name, "thinking",
+            "public builder must classify only the current turn"
+        );
+    }
+
+    #[test]
+    fn v3_routing_long_context_uses_active_tool_segment() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"short history"},
+                {"role":"assistant","content":"history response"},
+                {"role":"user","content":"inspect the current result"},
+                {
+                    "type":"function_call",
+                    "call_id":"call_current",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"cargo test\"}"
+                },
+                {
+                    "type":"function_call_output",
+                    "call_id":"call_current",
+                    "output":"alpha beta gamma delta ".repeat(4_000)
+                }
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "responses", Some(1_000));
+
+        assert_eq!(
+            facts.route_classification.route_name, "longcontext",
+            "current-turn tool output must count toward the current-turn threshold"
+        );
+        assert_eq!(
+            facts.route_classification.candidates,
+            ["longcontext", "tools", "default"]
+        );
+    }
+
+    #[test]
+    fn v3_routing_current_turn_image_survives_history_without_long_context() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "messages": [
+                {"role":"user","content":[
+                    {"type":"text","text":"alpha beta gamma delta ".repeat(4_000)},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}
+                ]},
+                {"role":"assistant","content":"history response"},
+                {"role":"user","content":[
+                    {"type":"text","text":"describe this"},
+                    {"type":"image_url","image_url":{"url":"data:image/png;base64,BBBB"}}
+                ]}
+            ]
+        });
+
+        let facts = build_v3_router_request_facts_for_entry(&request, "openai_chat", Some(1_000));
+
+        assert!(facts.capabilities.contains("multimodal"));
+        assert_eq!(facts.route_classification.route_name, "multimodal");
+        assert!(
+            !facts
+                .route_classification
+                .candidates
+                .iter()
+                .any(|candidate| candidate == "longcontext"),
+            "historical content must not trigger longcontext for a short current image turn"
         );
     }
 
@@ -1398,38 +1606,13 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_ignore_declared_web_search_builtin_surface() {
-        let request = json!({
-            "model": "gpt-5.5",
-            "tools": [
-                {"type":"web_search"},
-                {"type":"web_search_preview"}
-            ],
-            "input": [{"role":"user","content":"continue the implementation"}]
-        });
-
-        let facts = build_v3_router_request_facts_for_entry(
-            &request,
-            "responses",
-            TEST_LONGCONTEXT_THRESHOLD_TOKENS,
-        );
-
-        assert_eq!(facts.route_classification.route_name, "thinking");
-        assert!(!facts.capabilities.contains("thinking"));
-        assert!(!facts.capabilities.contains("tools"));
-        assert!(!facts.capabilities.contains("web_search"));
-        assert!(!facts.capabilities.contains("coding"));
-    }
-
-    #[test]
     fn v3_routing_facts_canonical_web_search_tool_declaration_contributes_capability() {
         // canonical（responses → chat）的 tools 数组含标准 `{"type":"web_search"}`
-        // 声明（responses web_search item 转换形状）+ Mode B 请求 model 时
-        // 必须产生 web_search 能力——真实路由的 facts 在 canonical 上构建
-        // （kernel/foundation 传 req04 的 canonical payload），仅检测原始 input
-        // part 或 function/custom websearch 名都会漏检 → web_search pool 不命中、
-        // 落 default（真实故障 20260808）。
-        let manifest = manifest_mode_b_websearch_for_routing_facts();
+        // 声明（responses web_search item 转换形状）时必须产生 hosted web_search
+        // 能力——真实路由的 facts 在 canonical 上构建（kernel/foundation 传 req04
+        // 的 canonical payload），仅检测原始 input part 或 function/custom
+        // websearch 名都会漏检 → web_search pool 不命中、落 default（真实故障 20260808）。
+        let manifest = hosted_websearch_manifest_for_routing_facts();
         let request = json!({
             "model": "MiniMax-M3",
             "messages": [{"role": "user", "content": "search routecodex"}],
@@ -1456,7 +1639,7 @@ mod tests {
         // 标准 `{"type":"web_search"}` 是两种 web search capability 形状，都必须
         // 贡献 web_search 路由能力（声明决定路由）——否则 anthropic 入口的 hosted
         // web_search 声明不命中 web_search 池、落 default（真实故障风险）。
-        let manifest = manifest_mode_b_websearch_for_routing_facts();
+        let manifest = hosted_websearch_manifest_for_routing_facts();
         let request = json!({
             "model": "MiniMax-M3",
             "messages": [{"role": "user", "content": "search routecodex"}],
@@ -1477,10 +1660,10 @@ mod tests {
     }
 
     #[test]
-    fn v3_routing_facts_canonical_web_search_declaration_without_mode_b_model_stays_idle() {
-        // v2-parity：非 Mode B 模型（gpt-5.5 原生 hosted）的 web_search 声明
-        // 不贡献 web_search 路由能力（provider 原生处理搜索，无需本地 hop 路由）。
-        let manifest = manifest_mode_b_websearch_for_routing_facts();
+    fn v3_routing_facts_canonical_web_search_declaration_contributes_for_any_model() {
+        // provider 原生 hosted web_search 声明与请求 model 无关，只要最新消息
+        // 是用户消息就贡献 web_search 路由能力；RCC 不再执行本地搜索。
+        let manifest = hosted_websearch_manifest_for_routing_facts();
         let request = json!({
             "model": "gpt-5.5",
             "messages": [{"role": "user", "content": "continue"}],
@@ -1494,13 +1677,13 @@ mod tests {
             Some(&manifest),
         );
         assert!(
-            !facts.capabilities.contains("web_search"),
-            "non-Mode-B model web_search declaration must not contribute: {:?}",
+            facts.capabilities.contains("web_search"),
+            "hosted web_search declaration must contribute for any model: {:?}",
             facts.capabilities
         );
     }
 
-    fn manifest_mode_b_websearch_for_routing_facts(
+    fn hosted_websearch_manifest_for_routing_facts(
     ) -> routecodex_v3_config::V3Config05ManifestPublished {
         compile_v3_config_05_manifest(
             parse_v3_config_02_authoring(
@@ -1518,8 +1701,7 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
+web_search_execution_mode = "native_remote_search_tool_mix"
 [route_groups.controlled.pools.web_search]
 selection = { strategy = "priority" }
 match = { precedence = 20, required_capabilities = ["web_search"] }
@@ -1541,11 +1723,10 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
         let request = json!({
             "model": "MiniMax-M3",
             "input": [
-                {"type": "web_search", "query": "routecodex"},
                 {
                     "type": "message",
                     "role": "user",
-                    "content": [{"type": "input_text", "text": "search routecodex"}]
+                    "content": [{"type": "input_text", "text": "search routecodex"}, {"type": "web_search", "query": "routecodex"}]
                 }
             ]
         });

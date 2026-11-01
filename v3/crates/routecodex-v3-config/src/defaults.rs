@@ -1,7 +1,7 @@
 use crate::{
     V3EntryProtocolBindingAuthoringConfig, V3EntryProtocolExecutionMode, V3HubFixedNode,
-    V3HubHookAuthoringConfig, V3HubHookPhase, V3HubHookProfile, V3HubHookRequirement,
-    V3HubResourceAuthoringConfig, V3HubResourceKind, V3HubResourceScope, V3HubV1AuthoringConfig,
+    V3HubHookAuthoringConfig, V3HubHookPhase, V3HubHookRequirement, V3HubResourceAuthoringConfig,
+    V3HubResourceKind, V3HubResourceScope, V3HubV1AuthoringConfig,
     V3ServerExecutionAuthoringConfig,
 };
 use std::collections::BTreeMap;
@@ -43,18 +43,17 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "anthropic".to_string(),
                 endpoint_patterns: vec!["/v1/messages".to_string()],
-                execution_mode: V3EntryProtocolExecutionMode::Relay,
+                execution_mode: V3EntryProtocolExecutionMode::Direct,
                 protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                 implemented: true,
                 forbidden_reentry_behavior:
-                    "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime."
+                    "Anthropic Messages endpoint must use its declared Direct or Relay runtime owner and must not fall through to another protocol's runtime or pending runtime."
                         .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_anthropic_relay_runtime_with_default_transport".to_string(),
+                    "execute_v3_anthropic_direct_server_outcome".to_string(),
                 ),
                 runtime_owner_path: Some(
-                    "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs"
-                        .to_string(),
+                    "v3/crates/routecodex-v3-server/src/executors.rs".to_string(),
                 ),
                 pending_owner_symbol: None,
                 pending_owner_path: None,
@@ -80,17 +79,17 @@ pub(crate) fn default_hub_v1_authoring() -> V3HubV1AuthoringConfig {
             V3EntryProtocolBindingAuthoringConfig {
                 entry_protocol: "gemini".to_string(),
                 endpoint_patterns: vec!["/v1beta/models/:model/generateContent".to_string()],
-                execution_mode: V3EntryProtocolExecutionMode::Relay,
+                execution_mode: V3EntryProtocolExecutionMode::Direct,
                 protocol_profile_owner: "v3.gemini_relay_runtime_integration".to_string(),
                 implemented: true,
                 forbidden_reentry_behavior:
-                    "Gemini endpoint must not fall through to pending or direct runtime.".to_string(),
+                    "Gemini endpoint must use its declared Direct or Relay runtime owner and must not fall through to another protocol's runtime or pending runtime."
+                        .to_string(),
                 runtime_owner_symbol: Some(
-                    "execute_v3_gemini_relay_runtime_with_default_transport".to_string(),
+                    "execute_v3_gemini_direct_server_outcome".to_string(),
                 ),
                 runtime_owner_path: Some(
-                    "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs"
-                        .to_string(),
+                    "v3/crates/routecodex-v3-server/src/executors.rs".to_string(),
                 ),
                 pending_owner_symbol: None,
                 pending_owner_path: None,
@@ -144,12 +143,6 @@ fn default_hub_v1_hooks() -> Vec<V3HubHookAuthoringConfig> {
         for phase in V3HubHookPhase::ALL {
             let optional_disabled = node == V3HubFixedNode::V3HubReqInbound02Normalized
                 && phase == V3HubHookPhase::Exit;
-            let servertool_profile = phase == V3HubHookPhase::Entry
-                && matches!(
-                    node,
-                    V3HubFixedNode::V3HubReqChatProcess04Governed
-                        | V3HubFixedNode::V3HubRespChatProcess03Governed
-                );
             let allowed_resources = match (node, phase) {
                 (V3HubFixedNode::V3HubReqInbound02Normalized, V3HubHookPhase::Entry) => {
                     vec!["metadata_center".to_string()]
@@ -175,11 +168,6 @@ fn default_hub_v1_hooks() -> Vec<V3HubHookAuthoringConfig> {
                 order,
                 allowed_resources,
                 forbidden_resources,
-                profile: if servertool_profile {
-                    Some(V3HubHookProfile::Servertool)
-                } else {
-                    None
-                },
             });
             order += 1;
         }
@@ -192,7 +180,7 @@ pub(crate) fn default_server_execution() -> V3ServerExecutionAuthoringConfig {
         allowed_modes: vec!["direct".to_string(), "relay".to_string()],
         allowed_invocation_sources: vec![
             "client".to_string(),
-            "servertool_followup".to_string(),
+            "refill".to_string(),
             "dry_run".to_string(),
         ],
         allowed_transports: vec!["json".to_string(), "sse".to_string()],

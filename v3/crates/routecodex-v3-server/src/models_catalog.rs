@@ -16,8 +16,10 @@ pub fn build_v3_models_catalog(
 ) -> serde_json::Value {
     let mut data = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    // expose_models 白名单（visible_id）；空 = 全量暴露（兼容现有）。
-    let is_exposed = |visible_id: &str| -> bool {
+    // expose_models 只约束"路由组可达条目"（visible_id）；空 = 全量暴露。
+    // 直连面（provider.model）与入口名不受它裁剪：直连面恒暴露，入口名见下方
+    // 虚拟条目段。
+    let is_routed_exposed = |visible_id: &str| -> bool {
         expose_models.is_empty() || expose_models.iter().any(|id| id == visible_id)
     };
     let scoped_models = collect_v3_route_group_catalog_model_refs(manifest, routing_group);
@@ -55,7 +57,7 @@ pub fn build_v3_models_catalog(
         );
         item.insert("owned_by".to_string(), json!("openai"));
         seen.insert(builtin_model_id.to_string());
-        if is_exposed(builtin_model_id) {
+        if is_routed_exposed(builtin_model_id) {
             data.push(Value::Object(item));
         }
     }
@@ -66,7 +68,7 @@ pub fn build_v3_models_catalog(
         {
             continue;
         }
-        if !is_exposed(&model_ref.visible_id) {
+        if !is_routed_exposed(&model_ref.visible_id) {
             continue;
         }
         let Some(provider) = manifest.providers.get(&model_ref.provider_id) else {
@@ -121,17 +123,16 @@ pub fn build_v3_models_catalog(
     }
     // Direct-routing surface: every enabled provider model is addressable as
     // `provider.model` regardless of route-group declarations, so expose those
-    // ids alongside the routed catalog.
+    // ids alongside the routed catalog. This surface is never narrowed by
+    // `expose_models`, whose names are client entry names rather than provider
+    // model ids.
     for provider in manifest.providers.values() {
         if !provider.enabled {
             continue;
         }
         for model in provider.models.values() {
             let direct_id = format!("{}.{}", provider.id, model.id);
-            if seen.contains(&direct_id)
-                || is_v3_hidden_codex_future_model(&model.id)
-                || !is_exposed(&direct_id)
-            {
+            if seen.contains(&direct_id) || is_v3_hidden_codex_future_model(&model.id) {
                 continue;
             }
             let capabilities = model.capabilities.iter().cloned().collect::<BTreeSet<_>>();
@@ -170,6 +171,22 @@ pub fn build_v3_models_catalog(
             seen.insert(direct_id);
             data.push(Value::Object(item));
         }
+    }
+    // 入口名（虚拟模型）：`expose_models` 中不对应任何 provider model 的名字是
+    // 客户端入口标签，例如默认入口 `gpt-5.5` 与兜底入口 `auto`。它们不 pin 任何
+    // provider，和 `auto` 走同一条正常 VR 路由，因此只发布目录条目并显式标记
+    // `direct_route: false`。
+    for entry_id in expose_models {
+        if seen.contains(entry_id) || is_v3_hidden_codex_future_model(entry_id) {
+            continue;
+        }
+        let capabilities = default_builtin_v3_model_capabilities(entry_id);
+        let mut item =
+            build_v3_codex_model_metadata(entry_id, entry_id, None, Some(&capabilities), false);
+        item.insert("owned_by".to_string(), json!("routecodex"));
+        item.insert("direct_route".to_string(), json!(false));
+        seen.insert(entry_id.clone());
+        data.push(Value::Object(item));
     }
     let models = data.clone();
     json!({

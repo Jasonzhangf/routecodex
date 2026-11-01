@@ -1,0 +1,26 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-eLLxXE/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-eLLxXE/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 54601
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 54602
+    }
+  ],
+  "admin_bind": "127.0.0.1:54602",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:54602"
+  },
+  "mode": "direct",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null
+}

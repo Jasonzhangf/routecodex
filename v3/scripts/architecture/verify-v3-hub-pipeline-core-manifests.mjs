@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import YAML from 'yaml';
 
 const REQUIRED = [
@@ -32,15 +33,8 @@ const REQUIRED = [
   },
 ];
 
-const REQUIRED_GATES = [
-  'npm run verify:v3-hub-pipeline-core-manifests',
-  'npm run test:v3-hub-pipeline-core-manifest-red-fixtures',
-  'npm run verify:v3-mainline-caller-flow',
-  'npm run verify:v3-architecture-docs',
-  'git diff --check',
-];
-
-export function verifyV3HubPipelineCoreManifests(repoRoot = process.cwd()) {
+const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+export function verifyV3HubPipelineCoreManifests(repoRoot = defaultRoot) {
   const failures = [];
   const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
   const loadYaml = (rel) => YAML.parse(read(rel)) ?? {};
@@ -50,20 +44,14 @@ export function verifyV3HubPipelineCoreManifests(repoRoot = process.cwd()) {
     'docs/architecture/v3-mainline-call-map.yml',
     'docs/architecture/v3-function-map.yml',
     'docs/architecture/v3-verification-map.yml',
-    'package.json',
   ]) {
     if (!exists(rel)) failures.push(`${rel}: required source missing`);
   }
   if (failures.length) return failures;
 
   const callMap = loadYaml('docs/architecture/v3-mainline-call-map.yml');
-  const functionMapText = read('docs/architecture/v3-function-map.yml');
-  const verificationMapText = read('docs/architecture/v3-verification-map.yml');
-  const packageJson = JSON.parse(read('package.json'));
-  const scripts = packageJson.scripts ?? {};
-
-  if (!scripts['verify:v3-hub-pipeline-core-manifests']) failures.push('package.json: missing verify:v3-hub-pipeline-core-manifests script');
-  if (!scripts['test:v3-hub-pipeline-core-manifest-red-fixtures']) failures.push('package.json: missing test:v3-hub-pipeline-core-manifest-red-fixtures script');
+  const functionMap = loadYaml('docs/architecture/v3-function-map.yml');
+  const verificationMap = loadYaml('docs/architecture/v3-verification-map.yml');
 
   for (const item of REQUIRED) {
     if (!exists(item.manifestPath)) {
@@ -109,38 +97,22 @@ export function verifyV3HubPipelineCoreManifests(repoRoot = process.cwd()) {
       for (const key of ['step_id', 'from_node', 'to_node', 'status', 'binding_kind', 'owner_feature_id', 'caller_symbol', 'caller_file', 'callee_symbol', 'callee_file']) {
         if ((actual?.[key] ?? null) !== (expected?.[key] ?? null)) failures.push(`${item.manifestPath}: edge[${index}].${key} must match call map`);
       }
-      if (JSON.stringify(actual?.resource_flow ?? null) !== JSON.stringify(expected?.resource_flow ?? null)) {
+      if (!isDeepStrictEqual(actual?.resource_flow ?? null, expected?.resource_flow ?? null)) {
         failures.push(`${item.manifestPath}: edge[${index}].resource_flow must match call map`);
       }
     }
 
-    for (const doc of manifest?.canonical_docs ?? []) {
-      if (!exists(doc)) failures.push(`${item.manifestPath}: canonical doc missing on disk: ${doc}`);
-    }
-    for (const gate of REQUIRED_GATES) {
-      if (!(manifest?.verification_gates ?? []).includes(gate)) failures.push(`${item.manifestPath}: missing required gate ${gate}`);
-    }
-    for (const gate of manifest?.verification_gates ?? []) {
-      const match = String(gate).match(/^npm run ([A-Za-z0-9:_-]+)$/u);
-      if (match && !scripts[match[1]]) failures.push(`${item.manifestPath}: npm script missing for gate ${gate}`);
-    }
-    if (manifest?.completion_boundary?.machine_readable_manifest !== true) failures.push(`${item.manifestPath}: completion_boundary.machine_readable_manifest must be true`);
-    if (manifest?.completion_boundary?.source_controlled !== true) failures.push(`${item.manifestPath}: completion_boundary.source_controlled must be true`);
-    if (manifest?.completion_boundary?.live_cutover !== false) failures.push(`${item.manifestPath}: completion_boundary.live_cutover must be false`);
-    if (manifest?.completion_boundary?.global_install_restart !== false) failures.push(`${item.manifestPath}: completion_boundary.global_install_restart must be false`);
-    if (!String(manifest?.completion_boundary?.forbidden_claim ?? '').includes('does not claim provider live behavior')) {
-      failures.push(`${item.manifestPath}: completion_boundary.forbidden_claim must explicitly deny provider live behavior`);
-    }
-
-    if (!functionMapText.includes(item.manifestPath)) failures.push(`docs/architecture/v3-function-map.yml: missing ${item.manifestPath}`);
-    if (!verificationMapText.includes(item.manifestPath)) failures.push(`docs/architecture/v3-verification-map.yml: missing ${item.manifestPath}`);
+    const owner = functionMap.features?.find((row) => row.feature_id === manifest.owner_feature_id);
+    if (!owner?.allowed_paths?.includes(item.manifestPath)) failures.push(`docs/architecture/v3-function-map.yml: owner does not bind ${item.manifestPath}`);
+    const verification = verificationMap.features?.find((row) => row.feature_id === manifest.owner_feature_id);
+    if (!verification?.contract?.includes(item.manifestPath)) failures.push(`docs/architecture/v3-verification-map.yml: owner does not bind ${item.manifestPath}`);
   }
 
   return failures;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const failures = verifyV3HubPipelineCoreManifests(process.cwd());
+  const failures = verifyV3HubPipelineCoreManifests();
   if (failures.length) {
     console.error('[verify:v3-hub-pipeline-core-manifests] failed');
     for (const failure of failures) console.error(`- ${failure}`);
@@ -148,5 +120,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   console.log('[verify:v3-hub-pipeline-core-manifests] ok');
   console.log('- Hub v1 request/response manifests exist and match v3-mainline-call-map.yml');
-  console.log('- manifests are wired into function/verification maps and package gates');
+  console.log('- manifests are bound to their declared function/verification owners');
 }

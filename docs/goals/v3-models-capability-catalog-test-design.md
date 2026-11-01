@@ -46,6 +46,22 @@ Reason: Codex bundled `gpt-5.6-*` metadata intentionally sets `tool_mode=code_mo
 `use_responses_lite=true`. Exposing those ids from a `gpt-5.5`-oriented RouteCodex catalog can make
 Codex switch into Responses Lite/code-mode request shapes that are not the current 5555 target.
 
+## Catalog surfaces
+
+`/v1/models` projects three distinct surfaces, and the route-group ceiling above applies only to the
+first one:
+
+1. **Route-group reachable visible ids.** Scoped by the current listener route group, and narrowed by
+   a non-empty `expose_models` list.
+2. **Direct-routing surface.** Every enabled provider model is addressable as `provider.model` and is
+   always listed, because `expose_models` names are client entry names rather than provider model ids.
+3. **Client entry names.** An `expose_models` name that matches no provider model is published as a
+   virtual entry with `direct_route: false`. Such a name takes the same normal Virtual Router path as
+   `auto`; it never pins a provider and never becomes a direct target.
+
+A client model string that is not a listed `provider.model` is not an error: it falls back to normal
+classification, which is the path `auto` and the entry names take.
+
 ## Capability classification
 
 Selectors that change Codex request/tool planning:
@@ -79,6 +95,11 @@ Non-capability / separate fields:
 - Derive `gpt-5.5` search/image fields from route-group reachable provider capabilities when
   available; otherwise use the built-in Codex preset for `gpt-5.5` (`web_search + multimodal`).
 - Preserve configured non-hidden client aliases and runtime-derived `supports_streaming` and context-window fields.
+- List every enabled provider model as a `provider.model` direct entry even when `expose_models` is
+  non-empty and names none of them.
+- Publish an `expose_models` name that matches no provider model as a virtual entry with
+  `direct_route: false`, and keep the built-in preset capability surface for a built-in entry name
+  such as `gpt-5.5`.
 - Keep stable Codex request-builder fields for reasoning, verbosity, parallel tools, context windows, `apply_patch_tool_type`, and built-in description.
 - Return equivalent `data` and `models` arrays.
 
@@ -87,7 +108,10 @@ Non-capability / separate fields:
 - Do not expose bare `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` before the gpt-5.6 client surface is intentionally enabled.
 - Do not expose configured provider model ids or aliases whose canonical or visible id is `gpt-5.6*`.
 - Do not expose enabled provider models or aliases that are not reachable from the current listener
-  route group.
+  route group on the routed surface. This ceiling does not apply to the `provider.model`
+  direct-routing surface, which must always be listed.
+- Do not suppress a `provider.model` direct entry because `expose_models` omits it, and do not turn a
+  client entry name into a direct route.
 - Do not expose child provider aliases from a forwarder unless that alias is itself the visible
   route target id.
 - Do not invent `gpt-5.5` for a listener route group that has no reachable `gpt-5.5` target.
@@ -107,6 +131,18 @@ Red sample locked in `p6_models_endpoint_projects_manifest_catalog_with_alias_ca
   requires it to be absent from `/v1/models`.
 - Green behavior keeps route-visible `client-test`, suppresses off-route models, and keeps
   `gpt-5.5` selectors absent when `gpt-5.5` is route-visible.
+
+Red sample locked in `p6_models_endpoint_expose_models_publishes_entry_names_and_keeps_direct_surface`:
+
+- Old behavior applied `expose_models` as a `visible_id` whitelist to every catalog entry, including
+  the `provider.model` direct surface. A list naming only client entry names such as
+  `["gpt-5.5", "auto"]` matched no provider model id, so `/v1/models` returned an empty catalog.
+- Red assertion declares `expose_models = ["gpt-5.5", "auto", "client-test"]` and requires `gpt-5.5`
+  and `auto` to be listed as virtual entries with `direct_route: false`, `client-test` to stay listed,
+  `offroute-test`/`offroute` to stay suppressed, and `test.test`/`test.offroute` to stay listed as
+  direct routes.
+- Green behavior publishes the entry names, keeps the whitelist scoped to routed visible ids, and
+  always lists the direct-routing surface.
 
 Additional current positive/negative locks:
 

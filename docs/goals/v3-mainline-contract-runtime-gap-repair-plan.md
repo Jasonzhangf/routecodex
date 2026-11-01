@@ -79,11 +79,7 @@ Out of scope:
 Source gates:
 - `npm run verify:v3-hub-v1-node-file-topology`
 - `npm run test:v3-relay-request-semantics`
-- `npm run verify:v3-relay-request-semantics`
-- `npm run test:v3-relay-request-semantics-red-fixtures`
 - `npm run test:v3-relay-response-semantics`
-- `npm run verify:v3-relay-response-semantics`
-- `npm run test:v3-relay-response-semantics-red-fixtures`
 - `npm run test:v3-hub-relay-runtime-closeout`
 - `npm run verify:v3-hub-relay-runtime-closeout`
 - `npm run test:v3-hub-relay-runtime-closeout-red-fixtures`

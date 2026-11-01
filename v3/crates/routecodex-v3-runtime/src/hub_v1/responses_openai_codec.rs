@@ -1,5 +1,14 @@
 use crate::protocol_tables::{map_field as table_map_field, V3TableDirection};
+use provider_compat_core::namespace_tools::resolve_responses_tool_declarations;
 use serde_json::{json, Map, Value};
+mod chat_extension_merge;
+mod tool_output;
+const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
+const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
+pub(super) const RESPONSES_REASONING_ITEMS_EXTENSION: &str = "responses_reasoning_items";
+pub(super) use tool_output::{
+    canonical_content as responses_tool_output_content, image_url as responses_image_url,
+};
 pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     payload: &Value,
 ) -> Result<Value, String> {
@@ -11,7 +20,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         Some(Value::String(text)) => vec![json!({
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": text}]
+            "content": text
         })],
         _ => {
             return Err(
@@ -23,6 +32,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     let mut messages = Vec::new();
     let mut pending_tool_message_index: Option<usize> = None;
     let mut pending_tool_call_ids: Vec<String> = Vec::new();
+    let mut pending_tool_adjacent_deferred_messages: Vec<Value> = Vec::new();
     let mut turn_assistant_tail_index: Option<usize> = None;
     if let Some(instructions) = root
         .get("instructions")
@@ -32,12 +42,8 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     {
         messages.push(json!({"role":"system","content":instructions}));
     }
-    let original_tools = root.get("tools").cloned();
-    let mut tools = original_tools
-        .as_ref()
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+
+    let mut tools = resolve_responses_tool_declarations(payload)?;
     for (input_index, item) in input.iter().enumerate() {
         let item = item.as_object().ok_or_else(|| {
             "Responses input item must be an object before OpenAI Chat encoding".to_string()
@@ -82,7 +88,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
-                    &pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     message,
                     turn_assistant_tail_index,
                 )?;
@@ -96,7 +102,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
-                    &pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     build_v3_openai_chat_assistant_output_text_message(item),
                     turn_assistant_tail_index,
                 )?;
@@ -107,7 +113,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     append_v3_openai_chat_message_preserving_tool_adjacency(
                         &mut messages,
                         &mut pending_tool_message_index,
-                        &pending_tool_call_ids,
+                        &mut pending_tool_adjacent_deferred_messages,
                         message,
                         turn_assistant_tail_index,
                     )?;
@@ -133,6 +139,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     build_v3_openai_chat_tool_result_message(item)?,
                 )?;
                 turn_assistant_tail_index = None;
@@ -142,6 +149,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     item,
                     input_index,
                     V3OpenAiChatHostedToolHistoryKind::WebSearch,
@@ -149,10 +157,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 turn_assistant_tail_index = None;
             }
             "tool_search_call" => {
-                ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
-                    item,
-                    V3OpenAiChatHostedToolHistoryKind::ToolSearch,
-                )?;
                 let assistant = build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
                     item,
                     read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
@@ -171,7 +175,6 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 turn_assistant_tail_index = None;
             }
             "tool_search_output" => {
-                ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(item)?;
                 let call_id = read_v3_non_empty_str(item.get("call_id")).ok_or_else(|| {
                     "Responses tool_search_output is missing call_id before Chat canonicalization"
                         .to_string()
@@ -186,6 +189,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                     &mut messages,
                     &mut pending_tool_message_index,
                     &mut pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     tool_result,
                 )?;
             }
@@ -220,7 +224,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                 append_v3_openai_chat_message_preserving_tool_adjacency(
                     &mut messages,
                     &mut pending_tool_message_index,
-                    &pending_tool_call_ids,
+                    &mut pending_tool_adjacent_deferred_messages,
                     json!({"role": "user", "content": content}),
                     turn_assistant_tail_index,
                 )?;
@@ -240,18 +244,35 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
             }
         }
     }
+    messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
     if messages.is_empty() {
         return Err("OpenAI Chat provider encoding produced no messages".to_string());
     }
-    let mut request = Map::new();
+    let mut request = root.clone();
+    for mapped in [
+        "input",
+        // The continuation owner consumes this known protocol locator. It is
+        // not an opaque business extension in canonical Chat.
+        "previous_response_id",
+        "instructions",
+        "metadata",
+        "client_metadata",
+        "prompt_cache_key",
+        "store",
+        "text",
+        "max_output_tokens",
+        "reasoning",
+    ] {
+        request.remove(mapped);
+    }
     if let Some(model) = root.get("model") {
         request.insert("model".to_string(), model.clone());
     }
     request.insert("messages".to_string(), Value::Array(messages));
     if !tools.is_empty() {
         request.insert("tools".to_string(), Value::Array(tools));
-    } else if let Some(value) = original_tools.filter(|value| !value.is_null()) {
-        request.insert("tools".to_string(), value);
+    } else if let Some(value) = root.get("tools").filter(|value| !value.is_null()) {
+        request.insert("tools".to_string(), value.clone());
     }
     for key in [
         "tool_choice",
@@ -316,6 +337,7 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
     project_responses_reasoning_to_chat_fields(root, &mut request)?;
     Ok(Value::Object(request))
 }
+
 fn project_responses_reasoning_to_chat_fields(
     root: &Map<String, Value>,
     request: &mut Map<String, Value>,
@@ -390,10 +412,10 @@ fn project_responses_reasoning_to_chat_fields(
     }
     Ok(())
 }
-fn append_v3_openai_chat_message_preserving_tool_adjacency(
+pub(crate) fn append_v3_openai_chat_message_preserving_tool_adjacency(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
-    pending_tool_call_ids: &[String],
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
     message: Value,
     turn_assistant_tail_index: Option<usize>,
 ) -> Result<(), String> {
@@ -407,12 +429,8 @@ fn append_v3_openai_chat_message_preserving_tool_adjacency(
             merge_v3_openai_chat_message_into_pending_tool_message(messages, index, &message)?;
             return Ok(());
         }
-        if v3_openai_chat_message_has_visible_payload(&message) {
-            return Err(format!(
-                "OpenAI Chat provider encoding cannot place {role} message before pending tool results: {}",
-                pending_tool_call_ids.join(",")
-            ));
-        }
+        pending_tool_adjacent_deferred_messages.push(message);
+        return Ok(());
     } else if let Some(tail_index) = turn_assistant_tail_index {
         let role = message
             .get("role")
@@ -471,6 +489,7 @@ fn append_v3_openai_chat_tool_result_message(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
     message: Value,
 ) -> Result<(), String> {
     let call_id = message
@@ -488,6 +507,7 @@ fn append_v3_openai_chat_tool_result_message(
             pending_tool_call_ids.remove(position);
             if pending_tool_call_ids.is_empty() {
                 *pending_tool_message_index = None;
+                messages.extend(std::mem::take(pending_tool_adjacent_deferred_messages));
             }
             return Ok(());
         }
@@ -536,6 +556,50 @@ fn merge_v3_openai_chat_message_into_pending_tool_message(
             format!("{existing}\n{source_reasoning}")
         };
         target.insert("reasoning_content".to_string(), Value::String(merged));
+    }
+    if let Some(source_extension) = source.get("routecodex_chat_extension") {
+        // Keep every Responses reasoning id/cipher association in source order.
+        // The canonical assistant message may fold several provider-origin
+        // reasoning items, so the ordered list is the complete business
+        // association while the legacy scalar fields remain compatibility
+        // projections of the first item.
+        let existing_items = target
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get(RESPONSES_REASONING_ITEMS_EXTENSION))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let existing_signature = target
+            .get("routecodex_chat_extension")
+            .and_then(Value::as_object)
+            .and_then(|extension| extension.get("responses_reasoning_encrypted_content"))
+            .cloned();
+        chat_extension_merge::merge_chat_extension(target, source_extension)?;
+        let source_items = source_extension
+            .get(RESPONSES_REASONING_ITEMS_EXTENSION)
+            .and_then(Value::as_array);
+        let mut ordered_items = existing_items;
+        if let Some(source_items) = source_items {
+            ordered_items.extend(source_items.iter().cloned());
+        }
+        if let Some(extension) = target
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            if !ordered_items.is_empty() {
+                extension.insert(
+                    RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
+                    Value::Array(ordered_items),
+                );
+            }
+            if let Some(signature) = existing_signature {
+                extension.insert(
+                    "responses_reasoning_encrypted_content".to_string(),
+                    signature,
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -644,6 +708,31 @@ pub(super) fn build_v3_chat_canonical_request_from_responses_payload_for_req_inb
     Ok(request)
 }
 
+/// Convert a finalized Responses `message` output item into a canonical Chat
+/// assistant message for a refill continuation history. The Chat Process owns
+/// continuation construction; this codec owns the Responses-to-Chat content
+/// projection, so the continuation reuses the exact same conversion the inbound
+/// canonicalization already applies.
+pub(crate) fn build_v3_chat_assistant_message_from_responses_output_item(
+    item: &Value,
+) -> Result<Value, String> {
+    let item = item.as_object().ok_or_else(|| {
+        "Responses message output item must be an object before Chat assistant encoding".to_string()
+    })?;
+    build_v3_openai_chat_message_from_responses_message(item)
+}
+
+/// Convert a finalized Responses `reasoning` output item into a canonical Chat
+/// assistant message carrying the provider-origin reasoning content and opaque
+/// signature association. RCC-synthesized reasoning has no provider identity
+/// and is omitted by the caller before this helper runs.
+pub(crate) fn build_v3_chat_assistant_reasoning_message_from_responses_output_item(
+    item: &Value,
+) -> Option<Value> {
+    let item = item.as_object()?;
+    build_v3_openai_chat_assistant_reasoning_message(item)
+}
+
 fn build_v3_openai_chat_message_from_responses_message(
     item: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -667,8 +756,9 @@ fn build_v3_openai_chat_message_from_responses_message(
     {
         message.insert(
             "reasoning_content".to_string(),
-            Value::String(reasoning_content),
+            Value::String(reasoning_content.clone()),
         );
+        retain_anthropic_reasoning_block_for_message(item, &reasoning_content, &mut message)?;
     }
     Ok(Value::Object(message))
 }
@@ -698,11 +788,168 @@ fn build_v3_openai_chat_assistant_reasoning_message(item: &Map<String, Value>) -
         collect_v3_openai_chat_reasoning_segments(Some(&Value::Object(item.clone()))).as_slice(),
     )
     .unwrap_or_default();
-    Some(json!({
+    let mut message = json!({
         "role":"assistant",
         "content":"",
         "reasoning_content":reasoning_content
-    }))
+    });
+    if let Some(extension) = item.get("routecodex_chat_extension") {
+        let mut extension = extension.clone();
+        if let Some(extension) = extension.as_object_mut() {
+            retain_anthropic_reasoning_block_association(item, &reasoning_content, extension);
+        }
+        message["routecodex_chat_extension"] = extension;
+    } else {
+        let mut extension = Map::new();
+        retain_anthropic_reasoning_block_association(item, &reasoning_content, &mut extension);
+        message["routecodex_chat_extension"] = Value::Object(extension);
+    }
+    // Preserve the Responses reasoning `encrypted_content` as an opaque business
+    // association so the Anthropic outbound projection can restore the exact
+    // thinking signature. Present-empty and non-empty both pass through; an
+    // absent field leaves the key absent.
+    if let Some(Value::String(signature)) = item.get("encrypted_content") {
+        if let Some(extension) = message
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension.insert(
+                "responses_reasoning_encrypted_content".to_string(),
+                Value::String(signature.clone()),
+            );
+        } else {
+            message["routecodex_chat_extension"] = json!({
+                "responses_reasoning_encrypted_content": signature
+            });
+        }
+    }
+    // Carry the Responses reasoning item identity so an outbound Chat->Responses
+    // projection can restore a reasoning input item even when the plaintext
+    // summary is empty. Every provider-origin reasoning item in the same turn
+    // keeps its complete id/cipher pair in source order so a continuation does
+    // not collapse distinct reasoning items into one.
+    let provider_item_id = item
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty());
+    if let Some(item_id) = provider_item_id {
+        if let Some(extension) = message
+            .get_mut("routecodex_chat_extension")
+            .and_then(Value::as_object_mut)
+        {
+            extension.insert(
+                "responses_reasoning_item_id".to_string(),
+                Value::String(item_id.to_string()),
+            );
+            let mut ordered = extension
+                .get(RESPONSES_REASONING_ITEMS_EXTENSION)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let mut entry = Map::new();
+            entry.insert("id".to_string(), Value::String(item_id.to_string()));
+            if let Some(Value::String(signature)) = item.get("encrypted_content") {
+                entry.insert(
+                    "encrypted_content".to_string(),
+                    Value::String(signature.clone()),
+                );
+            }
+            if let Some(summary) = item
+                .get("summary")
+                .and_then(Value::as_array)
+                .filter(|value| !value.is_empty())
+            {
+                entry.insert("summary".to_string(), Value::Array(summary.clone()));
+            }
+            if let Some(content) = item.get("content").filter(|value| !value.is_null()) {
+                entry.insert("content".to_string(), content.clone());
+            }
+            if let Some(text) = item.get("text").filter(|value| !value.is_null()) {
+                entry.insert("text".to_string(), text.clone());
+            }
+            if !ordered.iter().any(|entry| entry["id"] == item_id) {
+                ordered.push(Value::Object(entry));
+            }
+            extension.insert(
+                RESPONSES_REASONING_ITEMS_EXTENSION.to_string(),
+                Value::Array(ordered),
+            );
+        }
+    }
+    Some(message)
+}
+
+fn retain_anthropic_reasoning_block_association(
+    item: &Map<String, Value>,
+    reasoning_content: &str,
+    extension: &mut Map<String, Value>,
+) {
+    let anthropic_reasoning = extension
+        .get(ANTHROPIC_REASONING_EXTENSION)
+        .and_then(Value::as_object);
+    if extension
+        .get(ANTHROPIC_REASONING_BLOCKS_EXTENSION)
+        .and_then(Value::as_array)
+        .is_some_and(|blocks| !blocks.is_empty())
+    {
+        return;
+    }
+    let mut block = Map::new();
+    let native_type = anthropic_reasoning
+        .and_then(|extension| extension.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| {
+            // `encrypted_content: null` is a present key without ciphertext.
+            // Only non-empty ciphertext can form a legal `redacted_thinking`
+            // block; key presence alone would fabricate a data-less block.
+            let has_encrypted_content = item
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty());
+            if reasoning_content.trim().is_empty() && has_encrypted_content {
+                "redacted_thinking"
+            } else {
+                "thinking"
+            }
+        });
+    block.insert("type".to_string(), Value::String(native_type.to_string()));
+    block.insert(
+        "reasoning_content".to_string(),
+        Value::String(reasoning_content.to_string()),
+    );
+    if let Some(encrypted_content) = item.get("encrypted_content") {
+        block.insert("encrypted_content".to_string(), encrypted_content.clone());
+    }
+    if let Some(anthropic_reasoning) = anthropic_reasoning {
+        block.insert(
+            ANTHROPIC_REASONING_EXTENSION.to_string(),
+            Value::Object(anthropic_reasoning.clone()),
+        );
+    }
+    extension.insert(
+        ANTHROPIC_REASONING_BLOCKS_EXTENSION.to_string(),
+        Value::Array(vec![Value::Object(block)]),
+    );
+}
+
+fn retain_anthropic_reasoning_block_for_message(
+    item: &Map<String, Value>,
+    reasoning_content: &str,
+    message: &mut Map<String, Value>,
+) -> Result<(), String> {
+    let mut extension = match item.get("routecodex_chat_extension") {
+        Some(extension) => extension
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "reasoning routecodex_chat_extension is not an object".to_string())?,
+        None => Map::new(),
+    };
+    retain_anthropic_reasoning_block_association(item, reasoning_content, &mut extension);
+    message.insert(
+        "routecodex_chat_extension".to_string(),
+        Value::Object(extension),
+    );
+    Ok(())
 }
 
 fn build_v3_openai_chat_assistant_tool_call_message(
@@ -723,39 +970,75 @@ fn build_v3_openai_chat_assistant_tool_call_message(
         .ok_or_else(|| {
             "Responses function_call is missing name before OpenAI Chat encoding".to_string()
         })?;
+    let tool_call = project_v3_responses_tool_call_to_openai_chat(item, call_id, name);
+    let mut message = Map::new();
+    message.insert("role".to_string(), Value::String("assistant".to_string()));
+    if item.contains_key("content") {
+        let (content, _) =
+            build_v3_openai_chat_content_from_responses_content(item.get("content"))?;
+        message.insert("content".to_string(), content);
+    }
+    message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
+    if let Some(reasoning_content) = join_v3_openai_chat_reasoning_segments(
+        collect_v3_openai_chat_reasoning_segments(
+            item.get("reasoning_content")
+                .or_else(|| item.get("reasoning_text"))
+                .or_else(|| item.get("thinking")),
+        )
+        .as_slice(),
+    ) {
+        message.insert(
+            "reasoning_content".to_string(),
+            Value::String(reasoning_content.clone()),
+        );
+        retain_anthropic_reasoning_block_for_message(item, &reasoning_content, &mut message)?;
+    }
+    Ok(Value::Object(message))
+}
+
+/// The request and response adapters use the same reversible Chat encoding.
+pub(crate) fn project_v3_responses_tool_call_to_openai_chat(
+    item: &Map<String, Value>,
+    call_id: &str,
+    name: &str,
+) -> Value {
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or_default();
-    let name = if item_type != "custom_tool_call" {
-        if let Some(namespace) = read_v3_non_empty_str(item.get("namespace")) {
-            format!("{namespace}__{name}")
+    let name = if let Some(namespace) = read_v3_non_empty_str(item.get("namespace")) {
+        if item_type == "custom_tool_call" {
+            format!("{namespace}.{name}")
         } else {
-            name.to_string()
+            format!("{namespace}__{name}")
         }
     } else {
         name.to_string()
     };
     let arguments = if item_type == "custom_tool_call" {
-        let input = item.get("input").ok_or_else(|| {
-            "Responses custom_tool_call is missing input before OpenAI Chat encoding".to_string()
-        })?;
-        let input = match input {
-            Value::String(text) => Value::String(text.clone()),
-            other => {
-                Value::String(serde_json::to_string(other).map_err(|error| error.to_string())?)
-            }
-        };
-        serde_json::to_string(&json!({ "input": input })).map_err(|error| error.to_string())?
+        item.get("input")
+            .map(|input| json!({ "input": input }).to_string())
     } else {
-        let arguments = read_v3_responses_function_call_arguments_for_openai_chat(item)?;
-        project_v3_responses_arguments_to_openai_chat_wire(arguments.as_str())
+        item.get("arguments")
+            .or_else(|| {
+                item.get("function")
+                    .and_then(|function| function.get("arguments"))
+            })
+            .map(|arguments| match arguments {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            })
     };
-    let mut message = Map::new();
-    message.insert("role".to_string(), Value::String("assistant".to_string()));
-    message.insert("content".to_string(), Value::String(String::new()));
+    let mut function = Map::new();
+    function.insert("name".to_string(), Value::String(name));
+    if let Some(arguments) = arguments {
+        function.insert("arguments".to_string(), Value::String(arguments));
+    }
     let mut tool_call = json!({
         "id": call_id,
         "type": "function",
-        "function": {"name": name, "arguments": arguments}
+        "function": Value::Object(function)
     });
+    if let Some(signature) = item.get("thought_signature") {
+        tool_call["thought_signature"] = signature.clone();
+    }
     let responses_item_id = read_v3_non_empty_str(item.get("id"));
     if item_type == "custom_tool_call" || responses_item_id.is_some() {
         let mut extension = Map::new();
@@ -778,42 +1061,7 @@ fn build_v3_openai_chat_assistant_tool_call_message(
             );
         }
     }
-    message.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
-    if let Some(reasoning_content) = join_v3_openai_chat_reasoning_segments(
-        collect_v3_openai_chat_reasoning_segments(
-            item.get("reasoning_content")
-                .or_else(|| item.get("reasoning_text"))
-                .or_else(|| item.get("thinking")),
-        )
-        .as_slice(),
-    ) {
-        message.insert(
-            "reasoning_content".to_string(),
-            Value::String(reasoning_content),
-        );
-    }
-    Ok(Value::Object(message))
-}
-
-fn read_v3_responses_function_call_arguments_for_openai_chat(
-    item: &Map<String, Value>,
-) -> Result<String, String> {
-    let arguments = item
-        .get("arguments")
-        .or_else(|| {
-            item.get("function")
-                .and_then(Value::as_object)
-                .and_then(|function| function.get("arguments"))
-        })
-        .ok_or("Responses function_call is missing arguments before OpenAI Chat encoding")?;
-    match arguments {
-        Value::String(text) => Ok(text.clone()),
-        other => serde_json::to_string(other).map_err(|error| error.to_string()),
-    }
-}
-
-fn project_v3_responses_arguments_to_openai_chat_wire(arguments: &str) -> String {
-    arguments.to_string()
+    tool_call
 }
 
 fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result<Value, String> {
@@ -824,10 +1072,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         .get("output")
         .or_else(|| item.get("content"))
         .ok_or("Responses tool output is missing output/content before OpenAI Chat encoding")?;
-    let content = match output {
-        Value::String(text) => text.clone(),
-        other => serde_json::to_string(other).map_err(|error| error.to_string())?,
-    };
+    let content = tool_output::canonical_content(output)?;
     let item_type = item
         .get("type")
         .and_then(Value::as_str)
@@ -836,6 +1081,30 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
     extension.insert("responses_tool_output_type".to_string(), json!(item_type));
     if let Some(item_id) = read_v3_non_empty_str(item.get("id")) {
         extension.insert("responses_item_id".to_string(), json!(item_id));
+    }
+    let extra_fields: Map<String, Value> = item
+        .iter()
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "type"
+                    | "id"
+                    | "status"
+                    | "call_id"
+                    | "tool_call_id"
+                    | "tool_use_id"
+                    | "output"
+                    | "content"
+                    | "routecodex_chat_extension"
+            ) && !(call_id.is_none() && matches!(key.as_str(), "name" | "namespace"))
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if !extra_fields.is_empty() {
+        extension.insert(
+            "responses_tool_output_extra_fields".to_string(),
+            Value::Object(extra_fields),
+        );
     }
     let Some(call_id) = call_id else {
         // 命名无配对输出：name/namespace 是配对身份，不得伪造 call_id。Chat 的 tool 角色
@@ -852,6 +1121,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
             );
         }
         copy_v3_responses_tool_result_status(item, &mut named_extension)?;
+        copy_v3_anthropic_tool_result_is_error(item, &mut named_extension);
         return Ok(json!({
             "role":"user",
             "content":content,
@@ -859,6 +1129,7 @@ fn build_v3_openai_chat_tool_result_message(item: &Map<String, Value>) -> Result
         }));
     };
     copy_v3_responses_tool_result_status(item, &mut extension)?;
+    copy_v3_anthropic_tool_result_is_error(item, &mut extension);
     Ok(json!({
         "role":"tool",
         "tool_call_id":call_id,
@@ -879,6 +1150,20 @@ fn copy_v3_responses_tool_result_status(
         Some(status) => {
             extension.insert("responses_tool_output_status".to_string(), status.clone());
             Ok(())
+        }
+    }
+}
+
+fn copy_v3_anthropic_tool_result_is_error(
+    item: &Map<String, Value>,
+    extension: &mut Map<String, Value>,
+) {
+    if let Some(Value::Object(source)) = item.get("routecodex_chat_extension") {
+        if let Some(is_error) = source.get("anthropic_tool_result_is_error") {
+            extension.insert(
+                "anthropic_tool_result_is_error".to_string(),
+                is_error.clone(),
+            );
         }
     }
 }
@@ -914,32 +1199,15 @@ impl V3OpenAiChatHostedToolHistoryKind {
     }
 }
 
-fn ensure_v3_openai_chat_hosted_tool_output_has_no_side_channel(
-    item: &Map<String, Value>,
-) -> Result<(), String> {
-    let event = Value::Object(item.clone());
-    if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
-        return Err(format!(
-            "Responses tool_search_output contains RouteCodex side-channel field before Chat canonicalization: {key}"
-        ));
-    }
-    if let Some(key) = find_v3_openai_chat_hosted_tool_private_payload_key(&event) {
-        return Err(format!(
-            "Responses tool_search_output contains private debug field before Chat canonicalization: {key}"
-        ));
-    }
-    Ok(())
-}
-
 fn append_v3_openai_chat_hosted_tool_call_history_pair(
     messages: &mut Vec<Value>,
     pending_tool_message_index: &mut Option<usize>,
     pending_tool_call_ids: &mut Vec<String>,
+    pending_tool_adjacent_deferred_messages: &mut Vec<Value>,
     item: &Map<String, Value>,
     input_index: usize,
     kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<(), String> {
-    ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(item, kind)?;
     let call_id = build_v3_openai_chat_hosted_tool_history_call_id(item, input_index, kind);
     let assistant =
         build_v3_openai_chat_hosted_tool_assistant_tool_call_message(item, call_id.as_str(), kind)?;
@@ -956,46 +1224,9 @@ fn append_v3_openai_chat_hosted_tool_call_history_pair(
         messages,
         pending_tool_message_index,
         pending_tool_call_ids,
+        pending_tool_adjacent_deferred_messages,
         tool_result,
     )
-}
-
-fn ensure_v3_openai_chat_hosted_tool_event_has_no_side_channel(
-    item: &Map<String, Value>,
-    kind: V3OpenAiChatHostedToolHistoryKind,
-) -> Result<(), String> {
-    let event = Value::Object(item.clone());
-    let item_type = kind.responses_item_type();
-    if let Some(key) = super::find_v3_hub_side_channel_key(&event) {
-        return Err(format!(
-            "Responses {item_type} contains RouteCodex side-channel field before OpenAI Chat provider encoding: {key}"
-        ));
-    }
-    if let Some(key) = find_v3_openai_chat_hosted_tool_private_payload_key(&event) {
-        return Err(format!(
-            "Responses {item_type} contains private debug field before OpenAI Chat provider encoding: {key}"
-        ));
-    }
-    Ok(())
-}
-
-fn find_v3_openai_chat_hosted_tool_private_payload_key(value: &Value) -> Option<String> {
-    match value {
-        Value::Object(object) => {
-            for key in object.keys() {
-                if key.starts_with('_') {
-                    return Some(key.clone());
-                }
-            }
-            object
-                .values()
-                .find_map(find_v3_openai_chat_hosted_tool_private_payload_key)
-        }
-        Value::Array(items) => items
-            .iter()
-            .find_map(find_v3_openai_chat_hosted_tool_private_payload_key),
-        _ => None,
-    }
 }
 
 fn build_v3_openai_chat_hosted_tool_history_call_id(
@@ -1016,13 +1247,28 @@ fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
     kind: V3OpenAiChatHostedToolHistoryKind,
 ) -> Result<Value, String> {
     let arguments_value = build_v3_openai_chat_hosted_tool_arguments_value(item, kind);
-    let arguments = serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?;
-    let function_name = kind.openai_chat_function_name();
     let mut extension = Map::new();
     extension.insert(
         "responses_tool_call_type".to_string(),
         Value::String(kind.responses_item_type().to_string()),
     );
+    let mut function = json!({"name":kind.openai_chat_function_name()});
+    if let Some(arguments_value) = arguments_value {
+        let raw_string = matches!(kind, V3OpenAiChatHostedToolHistoryKind::ToolSearch)
+            && arguments_value.is_string();
+        let arguments = if raw_string {
+            arguments_value.as_str().unwrap().to_string()
+        } else {
+            serde_json::to_string(&arguments_value).map_err(|error| error.to_string())?
+        };
+        function["arguments"] = Value::String(arguments);
+        if matches!(kind, V3OpenAiChatHostedToolHistoryKind::ToolSearch) {
+            extension.insert(
+                "responses_arguments_serialized".to_string(),
+                Value::Bool(!raw_string),
+            );
+        }
+    }
     copy_v3_responses_item_extension_fields(item, &mut extension);
     Ok(json!({
         "role": "assistant",
@@ -1030,10 +1276,7 @@ fn build_v3_openai_chat_hosted_tool_assistant_tool_call_message(
         "tool_calls": [{
             "id": call_id,
             "type": "function",
-            "function": {
-                "name": function_name,
-                "arguments": arguments
-            },
+            "function": function,
             "routecodex_chat_extension": Value::Object(extension)
         }]
     }))
@@ -1087,18 +1330,21 @@ fn copy_v3_responses_item_extension_fields(
 fn build_v3_openai_chat_hosted_tool_arguments_value(
     item: &Map<String, Value>,
     kind: V3OpenAiChatHostedToolHistoryKind,
-) -> Value {
+) -> Option<Value> {
     let source = match kind {
         V3OpenAiChatHostedToolHistoryKind::WebSearch => item.get("action"),
         V3OpenAiChatHostedToolHistoryKind::ToolSearch => {
             item.get("arguments").or_else(|| item.get("action"))
         }
     };
-    match source {
+    if matches!(kind, V3OpenAiChatHostedToolHistoryKind::ToolSearch) {
+        return source.cloned();
+    }
+    Some(match source {
         Some(Value::Object(object)) => Value::Object(object.clone()),
         Some(value) => json!({ "value": value }),
         None => Value::Object(Map::new()),
-    }
+    })
 }
 
 fn build_v3_openai_chat_hosted_tool_result_message(
@@ -1163,10 +1409,8 @@ fn build_v3_openai_chat_content_from_responses_content(
     let Some(parts) = content.as_array() else {
         return Ok((Value::String(content.to_string()), Vec::new()));
     };
-    let mut text_segments = Vec::new();
     let mut converted_parts = Vec::new();
     let mut reasoning_segments = Vec::new();
-    let mut text_only = true;
     for part in parts {
         let object = part.as_object().ok_or_else(|| {
             "Responses message content part must be an object before OpenAI Chat encoding"
@@ -1174,19 +1418,32 @@ fn build_v3_openai_chat_content_from_responses_content(
         })?;
         match object.get("type").and_then(Value::as_str) {
             Some("input_text" | "output_text" | "text") => {
-                let text = object
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                text_segments.push(text.to_string());
-                converted_parts.push(json!({"type":"text","text":text}));
+                let mut converted = object.clone();
+                converted.insert("type".to_string(), Value::String("text".to_string()));
+                if let Some(text) = converted.get_mut("text") {
+                    if !text.is_string() {
+                        *text = Value::String(text.to_string());
+                    }
+                }
+                converted_parts.push(Value::Object(converted));
             }
             Some("reasoning_text" | "thinking" | "reasoning") => {
                 reasoning_segments.extend(collect_v3_openai_chat_reasoning_segments(Some(part)));
             }
             Some("input_image" | "image_url") => {
-                text_only = false;
                 converted_parts.push(convert_v3_responses_image_part_to_openai_chat_part(object));
+            }
+            Some("refusal") => {
+                // A provider refusal is legal business content: preserve it
+                // faithfully in the continuation history rather than treating
+                // the whole assistant message as unsupported.
+                let mut converted = object.clone();
+                if let Some(text) = converted.get_mut("refusal") {
+                    if !text.is_string() {
+                        *text = Value::String(text.to_string());
+                    }
+                }
+                converted_parts.push(Value::Object(converted));
             }
             Some(other) => {
                 return Err(format!(
@@ -1201,11 +1458,7 @@ fn build_v3_openai_chat_content_from_responses_content(
             }
         }
     }
-    if text_only {
-        Ok((Value::String(text_segments.join("")), reasoning_segments))
-    } else {
-        Ok((Value::Array(converted_parts), reasoning_segments))
-    }
+    Ok((Value::Array(converted_parts), reasoning_segments))
 }
 
 fn collect_v3_openai_chat_reasoning_segments(value: Option<&Value>) -> Vec<String> {
@@ -1260,28 +1513,44 @@ fn read_v3_trimmed_owned(text: &str) -> Option<String> {
 }
 
 fn convert_v3_responses_image_part_to_openai_chat_part(part: &Map<String, Value>) -> Value {
-    let image_url = normalize_v3_responses_image_url_for_openai_chat(part);
-    json!({"type":"image_url","image_url":image_url})
-}
-
-fn normalize_v3_responses_image_url_for_openai_chat(part: &Map<String, Value>) -> Value {
-    let source = part
-        .get("image_url")
-        .cloned()
-        .or_else(|| part.get("url").cloned())
-        .unwrap_or(Value::Null);
-
-    let mut image_url = match source {
-        Value::Object(object) => object,
-        Value::String(url) => Map::from_iter([("url".to_string(), Value::String(url))]),
-        other => Map::from_iter([("url".to_string(), other)]),
-    };
-
-    if let Some(detail) = part.get("detail").cloned() {
-        image_url.entry("detail".to_string()).or_insert(detail);
+    let image_url = responses_image_url(part);
+    let source_key = image_url.as_ref().and_then(|_| {
+        ["image_url", "url", "file_url", "data"]
+            .into_iter()
+            .find(|key| part.contains_key(*key))
+    });
+    let mut converted = part.clone();
+    converted.insert("type".to_string(), Value::String("image_url".to_string()));
+    if let Some(source_key) = source_key {
+        if source_key != "image_url" {
+            converted.remove(source_key);
+        }
+        if source_key == "data"
+            && part
+                .get("data")
+                .and_then(Value::as_str)
+                .is_some_and(|data| !data.starts_with("data:image/"))
+        {
+            if let Some(media_type_key) = ["media_type", "mime_type"]
+                .into_iter()
+                .find(|key| part.contains_key(*key))
+            {
+                converted.remove(media_type_key);
+            }
+        }
+        let nested_detail_already_present = part
+            .get(source_key)
+            .and_then(Value::as_object)
+            .is_some_and(|source| source.contains_key("detail"));
+        if !nested_detail_already_present {
+            converted.remove("detail");
+        }
     }
-
-    Value::Object(image_url)
+    converted.insert(
+        "image_url".to_string(),
+        image_url.unwrap_or_else(|| json!({"url":null})),
+    );
+    Value::Object(converted)
 }
 
 fn v3_openai_chat_wire_role(role: &str) -> &str {
@@ -1374,7 +1643,7 @@ fn normalize_v3_codex_integer_tool_schema(tool: &mut Value) {
     }
 }
 
-fn is_registered_codex_tool_schema(
+pub(crate) fn is_registered_codex_tool_schema(
     tool: &Map<String, Value>,
     property_names: &[&str],
     required_names: &[&str],
@@ -1387,12 +1656,19 @@ fn is_registered_codex_tool_schema(
         }
         _ => None,
     };
+    let description = tool.get("description").and_then(Value::as_str);
+    let registered_description = description == expected_description
+        || (tool_name == Some("exec_command")
+            && description
+                == Some(
+                    "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+                ));
     if !tool.keys().all(|key| {
         matches!(
             key.as_str(),
             "description" | "name" | "parameters" | "strict" | "type"
         )
-    }) || tool.get("description").and_then(Value::as_str) != expected_description
+    }) || !registered_description
     {
         return false;
     }

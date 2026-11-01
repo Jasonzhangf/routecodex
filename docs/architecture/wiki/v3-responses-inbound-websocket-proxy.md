@@ -28,5 +28,5 @@ Controlled evidence:
 - malformed client events, missing type, unsupported `response.cancel`, and nested `response.create.response` payloads fail before provider send.
 - A same-socket second response.create with `previous_response_id` and `function_call_output` is rejected before provider send; Responses continuation is retired.
 - Scope mismatch fails before provider send; Server does not repair continuation/history/tool state.
-- Provider WebSocket/runtime failure projects an explicit WebSocket error event without HTTP fallback.
+- A provider terminal closes the current WebSocket without any client payload, so a WebSocket client never observes a provider status, code, or body; a runtime/validation failure still projects an explicit WebSocket error event without HTTP fallback.
 - Client disconnect during incremental Runtime SSE projection drops the provider stream/connection instead of silently draining to terminal behind the client.

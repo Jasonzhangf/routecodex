@@ -9,28 +9,137 @@
 //! 错误统一以 `String` 表达，调用方（协议 runtime）负责 map_err 到自身错误类型；
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
-use crate::hub_v1::{V3HubEntryProtocol, V3RuntimeObservability, V3RuntimeStreamObservation};
+use crate::hub_v1::{
+    V3HubEntryProtocol, V3HubProviderWireProtocol, V3RuntimeObservability,
+    V3RuntimeProviderFailedAttemptEvidence, V3RuntimeProviderFailureObservation,
+    V3RuntimeStreamObservation,
+};
 use crate::provider_failure_runtime_policy::{
     project_v3_client_disconnect, provider_runtime_failure_stage,
-    run_v3_relay_provider_failure_policy, V3RelayProviderFailurePolicyContext,
+    run_v3_relay_provider_failure_policy_with_response_source,
+    v3_relay_provider_candidate_key_parts, V3RelayErrorOperatorFault,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyEvent,
     V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3Error06ClientProjected, V3ErrorActionScope, V3ErrorHandlingCenter,
-    V3ErrorHandlingCenterInput, V3ErrorSourceKind, V3_ERROR_CHAIN_NODE_IDS,
+    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError, V3ResponsesProviderTarget,
+    v3_provider_auth_handle_from_manifest_entry, V3ProviderAuthHandle, V3ProviderError,
+    V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
+    V3ResponsesProviderTarget, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, SseIncrementalDecoder, SseTransportLimits,
 };
 use routecodex_v3_target::V3Target10ConcreteProviderSelected;
 use serde_json::{json, Value};
+use std::fmt;
 use std::pin::Pin;
+use std::sync::Arc;
+
+/// 骨架内部错误（协议入口负责映射到自身错误类型）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum V3RelayCoreError {
+    StaticRegistry(String),
+    EndpointPath(String),
+    Target(String),
+    ResponseGovernance(super::V3HubRelayResponseError),
+    ProviderPoolExhausted { attempted_candidates: Vec<String> },
+}
+
+impl fmt::Display for V3RelayCoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
+            V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
+            V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::ResponseGovernance(error) => error.fmt(f),
+            V3RelayCoreError::ProviderPoolExhausted {
+                attempted_candidates,
+            } => write!(f, "provider pool exhausted after {attempted_candidates:?}"),
+        }
+    }
+}
+
+/// Provider attempt deadline. A provider that is missing from the compiled
+/// manifest keeps the remote first-byte budget of two minutes. An explicit
+/// whole-request budget is preserved unchanged; the SSE first-frame cap is
+/// enforced on the provider config.
+pub(crate) fn v3_relay_transport_response_timeout_from_ms(
+    request_timeout_ms: Option<u64>,
+) -> std::time::Duration {
+    std::time::Duration::from_millis(request_timeout_ms.filter(|&ms| ms > 0).unwrap_or(120_000))
+}
+
+#[cfg(test)]
+mod response_header_timeout_contract_tests {
+    use super::*;
+
+    #[test]
+    fn relay_transport_header_timeout_reads_provider_request_timeout() {
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(Some(900_000)),
+            std::time::Duration::from_millis(900_000)
+        );
+    }
+
+    #[test]
+    fn relay_transport_header_timeout_defaults_and_zero_use_default_timeout() {
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(None),
+            std::time::Duration::from_millis(120_000)
+        );
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(Some(0)),
+            std::time::Duration::from_millis(120_000)
+        );
+    }
+
+    #[test]
+    fn relay_transport_header_timeout_keeps_120_second_budget() {
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(Some(300_000)),
+            std::time::Duration::from_millis(300_000),
+            "the translation helper must not silently rewrite an already-compiled value"
+        );
+        assert_eq!(
+            v3_relay_transport_response_timeout_from_ms(None),
+            std::time::Duration::from_millis(120_000),
+            "a missing provider entry keeps the remote first-byte budget"
+        );
+    }
+}
+
+pub(crate) fn v3_relay_transport_response_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> std::time::Duration {
+    v3_relay_transport_response_timeout_from_ms(
+        manifest
+            .providers
+            .get(provider_id)
+            .map(|p| p.request_timeout_ms),
+    )
+}
+
+/// The published SSE timeout covers both first frame and inter-frame idle time.
+pub(crate) fn v3_provider_sse_idle_timeout(
+    manifest: &V3Config05ManifestPublished,
+    provider_id: &str,
+) -> Result<std::time::Duration, String> {
+    manifest.providers.get(provider_id).and_then(|provider| provider.sse_first_frame_timeout_ms)
+        .filter(|timeout_ms| *timeout_ms > 0).map(std::time::Duration::from_millis)
+        .ok_or_else(|| {
+            format!(
+                "published provider SSE first-frame/inter-frame timeout is missing for provider {provider_id}"
+            )
+        })
+}
 
 /// 统一的 relay provider 失败结构（替代各协议 `V3*RelayProviderFailure` 副本）。
 ///
@@ -40,13 +149,46 @@ use std::pin::Pin;
 #[derive(Debug, Clone)]
 pub struct V3RelayProviderFailure {
     pub status: u16,
+    /// The upstream provider's real HTTP status; `None` when no HTTP response was
+    /// received. Never the client-facing projection status.
+    pub provider_status: Option<u16>,
+    /// A typed body-read failure for an HTTP response whose status and headers
+    /// really arrived. `None` for a response-less transport failure and for a
+    /// completely received upstream HTTP error. The policy uses this field to
+    /// distinguish a truncated transport from an ordinary provider HTTP error.
+    pub provider_body_read_failure: Option<String>,
     pub client_response: Value,
     pub source_stage: &'static str,
     pub terminal_projection: Option<V3Error06ClientProjected>,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
+    pub error_operator_fault: Option<V3RelayErrorOperatorFault>,
+    /// Failure-only attempt-local wire evidence transferred to the policy event.
+    /// It is never read by error classification or provider health.
+    pub failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
     /// 从 client_response 提取错误类型（协议形状相关）。
     pub error_type_fn: fn(&Value) -> Option<String>,
     /// 从 client_response 提取错误消息（协议形状相关）。
     pub error_message_fn: fn(&Value) -> String,
+}
+
+/// Keep a planning operator fault typed until the Relay failure output consumes
+/// it. Reselection retains any preceding provider witness in the terminalizer.
+pub(crate) fn provider_operator_fault_failure(
+    fault: V3RelayErrorOperatorFault,
+) -> V3RelayProviderFailure {
+    V3RelayProviderFailure {
+        status: 599,
+        provider_status: None,
+        provider_body_read_failure: None,
+        client_response: Value::Null,
+        source_stage: fault.policy_failure.source_stage,
+        terminal_projection: None,
+        terminal_disposition: None,
+        error_operator_fault: Some(fault),
+        failed_attempt_evidence: None,
+        error_type_fn: extract_error_code_style,
+        error_message_fn: extract_message_code_style,
+    }
 }
 
 /// code/status 风格错误提取（gemini / openai / responses 形状：`error.code` 或 `error.status`）。
@@ -110,12 +252,13 @@ pub fn server_routing_group<'a>(
 /// Build the only public-facing source for an exhausted provider pool.
 ///
 /// Candidate details stay in the typed Error01/Error02 side-channel. Error06
-/// owns the stable client projection (`502 network_error`).
+/// stages no client candidate for a provider terminal: the client boundary is
+/// the `client_transport_break` disposition owned by Error05 and Server/SSE.
 pub(crate) fn provider_pool_exhausted_source(
     source_stage: &'static str,
     attempted_candidates: &[String],
-) -> routecodex_v3_error::V3Error01SourceRaised {
-    build_v3_error_01_source_raised(
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_plain_error(
         V3ErrorSourceKind::TargetPoolExhausted,
         source_stage,
         "selected_target_exhausted",
@@ -150,29 +293,17 @@ pub fn provider_target(
         .iter()
         .find(|entry| entry.alias == selected.auth_alias)
         .ok_or_else(|| "selected auth handle missing".to_string())?;
-    let secret = match (
-        &auth.env,
-        &auth.token_file,
-        &auth.secret_file,
-        &auth.secret_key,
-        &auth.api_key,
-    ) {
-        (Some(env), None, None, None, None) => V3ProviderAuthSecretHandle::Environment(env.clone()),
-        (None, Some(path), None, None, None) => V3ProviderAuthSecretHandle::TokenFile(path.clone()),
-        (None, None, Some(path), Some(key), None) => V3ProviderAuthSecretHandle::SecretFile {
-            path: path.clone(),
-            key: key.clone(),
-        },
-        (None, None, None, None, Some(value)) => V3ProviderAuthSecretHandle::ApiKey(value.clone()),
-        _ => return Err("selected auth handle is invalid".to_string()),
-    };
+    let secret =
+        v3_provider_auth_handle_from_manifest_entry(selected.auth_alias.clone(), auth)?.secret;
     Ok(V3ResponsesProviderTarget {
         provider_id: selected.provider_id.clone(),
+        interface_id: selected.interface_id.clone(),
         provider_type: selected.provider_type.clone(),
         base_url: selected.base_url.clone(),
         canonical_model_id: selected.model_id.clone(),
         wire_model: selected.wire_model.clone(),
-        compatibility_profile: provider.compatibility_profile.clone(),
+        compatibility_profile: selected.compatibility_profile.clone(),
+        headers: provider.headers.clone(),
         auth: V3ProviderAuthHandle {
             alias: selected.auth_alias.clone(),
             secret,
@@ -187,6 +318,28 @@ pub fn provider_target(
     })
 }
 
+/// 从已选 provider 的编译 auth 类型选择业务 wire 认证载体。仅 typed Gemini
+/// 协议存在非 Bearer 载体；其余显式枚举的协议保持请求不变。
+pub(crate) fn bind_v3_selected_business_auth_kind(
+    manifest: &V3Config05ManifestPublished,
+    selected: &routecodex_v3_target::V3TargetCandidate,
+    provider_protocol: V3HubProviderWireProtocol,
+    request: V3Transport13ResponsesHttpRequest,
+) -> Result<V3Transport13ResponsesHttpRequest, String> {
+    match provider_protocol {
+        V3HubProviderWireProtocol::Gemini => {
+            let provider = manifest
+                .providers
+                .get(&selected.provider_id)
+                .ok_or_else(|| "selected provider missing".to_string())?;
+            Ok(request.with_gemini_auth_kind(&provider.auth.auth_type))
+        }
+        V3HubProviderWireProtocol::Responses
+        | V3HubProviderWireProtocol::Anthropic
+        | V3HubProviderWireProtocol::OpenAiChat => Ok(request),
+    }
+}
+
 /// provider 失败策略执行（共享版；替代各协议 `handle_provider_failure` 副本）。
 ///
 /// 返回 `Ok(Some(failure))` 表示 terminal（需投影输出）；`Ok(None)` 表示已重排
@@ -198,11 +351,35 @@ pub async fn handle_provider_failure(
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
-    if failure.terminal_projection.is_some() {
+    handle_provider_failure_with_response_code(
+        context,
+        selected,
+        failure,
+        state,
+        retry_selected,
+        pending_recovery,
+        provider_failure_events,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn handle_provider_failure_with_response_code(
+    context: &V3RelayProviderFailurePolicyContext<'_>,
+    selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
+    mut failure: V3RelayProviderFailure,
+    state: &mut V3RelayProviderFailurePolicyState<'_>,
+    retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
+    provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
+    response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+) -> Result<Option<V3RelayProviderFailure>, String> {
+    if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let result = run_v3_relay_provider_failure_policy(
+    let mut result = match run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
         failure.source_stage,
@@ -211,10 +388,30 @@ pub async fn handle_provider_failure(
         provider_failure_message(&failure),
         None,
         state,
+        response_processing_code,
+        None,
+        failure.provider_status,
+        failure.provider_body_read_failure.as_deref(),
     )
     .await
-    .map_err(|error| error.to_string())?;
+    {
+        Ok(result) => result,
+        Err(Ok(error)) => return Err(error),
+        Err(Err(fault)) => {
+            failure.error_operator_fault = Some(fault);
+            return Ok(Some(failure));
+        }
+    };
+    result.event.provider_status = failure.provider_status;
+    result.event.failed_attempt_evidence = failure.failed_attempt_evidence.clone();
+    provider_failure_events
+        .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
+        V3Error05ExecutionAction::ReevaluateTarget => {
+            *retry_selected = None;
+            *pending_recovery = None;
+            Ok(None)
+        }
         V3Error05ExecutionAction::WaitThenReselect { recovery } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
             if result.event.wait_ms.is_some() {
@@ -237,12 +434,48 @@ pub async fn handle_provider_failure(
         }
         V3Error05ExecutionAction::ProjectTerminal => {
             failure.terminal_projection = result.terminal_projection;
+            failure.terminal_disposition = result.terminal_disposition;
             Ok(Some(failure))
         }
         V3Error05ExecutionAction::ClientDisconnected
         | V3Error05ExecutionAction::RejectNonProviderError => {
             Err("provider failure entered a non-provider Error05 lane".to_string())
         }
+    }
+}
+
+pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
+    event: &V3RelayProviderFailurePolicyEvent,
+) -> V3RuntimeProviderFailureObservation {
+    V3RuntimeProviderFailureObservation {
+        provider_key: v3_relay_provider_candidate_key_parts(
+            &event.candidate.provider_id,
+            Some(&event.candidate.interface_id),
+            Some(&event.candidate.auth_alias),
+            Some(&event.candidate.model_id),
+        ),
+        provider_id: event.candidate.provider_id.clone(),
+        auth_alias: Some(event.candidate.auth_alias.clone()),
+        model_id: event.candidate.model_id.clone(),
+        status: event.status,
+        error_type: event.error_type.clone(),
+        external_error_kind: None,
+        external_error_code: event.error_type.clone(),
+        // The real upstream HTTP status; `None` for a response-less failure.
+        external_error_status: event.provider_status,
+        internal_code: None,
+        // V3RelayProviderFailurePolicyEvent does not carry the upstream request
+        // id: record an honest unknown rather than a synthesised value.
+        upstream_request_id: None,
+        message: event.message.clone(),
+        failure_count: event.health_record.failure_count,
+        health_state: event.health_record.state.clone(),
+        cooldown_until_ms: event.health_record.cooldown_until_ms,
+        action: event.action.clone(),
+        next_provider_key: event.next_provider_key.clone(),
+        wait_ms: event.wait_ms,
+        diagnostic_source: Some(event.diagnostic_source.clone()),
+        failed_attempt_evidence: event.failed_attempt_evidence.clone(),
     }
 }
 
@@ -269,15 +502,346 @@ pub fn provider_http_failure(
     };
     V3RelayProviderFailure {
         status,
+        provider_status: Some(status),
+        provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        terminal_disposition: None,
+        error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
 }
 
+/// The canonical provider-terminal witness builder: the upstream HTTP response
+/// is recorded losslessly whenever one was received, whatever its status.
+///
+/// Client-projection eligibility (bug `705d624` keeps HTTP 502 out of any
+/// client response) is deliberately not part of this. Evidence capture is
+/// decoupled from the rule that decides whether a client may see the response,
+/// and a failed body read is recorded as such instead of erasing the status
+/// and headers that were really received.
+pub fn external_http_witness(response: &V3ProviderHttpFailure) -> V3ExternalHttpWitness {
+    let witness = V3ExternalHttpWitness::new(
+        response.status,
+        response
+            .headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        response.body.clone(),
+    );
+    match response.body_read_failure.as_deref() {
+        Some(reason) => witness.with_body_read_failure(reason),
+        None => witness,
+    }
+}
+
+/// The witness for a head that really arrived, whatever the status.
+///
+/// An SSE body is not materialized here, so the empty body is the truthful
+/// statement that no readable bytes were captured at this instant.
+fn external_http_witness_from_head(
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    body: Vec<u8>,
+) -> V3ExternalHttpWitness {
+    V3ExternalHttpWitness::new(
+        status,
+        headers
+            .iter()
+            .map(|header| (header.name.clone(), header.value.clone()))
+            .collect(),
+        body,
+    )
+}
+
+/// The witness for a raw provider response the moment its head arrives,
+/// whatever its status or body kind.
+///
+/// `external_http_witness` only ever sees responses that came back through the
+/// transport-error path (`V3ProviderError::HttpStatus`). A stream does not: it
+/// is returned as `Ok`, held for buffering, and only fails once its body has
+/// been consumed. For a stream whose payload never decodes, the arrival of the
+/// head is the only moment the runtime observes that upstream really answered,
+/// so recording it here keeps the evidence honest: a received head is never
+/// reported as `no_response`. An already-buffered JSON body is kept losslessly;
+/// an SSE body is not materialized, so the empty body is the truthful statement
+/// that no readable bytes were captured. A branch that can read a body replaces
+/// this with the fuller witness.
+///
+/// Evidence capture only. It does not change client projection, provider
+/// rotation, or health.
+pub fn external_http_witness_head(response: &V3ProviderResp14Raw) -> V3ExternalHttpWitness {
+    external_http_witness_from_head(
+        response.status(),
+        response.headers(),
+        response.json_body().map(<[u8]>::to_vec).unwrap_or_default(),
+    )
+}
+
+/// Build the witness from a provider error that carries a real response head.
+///
+/// Only errors raised *after* the head was read qualify: `HttpStatus`, and the
+/// two failures the transport raises once it has already parsed the head
+/// (`UnexpectedContentType`, `ResponseBodyUnreadable`). A genuine pre-head
+/// transport failure carries no evidence and stays `None`.
+pub(crate) fn external_http_witness_from_provider_error(
+    error: &V3ProviderError,
+) -> Option<V3ExternalHttpWitness> {
+    match error {
+        V3ProviderError::HttpStatus { response } => Some(external_http_witness(response)),
+        V3ProviderError::UnexpectedContentType {
+            status, headers, ..
+        }
+        | V3ProviderError::ResponseBodyUnreadable {
+            status, headers, ..
+        } => Some(external_http_witness_from_head(
+            *status,
+            headers,
+            Vec::new(),
+        )),
+        _ => None,
+    }
+}
+
+fn v3_failed_attempt_response_header_is_credential(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "authorization" | "proxy-authorization" | "x-api-key" | "api-key" | "cookie" | "set-cookie"
+    )
+}
+
+fn v3_failed_attempt_json_key_is_credential(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "authorization"
+            | "proxy-authorization"
+            | "x-api-key"
+            | "api-key"
+            | "api_key"
+            | "apikey"
+            | "cookie"
+            | "set-cookie"
+            | "token"
+            | "access_token"
+            | "refresh_token"
+            | "client_secret"
+            | "password"
+            | "secret"
+    )
+}
+
+fn redact_v3_failed_attempt_json(value: &mut Value) -> bool {
+    match value {
+        Value::Object(fields) => {
+            let mut changed = false;
+            for (name, field) in fields.iter_mut() {
+                if v3_failed_attempt_json_key_is_credential(name) {
+                    changed |= field.as_str() != Some("[REDACTED]");
+                    *field = Value::String("[REDACTED]".to_string());
+                } else {
+                    changed |= redact_v3_failed_attempt_json(field);
+                }
+            }
+            changed
+        }
+        Value::Array(values) => values.iter_mut().fold(false, |changed, value| {
+            changed | redact_v3_failed_attempt_json(value)
+        }),
+        _ => false,
+    }
+}
+
+fn project_v3_failed_attempt_response(
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    body: &[u8],
+    body_read_failure: Option<&str>,
+) -> Value {
+    let headers = headers
+        .iter()
+        .map(|header| {
+            let name = header.name.clone();
+            let value = if v3_failed_attempt_response_header_is_credential(&name) {
+                "[REDACTED]".to_string()
+            } else {
+                String::from_utf8_lossy(&header.value).to_string()
+            };
+            json!({"name": name, "value": value})
+        })
+        .collect::<Vec<Value>>();
+    let (body_bytes, redacted) = match serde_json::from_slice::<Value>(body) {
+        Ok(mut value) => {
+            if redact_v3_failed_attempt_json(&mut value) {
+                let bytes = serde_json::to_vec(&value).unwrap_or_else(|_| {
+                    b"[REDACTED: failed-attempt body serialization failed]".to_vec()
+                });
+                (bytes, true)
+            } else {
+                (body.to_vec(), false)
+            }
+        }
+        Err(_) => (body.to_vec(), false),
+    };
+    json!({
+        "kind": "external_http",
+        "status": status,
+        "headers": headers,
+        "body": {
+            "bytes": body_bytes,
+            "redacted": redacted,
+        },
+        "body_read_failure": body_read_failure,
+    })
+}
+
+pub(crate) fn build_v3_runtime_provider_failed_attempt_evidence_from_response(
+    attempt: usize,
+    provider_request: Option<Value>,
+    status: u16,
+    headers: &[V3ProviderResponseHeader],
+    body: &[u8],
+    body_read_failure: Option<&str>,
+) -> Arc<V3RuntimeProviderFailedAttemptEvidence> {
+    Arc::new(V3RuntimeProviderFailedAttemptEvidence {
+        attempt,
+        provider_request,
+        provider_response: project_v3_failed_attempt_response(
+            status,
+            headers,
+            body,
+            body_read_failure,
+        ),
+    })
+}
+
+pub(crate) fn build_v3_runtime_provider_failed_attempt_evidence_no_response(
+    attempt: usize,
+    provider_request: Option<Value>,
+) -> Arc<V3RuntimeProviderFailedAttemptEvidence> {
+    Arc::new(V3RuntimeProviderFailedAttemptEvidence {
+        attempt,
+        provider_request,
+        provider_response: json!({"kind": "no_response"}),
+    })
+}
+
+pub(crate) fn build_v3_runtime_provider_failed_attempt_evidence_from_error(
+    attempt: usize,
+    provider_request: Option<Value>,
+    error: &V3ProviderError,
+) -> Option<Arc<V3RuntimeProviderFailedAttemptEvidence>> {
+    match error {
+        V3ProviderError::HttpStatus { response } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                attempt,
+                provider_request,
+                response.status,
+                &response.headers,
+                &response.body,
+                response.body_read_failure.as_deref(),
+            ),
+        ),
+        V3ProviderError::UnexpectedContentType {
+            status, headers, ..
+        } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                attempt,
+                provider_request,
+                *status,
+                headers,
+                &[],
+                None,
+            ),
+        ),
+        V3ProviderError::ResponseBodyUnreadable {
+            status,
+            headers,
+            reason,
+            ..
+        } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                attempt,
+                provider_request,
+                *status,
+                headers,
+                &[],
+                Some(reason),
+            ),
+        ),
+        V3ProviderError::Transport { .. }
+        | V3ProviderError::InternalTransport { .. }
+        | V3ProviderError::WebSocketTransport { .. }
+        | V3ProviderError::WebSocketProtocol { .. } => Some(
+            build_v3_runtime_provider_failed_attempt_evidence_no_response(
+                attempt,
+                provider_request,
+            ),
+        ),
+        _ => None,
+    }
+}
+
+/// Preserve the received upstream status while recording that its body read
+/// failed. This remains a provider failure, never a complete HTTP witness.
+pub fn provider_http_body_read_failure(
+    response: &V3ProviderHttpFailure,
+    provider_id: &str,
+) -> V3RelayProviderFailure {
+    let reason = response
+        .body_read_failure
+        .as_deref()
+        .expect("body read failure helper requires a failed read");
+    let mut failure = provider_runtime_failure(
+        V3ProviderError::ResponseBody {
+            request_id: response.request_id.clone(),
+            provider_id: provider_id.to_string(),
+            reason: format!(
+                "provider HTTP {} error body read failed: {reason}",
+                response.status
+            ),
+        },
+        provider_id,
+    );
+    failure.status = response.status;
+    // The upstream did return an HTTP status; only its error body could not be
+    // read, so the real status still belongs in `provider_status`.
+    failure.provider_status = Some(response.status);
+    failure.provider_body_read_failure = Some(reason.to_string());
+    failure
+}
+
 /// 请求构造失败（共享版；gemini/openai/responses 形状）。
+pub(crate) fn provider_response_governance_failure(
+    error: V3RelayCoreError,
+    request_id: &str,
+    provider_id: &str,
+) -> (
+    V3RelayProviderFailure,
+    Option<routecodex_v3_error::V3InternalErrorCode>,
+) {
+    match error {
+        V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::GovernedAttemptEmpty) => (
+            provider_request_failure("V3HubRespChatProcess03Governed", "provider_response_empty", "provider response contained no deliverable business content after Relay governance"), None,
+        ),
+        V3RelayCoreError::ResponseGovernance(super::V3HubRelayResponseError::UnharvestableToolMarkup) => (
+            provider_request_failure("V3HubRespChatProcess03Governed", "relay_unharvestable_tool_markup", "recognized incomplete tool invocation cannot be delivered"),
+            Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03UnharvestableToolMarkup),
+        ),
+        V3RelayCoreError::ResponseGovernance(error) => {
+            let mut failure = provider_request_failure("V3HubRespChatProcess03Governed", "relay_response_processing_failure", error);
+            failure.status = 599;
+            (failure, Some(routecodex_v3_error::V3InternalErrorCode::V3HubRelayResp03Processing))
+        }
+        other => (provider_runtime_failure(V3ProviderError::ResponseBody {
+            request_id: request_id.to_string(), provider_id: provider_id.to_string(), reason: format!("provider response governance failed: {other}"),
+        }, provider_id), None),
+    }
+}
+
 pub fn provider_request_failure(
     source_stage: &'static str,
     error_type: &'static str,
@@ -285,28 +849,15 @@ pub fn provider_request_failure(
 ) -> V3RelayProviderFailure {
     V3RelayProviderFailure {
         status: 502,
+        // Request-construction failure: no upstream HTTP response exists.
+        provider_status: None,
+        provider_body_read_failure: None,
         client_response: json!({"error":{"code":error_type,"message":error.to_string()}}),
         source_stage,
         terminal_projection: None,
-        error_type_fn: extract_error_code_style,
-        error_message_fn: extract_message_code_style,
-    }
-}
-
-pub fn provider_terminal_admission_failure(
-    status: u16,
-    failure: crate::hub_v1::V3ProviderTerminalAdmissionFailure,
-) -> V3RelayProviderFailure {
-    V3RelayProviderFailure {
-        status,
-        client_response: json!({
-            "error": {
-                "code": failure.code,
-                "message": failure.message,
-            }
-        }),
-        source_stage: "V3ProviderRespInbound01Raw",
-        terminal_projection: None,
+        terminal_disposition: None,
+        error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -327,57 +878,104 @@ pub fn provider_runtime_failure(
                 "V3ProviderRespInbound01Raw"
             }
         };
+        let fallback_message = error.to_string();
         let source = crate::hooks::build_v3_provider_error_source(source_stage, error);
-        let projected =
-            V3ErrorHandlingCenter::project_terminal(V3ErrorHandlingCenter::decide_provider(
-                V3ErrorHandlingCenterInput {
-                    source,
-                    action_scope: V3ErrorActionScope::None,
-                    candidates_remaining: 0,
-                    source_status: None,
-                },
-                false,
-                false,
+        return match source.and_then(|source| {
+            crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+                source,
+                V3ErrorActionScope::None,
+                0,
                 None,
-            ));
-        return V3RelayProviderFailure {
-            status: projected.status,
-            client_response: json!({
-                "error": {
-                    "code": "provider_internal_transport_error",
-                    "message": projected.error_detail
-                }
-            }),
-            source_stage,
-            terminal_projection: Some(projected),
-            error_type_fn: extract_error_code_style,
-            error_message_fn: extract_message_code_style,
+            )
+        }) {
+            Ok(projected) => V3RelayProviderFailure {
+                status: projected.status,
+                // Internal transport handoff failure: no upstream HTTP response exists.
+                provider_status: None,
+                provider_body_read_failure: None,
+                client_response: json!({
+                    "error": {
+                        "code": "provider_internal_transport_error",
+                        "message": projected.error_detail
+                    }
+                }),
+                source_stage,
+                terminal_projection: Some(projected),
+                terminal_disposition: None,
+                error_operator_fault: None,
+                failed_attempt_evidence: None,
+                error_type_fn: extract_error_code_style,
+                error_message_fn: extract_message_code_style,
+            },
+            Err(fault) => V3RelayProviderFailure {
+                status: 599,
+                provider_status: None,
+                provider_body_read_failure: None,
+                client_response: json!({
+                    "error": {
+                        "code": "provider_internal_transport_error",
+                        "message": fallback_message
+                    }
+                }),
+                source_stage,
+                terminal_projection: None,
+                terminal_disposition: Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                ),
+                error_operator_fault: Some(fault),
+                failed_attempt_evidence: None,
+                error_type_fn: extract_error_code_style,
+                error_message_fn: extract_message_code_style,
+            },
         };
     }
     let error_code = match &error {
+        V3ProviderError::Transport { reason, .. }
+            if routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason) =>
+        {
+            V3_TRANSIENT_TRANSPORT_HANG_CODE
+        }
         // SSE 已经完成 provider response inbound 的协议判定；把这个语义错误码
         // 保留下游，健康策略才能把它和 transport hang 区分开。不能降成通用
         // provider_error，否则 relay 会按 transient 同 provider 重试后直接投影给客户端。
         V3ProviderError::MalformedSse { .. } => "provider_response_sse_event_invalid",
         _ => "provider_error",
     };
-    let terminal_projection =
-        matches!(&error, V3ProviderError::ClientDisconnect { .. }).then(|| {
-            project_v3_client_disconnect(
+    let (terminal_projection, error_operator_fault) =
+        if matches!(&error, V3ProviderError::ClientDisconnect { .. }) {
+            match project_v3_client_disconnect(
                 provider_id,
                 provider_runtime_failure_stage(&error),
                 error.to_string(),
-            )
-        });
+            ) {
+                Ok(projected) => (Some(projected), None),
+                Err(fault) => (None, Some(fault)),
+            }
+        } else {
+            (None, None)
+        };
     V3RelayProviderFailure {
         status: if terminal_projection.is_some() {
             499
         } else {
             502
         },
+        // Only a real upstream HTTP status may be recorded here; a transport or
+        // other response-less failure stays `None` instead of the projected 502.
+        provider_status: match &error {
+            V3ProviderError::HttpStatus { response } => Some(response.status),
+            _ => None,
+        },
+        provider_body_read_failure: match &error {
+            V3ProviderError::ResponseBodyUnreadable { reason, .. } => Some(reason.clone()),
+            _ => None,
+        },
         client_response: json!({"error":{"code":error_code,"message":error.to_string()}}),
         source_stage: provider_runtime_failure_stage(&error),
         terminal_projection,
+        terminal_disposition: None,
+        error_operator_fault,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_code_style,
         error_message_fn: extract_message_code_style,
     }
@@ -395,28 +993,101 @@ pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
 
 /// Provider failure that consumed the request residence budget must still be
 /// projected through the typed Error01-06 chain before the relay loop exits.
-pub fn terminalize_provider_failure(mut failure: V3RelayProviderFailure) -> V3RelayProviderFailure {
-    let source = build_v3_error_01_source_raised(
+pub fn terminalize_provider_failure_with_source(
+    mut failure: V3RelayProviderFailure,
+    source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
+) -> V3RelayProviderFailure {
+    let Some(source) = source else {
+        return terminalize_provider_failure(failure, last_external_http);
+    };
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+            }
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    failure.client_response = json!({
+        "error": {
+            "code": source.code.clone(),
+            "message": source.message.clone(),
+        }
+    });
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
+    }
+    failure
+}
+
+pub fn terminalize_provider_failure(
+    mut failure: V3RelayProviderFailure,
+    last_external_http: Option<routecodex_v3_error::V3ExternalHttpWitness>,
+) -> V3RelayProviderFailure {
+    if failure.terminal_projection.is_some() {
+        return failure;
+    }
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => {
+                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+            }
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
+    if failure.error_operator_fault.is_some() {
+        return failure;
+    }
+    let source = crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
         failure_error_type(&failure)
             .as_deref()
             .unwrap_or("provider_error"),
         provider_failure_message(&failure),
+        match failure.provider_status {
+            Some(status) => {
+                crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: failure_error_type(&failure),
+                    provider_id: None,
+                    upstream_request_id: None,
+                    message: Some(provider_failure_message(&failure)),
+                })
+            }
+            None => crate::operation_runner::V3Err01SourceInput::Plain,
+        },
     );
-    failure.terminal_projection = Some(V3ErrorHandlingCenter::project_terminal(
-        V3ErrorHandlingCenter::decide_provider(
-            V3ErrorHandlingCenterInput {
-                source,
-                action_scope: V3ErrorActionScope::None,
-                candidates_remaining: 0,
-                source_status: Some(failure.status),
-            },
-            false,
-            false,
-            None,
-        ),
-    ));
+    let source = match source {
+        Ok(source) => source,
+        Err(fault) => {
+            failure.error_operator_fault = Some(fault);
+            return failure;
+        }
+    };
+    match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    ) {
+        Ok(projected) => failure.terminal_projection = Some(projected),
+        Err(fault) => failure.error_operator_fault = Some(fault),
+    }
     failure
 }
 
@@ -438,16 +1109,24 @@ pub fn error_output(
     status: u16,
     provider_id: &str,
     mut trace: Vec<&'static str>,
-) -> (V3Error06ClientProjected, Vec<&'static str>) {
-    let projected = V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
+) -> (
+    Result<
+        V3Error06ClientProjected,
+        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+    >,
+    Vec<&'static str>,
+) {
+    let projected = crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
-        action_scope: V3ErrorActionScope::ProviderInstance {
+        V3ErrorActionScope::ProviderInstance {
             provider_id: provider_id.to_string(),
         },
-        candidates_remaining: 0,
-        source_status: Some(status),
-    });
-    trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+        0,
+        Some(status),
+    );
+    if projected.is_ok() {
+        trace.extend(V3_ERROR_CHAIN_NODE_IDS);
+    }
     (projected, trace)
 }
 
@@ -470,8 +1149,9 @@ pub(crate) fn build_v3_relay_observability(
         provider_id: Some(selected.candidate.provider_id.clone()),
         auth_alias: Some(selected.candidate.auth_alias.clone()),
         provider_key: Some(format!(
-            "{}:{}:{}",
+            "{}:{}:{}:{}",
             selected.candidate.provider_id,
+            selected.candidate.interface_id,
             selected.candidate.auth_alias,
             selected.candidate.model_id
         )),
@@ -611,16 +1291,177 @@ fn observe_relay_client_sse_usage_chunk(
                 // migration scope. They still use the independent transport object;
                 // their protocol semantic migration is a later owner transition.
                 observation.record_provider_event_json(event)?;
+                if matches!(protocol, V3HubEntryProtocol::Gemini)
+                    && super::v3_gemini_prompt_feedback_is_terminal(event)
+                {
+                    observation
+                        .record_semantic_terminal(super::V3RuntimeSemanticTerminal::Success)?;
+                }
             }
         }
     }
     Ok(())
 }
 
+pub(crate) fn relay_handoff_entry_state(
+    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+) -> (
+    crate::runtime_timing::V3RuntimeTimingState,
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+    Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
+) {
+    match handoff {
+        Some(handoff) => (
+            handoff.observability_accumulator.timing(),
+            handoff.request_local_excluded_candidates.clone(),
+            handoff.request_local_busy_candidates.clone(),
+            Some(handoff.target.clone()),
+        ),
+        None => (
+            crate::runtime_timing::V3RuntimeTimingState::start(),
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+            None,
+        ),
+    }
+}
+
+pub(crate) fn relay_request_execution_control(
+    manifest: &V3Config05ManifestPublished,
+    server_id: &str,
+    handoff: Option<&crate::V3ResponsesProtocolRelayHandoff>,
+) -> Result<crate::nodes::V3RequestExecutionControl, V3RelayCoreError> {
+    match handoff {
+        Some(handoff) => Ok(handoff.request_execution_control.clone()),
+        None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, server_id)
+            .map_err(|error| {
+                V3RelayCoreError::Target(format!(
+                    "V3ExecutionAttemptBudget rejected relay request: {error}"
+                ))
+            }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures_util::StreamExt;
+
+    #[test]
+    fn incomplete_provider_http_error_body_is_not_an_external_http_witness() {
+        let response = routecodex_v3_provider_responses::V3ProviderHttpFailure {
+            request_id: "req-body-read".into(),
+            provider_id: "provider-a".into(),
+            status: 429,
+            headers: vec![],
+            body: vec![],
+            body_read_failure: Some("connection closed while reading body".into()),
+        };
+        let witness = external_http_witness(&response);
+        // The response head was received, so the status is real evidence even
+        // though the body read failed.
+        assert_eq!(witness.status(), 429);
+        assert_eq!(
+            witness.body_read_failure(),
+            Some("connection closed while reading body")
+        );
+        let failure = provider_http_body_read_failure(&response, "provider-a");
+        assert_eq!(failure.status, 429);
+        // The upstream did return HTTP 429; only its error body read failed.
+        assert_eq!(failure.provider_status, Some(429));
+        assert!(provider_failure_message(&failure).contains("connection closed while reading body"));
+        assert!(failure.terminal_disposition.is_none());
+    }
+
+    #[test]
+    fn incomplete_http_body_records_the_new_response_head() {
+        let prior = V3ExternalHttpWitness::new(429, vec![], b"rate limited".to_vec());
+        let incomplete = V3ProviderHttpFailure {
+            request_id: "req-next".into(),
+            provider_id: "provider-b".into(),
+            status: 400,
+            headers: vec![],
+            body: vec![],
+            body_read_failure: Some("truncated body".into()),
+        };
+        let last = Some(external_http_witness(&incomplete));
+        let latest = last.expect("the new response head is real evidence");
+        assert_eq!(latest.status(), 400);
+        assert_eq!(latest.body_read_failure(), Some("truncated body"));
+        assert_ne!(latest, prior);
+    }
+
+    #[test]
+    fn internal_transport_terminalization_keeps_typed_error_without_no_response() {
+        let failure = provider_runtime_failure(
+            V3ProviderError::InternalTransport {
+                request_id: "req-internal".into(),
+                provider_id: "provider-a".into(),
+                lane: routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                reason: "admission lease mismatch".into(),
+            },
+            "provider-a",
+        );
+        let terminal = terminalize_provider_failure(failure, None);
+        assert_eq!(
+            terminal.terminal_projection.as_ref().map(|p| p.status),
+            Some(598)
+        );
+        assert!(terminal.terminal_disposition.is_none());
+    }
+
+    #[test]
+    fn internal_transport_runtime_failure_executes_sdk_error_02_to_06() {
+        for (lane, source_stage, sdk_source_stage, expected_status) in [
+            (
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request,
+                "V3ProviderReqOutbound09TransportRequest",
+                "V3Transport13ResponsesHttpRequest",
+                598,
+            ),
+            (
+                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response,
+                "V3ProviderRespInbound01Raw",
+                "V3ProviderResp14Raw",
+                599,
+            ),
+        ] {
+            let failure = provider_runtime_failure(
+                V3ProviderError::InternalTransport {
+                    request_id: format!("req-internal-{expected_status}"),
+                    provider_id: "provider-a".to_string(),
+                    lane,
+                    reason: format!("internal transport lane {expected_status}"),
+                },
+                "provider-a",
+            );
+            assert_eq!(failure.status, expected_status);
+            assert_eq!(failure.source_stage, source_stage);
+            assert_eq!(failure.provider_status, None);
+            assert!(failure.terminal_disposition.is_none());
+            assert!(failure.error_operator_fault.is_none());
+            let projection = failure
+                .terminal_projection
+                .expect("InternalTransport must retain the SDK Error06 projection");
+            assert_eq!(projection.status, expected_status);
+            assert_eq!(projection.chain, V3_ERROR_CHAIN_NODE_IDS);
+            assert_eq!(
+                projection.diagnostic_source.source_kind,
+                V3ErrorSourceKind::RuntimeFailure
+            );
+            assert_eq!(projection.diagnostic_source.source_stage, sdk_source_stage);
+            assert_eq!(
+                projection.diagnostic_source.code,
+                "provider_internal_transport_error"
+            );
+            assert_eq!(projection.error_class, "runtime_failure");
+            assert_eq!(
+                failure.client_response["error"]["message"],
+                projection.error_detail
+            );
+        }
+    }
 
     fn observe_one(
         protocol: V3HubEntryProtocol,
@@ -699,6 +1540,83 @@ mod tests {
     }
 
     #[test]
+    fn terminalizer_retains_full_http_witness_with_and_without_sdk_fault() {
+        for status in [200, 429] {
+            let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+                status,
+                vec![("x-provider-trace".to_string(), b"trace-a".to_vec())],
+                b"provider-private-body".to_vec(),
+            )
+            .with_body_read_failure("truncated provider body");
+            for sdk_fault in [false, true] {
+                let mut failure = provider_runtime_failure(
+                    V3ProviderError::Transport {
+                        request_id: "req-terminal-witness".to_string(),
+                        provider_id: "provider-a".to_string(),
+                        reason: "residence budget exhausted".to_string(),
+                    },
+                    "provider-a",
+                );
+                if sdk_fault {
+                    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::ProviderFailure,
+                        failure.source_stage,
+                        "provider_error",
+                        "residence budget exhausted",
+                    );
+                    failure = provider_operator_fault_failure(
+                        crate::provider_failure_runtime_policy::finish_v3_relay_error_projection(
+                            source,
+                            Ok(None),
+                        )
+                        .expect_err("missing Error06 is a typed SDK fault"),
+                    );
+                }
+                let terminal = terminalize_provider_failure(failure, Some(witness.clone()));
+                assert_eq!(
+                    terminal.terminal_disposition,
+                    Some(
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+                            witness.clone()
+                        )
+                    )
+                );
+                if sdk_fault {
+                    assert!(terminal.terminal_projection.is_none());
+                    assert!(terminal.error_operator_fault.is_some());
+                } else {
+                    assert_eq!(terminal.terminal_projection.unwrap().status, 502);
+                    assert!(terminal.error_operator_fault.is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn terminalizer_preserves_upstream_http_link_in_error01_source() {
+        let failure = provider_http_failure(
+            429,
+            br#"{"error":{"code":"rate_limit_error","message":"slow down"}}"#,
+            "provider-a",
+        );
+        let terminal = terminalize_provider_failure(failure, None);
+        let projection = terminal
+            .terminal_projection
+            .expect("terminalized provider failure must carry Error06 projection");
+        let external = projection
+            .diagnostic_source
+            .external_error
+            .expect("a real provider HTTP status must stay linked in Error01");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, Some(429));
+        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(external.message.as_deref(), Some("slow down"));
+    }
+
+    #[test]
     fn terminalized_provider_failure_has_no_fabricated_provider_scope() {
         let failure = provider_runtime_failure(
             V3ProviderError::Transport {
@@ -708,7 +1626,7 @@ mod tests {
             },
             "provider-a",
         );
-        let projection = terminalize_provider_failure(failure)
+        let projection = terminalize_provider_failure(failure, None)
             .terminal_projection
             .expect("terminalized provider failure must carry Error06 projection");
         assert!(projection.health_action.is_none());

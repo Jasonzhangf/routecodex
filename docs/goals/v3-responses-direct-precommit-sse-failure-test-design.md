@@ -4,17 +4,17 @@ Design ID: `CCSOL-SSE-PRECOMMIT-EMPTY-20260816-01`
 
 ## Lifecycle under test
 
-`V3ProviderResp14Raw` may contain HTTP 2xx SSE lifecycle frames before any client-visible business output. The Direct runtime must buffer the complete provider attempt until a protocol-valid terminal event. Error, malformed/empty terminal, timeout, or EOF before terminal must remain precommit and enter Error01→05 so the existing retry/reselection state machine can act.
+`V3ProviderResp14Raw` may contain HTTP 2xx SSE lifecycle frames before any client-visible business output. The Direct runtime must buffer the complete provider attempt until a protocol-valid terminal event. Error, malformed terminal, timeout, or EOF before terminal must remain precommit and enter Error01→05 so the existing retry/reselection state machine can act. A valid empty successful terminal is representable and must pass unchanged.
 
 ## White-box contracts
 
 - Responses `response.created`, `response.in_progress`, output items, reasoning, tool calls, and deltas remain in the runtime-owned attempt buffer; only a complete protocol-valid terminal event authorizes client commit.
-- Responses `response.completed` with `output=[]` or no `output` is an empty terminal: it raises Error01 `provider_response_sse_empty` before Resp15 and is consumed by the existing retry/reselect chain.
+- Responses `response.completed` with `output=[]` or no `output` is a valid successful terminal. It preserves the provider response and does not trigger rejection, retry, or cooldown.
 - Anthropic `message_start`, content blocks, and deltas remain buffered until a valid `message_stop` terminal.
 - OpenAI Chat role-only/empty deltas, content/reasoning/tool deltas, and finish chunks remain buffered until the protocol terminal is validated.
 - Protocol selection is an explicit argument. A frame belonging to another protocol fails classification; no JSON shape auto-detection or second classification pass is allowed.
 - Each protocol maps its own provider error event to typed `Failure`; keepalive remains non-semantic, while OpenAI Chat `[DONE]` is accepted only after a terminal `finish_reason` and fails closed when received before it.
-- Error, malformed/empty terminal, and EOF after lifecycle-only frames return provider Error01 before Resp15.
+- Error, malformed terminal, and EOF before a terminal after lifecycle-only frames return provider Error01 before Resp15. Empty successful terminals in Responses, Chat, and Anthropic preserve their original frames.
 
 ## Module black box
 

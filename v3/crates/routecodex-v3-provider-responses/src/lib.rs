@@ -4,9 +4,12 @@ pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
 mod health;
 pub mod key_health;
+mod opencode_zen_headers;
 pub mod probe;
 mod probe_backoff;
+mod provider_auth;
 mod provider_cooldown_probe;
+pub use provider_cooldown_probe::V3ProviderCooldownProbeKey;
 pub mod raw_response;
 mod shared;
 pub mod transport;
@@ -17,25 +20,30 @@ pub mod wire;
 pub use error::{V3ProviderError, V3ProviderHttpFailure, V3ProviderInternalTransportLane};
 pub use global_cooldown::{
     V3ProviderCooldownCoordinator, V3ProviderCooldownFailureClass, V3ProviderCooldownKey,
-    V3ProviderCooldownObservation, V3ProviderCooldownProbePermit,
 };
 pub use health::{
     V3ProviderAllAvailable, V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader,
     V3ProviderAvailabilityRegistry, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderGlobalSubscriptionDecision,
-    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
+    V3ProviderGlobalSubscriptionPolicy, V3ProviderHealthError, V3ProviderHealthListenerScope,
+    V3ProviderHealthStore, V3ProviderSessionAvailabilityReader, V3_COOLDOWN_MANUAL_MAX_MS,
 };
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
+    V3ProviderRateLimitProbeDisposition, V3ProviderSchedulingProjection,
+    V3ProviderSchedulingReader,
 };
-pub use probe::build_v3_provider_global_probe_request;
+pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
+pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};
+pub use provider_auth::{V3DiscoveredModel, V3DiscoveredModelSource};
 pub use raw_response::{
     V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderResponseBodyKind,
     V3ProviderResponseHeader, V3ProviderSseStream,
 };
 pub use routecodex_v3_error::{
-    V3ProviderFailureAction, V3ProviderHealthScope, V3ProviderRecoveryKind,
+    V3ProviderErrorFingerprint, V3ProviderFailureAction, V3ProviderHealthScope,
+    V3ProviderRecoveryKind,
 };
 pub use transport::{
     build_v3_anthropic_provider_request_header,
@@ -45,18 +53,22 @@ pub use transport::{
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
     build_v3_transport_13_responses_request_from_v3_provider_12,
-    is_v3_anthropic_provider_request_header_name, ProviderResponsesTransport,
-    ReqwestResponsesTransport, ResponsesTransport, V3ProviderCancellation, V3ProviderRequestHeader,
-    V3Transport13ResponsesHttpRequest, V3Transport13ResponsesRequest,
+    build_v3_transport_13_responses_request_from_wire_parts, discover_v3_provider_model_entries,
+    discover_v3_provider_models, is_v3_anthropic_provider_request_header_name,
+    ProviderResponsesTransport, ReqwestResponsesTransport, ResponsesTransport,
+    V3ProviderCancellation, V3ProviderRequestHeader, V3Transport13ResponsesHttpRequest,
+    V3Transport13ResponsesRequest,
 };
 pub use transport_handoff::{
-    V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptKey,
-    V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
-    V3ProviderTransportHandoffScope, V3ProviderTransportKind,
+    V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptControl,
+    V3ProviderTransportAttemptKey, V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
+    V3ProviderTransportHandoffScope, V3ProviderTransportKind, V3ProviderTransportSendFact,
+    V3ProviderTransportSendPhase,
 };
 pub use wire::{
-    apply_v3_response_cipher_policy, build_v3_provider_12_responses_wire_payload,
-    find_v3_routecodex_control_payload_key, V3Provider12ResponsesWirePayload, V3ProviderAuthHandle,
-    V3ProviderAuthSecretHandle, V3ResponsesProviderTarget, V3ResponsesRequestEndpoint,
-    V3ResponsesStreamIntent, V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS,
+    apply_v3_chat_reasoning_cipher_policy, apply_v3_response_cipher_policy,
+    build_v3_provider_12_responses_wire_payload, v3_provider_auth_handle_from_manifest_entry,
+    v3_provider_auth_secret_handle_from_declaration_fields, V3Provider12ResponsesWirePayload,
+    V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesProviderTarget,
+    V3ResponsesRequestEndpoint, V3ResponsesStreamIntent,
 };

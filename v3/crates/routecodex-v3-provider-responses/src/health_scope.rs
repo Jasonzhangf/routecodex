@@ -4,13 +4,10 @@ fn scope_label(scope: &V3ErrorActionScope) -> String {
         V3ErrorActionScope::ProviderInstance { provider_id } => {
             format!("provider_instance:{provider_id}")
         }
-        V3ErrorActionScope::AuthKey {
+        V3ErrorActionScope::ProviderKeyModel {
             provider_id,
             auth_alias,
-        } => format!("auth_key:{provider_id}:{auth_alias}"),
-        V3ErrorActionScope::CanonicalModel {
-            provider_id,
             model_id,
-        } => format!("canonical_model:{provider_id}:{model_id}"),
+        } => format!("provider_key_model:{provider_id}:{auth_alias}:{model_id}"),
     }
 }

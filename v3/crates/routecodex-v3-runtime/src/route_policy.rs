@@ -4,12 +4,15 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_route_classifier::{
     build_v3_current_turn_route_facts_from_value, evaluate_v3_route_policies, V3RouteCondition,
-    V3RouteHistoryWindow, V3RoutePolicy, V3RoutePolicyAction, V3RouteTurnObservation,
+    V3RoutePolicy, V3RoutePolicyAction, V3RouteTurnObservation,
 };
 use routecodex_v3_virtual_router::{V3Router05RequestClassified, V3VirtualRouter};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+
+const V3_ROUTE_POLICY_PENDING_TTL_MS: u64 = 60 * 60 * 1000;
+const V3_ROUTE_POLICY_MAX_PENDING_TURNS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3RoutePolicyScope {
@@ -40,14 +43,6 @@ impl V3RoutePolicyScope {
         self.conversation_id = conversation_id.into();
         self
     }
-
-    fn history_key_is_valid(&self) -> bool {
-        !self.server_id.trim().is_empty()
-            && !self.routing_group_id.trim().is_empty()
-            && !self.session_id.trim().is_empty()
-            && !self.port.trim().is_empty()
-            && !self.conversation_id.trim().is_empty()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -60,24 +55,52 @@ struct V3RoutePolicyRequestKey {
 struct V3PendingRoutePolicyTurn {
     observation: V3RouteTurnObservation,
     action: Option<V3RoutePolicyAction>,
+    guard_identity: Weak<()>,
+    last_seen_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct V3RoutePolicyPendingGuard {
+    state: V3RoutePolicyRuntimeState,
+    scope: V3RoutePolicyScope,
+    request_id: String,
+    identity: Arc<()>,
+}
+
+impl Drop for V3RoutePolicyPendingGuard {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.identity) == 1 {
+            let _ =
+                self.state
+                    .discard_pending_identity(&self.scope, &self.request_id, &self.identity);
+        }
+    }
+}
+
+impl V3RoutePolicyPendingGuard {
+    pub(crate) fn scope(&self) -> &V3RoutePolicyScope {
+        &self.scope
+    }
+
+    pub(crate) fn commit<E: From<String>>(&self) -> Result<(), E> {
+        self.state
+            .commit_request_from_guard(&self.scope, &self.request_id, &self.identity)
+            .map_err(E::from)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct V3RoutePolicyRuntimeState {
-    histories: Arc<Mutex<BTreeMap<V3RoutePolicyScope, V3RouteHistoryWindow>>>,
     pending: Arc<Mutex<BTreeMap<V3RoutePolicyRequestKey, V3PendingRoutePolicyTurn>>>,
 }
 
 impl V3RoutePolicyRuntimeState {
     pub fn process_shared() -> Self {
         use std::sync::OnceLock;
-        static SHARED: OnceLock<Arc<Mutex<BTreeMap<V3RoutePolicyScope, V3RouteHistoryWindow>>>> =
-            OnceLock::new();
         static SHARED_PENDING: OnceLock<
             Arc<Mutex<BTreeMap<V3RoutePolicyRequestKey, V3PendingRoutePolicyTurn>>>,
         > = OnceLock::new();
         Self {
-            histories: SHARED.get_or_init(Default::default).clone(),
             pending: SHARED_PENDING.get_or_init(Default::default).clone(),
         }
     }
@@ -89,7 +112,8 @@ impl V3RoutePolicyRuntimeState {
         scope: V3RoutePolicyScope,
         request_id: &str,
         observation: V3RouteTurnObservation,
-    ) -> Result<V3Router05RequestClassified, String> {
+        now_epoch_ms: u64,
+    ) -> Result<(V3Router05RequestClassified, V3RoutePolicyPendingGuard), String> {
         let request_is_compaction = classified
             .endpoint
             .trim_end_matches('/')
@@ -100,35 +124,39 @@ impl V3RoutePolicyRuntimeState {
             scope: scope.clone(),
             request_id: request_id.to_string(),
         };
-        if let Some(pending) = self
+        self.prune_pending(now_epoch_ms)?;
+        let mut pending_entries = self
             .pending
             .lock()
-            .map_err(|error| format!("route policy pending lock poisoned: {error}"))?
-            .get(&key)
-            .cloned()
-        {
-            return Ok(V3VirtualRouter::with_route_policy_pool(
-                classified,
-                if request_is_compaction {
-                    Some("compact".to_string())
-                } else {
-                    pending.action.map(|action| action.route_pool)
-                },
-            ));
+            .map_err(|error| format!("route policy pending lock poisoned: {error}"))?;
+        if let Some(pending) = pending_entries.get(&key).cloned() {
+            if let Some(identity) = pending.guard_identity.upgrade() {
+                return Ok((
+                    V3VirtualRouter::with_route_policy_pool(
+                        classified,
+                        if request_is_compaction {
+                            Some("compact".to_string())
+                        } else {
+                            pending.action.map(|action| action.route_pool)
+                        },
+                    ),
+                    V3RoutePolicyPendingGuard {
+                        state: self.clone(),
+                        scope,
+                        request_id: request_id.to_string(),
+                        identity,
+                    },
+                ));
+            }
+            // A dead guard cannot own this entry. Remove it before evaluating
+            // a fresh turn so a reused request id cannot inherit stale state.
+            pending_entries.remove(&key);
         }
+        drop(pending_entries);
 
-        let history = self
-            .histories
-            .lock()
-            .map_err(|error| format!("route policy history lock poisoned: {error}"))?
-            .get(&scope)
-            .cloned()
-            .unwrap_or_else(|| V3RouteHistoryWindow::new(max_policy_window(&policies)));
-        let mut history_with_current = history;
-        history_with_current.record_turn(observation.clone());
-        let action =
-            evaluate_v3_route_policies(&policies, observation.clone(), &history_with_current)
-                .map_err(|error| format!("route policy evaluation failed: {error:?}"))?;
+        let action = evaluate_v3_route_policies(&policies, observation.clone())
+            .map_err(|error| format!("route policy evaluation failed: {error:?}"))?;
+        let identity = Arc::new(());
         self.pending
             .lock()
             .map_err(|error| format!("route policy pending lock poisoned: {error}"))?
@@ -137,61 +165,114 @@ impl V3RoutePolicyRuntimeState {
                 V3PendingRoutePolicyTurn {
                     observation,
                     action: action.clone(),
+                    guard_identity: Arc::downgrade(&identity),
+                    last_seen_ms: now_epoch_ms,
                 },
             );
-        Ok(V3VirtualRouter::with_route_policy_pool(
-            classified,
-            if request_is_compaction {
-                Some("compact".to_string())
-            } else {
-                action.map(|action| action.route_pool)
+        Ok((
+            V3VirtualRouter::with_route_policy_pool(
+                classified,
+                if request_is_compaction {
+                    Some("compact".to_string())
+                } else {
+                    action.map(|action| action.route_pool)
+                },
+            ),
+            V3RoutePolicyPendingGuard {
+                state: self.clone(),
+                scope,
+                request_id: request_id.to_string(),
+                identity,
             },
         ))
     }
 
-    pub fn commit_request(
+    pub(crate) fn commit_request_from_guard(
         &self,
         scope: &V3RoutePolicyScope,
         request_id: &str,
-        policies: &[V3RoutePolicy],
+        guard_identity: &Arc<()>,
+    ) -> Result<(), String> {
+        self.commit_or_discard_request(scope, request_id, guard_identity)
+    }
+
+    fn commit_or_discard_request(
+        &self,
+        scope: &V3RoutePolicyScope,
+        request_id: &str,
+        guard_identity: &Arc<()>,
     ) -> Result<(), String> {
         let key = V3RoutePolicyRequestKey {
             scope: scope.clone(),
             request_id: request_id.to_string(),
         };
-        let Some(pending) = self
-            .pending
-            .lock()
-            .map_err(|error| format!("route policy pending lock poisoned: {error}"))?
-            .remove(&key)
-        else {
-            return Ok(());
+        let pending = {
+            let mut pending_entries = self
+                .pending
+                .lock()
+                .map_err(|error| format!("route policy pending lock poisoned: {error}"))?;
+            let Some(pending) = pending_entries.get(&key).cloned() else {
+                return Ok(());
+            };
+            let owns_pending = pending
+                .guard_identity
+                .upgrade()
+                .is_some_and(|pending_identity| Arc::ptr_eq(&pending_identity, guard_identity));
+            if !owns_pending {
+                return Ok(());
+            }
+            pending_entries.remove(&key);
+            pending
         };
-        if !scope.history_key_is_valid() {
-            return Ok(());
-        }
-        self.histories
-            .lock()
-            .map_err(|error| format!("route policy history lock poisoned: {error}"))?
-            .entry(scope.clone())
-            .or_insert_with(|| V3RouteHistoryWindow::new(max_policy_window(policies)))
-            .record_turn(pending.observation);
+        let _ = (scope, &pending.observation);
         Ok(())
     }
 
-    pub fn discard_request(
+    fn discard_pending_identity(
         &self,
         scope: &V3RoutePolicyScope,
         request_id: &str,
+        identity: &Arc<()>,
     ) -> Result<(), String> {
         let key = V3RoutePolicyRequestKey {
             scope: scope.clone(),
             request_id: request_id.to_string(),
         };
-        self.pending
+        let mut pending = self
+            .pending
             .lock()
-            .map_err(|error| format!("route policy pending lock poisoned: {error}"))?
-            .remove(&key);
+            .map_err(|error| format!("route policy pending lock poisoned: {error}"))?;
+        let owns_pending = pending.get(&key).is_some_and(|turn| {
+            turn.guard_identity
+                .upgrade()
+                .is_some_and(|pending_identity| Arc::ptr_eq(&pending_identity, identity))
+        });
+        if owns_pending {
+            pending.remove(&key);
+        }
+        Ok(())
+    }
+
+    fn prune_pending(&self, now_epoch_ms: u64) -> Result<(), String> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|error| format!("route policy pending lock poisoned: {error}"))?;
+        pending.retain(|_, turn| {
+            turn.guard_identity.strong_count() > 0
+                || now_epoch_ms.saturating_sub(turn.last_seen_ms) <= V3_ROUTE_POLICY_PENDING_TTL_MS
+        });
+        while pending.len() > V3_ROUTE_POLICY_MAX_PENDING_TURNS {
+            let Some(oldest) = pending
+                .iter()
+                .filter(|(_, turn)| turn.guard_identity.strong_count() == 0)
+                .min_by_key(|(_, turn)| turn.last_seen_ms)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            pending.remove(&oldest);
+        }
         Ok(())
     }
 }
@@ -213,34 +294,13 @@ pub fn compile_route_policies(
 pub fn observe_route_turn(body: &Value, route_name: &str) -> V3RouteTurnObservation {
     let current = build_v3_current_turn_route_facts_from_value(body);
     V3RouteTurnObservation {
-        new_user_input: current.latest_message_from_user,
         is_compaction: current.is_compaction || route_name == "compact",
-        search_pool_hit: route_name == "search",
-        tool_execution_error: current.has_current_turn_tool_execution_error,
-        tool_name: current.last_assistant_tool.map(|tool| tool.name),
-        route_pool: route_name.to_string(),
     }
 }
 
 fn compile_route_policy(policy: &V3RoutePolicyManifest) -> Result<V3RoutePolicy, String> {
     let condition = match &policy.condition {
         V3RouteConditionManifest::CurrentCompaction => V3RouteCondition::CurrentCompaction,
-        V3RouteConditionManifest::SearchPoolTurnRatioAtLeast {
-            window_turns,
-            numerator,
-            denominator,
-        } => V3RouteCondition::SearchPoolTurnRatioAtLeast {
-            window_turns: *window_turns,
-            numerator: *numerator,
-            denominator: *denominator,
-        },
-        V3RouteConditionManifest::ToolExecutionErrorTurnsAtLeast {
-            window_turns,
-            count,
-        } => V3RouteCondition::ToolExecutionErrorTurnsAtLeast {
-            window_turns: *window_turns,
-            count: *count,
-        },
     };
     let V3RouteActionManifest { select_route_pool } = &policy.action;
     Ok(V3RoutePolicy {
@@ -249,21 +309,6 @@ fn compile_route_policy(policy: &V3RoutePolicyManifest) -> Result<V3RoutePolicy,
         condition,
         route_pool: select_route_pool.clone(),
     })
-}
-
-fn max_policy_window(policies: &[V3RoutePolicy]) -> usize {
-    policies
-        .iter()
-        .map(|policy| match &policy.condition {
-            V3RouteCondition::CurrentCompaction => 1,
-            V3RouteCondition::SearchPoolTurnRatioAtLeast { window_turns, .. }
-            | V3RouteCondition::ToolExecutionErrorTurnsAtLeast { window_turns, .. } => {
-                *window_turns
-            }
-        })
-        .max()
-        .unwrap_or(1)
-        .max(5)
 }
 
 #[cfg(test)]
@@ -297,16 +342,6 @@ id = "compact"
 precedence = 1
 condition = { kind = "current_compaction" }
 action = { select_route_pool = "compact" }
-[[route_groups.test.route_policies]]
-id = "search"
-precedence = 2
-condition = { kind = "search_pool_turn_ratio_at_least", window_turns = 10, numerator = 4, denominator = 5 }
-action = { select_route_pool = "thinking" }
-[[route_groups.test.route_policies]]
-id = "errors"
-precedence = 3
-condition = { kind = "tool_execution_error_turns_at_least", window_turns = 5, count = 3 }
-action = { select_route_pool = "thinking" }
 [route_groups.test.pools.default]
 selection = { strategy = "priority" }
 targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", key = "key1", priority = 1 }]
@@ -336,6 +371,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
                 client_model: None,
                 capabilities: BTreeSet::new(),
                 input_tokens: 0,
+                current_turn_input_tokens: 0,
                 route_classification: RouteClassification::default(),
             },
             route_policy_pool: None,
@@ -348,61 +384,83 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
     }
 
     #[test]
-    fn runtime_commits_current_turn_once_and_discard_does_not_pollute_history() {
+    fn current_turn_compaction_selects_compact_pool_and_commit_clears_pending() {
         let state = V3RoutePolicyRuntimeState::default();
         let manifest = manifest();
         let scope = scope();
-        let policies = compile_route_policies(&manifest, "test").expect("policies");
-        let search = V3RouteTurnObservation {
-            search_pool_hit: true,
-            ..Default::default()
-        };
-        for request in 0..7 {
-            let request_id = format!("search-{request}");
-            state
+        let (classified, pending) = state
+            .evaluate_request(
+                &manifest,
+                classified(),
+                scope,
+                "compact-1",
+                V3RouteTurnObservation {
+                    is_compaction: true,
+                },
+                1,
+            )
+            .expect("evaluate");
+        assert_eq!(classified.route_policy_pool.as_deref(), Some("compact"));
+        pending.commit::<String>().expect("commit");
+        drop(pending);
+        assert!(state.pending.lock().expect("pending lock").is_empty());
+    }
+
+    #[test]
+    fn pending_guard_discards_non_commit_turns() {
+        let state = V3RoutePolicyRuntimeState::default();
+        let manifest = manifest();
+        let scope = scope();
+        for request in 0..32 {
+            let request_id = format!("failed-{request}");
+            let (_classified, pending) = state
                 .evaluate_request(
                     &manifest,
                     classified(),
                     scope.clone(),
                     &request_id,
-                    search.clone(),
+                    V3RouteTurnObservation::default(),
+                    request,
                 )
                 .expect("evaluate");
-            state
-                .commit_request(&scope, &request_id, &policies)
-                .expect("commit");
+            drop(pending);
         }
-        let dropped = "dropped";
-        state
+        assert!(state.pending.lock().expect("pending lock").is_empty());
+    }
+
+    #[test]
+    fn stale_guard_does_not_remove_reused_request_id() {
+        let state = V3RoutePolicyRuntimeState::default();
+        let manifest = manifest();
+        let scope = scope();
+        let (_, stale_guard) = state
             .evaluate_request(
                 &manifest,
                 classified(),
                 scope.clone(),
-                dropped,
+                "reused",
                 V3RouteTurnObservation::default(),
+                1,
             )
-            .expect("evaluate dropped");
-        state.discard_request(&scope, dropped).expect("discard");
-        let action = state
-            .evaluate_request(&manifest, classified(), scope.clone(), "current", search)
-            .expect("evaluate current")
-            .route_policy_pool;
-        assert_eq!(action.as_deref(), Some("thinking"));
+            .expect("evaluate stale");
+        let (_, current_guard) = state
+            .evaluate_request(
+                &manifest,
+                classified(),
+                scope.clone(),
+                "reused",
+                V3RouteTurnObservation::default(),
+                2,
+            )
+            .expect("evaluate current");
+        drop(stale_guard);
+        assert_eq!(state.pending.lock().expect("pending lock").len(), 1);
+        drop(current_guard);
+        assert!(state.pending.lock().expect("pending lock").is_empty());
     }
 
     #[test]
-    fn provider_failure_observation_is_not_a_tool_error() {
-        let body = serde_json::json!({
-            "error": {"message": "upstream unavailable"},
-            "messages": [{"role": "user", "content": "hi"}]
-        });
-        let observation = observe_route_turn(&body, "default");
-        assert!(!observation.tool_execution_error);
-        assert!(!observation.search_pool_hit);
-    }
-
-    #[test]
-    fn compact_observation_is_independent_from_history_conditions() {
+    fn compact_observation_selects_compact_pool() {
         let observation = observe_route_turn(&serde_json::json!({}), "compact");
         assert!(observation.is_compaction);
         let policy = V3RoutePolicy {
@@ -411,10 +469,37 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             condition: V3RouteCondition::CurrentCompaction,
             route_pool: "compact".into(),
         };
-        let action =
-            evaluate_v3_route_policies(&[policy], observation, &V3RouteHistoryWindow::new(1))
-                .expect("compact evaluation")
-                .expect("compact action");
+        let action = evaluate_v3_route_policies(&[policy], observation)
+            .expect("compact evaluation")
+            .expect("compact action");
         assert_eq!(action.route_pool, "compact");
+    }
+
+    #[test]
+    fn ordinary_repeated_turns_never_override_route_pool() {
+        // Ordinary routing is bound to the current turn only: route policy keeps
+        // no cross-request history, so a run of identical non-compaction turns
+        // must never select or promote a route pool.
+        let state = V3RoutePolicyRuntimeState::default();
+        let manifest = manifest();
+        let scope = scope();
+        let observation = V3RouteTurnObservation::default();
+        for request in 0..5u64 {
+            let (classified, pending) = state
+                .evaluate_request(
+                    &manifest,
+                    classified(),
+                    scope.clone(),
+                    &format!("ordinary-{request}"),
+                    observation.clone(),
+                    request,
+                )
+                .expect("evaluate");
+            assert_eq!(
+                classified.route_policy_pool, None,
+                "current turn without a matching policy must not select a route pool"
+            );
+            pending.commit::<String>().expect("commit");
+        }
     }
 }

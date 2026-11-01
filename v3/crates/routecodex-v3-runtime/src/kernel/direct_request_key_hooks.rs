@@ -5,6 +5,7 @@ pub enum V3DirectRequestProtocol {
     Responses,
     OpenAiChat,
     Anthropic,
+    Gemini,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +236,10 @@ pub(crate) fn parse_v3_direct_request_key_view(
             }
             collect_v3_direct_anthropic_tools(object.get("tools"), &mut tools);
         }
+        V3DirectRequestProtocol::Gemini => {
+            collect_v3_direct_gemini_system(object.get("systemInstruction"), &mut system);
+            collect_v3_direct_gemini_tools(object.get("tools"), &mut tools);
+        }
     }
     Ok(V3DirectRequestKeyView {
         protocol,
@@ -342,6 +347,47 @@ fn collect_v3_direct_anthropic_tools(
     }
 }
 
+fn collect_v3_direct_gemini_system(value: Option<&Value>, output: &mut Vec<String>) {
+    let Some(parts) = value
+        .and_then(|instruction| instruction.get("parts"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for part in parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            output.push(text.to_owned());
+        }
+    }
+}
+
+fn collect_v3_direct_gemini_tools(
+    tools_value: Option<&Value>,
+    output: &mut Vec<V3DirectRequestToolKey>,
+) {
+    let Some(tools) = tools_value.and_then(Value::as_array) else {
+        return;
+    };
+    for tool in tools {
+        let Some(declarations) = tool.get("functionDeclarations").and_then(Value::as_array) else {
+            continue;
+        };
+        for declaration in declarations {
+            output.push(V3DirectRequestToolKey {
+                ordinal: output.len(),
+                name: declaration
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                description: declaration
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            });
+        }
+    }
+}
+
 fn apply_v3_direct_request_key_edits(
     body: &mut Value,
     view: &V3DirectRequestKeyView,
@@ -386,6 +432,15 @@ fn append_v3_direct_prompt_key(
                 append_v3_direct_anthropic_system(body, append)?;
             }
         }
+        V3DirectRequestProtocol::Gemini => match role {
+            "system" => append_v3_direct_gemini_system(body, append)?,
+            "developer" => {
+                return Err(
+                    "Gemini Direct request key hooks do not support the developer role".to_owned(),
+                )
+            }
+            _ => return Err(format!("unsupported Gemini request key role: {role}")),
+        },
     }
     Ok(())
 }
@@ -454,6 +509,25 @@ fn append_v3_direct_anthropic_system(body: &mut Value, append: &str) -> Result<(
     Ok(())
 }
 
+fn append_v3_direct_gemini_system(body: &mut Value, append: &str) -> Result<(), String> {
+    let object = body
+        .as_object_mut()
+        .ok_or_else(|| "direct Gemini request must be an object".to_owned())?;
+    let instruction = object
+        .entry("systemInstruction".to_owned())
+        .or_insert_with(|| serde_json::json!({"parts":[]}));
+    let instruction = instruction
+        .as_object_mut()
+        .ok_or_else(|| "Gemini systemInstruction must be an object".to_owned())?;
+    let parts = instruction
+        .entry("parts".to_owned())
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| "Gemini systemInstruction.parts must be an array".to_owned())?;
+    parts.push(serde_json::json!({"text":append}));
+    Ok(())
+}
+
 fn append_v3_direct_tool_descriptions(
     body: &mut Value,
     protocol: V3DirectRequestProtocol,
@@ -463,14 +537,31 @@ fn append_v3_direct_tool_descriptions(
         .get_mut("tools")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| "direct tool key rewrite requires a tools array".to_owned())?;
-    for tool in tools {
-        let description = match protocol {
-            V3DirectRequestProtocol::OpenAiChat => tool.pointer_mut("/function/description"),
-            _ => tool.get_mut("description"),
-        };
-        if let Some(Value::String(description)) = description {
-            description.push_str("\n\n");
-            description.push_str(append);
+    if protocol == V3DirectRequestProtocol::Gemini {
+        for tool in tools {
+            let Some(declarations) = tool
+                .get_mut("functionDeclarations")
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for declaration in declarations {
+                if let Some(Value::String(description)) = declaration.get_mut("description") {
+                    description.push_str("\n\n");
+                    description.push_str(append);
+                }
+            }
+        }
+    } else {
+        for tool in tools {
+            let description = match protocol {
+                V3DirectRequestProtocol::OpenAiChat => tool.pointer_mut("/function/description"),
+                _ => tool.get_mut("description"),
+            };
+            if let Some(Value::String(description)) = description {
+                description.push_str("\n\n");
+                description.push_str(append);
+            }
         }
     }
     Ok(())
@@ -506,8 +597,24 @@ fn inject_v3_direct_tool(
             "description":description,
             "input_schema":injection.parameters
         }),
+        V3DirectRequestProtocol::Gemini => serde_json::json!({
+            "name":injection.name,
+            "description":description,
+            "parameters":injection.parameters
+        }),
     };
-    tools.push(tool);
+    if protocol == V3DirectRequestProtocol::Gemini {
+        if let Some(declarations) = tools.iter_mut().find_map(|tool| {
+            tool.get_mut("functionDeclarations")
+                .and_then(Value::as_array_mut)
+        }) {
+            declarations.push(tool);
+        } else {
+            tools.push(serde_json::json!({"functionDeclarations":[tool]}));
+        }
+    } else {
+        tools.push(tool);
+    }
     Ok(())
 }
 
@@ -539,6 +646,18 @@ mod tests {
         Ok(())
     }
 
+    fn tool_injection_mount(
+        _view: &V3DirectRequestKeyView,
+        edits: &mut V3DirectRequestKeyEdits,
+    ) -> Result<(), String> {
+        edits.inject_tools.push(V3DirectRequestToolInjection {
+            name: "injected".to_owned(),
+            description: Some("injected tool".to_owned()),
+            parameters: serde_json::json!({"type":"object"}),
+        });
+        Ok(())
+    }
+
     fn illegal_system_mount(
         _view: &V3DirectRequestKeyView,
         edits: &mut V3DirectRequestKeyEdits,
@@ -565,6 +684,42 @@ mod tests {
                 description: Some("extra tool".to_owned()),
                 parameters: serde_json::json!({"type":"object"}),
             });
+            Ok(())
+        }
+    }
+
+    struct GeminiAppendHook;
+
+    impl V3DirectRequestKeyHook for GeminiAppendHook {
+        fn notify(&mut self, _view: &V3DirectRequestKeyView) {}
+
+        fn rewrite(
+            &mut self,
+            _view: &V3DirectRequestKeyView,
+            edits: &mut V3DirectRequestKeyEdits,
+        ) -> Result<(), String> {
+            edits.system_append = Some("system addition".to_owned());
+            edits.tool_description_append = Some("tool addition".to_owned());
+            edits.inject_tools.push(V3DirectRequestToolInjection {
+                name: "extra".to_owned(),
+                description: Some("extra tool".to_owned()),
+                parameters: serde_json::json!({"type":"object"}),
+            });
+            Ok(())
+        }
+    }
+
+    struct GeminiDeveloperHook;
+
+    impl V3DirectRequestKeyHook for GeminiDeveloperHook {
+        fn notify(&mut self, _view: &V3DirectRequestKeyView) {}
+
+        fn rewrite(
+            &mut self,
+            _view: &V3DirectRequestKeyView,
+            edits: &mut V3DirectRequestKeyEdits,
+        ) -> Result<(), String> {
+            edits.developer_append = Some("developer addition".to_owned());
             Ok(())
         }
     }
@@ -640,6 +795,298 @@ mod tests {
             .unwrap()
             .contains("tool addition"));
         assert_eq!(output["tools"][1]["name"], "extra");
+    }
+
+    #[test]
+    fn gemini_key_view_reads_native_system_and_function_declarations() {
+        let body = serde_json::json!({
+            "systemInstruction": {
+                "parts": [
+                    {"text": "base system", "opaquePart": true},
+                    {"text": "second system"}
+                ],
+                "opaqueSystem": "keep"
+            },
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": "hello"}],
+                "opaqueContent": "keep"
+            }],
+            "tools": [
+                {"googleSearch": {}, "opaqueHosted": "keep"},
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "lookup",
+                            "description": "lookup tool",
+                            "parameters": {"type": "object"},
+                            "opaqueDeclaration": "keep"
+                        },
+                        {"name": "other", "parameters": {"type": "object"}}
+                    ],
+                    "opaqueTool": "keep"
+                }
+            ],
+            "unknownTop": "keep"
+        });
+        let view =
+            parse_v3_direct_request_key_view(&body, V3DirectRequestProtocol::Gemini).unwrap();
+        assert_eq!(view.protocol, V3DirectRequestProtocol::Gemini);
+        assert_eq!(view.system, vec!["base system", "second system"]);
+        assert!(view.developer.is_empty());
+        assert_eq!(view.tools.len(), 2);
+        assert_eq!(view.tools[0].ordinal, 0);
+        assert_eq!(view.tools[0].name.as_deref(), Some("lookup"));
+        assert_eq!(view.tools[0].description.as_deref(), Some("lookup tool"));
+        assert_eq!(view.tools[1].ordinal, 1);
+        assert_eq!(view.tools[1].name.as_deref(), Some("other"));
+    }
+
+    #[test]
+    fn gemini_default_noop_hooks_preserve_native_request_exactly() {
+        let body = serde_json::json!({
+            "systemInstruction": {
+                "parts": [{"text": "base system", "opaquePart": true}],
+                "opaqueSystem": "keep"
+            },
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": "hello", "opaquePart": true}],
+                "opaqueContent": "keep"
+            }],
+            "tools": [{
+                "googleSearch": {},
+                "opaqueHosted": "keep"
+            }],
+            "generationConfig": {"temperature": 0.2, "opaqueConfig": true},
+            "unknownTop": "keep"
+        });
+        let mut catalog = default_v3_direct_request_key_hook_catalog();
+        let output = apply_v3_direct_request_key_hook(
+            body.clone(),
+            V3DirectRequestProtocol::Gemini,
+            &mut catalog,
+        )
+        .unwrap();
+        assert_eq!(output, body);
+    }
+
+    #[test]
+    fn gemini_key_edits_preserve_contents_unknown_fields_and_hosted_tools() {
+        let body = serde_json::json!({
+            "systemInstruction": {
+                "parts": [
+                    {"text": "base system", "opaquePart": true},
+                    {"text": "second system"}
+                ],
+                "opaqueSystem": "keep"
+            },
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": "hello", "opaquePart": true},
+                    {"inlineData": {"mimeType": "text/plain", "data": "aGVsbG8="}}
+                ],
+                "opaqueContent": "keep"
+            }],
+            "tools": [
+                {"googleSearch": {}, "opaqueHosted": "keep"},
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "lookup",
+                            "description": "base tool",
+                            "parameters": {"type": "object"},
+                            "opaqueDeclaration": "keep"
+                        },
+                        {
+                            "name": "other",
+                            "parameters": {"type": "object"},
+                            "opaqueDeclaration": "keep other"
+                        }
+                    ],
+                    "opaqueTool": "keep"
+                }
+            ],
+            "generationConfig": {"temperature": 0.2, "opaqueConfig": true},
+            "unknownTop": "keep"
+        });
+        let original_contents = body["contents"].clone();
+        let original_hosted_tool = body["tools"][0].clone();
+        let output = apply_v3_direct_request_key_hook(
+            body,
+            V3DirectRequestProtocol::Gemini,
+            &mut GeminiAppendHook,
+        )
+        .unwrap();
+
+        assert_eq!(output["contents"], original_contents);
+        assert_eq!(output["tools"][0], original_hosted_tool);
+        assert_eq!(output["systemInstruction"]["opaqueSystem"], "keep");
+        assert_eq!(
+            output["systemInstruction"]["parts"][0],
+            serde_json::json!({"text": "base system", "opaquePart": true})
+        );
+        assert_eq!(
+            output["systemInstruction"]["parts"][1],
+            serde_json::json!({"text": "second system"})
+        );
+        assert_eq!(
+            output["systemInstruction"]["parts"][2],
+            serde_json::json!({"text": "system addition"})
+        );
+        assert_eq!(output["tools"][1]["opaqueTool"], "keep");
+        let declarations = output["tools"][1]["functionDeclarations"]
+            .as_array()
+            .unwrap();
+        assert_eq!(declarations[0]["opaqueDeclaration"], "keep");
+        assert_eq!(declarations[0]["description"], "base tool\n\ntool addition");
+        assert_eq!(declarations[1]["opaqueDeclaration"], "keep other");
+        assert!(declarations[1].get("description").is_none());
+        assert_eq!(declarations[2]["name"], "extra");
+        assert_eq!(declarations[2]["description"], "extra tool");
+        assert_eq!(
+            declarations[2]["parameters"],
+            serde_json::json!({"type":"object"})
+        );
+        assert_eq!(output["generationConfig"]["opaqueConfig"], true);
+        assert_eq!(output["unknownTop"], "keep");
+    }
+
+    #[test]
+    fn gemini_developer_edit_fails_without_inventing_a_native_role() {
+        let body = serde_json::json!({
+            "contents": [{"role":"user","parts":[{"text":"hello"}]}]
+        });
+        let error = apply_v3_direct_request_key_hook(
+            body,
+            V3DirectRequestProtocol::Gemini,
+            &mut GeminiDeveloperHook,
+        )
+        .expect_err("Gemini has no developer role");
+        assert!(error.contains("Gemini"));
+        assert!(error.contains("developer"));
+    }
+
+    #[test]
+    fn gemini_key_catalog_dispatches_system_and_tools_mounts() {
+        let body = serde_json::json!({
+            "systemInstruction": {"parts": [{"text": "base system"}]},
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+            "tools": [{
+                "googleSearch": {},
+                "functionDeclarations": [{
+                    "name": "lookup",
+                    "description": "base tool",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        });
+        let mut catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: system_mount,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: noop_v3_direct_request_key_rewrite,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: tools_mount,
+            },
+        );
+        let output =
+            apply_v3_direct_request_key_hook(body, V3DirectRequestProtocol::Gemini, &mut catalog)
+                .unwrap();
+        assert_eq!(
+            output["systemInstruction"]["parts"][1],
+            serde_json::json!({"text": "system mount"})
+        );
+        assert_eq!(
+            output["tools"][0]["functionDeclarations"][0]["description"],
+            "base tool\n\ntools mount"
+        );
+        assert_eq!(output["tools"][0]["googleSearch"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn gemini_tool_edits_ignore_hosted_only_tools_without_creating_a_declarations_container() {
+        let body = serde_json::json!({
+            "contents": [{"role":"user","parts":[{"text":"hello"}]}],
+            "tools": [{"googleSearch": {}, "opaqueHosted": "keep"}]
+        });
+        let mut catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: noop_v3_direct_request_key_rewrite,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: noop_v3_direct_request_key_rewrite,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: tools_mount,
+            },
+        );
+        let output =
+            apply_v3_direct_request_key_hook(body, V3DirectRequestProtocol::Gemini, &mut catalog)
+                .expect("hosted tools have no function declarations to edit");
+        assert_eq!(
+            output["tools"],
+            serde_json::json!([{"googleSearch": {}, "opaqueHosted": "keep"}])
+        );
+        assert_eq!(output["contents"][0]["parts"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn gemini_tool_injection_creates_function_declarations_after_hosted_tools() {
+        let body = serde_json::json!({
+            "contents": [{"role":"user","parts":[{"text":"hello"}]}],
+            "tools": [{"googleSearch": {}, "opaqueHosted": "keep"}]
+        });
+        let original_contents = body["contents"].clone();
+        let original_hosted_tool = body["tools"][0].clone();
+        let mut catalog = V3DirectRequestKeyHookCatalog::new(
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::System,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: noop_v3_direct_request_key_rewrite,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Developer,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: noop_v3_direct_request_key_rewrite,
+            },
+            V3DirectRequestKeyMount {
+                key: V3DirectRequestKeyKind::Tools,
+                notify: noop_v3_direct_request_key_notify,
+                rewrite: tool_injection_mount,
+            },
+        );
+        let output =
+            apply_v3_direct_request_key_hook(body, V3DirectRequestProtocol::Gemini, &mut catalog)
+                .expect("Gemini tool injection must not require an existing declaration container");
+
+        assert_eq!(output["contents"], original_contents);
+        assert_eq!(output["tools"][0], original_hosted_tool);
+        assert_eq!(
+            output["tools"][1],
+            serde_json::json!({
+                "functionDeclarations": [{
+                    "name": "injected",
+                    "description": "injected tool",
+                    "parameters": {"type":"object"}
+                }]
+            })
+        );
     }
 
     #[test]

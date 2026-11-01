@@ -23,13 +23,10 @@ edges:
   - [V3Lifecycle05IdentityPublished, V3Lifecycle06LiveControlled]
   - [V3Lifecycle06LiveControlled, V3Lifecycle07GracefullyStopped]
 verification_gates:
-  - verify:v3-managed-server-lifecycle
-  - test:v3-managed-server-lifecycle-red-fixtures
   - test:v3-managed-server-lifecycle
   - verify:v3-architecture-docs
   - verify:v3-resource-map
   - verify:v3-module-boundaries
-  - verify:v3-rust-only
   - verify:v3-cargo-fmt
   - verify:v3-clippy
   - test:v3-workspace

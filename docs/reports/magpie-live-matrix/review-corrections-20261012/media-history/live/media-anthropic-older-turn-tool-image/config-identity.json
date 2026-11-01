@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-history/live/media-anthropic-older-turn-tool-image/v3-protocol-live-mock-lifecycle-N7mbqt/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-history/live/media-anthropic-older-turn-tool-image/v3-protocol-live-mock-lifecycle-N7mbqt/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 58204
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 58205
+    }
+  ],
+  "admin_bind": "127.0.0.1:58205",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:58205"
+  },
+  "mode": "relay",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-openai_chat",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-history/live/media-anthropic-older-turn-tool-image/v3-protocol-live-mock-lifecycle-N7mbqt/provider/mock-openai_chat/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-history/live/media-anthropic-older-turn-tool-image/provider.toml",
+      "model": "mock.chat-model",
+      "wire_model": "chat-model",
+      "sha256": "3818d4a1eb9aae5ab7cedc7ed7c99e3e7c4828b872e42c34b0cd120cf53f8535"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "openai_chat",
+    "wire_model": "chat-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-openai_chat/mock.chat-model",
+        "provider_id": "mock-openai_chat",
+        "model": "mock.chat-model",
+        "wire_model": "chat-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-history/live/media-anthropic-older-turn-tool-image/v3-protocol-live-mock-lifecycle-N7mbqt/provider/mock-openai_chat/config.v2.toml",
+        "provider_sha256": "3818d4a1eb9aae5ab7cedc7ed7c99e3e7c4828b872e42c34b0cd120cf53f8535",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-openai_chat/mock.chat-model"
+  ]
+}

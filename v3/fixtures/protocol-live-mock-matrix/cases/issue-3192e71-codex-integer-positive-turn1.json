@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "case_id": "issue-3192e71-codex-integer-positive-turn1",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "openai_chat",
+    "transport": "sse",
+    "mode": "relay"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "mock.chat-model",
+      "stream": true,
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "run pwd"
+            }
+          ]
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "name": "exec_command",
+          "description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+          "strict": false,
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "type": "string",
+                "description": "Shell command to execute."
+              },
+              "justification": {
+                "type": "string",
+                "description": "User-facing approval question for `require_escalated`; omit otherwise."
+              },
+              "login": {
+                "type": "boolean",
+                "description": "True runs the shell with -l/-i semantics; false disables them. Defaults to true."
+              },
+              "max_output_tokens": {
+                "type": "number",
+                "description": "Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy."
+              },
+              "prefix_rule": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Reusable approval prefix for `cmd`, only with `sandbox_permissions: \"require_escalated\"`; for example [\"git\", \"pull\"]."
+              },
+              "sandbox_permissions": {
+                "type": "string",
+                "enum": [
+                  "use_default",
+                  "require_escalated"
+                ],
+                "description": "Per-command sandbox override. Defaults to `use_default`; use `require_escalated` for unsandboxed execution."
+              },
+              "shell": {
+                "type": "string",
+                "description": "Shell binary to launch. Defaults to the user's default shell."
+              },
+              "tty": {
+                "type": "boolean",
+                "description": "True allocates a PTY for the command; false or omitted uses plain pipes."
+              },
+              "workdir": {
+                "type": "string",
+                "description": "Working directory for the command. Defaults to the turn cwd."
+              },
+              "yield_time_ms": {
+                "type": "number",
+                "description": "Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms."
+              }
+            },
+            "required": [
+              "cmd"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expected_provider": {
+    "paths": [
+      "/v1/chat/completions"
+    ],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "chat-model",
+      "messages.0.role": "user",
+      "tools.0.function.name": "exec_command",
+      "tools.0.function.description": "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+      "tools.0.function.parameters.properties.max_output_tokens.type": "integer",
+      "tools.0.function.parameters.properties.yield_time_ms.type": "integer",
+      "stream": true
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {
+        "data": {
+          "id": "chatcmpl_integer_values",
+          "object": "chat.completion.chunk",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "tool_calls": [
+                  {
+                    "index": 0,
+                    "id": "call_int_1",
+                    "type": "function",
+                    "function": {
+                      "name": "exec_command",
+                      "arguments": "{\"cmd\":\"pwd\",\"max_output_tokens\":8000.0,\"yield_time_ms\":20000.0}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "data": {
+          "id": "chatcmpl_integer_values",
+          "object": "chat.completion.chunk",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {},
+              "finish_reason": "tool_calls"
+            }
+          ]
+        }
+      },
+      {
+        "data": "[DONE]"
+      }
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output_items.length": 1,
+      "output_items.0.type": "function_call",
+      "output_items.0.call_id": "call_int_1",
+      "output_items.0.name": "exec_command",
+      "output_items.0.arguments": "{\"cmd\":\"pwd\",\"max_output_tokens\":8000,\"yield_time_ms\":20000}"
+    },
+    "body_must_not": [
+      "8000.0",
+      "20000.0",
+      "provider_error",
+      "internal_error",
+      "routecodex_internal"
+    ],
+    "semantic_terminal_required": true
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "sha": "918354c39d52bd77caeb70677b6270cc36c474ac",
+    "files": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs"
+    ],
+    "tests": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_codex_integer_values_tests.rs::resp03_restores_registered_codex_integer_argument_values"
+    ]
+  },
+  "contract_differences": [
+    {
+      "source_behavior": "The unit owner rewrites integral floats only for the exact registered Codex shell schema.",
+      "rcc_requirement": "The public replay must use the installed current schema and return the integer-restored function_call to the client. This case is turn 1 only so it runs without a Codex CLI; issue-3192e71-codex-integer-positive keeps the real pwd execution."
+    }
+  ]
+}

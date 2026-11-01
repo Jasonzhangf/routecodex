@@ -108,7 +108,6 @@ re-enter RouteCodex; it returns to the normal client tool loop.
 
 - `npm run verify:v3-servertool-center-skeleton`
 - `npm run verify:v3-architecture-docs`
-- `npm run verify:v3-build-admission-lockstep`
 - `npm run verify:architecture-wiki-html-sync`
 - `npm run verify:v3-architecture-ci`
 

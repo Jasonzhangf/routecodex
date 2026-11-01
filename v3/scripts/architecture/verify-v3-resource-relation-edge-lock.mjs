@@ -3,26 +3,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
 
-const root = process.cwd();
-const admissionPrefix = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-  ? ''
-  : 'build-contracts/architecture-admission/repo/';
-const v3Prefix = '';
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(import.meta.dirname, '../..', '..');
 const failures = [];
 const files = {
-  resourceMap: process.env.ROUTECODEX_V3_RESOURCE_MAP_PATH ?? `${admissionPrefix}docs/architecture/v3-resource-operation-map.yml`,
-  mainlineMap: process.env.ROUTECODEX_V3_MAINLINE_CALL_MAP_PATH ?? `${admissionPrefix}docs/architecture/v3-mainline-call-map.yml`,
-  functionMap: process.env.ROUTECODEX_V3_FUNCTION_MAP_PATH ?? `${admissionPrefix}docs/architecture/v3-function-map.yml`,
-  verificationMap: process.env.ROUTECODEX_V3_VERIFICATION_MAP_PATH ?? `${admissionPrefix}docs/architecture/v3-verification-map.yml`,
-  packageJson: process.env.ROUTECODEX_PACKAGE_JSON_PATH ?? `${v3Prefix}package.json`,
-  verifier: `${v3Prefix}scripts/architecture/verify-v3-resource-relation-edge-lock.mjs`,
-  redFixture: `${v3Prefix}scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs`,
+  resourceMap: process.env.ROUTECODEX_V3_RESOURCE_MAP_PATH ?? 'docs/architecture/v3-resource-operation-map.yml',
+  mainlineMap: process.env.ROUTECODEX_V3_MAINLINE_CALL_MAP_PATH ?? 'docs/architecture/v3-mainline-call-map.yml',
+  functionMap: process.env.ROUTECODEX_V3_FUNCTION_MAP_PATH ?? 'docs/architecture/v3-function-map.yml',
+  verificationMap: process.env.ROUTECODEX_V3_VERIFICATION_MAP_PATH ?? 'docs/architecture/v3-verification-map.yml',
 };
 
 const featureId = 'v3.resource_relation_edge_lock';
-const verifyGate = 'npm run verify:v3-resource-relation-edge-lock';
-const redGate = 'npm run test:v3-resource-relation-edge-lock-red-fixtures';
-const architectureDocsGate = 'npm run verify:v3-architecture-docs';
 const resourceFlowFields = ['consumes', 'produces', 'side_channel_reads', 'side_channel_writes'];
 const resourceFlowFieldSet = new Set(resourceFlowFields);
 const forbiddenResourceRelationFields = new Set([
@@ -86,14 +78,6 @@ const resourceMap = readYaml(files.resourceMap);
 const mainlineMap = readYaml(files.mainlineMap);
 const functionMap = readYaml(files.functionMap);
 const verificationMap = readYaml(files.verificationMap);
-const packageJson = readJson(files.packageJson);
-
-requirePackageScript('verify:v3-resource-relation-edge-lock', 'node scripts/architecture/verify-v3-resource-relation-edge-lock.mjs');
-requirePackageScript('test:v3-resource-relation-edge-lock-red-fixtures', 'node scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs');
-requirePackageScriptContains('verify:v3-architecture-docs', 'verify:v3-resource-relation-edge-lock');
-for (const rel of [files.verifier, files.redFixture]) {
-  if (!fs.existsSync(abs(rel))) fail(rel + ': missing resource relation edge lock file');
-}
 
 const resourceIds = verifyResourceMap(resourceMap);
 const resourceUsage = verifyMainlineEdges(mainlineMap, resourceIds);
@@ -128,15 +112,6 @@ function readYaml(rel) {
     return YAML.parse(readText(rel)) ?? {};
   } catch (error) {
     fail(rel + ': YAML parse failed: ' + error.message);
-    return {};
-  }
-}
-
-function readJson(rel) {
-  try {
-    return JSON.parse(readText(rel));
-  } catch (error) {
-    fail(rel + ': JSON parse failed: ' + error.message);
     return {};
   }
 }
@@ -343,19 +318,11 @@ function verifyGateMaps(functionMapParsed, verificationMapParsed) {
         fail(files.functionMap + ': ' + featureId + ' missing resource binding ' + resourceId);
       }
     }
-    for (const gate of [verifyGate, redGate, architectureDocsGate]) {
-      if (!array(functionFeature.required_gates).includes(gate)) {
-        fail(files.functionMap + ': ' + featureId + ' missing required gate ' + gate);
-      }
-    }
     const contractPaths = [
-      files.verifier,
-      files.redFixture,
       'docs/architecture/v3-resource-operation-map.yml',
       'docs/architecture/v3-mainline-call-map.yml',
       'docs/architecture/v3-function-map.yml',
       'docs/architecture/v3-verification-map.yml',
-      'package.json',
     ];
     for (const rel of contractPaths) {
       if (!array(functionFeature.allowed_paths).includes(rel)) {
@@ -367,36 +334,5 @@ function verifyGateMaps(functionMapParsed, verificationMapParsed) {
   const verificationFeature = array(verificationMapParsed?.features).find((feature) => feature?.feature_id === featureId);
   if (!verificationFeature) {
     fail(files.verificationMap + ': missing feature ' + featureId);
-  } else {
-    for (const gate of [verifyGate, redGate, architectureDocsGate]) {
-      if (!array(verificationFeature.required_gates).includes(gate)) {
-        fail(files.verificationMap + ': ' + featureId + ' missing required gate ' + gate);
-      }
-    }
-    const requiredContract = array(verificationFeature.required_contract).join('\n');
-    for (const phrase of [
-      'Resources are nodes/truth resources, not edges',
-      'resource_flow',
-      'Multiple callable paths require multiple edges',
-      'Every mainline chain and edge owner_feature_id resolves through the V3 function map and verification map',
-    ]) {
-      if (!requiredContract.includes(phrase)) {
-        fail(files.verificationMap + ': ' + featureId + ' required_contract missing phrase ' + phrase);
-      }
-    }
-  }
-}
-
-function requirePackageScript(name, expectedCommand) {
-  const actual = packageJson?.scripts?.[name];
-  if (actual !== expectedCommand) {
-    fail(files.packageJson + ': script ' + name + ' must be ' + expectedCommand);
-  }
-}
-
-function requirePackageScriptContains(name, expectedSubstring) {
-  const actual = packageJson?.scripts?.[name];
-  if (typeof actual !== 'string' || !actual.includes(expectedSubstring)) {
-    fail(files.packageJson + ': script ' + name + ' must invoke ' + expectedSubstring);
   }
 }

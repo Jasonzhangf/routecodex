@@ -46,7 +46,6 @@ fn published_manifest() -> V3Config05ManifestPublished {
                 order,
                 allowed_resources: vec!["metadata_center".to_string()],
                 forbidden_resources: vec![],
-                profile: None,
             });
             order += 1;
         }
@@ -152,6 +151,7 @@ fn published_manifest() -> V3Config05ManifestPublished {
         debug: V3DebugManifest {
             log_console: false,
             log_file: None,
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,
@@ -164,7 +164,6 @@ fn published_manifest() -> V3Config05ManifestPublished {
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
         memory_raw_capture: Default::default(),
     }

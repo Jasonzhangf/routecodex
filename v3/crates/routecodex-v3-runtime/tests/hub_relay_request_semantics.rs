@@ -1,7 +1,7 @@
 use routecodex_v3_runtime::{
     build_v3_hub_req_inbound_01_client_raw, compile_v3_hub_relay_request_hooks, V3HubEntryProtocol,
     V3HubInvocationSource, V3HubRelayRequestError, V3HubRelayRequestHookEvent,
-    V3HubRequestSemanticProtocol, V3HubServertoolRequestProfile, V3HubTransportIntent,
+    V3HubRequestHookProfile, V3HubRequestSemanticProtocol, V3HubTransportIntent,
 };
 use serde_json::{json, Value};
 
@@ -34,7 +34,7 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let governed = hooks
         .run(
             raw_for(payload.clone(), V3HubEntryProtocol::OpenAiChat),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert_eq!(governed.payload(), &payload);
@@ -52,7 +52,6 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
             V3HubRelayRequestHookEvent::Req04Entry,
             V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
             V3HubRelayRequestHookEvent::Req04ToolGoverned,
-            V3HubRelayRequestHookEvent::ServertoolOptionalNoop,
             V3HubRelayRequestHookEvent::Req04Exit,
         ]
     );
@@ -82,7 +81,7 @@ fn responses_req_inbound02_keeps_named_unpaired_tool_output_through_req04_govern
                     }
                 ]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .expect("named unpaired tool output must pass ReqInbound02 and Req04 governance");
 
@@ -137,7 +136,7 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
                     }
                 ]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
 
@@ -152,7 +151,10 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
     );
     assert_eq!(payload["messages"][0]["role"], "system");
     assert_eq!(payload["messages"][1]["role"], "user");
-    assert_eq!(payload["messages"][1]["content"], "search then answer");
+    assert_eq!(
+        payload["messages"][1]["content"],
+        json!([{"type":"text","text":"search then answer"}])
+    );
     assert!(
         serialized_contains_tool_type(payload, "tool_search"),
         "tool_search must survive inbound as a Chat canonical tool surface: {payload}"
@@ -170,7 +172,7 @@ fn responses_req_inbound02_canonicalizes_payload_to_chat_and_preserves_tool_sear
 #[test]
 fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
+    let profile = V3HubRequestHookProfile::enabled().with_memory_raw_capture_enabled(true);
     let governed = hooks
         .run(
             raw(json!({
@@ -192,7 +194,7 @@ fn responses_relay_req04_injects_memory_guidance_once_before_tool_governance() {
 #[test]
 fn responses_relay_memory_guidance_injection_fails_fast_on_bad_instructions() {
     let hooks = compile_v3_hub_relay_request_hooks();
-    let profile = V3HubServertoolRequestProfile::enabled([]).with_memory_raw_capture_enabled(true);
+    let profile = V3HubRequestHookProfile::enabled().with_memory_raw_capture_enabled(true);
     let error = hooks
         .run(
             raw(json!({
@@ -247,7 +249,7 @@ fn req04_preserves_malformed_shell_like_function_call_and_parse_error_output() {
                     }
                 ]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
 
@@ -299,7 +301,7 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
     let governed = hooks
         .run(
             raw_for(valid, V3HubEntryProtocol::OpenAiChat),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     let events = governed.hook_events();
@@ -315,13 +317,12 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
 
     for invalid in [
         json!({"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"x","arguments":"{}"}}]}]}),
-        json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]}),
         json!({"messages":[{"role":"tool","tool_call_id":"orphan","content":"x"}]}),
     ] {
         assert!(matches!(
             hooks.run(
                 raw_for(invalid, V3HubEntryProtocol::OpenAiChat),
-                &V3HubServertoolRequestProfile::disabled(),
+                &V3HubRequestHookProfile::disabled(),
             ),
             Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
                 protocol: "openai_chat",
@@ -329,6 +330,14 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
             })
         ));
     }
+    let duplicate = json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]});
+    let governed = hooks
+        .run(
+            raw_for(duplicate.clone(), V3HubEntryProtocol::OpenAiChat),
+            &V3HubRequestHookProfile::disabled(),
+        )
+        .unwrap();
+    assert_eq!(governed.payload()["messages"], duplicate["messages"]);
 }
 
 #[test]
@@ -337,36 +346,82 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     let valid = json!({
         "contents":[
             {"role":"user","parts":[{"text":"lookup"}]},
-            {"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"city":"Tokyo"}}}]},
-            {"role":"user","parts":[{"functionResponse":{"name":"lookup","response":{"forecast":"sunny"}}}]}
+            {"role":"model","parts":[{"functionCall":{"id":"call_1","name":"lookup","args":{"city":"Tokyo"}}}]},
+            {"role":"user","parts":[{"functionResponse":{"id":"call_1","name":"lookup","response":{"forecast":"sunny"}}}]}
         ]
     });
     let governed = hooks
         .run(
             raw_for(valid, V3HubEntryProtocol::Gemini),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
+        )
+        .unwrap();
+    // ReqInbound02 已把 Gemini 归一化为 canonical Chat `messages`，不再对原始
+    // `contents` 二次治理；工具历史统一由既有 canonical Chat 治理处理。
+    assert!(!governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
+    assert!(governed
+        .hook_events()
+        .contains(&V3HubRelayRequestHookEvent::Req04ToolGoverned));
+    assert!(governed.payload().get("contents").is_none());
+    let messages = governed.payload()["messages"]
+        .as_array()
+        .expect("Gemini inbound must canonicalize to Chat messages");
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[0]["content"][0]["text"], "lookup");
+    assert_eq!(messages[1]["role"], "assistant");
+    assert_eq!(messages[1]["tool_calls"][0]["id"], "call_1");
+    assert_eq!(messages[1]["tool_calls"][0]["function"]["name"], "lookup");
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "call_1");
+
+    // canonical Chat 工具历史治理仍拒绝按 id 无法配对的 orphan 工具输出。
+    let orphan = json!({
+        "contents":[
+            {"role":"user","parts":[{"functionResponse":{"id":"orphan","name":"lookup","response":{"x":1}}}]}
+        ]
+    });
+    assert!(matches!(
+        hooks.run(
+            raw_for(orphan, V3HubEntryProtocol::Gemini),
+            &V3HubRequestHookProfile::disabled(),
+        ),
+        Err(V3HubRelayRequestError::OrphanToolOutput { .. })
+    ));
+
+    // no-id functionResponse：原生 id 缺失时保持缺失，不生成 id，也不改写为 user
+    // 角色；显式 source 关联随 canonical tool receipt 一起保留。
+    let no_id = json!({
+        "contents":[
+            {"role":"user","parts":[{"text":"lookup"}]},
+            {"role":"user","parts":[{"functionResponse":{"name":"lookup","response":{"forecast":"sunny"}}}]}
+        ]
+    });
+    let governed = hooks
+        .run(
+            raw_for(no_id, V3HubEntryProtocol::Gemini),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(governed
         .hook_events()
-        .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
-
-    for invalid in [
-        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"response":{"x":1}}}]}]}),
-        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"","response":{"x":1}}}]}]}),
-        json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"orphan","response":{"x":1}}}]}]}),
-    ] {
-        assert!(matches!(
-            hooks.run(
-                raw_for(invalid, V3HubEntryProtocol::Gemini),
-                &V3HubServertoolRequestProfile::disabled(),
-            ),
-            Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                protocol: "gemini",
-                ..
-            })
-        ));
-    }
+        .contains(&V3HubRelayRequestHookEvent::Req04ToolGoverned));
+    let tool = governed.payload()["messages"]
+        .as_array()
+        .expect("Gemini inbound must canonicalize to Chat messages")
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("no-id functionResponse must survive as a tool receipt");
+    assert!(
+        tool.get("tool_call_id").is_none(),
+        "missing native id must stay missing"
+    );
+    assert_eq!(
+        tool["routecodex_chat_extension"]["gemini_native_fields"][0]["fields"]["functionResponse"]
+            ["name"],
+        "lookup"
+    );
 }
 
 #[test]
@@ -377,7 +432,7 @@ fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
             raw(json!({
                 "messages":[{"role":"tool","tool_call_id":"shape_only","content":"preserve"}]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(!governed
@@ -399,7 +454,7 @@ fn apply_patch_guidance_is_not_injected_into_payload_at_req04() {
                     "format":{"type":"grammar","syntax":"lark","definition":"start: patch"}
                 }]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
 
@@ -417,7 +472,7 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
                 "input":[{"role":"user","content":"Patch a file"}],
                 "tools":[{"type":"custom","name":"apply_patch","format":"freeform"}]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(serde_json::to_string(governed.payload())
@@ -431,7 +486,7 @@ fn apply_patch_guidance_text_is_preserved_at_req04() {
                 "input":[{"role":"user","content":"Lookup"}],
                 "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]
             })),
-            &V3HubServertoolRequestProfile::disabled(),
+            &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
     assert!(without_apply_patch.payload().get("instructions").is_none());
@@ -442,15 +497,134 @@ fn malformed_tool_output_and_required_hook_failure_are_explicit() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let malformed = json!({"input":[{"type":"function_call_output","output":"missing call id"}]});
     assert!(matches!(
-        hooks.run(raw(malformed), &V3HubServertoolRequestProfile::disabled()),
+        hooks.run(raw(malformed), &V3HubRequestHookProfile::disabled()),
         Err(V3HubRelayRequestError::ReqInboundInvalid { .. })
     ));
+}
 
-    assert!(matches!(
-        hooks.run(
-            raw(json!({"input":[{"role":"user","content":"continue"}]})),
-            &V3HubServertoolRequestProfile::required_failure("req04.required")
-        ),
-        Err(V3HubRelayRequestError::RequiredHookFailed { .. })
-    ));
+fn mixed_kind_duplicate_responses_input(custom_declared_first: bool) -> Value {
+    let function_call =
+        json!({"type":"function_call","call_id":"dup","name":"lookup","arguments":"{}"});
+    let custom_call =
+        json!({"type":"custom_tool_call","call_id":"dup","name":"render","input":"freeform"});
+    let function_output =
+        json!({"type":"function_call_output","call_id":"dup","output":"function ok"});
+    let custom_output =
+        json!({"type":"custom_tool_call_output","call_id":"dup","output":"custom ok"});
+    let input = if custom_declared_first {
+        vec![custom_call, function_call, custom_output, function_output]
+    } else {
+        vec![function_call, custom_call, function_output, custom_output]
+    };
+    json!({"model":"gpt-5.5","input":input})
+}
+
+#[test]
+fn mixed_kind_duplicate_call_id_survives_canonical_chat_branch_in_either_order() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    for custom_declared_first in [false, true] {
+        let governed = hooks
+            .run(
+                raw_for(
+                    mixed_kind_duplicate_responses_input(custom_declared_first),
+                    V3HubEntryProtocol::Responses,
+                ),
+                &V3HubRequestHookProfile::disabled(),
+            )
+            .expect("mixed function/custom duplicate call_id must not be rejected at Req04");
+
+        assert_eq!(governed.tool_output_count(), 2);
+        assert!(governed.payload().get("input").is_none());
+        let messages = governed.payload()["messages"].as_array().unwrap();
+
+        let declared_kinds: Vec<Option<&str>> = messages
+            .iter()
+            .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+            .flatten()
+            .filter(|call| call.get("id").and_then(Value::as_str) == Some("dup"))
+            .map(|call| {
+                call.pointer("/routecodex_chat_extension/responses_tool_call_type")
+                    .and_then(Value::as_str)
+            })
+            .collect();
+        assert_eq!(
+            declared_kinds.len(),
+            2,
+            "both declared calls must survive: {messages:?}"
+        );
+        assert!(
+            declared_kinds.contains(&Some("custom_tool_call")),
+            "custom declaration must be preserved: {messages:?}"
+        );
+        assert!(
+            declared_kinds.contains(&None),
+            "function declaration must be preserved: {messages:?}"
+        );
+
+        let tool_outputs: Vec<(&str, Option<&str>)> = messages
+            .iter()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+            .filter(|message| message.get("tool_call_id").and_then(Value::as_str) == Some("dup"))
+            .map(|message| {
+                (
+                    message
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                    message
+                        .pointer("/routecodex_chat_extension/responses_tool_output_type")
+                        .and_then(Value::as_str),
+                )
+            })
+            .collect();
+        assert_eq!(
+            tool_outputs.len(),
+            2,
+            "both matching results must survive: {messages:?}"
+        );
+        assert!(
+            tool_outputs.contains(&("function ok", Some("function_call_output"))),
+            "function result must pair without kind adjudication: {messages:?}"
+        );
+        assert!(
+            tool_outputs.contains(&("custom ok", Some("custom_tool_call_output"))),
+            "custom result must pair without kind adjudication: {messages:?}"
+        );
+    }
+}
+
+#[test]
+fn mixed_kind_duplicate_call_id_survives_raw_input_branch_in_either_order() {
+    let hooks = compile_v3_hub_relay_request_hooks();
+    for custom_declared_first in [false, true] {
+        let governed = hooks
+            .run(
+                raw_for(
+                    mixed_kind_duplicate_responses_input(custom_declared_first),
+                    V3HubEntryProtocol::OpenAiChat,
+                ),
+                &V3HubRequestHookProfile::disabled(),
+            )
+            .expect("mixed function/custom duplicate call_id must not be rejected at Req04");
+
+        assert_eq!(governed.tool_output_count(), 2);
+        let input = governed.payload()["input"]
+            .as_array()
+            .expect("raw input preserved");
+        assert_eq!(
+            input.len(),
+            4,
+            "both declarations and both results must be preserved in order: {input:?}"
+        );
+        assert!(input.iter().any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some("dup")
+                && item.get("output").and_then(Value::as_str) == Some("function ok")
+        }));
+        assert!(input.iter().any(|item| {
+            item.get("type").and_then(Value::as_str) == Some("custom_tool_call_output")
+                && item.get("call_id").and_then(Value::as_str) == Some("dup")
+                && item.get("output").and_then(Value::as_str) == Some("custom ok")
+        }));
+    }
 }

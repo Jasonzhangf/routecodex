@@ -140,7 +140,7 @@
     <li>Responses continuation is retired: non-empty previous_response_id fails before routing or provider transport, and Req04 never restores a saved local context.</li>
     <li>This small skeleton does not declare a request-side internal artifact removal path because no confirmed requirement exists.</li>
     <li>Error feedback is preserved: parse-error, unknown-tool, unsupported, schema reject, and execution failure outputs remain model correction input.</li>
-    <li>Response chain runs provider raw → compat → RespInbound normalization before Resp03. Resp03 first harvests text, completes/repairs tool frames, may correct finish_reason, then sends tool_call through the registered servertool hook while stop remains an ordinary terminal response.</li>
+    <li>Response chain runs provider raw → compat → RespInbound normalization before Resp03. Resp03 first harvests text, completes/repairs tool frames, may correct finish_reason, then sends tool_call through the registered tool hook while stop remains an ordinary terminal response.</li>
     <li>Provider codec owns malformed provider fields; Req04/Resp03 cannot become provider-specific workaround or error projection layer.</li>
     <li>Diagnostics stay side-channel only and must not enter provider body or client normal payload.</li>
   </ol>
@@ -158,10 +158,10 @@ flowchart TD
   RQ01[&quot;&lt;b&gt;Server SSE Frame Accepted&lt;/b&gt;&lt;br/&gt;server 接收 HTTP/SSE 请求、绑定 endpoint、request id、port/server id。&lt;br/&gt;&lt;small&gt;V3Server03HttpRequestRaw&lt;/small&gt;&quot;]
   RQ02[&quot;&lt;b&gt;Request Normalization&lt;/b&gt;&lt;br/&gt;把客户端协议请求非破坏性归一化为 Hub request normal payload。&lt;br/&gt;&lt;small&gt;V3HubReqInbound02Normalized&lt;/small&gt;&quot;]
   RQ03[&quot;&lt;b&gt;Tool Output Pair Normalization&lt;/b&gt;&lt;br/&gt;归一化客户端提交的工具输出结果，并保持它和对应 tool call 的 call_id/type 关系。&lt;br/&gt;&lt;small&gt;function_call_output / custom_tool_call_output adjacency&lt;/small&gt;&quot;]
-  RQ04[&quot;&lt;b&gt;Req04 Chat Process Governance&lt;/b&gt;&lt;br/&gt;治理当前请求的工具输出、history、servertool request hook 和请求语义。&lt;br/&gt;&lt;small&gt;V3HubReqChatProcess04Governed&lt;/small&gt;&quot;]
+  RQ04[&quot;&lt;b&gt;Req04 Chat Process Governance&lt;/b&gt;&lt;br/&gt;治理当前请求的工具输出、history、工具注入和请求语义。&lt;br/&gt;&lt;small&gt;V3HubReqChatProcess04Governed&lt;/small&gt;&quot;]
   RQ05[&quot;&lt;b&gt;Merge Current Tool Surfaces&lt;/b&gt;&lt;br/&gt;合并当前请求携带的 top-level tools 和 Codex additional_tools。&lt;br/&gt;&lt;small&gt;top-level tools + input[].additional_tools.tools&lt;/small&gt;&quot;]
   RQ06[&quot;&lt;b&gt;Preserve Client Tool Feedback&lt;/b&gt;&lt;br/&gt;把当前客户端工具执行结果并入 governed request truth。&lt;br/&gt;&lt;small&gt;function_call_output / custom output truth&lt;/small&gt;&quot;]
-  RQ07[&quot;&lt;b&gt;Inject Current Internal Tools&lt;/b&gt;&lt;br/&gt;按当前 turn policy 注入已声明的内部工具和必要 guidance。&lt;br/&gt;&lt;small&gt;tool-thinking / servertool request hook profile&lt;/small&gt;&quot;]
+  RQ07[&quot;&lt;b&gt;Inject Current Internal Tools&lt;/b&gt;&lt;br/&gt;按当前 turn policy 注入已声明的内部工具和必要 guidance。&lt;br/&gt;&lt;small&gt;tool-thinking / tool hook profile&lt;/small&gt;&quot;]
   RQ08[&quot;&lt;b&gt;Emit Req04 Governed Request&lt;/b&gt;&lt;br/&gt;把当前请求工具 surface 和工具输出结果交给 ReqExecution05。&lt;br/&gt;&lt;small&gt;V3HubReqExecution05Planned&lt;/small&gt;&quot;]
   title_note --&gt; RQ00
   RQ00 --&gt;|client SSE request enters server| RQ01
@@ -176,8 +176,7 @@ flowchart TD
   classDef restore fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;
   classDef compat fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   classDef repair fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
-  classDef servertool fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
-
+  classDef hook fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
   classDef normalize fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef load fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
@@ -209,10 +208,10 @@ flowchart TD
   RS03[&quot;&lt;b&gt;Text Harvest First&lt;/b&gt;&lt;br/&gt;进入 Resp03 后先收割文本、reasoning、delta 累积片段。&lt;br/&gt;&lt;small&gt;Resp03 text harvest&lt;/small&gt;&quot;]
   RS04[&quot;&lt;b&gt;Complete / Repair Tool Frames&lt;/b&gt;&lt;br/&gt;补齐/修正可从响应语义确定的 tool frame，例如 text-harvest 后形成完整 tool call。&lt;br/&gt;&lt;small&gt;Resp03 tool frame completion&lt;/small&gt;&quot;]
   RS05[&quot;&lt;b&gt;Inspect finish_reason&lt;/b&gt;&lt;br/&gt;根据补齐修复后的 finish_reason 选择响应治理路径。&lt;br/&gt;&lt;small&gt;finish_reason: tool_call | stop | other&lt;/small&gt;&quot;]
-  RS06[&quot;&lt;b&gt;Tool-call Servertool Hook&lt;/b&gt;&lt;br/&gt;在 tool_call 分支先判断模型 tool call 是否属于 servertool/内部工具。&lt;br/&gt;&lt;small&gt;servertool hook under finish_reason=tool_call&lt;/small&gt;&quot;]
-  RS07[&quot;&lt;b&gt;Ordinary Tool Governance&lt;/b&gt;&lt;br/&gt;servertool 未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。&lt;br/&gt;&lt;small&gt;exec_command / apply_patch / client tool governance&lt;/small&gt;&quot;]
+  RS06[&quot;&lt;b&gt;Tool-call Hook&lt;/b&gt;&lt;br/&gt;在 tool_call 分支先判断模型 tool call 是否属于内部工具。&lt;br/&gt;&lt;small&gt;tool hook under finish_reason=tool_call&lt;/small&gt;&quot;]
+  RS07[&quot;&lt;b&gt;Ordinary Tool Governance&lt;/b&gt;&lt;br/&gt;内部工具未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。&lt;br/&gt;&lt;small&gt;exec_command / apply_patch / client tool governance&lt;/small&gt;&quot;]
   RS08[&quot;&lt;b&gt;Terminal Response Branch&lt;/b&gt;&lt;br/&gt;保留 finish_reason=stop 的普通终止响应。&lt;br/&gt;&lt;small&gt;finish_reason=stop&lt;/small&gt;&quot;]
-  RS09[&quot;&lt;b&gt;Update Runtime Control Side-Channel&lt;/b&gt;&lt;br/&gt;根据 tool_call 分支治理结果更新 servertool runtime side-channel。&lt;br/&gt;&lt;small&gt;ServerToolCenterMetadataControl&lt;/small&gt;&quot;]
+  RS09[&quot;&lt;b&gt;Update Runtime Control Side-Channel&lt;/b&gt;&lt;br/&gt;根据 tool_call 分支治理结果更新 runtime side-channel。&lt;br/&gt;&lt;small&gt;ServerToolCenterMetadataControl&lt;/small&gt;&quot;]
   RS10[&quot;&lt;b&gt;Emit Resp03 Governed Semantic&lt;/b&gt;&lt;br/&gt;合流输出 Resp03 已治理的 response semantic。&lt;br/&gt;&lt;small&gt;V3HubRespChatProcess03Governed::output&lt;/small&gt;&quot;]
   RS11[&quot;&lt;b&gt;RespOutbound Client Semantic&lt;/b&gt;&lt;br/&gt;Resp03 结束后，把已治理的 Hub response semantic 投影为入口协议可见的 client semantic。&lt;br/&gt;&lt;small&gt;V3HubRespOutbound05ClientSemantic&lt;/small&gt;&quot;]
   RS12[&quot;&lt;b&gt;JSON to SSE Client Frame&lt;/b&gt;&lt;br/&gt;对客户端 SSE 入口，把 outbound client semantic 转成 SSE frame 并发送。&lt;br/&gt;&lt;small&gt;V3ServerRespOutbound06ClientFrame / json2sse&lt;/small&gt;&quot;]
@@ -225,8 +224,8 @@ flowchart TD
   RS05 --&gt;|finish_reason=tool_call| RS06
   RS05 --&gt;|finish_reason=stop| RS08
   RS05 --&gt;|other terminal / pass-through| RS10
-  RS06 --&gt;|servertool intercepted| RS09
-  RS06 --&gt;|not servertool| RS07
+  RS06 --&gt;|tool intercepted| RS09
+  RS06 --&gt;|not tool| RS07
   RS07 --&gt;|ordinary tool governed| RS09
   RS08 --&gt;|ordinary terminal response| RS10
   RS09 --&gt;|side-channel state updated only| RS10
@@ -236,8 +235,7 @@ flowchart TD
   classDef restore fill:#f0f9ff,stroke:#0284c7,stroke-width:2px,color:#0c4a6e;
   classDef compat fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   classDef repair fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
-  classDef servertool fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
-
+  classDef hook fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81;
   classDef normalize fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef load fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef decision fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f;
@@ -258,7 +256,7 @@ flowchart TD
   class RS07,RS08,RS10 govern;
   class RS03 harvest;
   class RS04 repair;
-  class RS06 servertool;
+  class RS06 hook;
   class RS09 sidechannel;</pre></div>
         </section>
       </div>
@@ -303,7 +301,7 @@ flowchart TD
           <div class="node-card-top"><span>RQ04</span><small>V3HubReqChatProcess04Governed</small></div>
           <h3>Req04 Chat Process Governance</h3>
           <dl>
-            <dt>干什么</dt><dd>治理当前请求的工具输出、history、servertool request hook 和请求语义。</dd>
+            <dt>干什么</dt><dd>治理当前请求的工具输出、history、工具注入和请求语义。</dd>
             <dt>逻辑</dt><dd>Req04 是唯一请求侧 Chat Process owner；非空 previous_response_id 已在路由前拒绝，不恢复 continuation context。</dd>
           </dl>
         </article>
@@ -324,7 +322,7 @@ flowchart TD
           </dl>
         </article>
         <article class="logic-card inject">
-          <div class="node-card-top"><span>RQ07</span><small>tool-thinking / servertool request hook profile</small></div>
+          <div class="node-card-top"><span>RQ07</span><small>tool-thinking / tool hook profile</small></div>
           <h3>Inject Current Internal Tools</h3>
           <dl>
             <dt>干什么</dt><dd>按当前 turn policy 注入已声明的内部工具和必要 guidance。</dd>
@@ -357,7 +355,7 @@ flowchart TD
           <h3>Provider Response Compat</h3>
           <dl>
             <dt>干什么</dt><dd>先做 provider-specific response compat，把上游差异映射到 Hub 可解析形状。</dd>
-            <dt>逻辑</dt><dd>compat 只处理 provider 协议差异；不得承担 servertool 或普通工具治理。</dd>
+            <dt>逻辑</dt><dd>compat 只处理 provider 协议差异；不得承担工具治理。</dd>
           </dl>
         </article>
         <article class="logic-card normalize">
@@ -389,22 +387,22 @@ flowchart TD
           <h3>Inspect finish_reason</h3>
           <dl>
             <dt>干什么</dt><dd>根据补齐修复后的 finish_reason 选择响应治理路径。</dd>
-            <dt>逻辑</dt><dd>tool_call 进入已注册的 servertool hook；stop 保持普通终止响应；两条响应分支在 Resp03 内建模，但不和请求图混合。</dd>
+            <dt>逻辑</dt><dd>tool_call 进入已注册的工具 hook；stop 保持普通终止响应；两条响应分支在 Resp03 内建模，但不和请求图混合。</dd>
           </dl>
         </article>
-        <article class="logic-card servertool">
-          <div class="node-card-top"><span>RS06</span><small>servertool hook under finish_reason=tool_call</small></div>
-          <h3>Tool-call Servertool Hook</h3>
+        <article class="logic-card hook">
+          <div class="node-card-top"><span>RS06</span><small>tool hook under finish_reason=tool_call</small></div>
+          <h3>Tool-call Hook</h3>
           <dl>
-            <dt>干什么</dt><dd>在 tool_call 分支先判断模型 tool call 是否属于 servertool/内部工具。</dd>
-            <dt>逻辑</dt><dd>servertool 拦截优先于普通工具治理；如果被 servertool 接管，就进入 servertool response governance，不再当普通 exec/apply_patch 处理。</dd>
+            <dt>干什么</dt><dd>在 tool_call 分支先判断模型 tool call 是否属于内部工具。</dd>
+            <dt>逻辑</dt><dd>工具拦截优先于普通工具治理；如果被内部工具接管，就进入工具 response governance，不再当普通 exec/apply_patch 处理。</dd>
           </dl>
         </article>
         <article class="logic-card govern">
           <div class="node-card-top"><span>RS07</span><small>exec_command / apply_patch / client tool governance</small></div>
           <h3>Ordinary Tool Governance</h3>
           <dl>
-            <dt>干什么</dt><dd>servertool 未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。</dd>
+            <dt>干什么</dt><dd>内部工具未拦截的 tool_call 进入普通工具治理，例如 exec_command、apply_patch、客户端工具调用治理。</dd>
             <dt>逻辑</dt><dd>这里治理普通工具 identity、arguments、call_id、required_action/client projection 输入；不得删除客户端可见工具真相。</dd>
           </dl>
         </article>
@@ -413,15 +411,15 @@ flowchart TD
           <h3>Terminal Response Branch</h3>
           <dl>
             <dt>干什么</dt><dd>保留 finish_reason=stop 的普通终止响应。</dd>
-            <dt>逻辑</dt><dd>terminal stop 不进入 servertool hook、内部续轮或提示词注入；直接与 Resp03 的已治理语义合流。</dd>
+            <dt>逻辑</dt><dd>terminal stop 不进入工具 hook、内部续轮或提示词注入；直接与 Resp03 的已治理语义合流。</dd>
           </dl>
         </article>
         <article class="logic-card sidechannel">
           <div class="node-card-top"><span>RS09</span><small>ServerToolCenterMetadataControl</small></div>
           <h3>Update Runtime Control Side-Channel</h3>
           <dl>
-            <dt>干什么</dt><dd>根据 tool_call 分支治理结果更新 servertool runtime side-channel。</dd>
-            <dt>逻辑</dt><dd>只写 side-channel；不得把 servertool/debug/control 字段放进 provider body 或 client normal payload。</dd>
+            <dt>干什么</dt><dd>根据 tool_call 分支治理结果更新 runtime side-channel。</dd>
+            <dt>逻辑</dt><dd>只写 side-channel；不得把工具/debug/control 字段放进 provider body 或 client normal payload。</dd>
           </dl>
         </article>
         <article class="logic-card govern">
@@ -457,7 +455,7 @@ flowchart TD
     <article class="note-card">
       <span class="badge">split</span>
       <h3>Client SSE request lifecycle split from response governance</h3>
-      <p>请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、Req04 current-turn merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 将 tool_call 送入已注册 servertool hook、将 stop 保持为普通终止响应。两边不能混成一张图。</p>
+      <p>请求侧从 Client SSE 开始，经过 server accept、ReqInbound normalize、工具输出配对归一、Req04 current-turn merge/governance；响应侧先 compat 再归一化，Resp03 内先文本收割/工具补齐，再按 finish_reason 将 tool_call 送入已注册工具 hook、将 stop 保持为普通终止响应。两边不能混成一张图。</p>
     </article>
     <article class="note-card">
       <span class="badge">request</span>
@@ -472,7 +470,7 @@ flowchart TD
     <article class="note-card">
       <span class="badge">response</span>
       <h3>Resp03 owns response governance</h3>
-      <p>响应侧 compat 和归一化之后，文本收割、工具补齐修复、finish_reason 分流、servertool hooks、普通工具治理都只能在 Resp03 做；RespOutbound/handler 不能补第二套治理。</p>
+      <p>响应侧 compat 和归一化之后，文本收割、工具补齐修复、finish_reason 分流、工具 hooks、普通工具治理都只能在 Resp03 做；RespOutbound/handler 不能补第二套治理。</p>
     </article>
     <article class="note-card">
       <span class="badge">response</span>
@@ -487,7 +485,7 @@ flowchart TD
     <article class="note-card">
       <span class="badge">side-channel</span>
       <h3>Diagnostics stay side-channel only</h3>
-      <p>debug、metadata、servertool runtime control、snapshot 只能走 side-channel carrier；不得混进 provider body 或 client normal payload。</p>
+      <p>debug、metadata、runtime control、snapshot 只能走 side-channel carrier；不得混进 provider body 或 client normal payload。</p>
     </article>
   </div>
     </section>
@@ -503,7 +501,7 @@ flowchart TD
       <tr><td>Client tool declarations</td><td>Request data plane / Req04 reader</td><td>Preserve by default; do not delete because a provider cannot consume the exact shape.</td></tr>
       <tr><td>additional_tools</td><td>Codex capability declaration surface / Req04 reader</td><td>Preserve original Responses input surface; do not flatten or drop it for convenience.</td></tr>
       <tr><td>Provider response tool calls</td><td>Resp03 response governance truth</td><td>Classify and harvest before RespOutbound; do not leave response governance outside Resp03.</td></tr>
-      <tr><td>Servertool runtime control</td><td>Metadata side-channel / ServerToolCenter</td><td>Read/update at the registered servertool hook; never enter provider/client normal payload.</td></tr>
+      <tr><td>Tool runtime control</td><td>Metadata side-channel / Runtime side-channel</td><td>Read/update inside Chat Process; never enter provider/client normal payload.</td></tr>
       <tr><td>Provider malformed fields</td><td>ReqOutbound / provider codec owner</td><td>Fix provider-bound field generation before send; do not delete transcript truth in Req04.</td></tr>
     </tbody>
   </table>
@@ -513,7 +511,7 @@ flowchart TD
       <h2>Forbidden action focus</h2>
       <div class="callout">
         <strong>Do not repair tool continuity by deleting request truth or by moving governance to the wrong side.</strong>
-        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Responses continuation is retired before routing/provider transport. Response-side tool/servertool governance belongs to Resp03; outbound and json2sse happen after that.
+        Request-side current tool output pair normalization belongs before/inside Req04 and must preserve client/model truth. Responses continuation is retired before routing/provider transport. Response-side tool governance belongs to Resp03; outbound and json2sse happen after that.
         Provider malformed fields are fixed at ReqOutbound/provider codec; debug/control facts stay side-channel only.
       </div>
     </section>
@@ -531,7 +529,7 @@ flowchart TD
       <tr><td>C6</td><td>No request-side internal artifact-removal path is declared in this small skeleton.</td><td>Locks removal of unproven artifact-removal path.</td></tr>
       <tr><td>C7</td><td>Error feedback is preserved.</td><td>Locks parse-error / unknown-tool feedback preservation.</td></tr>
       <tr><td>C8</td><td>additional_tools reach provider-visible tools.</td><td>Locks Codex capability declaration surface.</td></tr>
-      <tr><td>C9</td><td>Resp03 owns response-side tool/servertool governance.</td><td>Locks no handler/RespOutbound duplicate response governance.</td></tr>
+      <tr><td>C9</td><td>Resp03 owns response-side tool governance.</td><td>Locks no handler/RespOutbound duplicate response governance.</td></tr>
       <tr><td>C10</td><td>RespOutbound and JSON→SSE happen after Resp03 governance.</td><td>Locks Chat Process endpoint before outbound/json2sse.</td></tr>
       <tr><td>C11</td><td>Provider-specific malformed fields are fixed in ReqOutbound/provider codec.</td><td>Locks provider codec owner.</td></tr>
       <tr><td>C12</td><td>Metadata/debug remains side-channel only.</td><td>Locks normal payload purity.</td></tr>
@@ -551,7 +549,7 @@ flowchart TD
       <tr><td>Preserve unknown-tool feedback</td><td>Client rejection stays feedback instead of being silently deleted.</td></tr>
       <tr><td>Reject one-sided deletion of a paired call/output</td><td>Call/output adjacency cannot be broken.</td></tr>
       <tr><td>Preserve additional_tools</td><td>Codex capability declarations remain visible.</td></tr>
-      <tr><td>Classify response tool/servertool actions only in Resp03</td><td>Response governance cannot move to RespInbound, RespOutbound, handler, or SSE.</td></tr>
+      <tr><td>Classify response tool actions only in Resp03</td><td>Response governance cannot move to RespInbound, RespOutbound, handler, or SSE.</td></tr>
       <tr><td>Reject post-Resp03 semantic repair</td><td>RespOutbound cannot reinterpret tools or fix history after Resp03.</td></tr>
       <tr><td>Keep provider malformed-field repair in codec/builder</td><td>Req04 cannot become provider-specific workaround layer.</td></tr>
       <tr><td>Reject metadata/control leaks into provider/client payload</td><td>Side-channel remains isolated.</td></tr>
@@ -569,7 +567,7 @@ flowchart TD
     <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs</code></li>
     <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs</code></li>
     <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs</code></li>
-    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs</code></li>
+    <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/tool_thinking_hooks.rs</code></li>
     <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_format.rs</code></li>
     <li><code>v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs</code></li>
   </ul>

@@ -1,0 +1,34 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-CnITL5/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-CnITL5/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 57105
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 57106
+    }
+  ],
+  "admin_bind": "127.0.0.1:57106",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:57106"
+  },
+  "mode": "direct",
+  "model": "mock.unavailable-model",
+  "wire_model": "unavailable-model",
+  "runtime_setup": {
+    "provider_id": "mock-chat",
+    "model": "mock.unavailable-model",
+    "wire_model": "unavailable-model",
+    "candidate_ids": [
+      "mock-chat/mock.unavailable-model"
+    ],
+    "all_candidates_fail": true
+  }
+}

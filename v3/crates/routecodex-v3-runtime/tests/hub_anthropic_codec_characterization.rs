@@ -1,7 +1,7 @@
 #![allow(clippy::bool_comparison)]
 
 use routecodex_v3_runtime::{
-    characterize_v3_anthropic_client_input_to_hub_semantic,
+    build_v3_hub_req_inbound_01_client_raw, characterize_v3_anthropic_client_input_to_hub_semantic,
     characterize_v3_anthropic_hub_response_semantic_to_client_projection,
     characterize_v3_anthropic_hub_semantic_to_provider_wire,
     characterize_v3_anthropic_provider_raw_to_hub_response_semantic,
@@ -10,11 +10,27 @@ use routecodex_v3_runtime::{
     encode_v3_responses_semantic_as_anthropic_request,
     project_v3_anthropic_message_as_responses_response,
     project_v3_anthropic_message_as_responses_response_with_context,
-    project_v3_responses_json_as_anthropic_message, V3AnthropicChatShapeBranchSemantic,
-    V3AnthropicCodecError, V3AnthropicCodecStage, V3AnthropicResponsesProjectionContext,
-    V3HubEntryProtocol, V3HubProviderWireProtocol, V3HubTransportIntent,
+    project_v3_responses_json_as_anthropic_message, run_v3_anthropic_relay_runtime_req_inbound,
+    V3AnthropicChatShapeBranchSemantic, V3AnthropicCodecError, V3AnthropicCodecStage,
+    V3AnthropicResponsesProjectionContext, V3HubEntryProtocol, V3HubInvocationSource,
+    V3HubProviderWireProtocol, V3HubTransportIntent,
 };
 use serde_json::json;
+
+#[test]
+fn anthropic_message_source_scalar_and_array_keep_their_shapes() {
+    let scalar = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "messages":[{"role":"user","content":"hello"}]
+    }))
+    .unwrap();
+    assert_eq!(scalar["input"][0]["content"], "hello");
+    let array = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "messages":[{"role":"user","content":[{"type":"text","text":"one"},{"type":"text","text":"two","cache_control":{"type":"ephemeral"}}]}]
+    })).unwrap();
+    assert!(array["input"][0]["content"].is_array());
+    assert_eq!(array["input"][0]["content"][0]["text"], "one");
+    assert_eq!(array["input"][0]["content"][1]["text"], "two");
+}
 
 #[test]
 fn request_characterization_preserves_anthropic_json_tool_result_and_reasoning_shape() {
@@ -120,6 +136,63 @@ fn anthropic_image_url_does_not_map_to_inline_media_data() {
     assert!(!semantics.iter().any(|semantic| semantic.chat_semantic
         == V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData
         && semantic.source_field == "request.messages[].content[].image.source.url"));
+}
+
+#[test]
+fn anthropic_image_siblings_survive_as_responses_input_image() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"user",
+            "content":[{
+                "type":"image",
+                "source":{"type":"url","url":"https://example.test/image.png"},
+                "future_sibling":{"keep":true}
+            }]
+        }]
+    }))
+    .expect("Anthropic image siblings must normalize to Responses input_image");
+
+    assert_eq!(
+        semantic["input"][0]["content"][0],
+        json!({
+            "type":"input_image",
+            "image_url":"https://example.test/image.png",
+            "future_sibling":{"keep":true}
+        })
+    );
+}
+
+#[test]
+fn anthropic_duplicate_image_urls_keep_their_occurrence_siblings() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"user",
+            "content":[
+                {
+                    "type":"image",
+                    "source":{"type":"url","url":"https://example.test/image.png"},
+                    "future_sibling":{"occurrence":"first"}
+                },
+                {
+                    "type":"image",
+                    "source":{"type":"url","url":"https://example.test/image.png"},
+                    "future_sibling":{"occurrence":"second"}
+                }
+            ]
+        }]
+    }))
+    .expect("Duplicate Anthropic image URLs must normalize independently");
+
+    assert_eq!(
+        semantic["input"][0]["content"][0]["future_sibling"],
+        json!({"occurrence":"first"})
+    );
+    assert_eq!(
+        semantic["input"][0]["content"][1]["future_sibling"],
+        json!({"occurrence":"second"})
+    );
 }
 
 #[test]
@@ -486,65 +559,132 @@ fn anthropic_unregistered_input_wrapper_is_not_unwrapped_as_custom() {
 }
 
 #[test]
-fn anthropic_custom_wrapper_rejects_extra_or_non_string_input_without_repair() {
-    let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+fn anthropic_custom_wrapper_preserves_extra_or_non_string_input_without_repair() {
+    // A declared custom tool whose provider value is not the exact recognized
+    // raw-string wrapper is still representable: the complete JSON value is
+    // serialized once into the string-valued `custom_tool_call.input`. The
+    // declaration provenance stays authoritative; the extra key or the inner
+    // object is never guessed, extracted, or relabeled.
+    let flat = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
         "tools":[{
             "type":"custom",
             "name":"apply_patch",
             "format":{"type":"text"}
         }]
     }))
-    .expect("custom declaration context");
+    .expect("flat custom declaration context");
+    let namespaced = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+        "tools":[{
+            "type":"namespace",
+            "name":"functions",
+            "tools":[{
+                "type":"custom",
+                "name":"apply_patch",
+                "format":{"type":"text"}
+            }]
+        }]
+    }))
+    .expect("namespaced custom declaration context");
     for malformed in [
         json!({"input":"raw","extra":true}),
         json!({"input":{"patch":"raw"}}),
     ] {
-        let error = project_v3_anthropic_message_as_responses_response_with_context(
+        let flat_call = project_v3_anthropic_message_as_responses_response_with_context(
             &json!({
-                "id":"msg_malformed_custom",
+                "id":"msg_flat_custom",
                 "role":"assistant",
                 "content":[{
                     "type":"tool_use",
-                    "id":"toolu_malformed",
+                    "id":"toolu_flat_custom",
                     "name":"apply_patch",
                     "input":malformed
                 }],
                 "stop_reason":"tool_use"
             }),
-            &context,
+            &flat,
         )
-        .expect_err("malformed registered wrapper must fail without repair");
-        assert!(
-            error.to_string().contains("custom tool_use.input"),
-            "{error}"
+        .expect("flat declared custom must preserve the complete provider input");
+        assert_eq!(flat_call["output"][0]["type"], "custom_tool_call");
+        assert_eq!(flat_call["output"][0]["name"], "apply_patch");
+        assert!(flat_call["output"][0].get("namespace").is_none());
+        assert_eq!(flat_call["output"][0]["call_id"], "toolu_flat_custom");
+        let flat_wire = flat_call["output"][0]["input"]
+            .as_str()
+            .expect("custom_tool_call.input is string-valued");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(flat_wire).unwrap(),
+            malformed
+        );
+
+        let namespaced_call = project_v3_anthropic_message_as_responses_response_with_context(
+            &json!({
+                "id":"msg_namespaced_custom",
+                "role":"assistant",
+                "content":[{
+                    "type":"tool_use",
+                    "id":"toolu_namespaced_custom",
+                    "name":"functions__apply_patch",
+                    "input":malformed
+                }],
+                "stop_reason":"tool_use"
+            }),
+            &namespaced,
+        )
+        .expect("namespaced declared custom must preserve the complete provider input");
+        assert_eq!(namespaced_call["output"][0]["type"], "custom_tool_call");
+        assert_eq!(namespaced_call["output"][0]["namespace"], "functions");
+        assert_eq!(namespaced_call["output"][0]["name"], "apply_patch");
+        assert_eq!(
+            namespaced_call["output"][0]["call_id"],
+            "toolu_namespaced_custom"
+        );
+        let namespaced_wire = namespaced_call["output"][0]["input"]
+            .as_str()
+            .expect("custom_tool_call.input is string-valued");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(namespaced_wire).unwrap(),
+            malformed
         );
     }
 }
 
 #[test]
-fn responses_custom_tool_call_missing_input_fails_without_empty_object_repair() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_custom_tool_call_missing_input_preserves_correction_without_empty_object_repair() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "input":[
             {"type":"custom_tool_call","call_id":"call_missing","name":"apply_patch"},
             {"type":"custom_tool_call_output","call_id":"call_missing","output":"done"}
         ]
     }))
-    .expect_err("custom tool input is required for the registered wrapper");
-    assert!(format!("{error:?}").contains("custom_tool_call.input"));
+    .expect("missing original input and matching client result remain paired");
+    assert_eq!(request["messages"][0]["content"][0]["id"], "call_missing");
+    assert!(request["messages"][0]["content"][0].get("input").is_none());
+    assert_eq!(
+        request["messages"][1]["content"][0]["tool_use_id"],
+        "call_missing"
+    );
+    assert_eq!(request["messages"][1]["content"][0]["content"], "done");
 }
 
 #[test]
-fn responses_custom_tool_call_non_string_input_fails_without_relabel_or_repair() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_custom_tool_call_non_string_input_is_preserved_without_relabel_or_repair() {
+    let request = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "input":[
             {"type":"custom_tool_call","call_id":"call_object","name":"apply_patch","input":{"patch":"raw"}},
             {"type":"custom_tool_call_output","call_id":"call_object","output":"done"}
         ]
     }))
-    .expect_err("custom wrapper accepts only the exact raw string input");
-    assert!(format!("{error:?}").contains("custom_tool_call.input"));
+    .expect("custom wrapper preserves the exact present JSON input");
+    assert_eq!(
+        request["messages"][0]["content"][0]["input"],
+        json!({"input":{"patch":"raw"}})
+    );
+    assert_eq!(
+        request["messages"][1]["content"][0]["tool_use_id"],
+        "call_object"
+    );
 }
 
 #[test]
@@ -837,6 +977,44 @@ fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
 
     assert!(matches!(
         error,
+        V3AnthropicCodecError::MalformedField { field: "thinking" }
+    ));
+}
+
+#[test]
+fn anthropic_thinking_history_rejects_missing_native_reasoning_fields() {
+    // Extra alias fields are preserved as opaque extensions, so a block is only
+    // rejected when its own native reasoning payload is absent.
+    for (content, field) in [
+        (
+            json!({"type":"thinking","text":"alias text","data":"alias signature"}),
+            "thinking",
+        ),
+        (
+            json!({"type":"redacted_thinking","signature":"alias redacted payload"}),
+            "data",
+        ),
+    ] {
+        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+            "model":"claude-sonnet",
+            "messages":[{"role":"assistant","content":[content]}]
+        }))
+        .expect_err("Anthropic history must reject a reasoning block without its native payload");
+
+        assert!(matches!(
+            error,
+            V3AnthropicCodecError::MalformedField { field: actual } if actual == field
+        ));
+    }
+
+    // `reasoning` is not an Anthropic content block type.
+    let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{"role":"assistant","content":[{"type":"reasoning","reasoning":"non-Anthropic alias"}]}]
+    }))
+    .expect_err("Anthropic history must reject non-Anthropic reasoning block types");
+    assert!(matches!(
+        error,
         V3AnthropicCodecError::MalformedField {
             field: "reasoning content"
         }
@@ -844,54 +1022,179 @@ fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
 }
 
 #[test]
-fn anthropic_thinking_history_rejects_cross_type_alias_fields() {
-    for content in [
-        json!({"type":"thinking","text":"alias text","data":"alias signature"}),
-        json!({"type":"redacted_thinking","signature":"alias redacted payload"}),
-        json!({"type":"reasoning","reasoning":"non-Anthropic alias"}),
-    ] {
-        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
-            "model":"claude-sonnet",
-            "messages":[{"role":"assistant","content":[content]}]
-        }))
-        .expect_err("Anthropic history must reject cross-type reasoning aliases");
+fn anthropic_thinking_history_preserves_native_reasoning_with_extra_fields() {
+    // A representable reasoning block that also carries extra provider fields
+    // keeps its native payload and preserves the extra fields as opaque data.
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{"role":"assistant","content":[
+            {"type":"thinking","thinking":"native thinking","text":"alias thinking"},
+            {"type":"redacted_thinking","data":"native encrypted content","signature":"alias encrypted content"}
+        ]}]
+    }))
+    .expect("representable reasoning with extra fields must not be rejected");
 
-        assert!(matches!(
-            error,
-            V3AnthropicCodecError::MalformedField {
-                field: "reasoning content"
+    assert_eq!(
+        semantic["input"],
+        json!([
+            {
+                "type":"reasoning",
+                "summary":[{"type":"summary_text","text":"native thinking"}],
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"thinking",
+                        "text":"alias thinking"
+                    }
+                }
+            },
+            {
+                "type":"reasoning",
+                "encrypted_content":"native encrypted content",
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"redacted_thinking",
+                        "signature":"alias encrypted content"
+                    }
+                }
             }
-        ));
-    }
+        ])
+    );
 }
 
 #[test]
-fn anthropic_thinking_history_rejects_native_and_alias_dual_truth() {
-    for content in [
+fn anthropic_reasoning_extensions_round_trip_without_overwriting_responses_native_fields() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_reasoning_extensions",
+        "type":"message",
+        "role":"assistant",
+        "content":[
+            {
+                "type":"thinking",
+                "thinking":"signed thinking",
+                "signature":"native-signature",
+                "summary":{"source":"provider-extension-summary"},
+                "encrypted_content":"provider-extension-encrypted-content",
+                "cache_control":{"type":"ephemeral"}
+            },
+            {
+                "type":"thinking",
+                "thinking":"unsigned thinking",
+                "encrypted_content":"unsigned-provider-extension"
+            }
+        ],
+        "stop_reason":"end_turn"
+    }))
+    .expect("representable Anthropic reasoning extensions must survive projection");
+
+    let signed = &response["output"][0];
+    assert_eq!(
+        signed["summary"],
+        json!([{"type":"summary_text","text":"signed thinking"}])
+    );
+    assert_eq!(signed["encrypted_content"], "native-signature");
+    let signed_extension = &signed["routecodex_chat_extension"]["anthropic_reasoning"];
+    assert_eq!(signed_extension["type"], "thinking");
+    assert_eq!(
+        signed_extension["summary"],
+        json!({"source":"provider-extension-summary"})
+    );
+    assert_eq!(
+        signed_extension["encrypted_content"],
+        "provider-extension-encrypted-content"
+    );
+    assert_eq!(
+        signed_extension["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+
+    let unsigned = &response["output"][1];
+    assert_eq!(
+        unsigned["summary"],
+        json!([{"type":"summary_text","text":"unsigned thinking"}])
+    );
+    assert!(
+        unsigned.get("encrypted_content").is_none(),
+        "an extension named encrypted_content is not an Anthropic thinking signature"
+    );
+    assert_eq!(
+        unsigned["routecodex_chat_extension"]["anthropic_reasoning"]["encrypted_content"],
+        "unsigned-provider-extension"
+    );
+
+    let replay = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[signed.clone(), unsigned.clone()]
+    }))
+    .expect("namespaced reasoning extensions must restore on Anthropic replay");
+    assert_eq!(
+        replay["messages"][0]["content"][0],
         json!({
             "type":"thinking",
-            "thinking":"native thinking",
-            "text":"alias thinking"
-        }),
+            "thinking":"signed thinking",
+            "signature":"native-signature",
+            "summary":{"source":"provider-extension-summary"},
+            "encrypted_content":"provider-extension-encrypted-content",
+            "cache_control":{"type":"ephemeral"}
+        })
+    );
+    assert_eq!(
+        replay["messages"][1]["content"][0],
+        json!({
+            "type":"thinking",
+            "thinking":"unsigned thinking",
+            "encrypted_content":"unsigned-provider-extension"
+        })
+    );
+    assert!(
+        replay["messages"][1]["content"][0]
+            .get("signature")
+            .is_none(),
+        "opaque encrypted_content must not become an Anthropic thinking signature"
+    );
+}
+
+#[test]
+fn anthropic_redacted_reasoning_extensions_round_trip_without_reclassification() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
+        "id":"msg_redacted_extensions",
+        "type":"message",
+        "role":"assistant",
+        "content":[{
+            "type":"redacted_thinking",
+            "data":"native-redacted-data",
+            "summary":{"source":"redacted-extension-summary"},
+            "cache_control":{"type":"ephemeral"}
+        }],
+        "stop_reason":"end_turn"
+    }))
+    .expect("representable redacted reasoning extensions must survive projection");
+
+    let reasoning = &response["output"][0];
+    assert_eq!(reasoning["encrypted_content"], "native-redacted-data");
+    let extension = &reasoning["routecodex_chat_extension"]["anthropic_reasoning"];
+    assert_eq!(extension["type"], "redacted_thinking");
+    assert_eq!(
+        extension["summary"],
+        json!({"source":"redacted-extension-summary"})
+    );
+    assert_eq!(extension["cache_control"], json!({"type":"ephemeral"}));
+
+    let replay = encode_v3_responses_semantic_as_anthropic_request(json!({
+        "model":"MiniMax-M3",
+        "stream":false,
+        "input":[reasoning.clone()]
+    }))
+    .expect("redacted reasoning extensions must restore on Anthropic replay");
+    assert_eq!(
+        replay["messages"][0]["content"][0],
         json!({
             "type":"redacted_thinking",
-            "data":"native encrypted content",
-            "signature":"alias encrypted content"
-        }),
-    ] {
-        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
-            "model":"claude-sonnet",
-            "messages":[{"role":"assistant","content":[content]}]
-        }))
-        .expect_err("Anthropic history must reject native and alias dual truth");
-
-        assert!(matches!(
-            error,
-            V3AnthropicCodecError::MalformedField {
-                field: "reasoning content"
-            }
-        ));
-    }
+            "data":"native-redacted-data",
+            "summary":{"source":"redacted-extension-summary"},
+            "cache_control":{"type":"ephemeral"}
+        })
+    );
 }
 
 #[test]
@@ -1665,8 +1968,8 @@ fn responses_hosted_web_search_conflicting_identity_aliases_fail_before_anthropi
 }
 
 #[test]
-fn responses_hosted_web_search_action_side_channel_fails_before_anthropic_wire() {
-    let error = encode_v3_responses_semantic_as_anthropic_request(json!({
+fn responses_hosted_web_search_action_preserves_business_names_in_anthropic_wire() {
+    let wire = encode_v3_responses_semantic_as_anthropic_request(json!({
         "model":"MiniMax-M3",
         "input":[{
             "type":"web_search_call",
@@ -1680,14 +1983,8 @@ fn responses_hosted_web_search_action_side_channel_fails_before_anthropic_wire()
             "result":{"title":"Ubuntu ARM64"}
         }]
     }))
-    .expect_err("nested RouteCodex side-channel must not reach Anthropic provider wire");
-
-    assert!(matches!(
-        error,
-        V3AnthropicCodecError::SideChannelLeaked {
-            field: "metadata_center"
-        }
-    ));
+    .expect("hosted tool action names remain business fields");
+    assert!(wire.to_string().contains("metadata_center"));
 }
 
 #[test]
@@ -2112,7 +2409,7 @@ fn nested_business_fields_named_like_side_channels_are_preserved() {
 }
 
 #[test]
-fn side_channel_and_protocol_fields_cannot_enter_anthropic_payloads() {
+fn business_names_are_preserved_and_wrong_entry_protocol_is_rejected() {
     for leaked in [
         "routecodex_internal",
         "metadata_center",
@@ -2125,14 +2422,13 @@ fn side_channel_and_protocol_fields_cannot_enter_anthropic_payloads() {
             .as_object_mut()
             .unwrap()
             .insert(leaked.to_string(), json!({"leak":true}));
-        assert!(matches!(
-            characterize_v3_anthropic_client_input_to_hub_semantic(
-                payload,
-                V3HubEntryProtocol::Anthropic,
-                V3HubTransportIntent::Json,
-            ),
-            Err(V3AnthropicCodecError::SideChannelLeaked { .. })
-        ));
+        let semantic = characterize_v3_anthropic_client_input_to_hub_semantic(
+            payload.clone(),
+            V3HubEntryProtocol::Anthropic,
+            V3HubTransportIntent::Json,
+        )
+        .expect("business names do not establish control provenance");
+        assert_eq!(semantic.payload(), &payload);
     }
     assert!(matches!(
         characterize_v3_anthropic_client_input_to_hub_semantic(
@@ -2399,7 +2695,8 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_reason":"end_turn"
             }),
             "completed",
-            "end_turn",
+            None,
+            None,
             None,
         ),
         (
@@ -2409,8 +2706,9 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "content":[{"type":"tool_use","id":"call_terminal","name":"lookup","input":{"q":"x"}}],
                 "stop_reason":"tool_use"
             }),
-            "requires_action",
-            "tool_use",
+            "completed",
+            None,
+            None,
             None,
         ),
         (
@@ -2421,8 +2719,9 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_reason":"max_tokens"
             }),
             "incomplete",
-            "max_tokens",
+            None,
             Some("max_output_tokens"),
+            None,
         ),
         (
             json!({
@@ -2433,7 +2732,8 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_sequence":"</answer>"
             }),
             "completed",
-            "stop_sequence",
+            Some("</answer>"),
+            None,
             None,
         ),
         (
@@ -2444,7 +2744,8 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_reason":"pause_turn"
             }),
             "in_progress",
-            "pause_turn",
+            None,
+            None,
             None,
         ),
         (
@@ -2456,28 +2757,43 @@ fn anthropic_terminal_projection_uses_closed_registered_stop_reason_matrix() {
                 "stop_details":{"category":"cyber","explanation":"policy"}
             }),
             "incomplete",
-            "refusal",
+            None,
             Some("content_filter"),
+            Some("cyber"),
         ),
     ];
 
-    for (payload, expected_status, expected_finish_reason, expected_incomplete_reason) in cases {
+    for (
+        payload,
+        expected_status,
+        expected_stop_sequence,
+        expected_incomplete_reason,
+        expected_stop_details_category,
+    ) in cases
+    {
         let response = project_v3_anthropic_message_as_responses_response(&payload)
             .unwrap_or_else(|error| panic!("registered terminal value must project: {error}"));
         assert_eq!(response["status"], expected_status, "{response}");
-        assert_eq!(
-            response["finish_reason"], expected_finish_reason,
-            "{response}"
+        // Responses has no `finish_reason` field: carrying the Anthropic
+        // `stop_reason` as `finish_reason` fabricates a Chat-only field into a
+        // Responses client projection. Terminality is `status` alone.
+        assert!(
+            response.get("finish_reason").is_none(),
+            "Responses projection must not carry finish_reason: {response}"
         );
         match expected_incomplete_reason {
             Some(reason) => assert_eq!(response["incomplete_details"]["reason"], reason),
             None => assert!(response.get("incomplete_details").is_none(), "{response}"),
         }
-        if expected_finish_reason == "stop_sequence" {
-            assert_eq!(response["stop_sequence"], "</answer>", "{response}");
+        match expected_stop_sequence {
+            Some(sequence) => assert_eq!(response["stop_sequence"], sequence, "{response}"),
+            None => assert!(response.get("stop_sequence").is_none(), "{response}"),
         }
-        if expected_finish_reason == "refusal" {
-            assert_eq!(response["stop_details"]["category"], "cyber", "{response}");
+        match expected_stop_details_category {
+            Some(category) => {
+                assert_eq!(response["stop_details"]["category"], category, "{response}")
+            }
+            None => assert!(response.get("stop_details").is_none(), "{response}"),
         }
     }
 }
@@ -2521,13 +2837,6 @@ fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_value
             "stop_reason":"end_turn",
             "stop_sequence":"unexpected"
         }),
-        json!({
-            "id":"msg_malformed_details",
-            "role":"assistant",
-            "content":[{"type":"text","text":"refusal"}],
-            "stop_reason":"refusal",
-            "stop_details":"not-an-object"
-        }),
     ];
 
     for payload in malformed {
@@ -2535,27 +2844,59 @@ fn anthropic_terminal_projection_rejects_missing_unknown_and_contradictory_value
             .expect_err("malformed terminal truth must fail at the Anthropic codec owner");
         assert!(
             error.to_string().contains("stop_reason")
-                || error.to_string().contains("stop_sequence")
-                || error.to_string().contains("stop_details"),
+                || error.to_string().contains("stop_sequence"),
             "{error}"
         );
     }
 }
 
 #[test]
-fn anthropic_model_context_window_stop_is_explicitly_unsupported_for_responses() {
-    let error = project_v3_anthropic_message_as_responses_response(&json!({
+fn anthropic_terminal_projection_preserves_opaque_details() {
+    for reason in [
+        "end_turn",
+        "refusal",
+        "max_tokens",
+        "pause_turn",
+        "tool_use",
+    ] {
+        for details in [
+            json!({"vendor":[1,null]}),
+            json!(" exact\nopaque "),
+            json!([false, 2]),
+            json!(12.5),
+            json!(true),
+            json!(null),
+        ] {
+            let message = json!({"id":"msg_opaque","role":"assistant",
+                "content":if reason == "tool_use" {
+                    json!([{"type":"text","text":" exact body "},{"type":"tool_use","id":"call_opaque","name":"lookup","input":{"q":"exact"}}])
+                } else { json!([{"type":"text","text":" exact body "}]) },
+                "stop_reason":reason,"stop_details":details});
+            let response = project_v3_anthropic_message_as_responses_response(&message).unwrap();
+            assert_eq!(
+                response.get("stop_details"),
+                Some(&details),
+                "{reason}: {response}"
+            );
+            assert_eq!(response["output"][0]["content"][0]["text"], " exact body ");
+        }
+    }
+}
+
+#[test]
+fn anthropic_model_context_window_stop_preserves_incomplete_business_response() {
+    let response = project_v3_anthropic_message_as_responses_response(&json!({
         "id":"msg_context_window",
         "role":"assistant",
         "content":[{"type":"text","text":"partial"}],
         "stop_reason":"model_context_window_exceeded"
     }))
-    .expect_err("Responses has no exact incomplete reason for Anthropic input-context exhaustion");
+    .expect("representable partial business content must pass through");
 
-    assert!(
-        error.to_string().contains("model_context_window_exceeded"),
-        "{error}"
-    );
+    assert_eq!(response["status"], "incomplete");
+    assert_eq!(response["output"][0]["content"][0]["text"], "partial");
+    assert!(response.get("finish_reason").is_none(), "{response}");
+    assert!(response.get("error").is_none(), "{response}");
 }
 
 #[test]
@@ -2740,5 +3081,103 @@ fn anthropic_native_tool_use_remains_projectable_tool_reason_source() {
     assert_eq!(
         client["content"][0]["input"]["reason"],
         "执行 ping 命令进行探测"
+    );
+}
+
+#[test]
+fn anthropic_tool_use_thought_signature_reaches_chat_consumer_verbatim() {
+    let signature = "opaque/anthropic/signature/+==";
+    let request = json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":"toolu_signed",
+                "name":"lookup",
+                "input":{"q":"x"},
+                "thought_signature":signature
+            }]
+        }]
+    });
+
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(request.clone())
+        .expect("signed tool_use");
+    assert_eq!(
+        semantic["input"][0]["thought_signature"],
+        json!(signature),
+        "the function_call constructor must preserve the provided signature: {semantic}"
+    );
+
+    let normalized =
+        run_v3_anthropic_relay_runtime_req_inbound(build_v3_hub_req_inbound_01_client_raw(
+            request,
+            V3HubEntryProtocol::Anthropic,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        ))
+        .expect("Anthropic tool_use must reach the Chat consumer");
+    let call = normalized.payload()["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|message| message["role"] == "assistant")
+        })
+        .and_then(|message| message["tool_calls"].as_array())
+        .and_then(|calls| calls.iter().find(|call| call["id"] == "toolu_signed"))
+        .expect("signed tool call in Chat canonical payload");
+    assert_eq!(
+        call["thought_signature"],
+        json!(signature),
+        "the existing Chat consumer must receive the exact signature: {}",
+        normalized.payload()
+    );
+}
+
+#[test]
+fn anthropic_tool_use_without_thought_signature_does_not_synthesize_one() {
+    let request = json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{
+                "type":"tool_use",
+                "id":"toolu_unsigned",
+                "name":"lookup",
+                "input":{"q":"x"}
+            }]
+        }]
+    });
+
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(request.clone())
+        .expect("unsigned tool_use");
+    assert!(
+        semantic["input"][0].get("thought_signature").is_none(),
+        "the function_call constructor must not invent a signature: {semantic}"
+    );
+
+    let normalized =
+        run_v3_anthropic_relay_runtime_req_inbound(build_v3_hub_req_inbound_01_client_raw(
+            request,
+            V3HubEntryProtocol::Anthropic,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        ))
+        .expect("unsigned Anthropic tool_use must reach the Chat consumer");
+    let call = normalized.payload()["messages"]
+        .as_array()
+        .and_then(|messages| {
+            messages
+                .iter()
+                .find(|message| message["role"] == "assistant")
+        })
+        .and_then(|message| message["tool_calls"].as_array())
+        .and_then(|calls| calls.iter().find(|call| call["id"] == "toolu_unsigned"))
+        .expect("unsigned tool call in Chat canonical payload");
+    assert!(
+        call.get("thought_signature").is_none(),
+        "the Chat consumer must not synthesize a signature: {}",
+        normalized.payload()
     );
 }

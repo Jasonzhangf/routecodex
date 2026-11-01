@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
+const repoRoot = resolve(v3Root, '..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-selected-provider-model-binding.mjs');
 const copied = [
   'package.json',
@@ -33,8 +33,14 @@ const cases = [
     diagnostic: /Direct must bind selected model before Provider12 wire build/u,
   },
   {
+    name: 'Direct builds registry wire before shared binding',
+    path: 'v3/crates/routecodex-v3-runtime/src/hooks.rs',
+    mutate: (source) => source.replace('crate::selected_provider_model_binding::bind_v3_selected_provider_model(', 'routecodex_v3_provider_responses::wire::build_v3_provider_12_responses_wire_payload_with_registry();\ncrate::selected_provider_model_binding::bind_v3_selected_provider_model('),
+    diagnostic: /Direct must bind selected model before Provider12 wire build/u,
+  },
+  {
     name: 'Relay skips shared binding',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs',
     mutate: (source) => source.replace('bind_v3_selected_provider_model(provider_protocol_payload, selected)', 'Ok(V3SelectedProviderModelBinding::from_unbound(provider_protocol_payload))'),
     diagnostic: /Relay protocol payload builder must call the shared selected-model owner/u,
   },
@@ -82,11 +88,7 @@ for (const testCase of cases) {
   const root = mkdtempSync(join(tmpdir(), 'v3-model-binding-red-'));
   try {
     for (const rel of copied) {
-      const source = rel === 'package.json'
-        ? resolve(v3Root, rel)
-        : rel.startsWith('v3/')
-          ? resolve(v3Root, rel.slice('v3/'.length))
-          : resolve(admissionRoot, rel);
+      const source = resolve(repoRoot, rel);
       cpSync(source, resolve(root, rel), { recursive: true });
     }
     const target = resolve(root, testCase.path);
@@ -97,7 +99,11 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+    const result = spawnSync(process.execPath, [verifier], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
+    });
     const output = `${result.stdout || ''}\n${result.stderr || ''}`;
     if (result.status === 0) failures.push(`${testCase.name}: verifier unexpectedly passed`);
     else if (!testCase.diagnostic.test(output)) failures.push(`${testCase.name}: wrong diagnostic: ${output.slice(-1200)}`);

@@ -109,8 +109,9 @@
 
 - 黑盒客户端测试：
   - 直接打 `POST /v1/responses`，观察是否稳定收到：
-    - `response.created` → `response.in_progress` → `response.output_text.delta`* → `response.output_text.done` → `response.completed` → `response.done`。
-  - 工具回路：收到 `required_action` 后，黑盒 `submit_tool_outputs`，再验证下一轮直到 `done`。
+    - `response.created` → `response.in_progress` → `response.output_text.delta`* → `response.output_text.done` → `response.completed`。
+    - Responses 客户端流的终态只有 `response.completed` / `response.incomplete` / `response.failed`；`response.done` 与 Chat Completions 的 `data: [DONE]` 都不属于 Responses 协议，不应出现。
+  - 工具回路：工具调用是普通输出项，终态仍为 `response.completed` 且 `output[]` 携带 `function_call` 项；黑盒回传工具结果后再验证下一轮直到终态。`requires_action` 不是 Responses 状态。
 
 - 服务端可观测：
   - 原始 SSE 字节：`~/.rcc/logs/sse/<reqId>_server.sse.log`

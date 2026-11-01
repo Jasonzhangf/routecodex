@@ -1,3 +1,9 @@
+use super::super::responses_openai_codec::{responses_image_url, responses_tool_output_content};
+use super::namespace_tool_names::anthropic_tool_call_wire_name;
+use super::reasoning_projection::{
+    chat_message_reasoning_as_anthropic_content,
+    project_v3_responses_reasoning_item_as_anthropic_content,
+};
 use super::*;
 
 pub(super) fn responses_system_as_anthropic_system(value: &Value) -> Option<String> {
@@ -72,7 +78,6 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         if role == "tool" {
-            let is_error = responses_tool_result_is_error(chat_tool_result_status(object)?)?;
             let mut tool_result = Map::new();
             tool_result.insert("type".to_string(), Value::String("tool_result".to_string()));
             tool_result.insert(
@@ -81,9 +86,11 @@ pub(super) fn chat_messages_as_anthropic_messages(
             );
             tool_result.insert(
                 "content".to_string(),
-                responses_tool_output_as_anthropic_content(object.get("content")),
+                responses_tool_output_as_anthropic_content(object.get("content"))?,
             );
-            if is_error {
+            if let Some(is_error) = tool_result_explicit_is_error(object)? {
+                tool_result.insert("is_error".to_string(), is_error.clone());
+            } else if responses_tool_result_is_error(chat_tool_result_status(object)?)? {
                 tool_result.insert("is_error".to_string(), Value::Bool(true));
             }
             output.push(json!({
@@ -93,20 +100,7 @@ pub(super) fn chat_messages_as_anthropic_messages(
             continue;
         }
         let mut content = Vec::new();
-        if let Some(reasoning_content) = object.get("reasoning_content") {
-            if let Some(reasoning_content) = reasoning_content.as_str() {
-                if !reasoning_content.is_empty() {
-                    content.push(json!({
-                        "type":"thinking",
-                        "thinking":reasoning_content
-                    }));
-                }
-            } else if !reasoning_content.is_null() {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning_content",
-                });
-            }
-        }
+        content.extend(chat_message_reasoning_as_anthropic_content(object)?);
         content.extend(responses_content_as_anthropic_content(
             object.get("content"),
         )?);
@@ -138,24 +132,27 @@ pub(super) fn openai_chat_tool_call_as_anthropic_tool_use(
         .or_else(|| object.get("arguments"))
     {
         Some(Value::String(raw)) => {
-            serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw}))
+            Some(serde_json::from_str(raw).unwrap_or_else(|_| json!({"input": raw})))
         }
-        Some(value) => value.to_owned(),
-        None => json!({}),
+        Some(value) => Some(value.to_owned()),
+        None => None,
     };
+    let is_custom = value
+        .pointer("/routecodex_chat_extension/responses_tool_call_type")
+        .and_then(Value::as_str)
+        == Some("custom_tool_call");
     let name = function
         .and_then(|function| function.get("name"))
         .or_else(|| object.get("name"))
         .and_then(Value::as_str)
-        .map(super::super::request_outbound_mcp_names::provider_function_name)
+        .map(|name| anthropic_tool_call_wire_name(name, is_custom))
         .map(Value::String)
         .unwrap_or(Value::Null);
-    Ok(json!({
-        "type":"tool_use",
-        "id": object.get("id").cloned().unwrap_or(Value::Null),
-        "name": name,
-        "input": input
-    }))
+    let mut tool_use = json!({"type":"tool_use","id":object.get("id").cloned().unwrap_or(Value::Null),"name":name});
+    if let Some(input) = input {
+        tool_use["input"] = input;
+    }
+    Ok(tool_use)
 }
 
 pub(super) fn responses_input_array_as_anthropic_messages(
@@ -398,21 +395,30 @@ pub(super) fn responses_tool_call_as_anthropic_tool_use(
     let name = object
         .get("name")
         .and_then(Value::as_str)
-        .map(super::super::request_outbound_mcp_names::provider_function_name)
+        .map(|name| {
+            anthropic_tool_call_wire_name(
+                name,
+                object.get("type").and_then(Value::as_str) == Some("custom_tool_call"),
+            )
+        })
         .map(Value::String)
         .unwrap_or(Value::Null);
-    Ok(json!({
-        "type":"tool_use",
-        "id": responses_tool_call_id_value(object),
-        "name": name,
-        "input": responses_function_call_input(object)?
-    }))
+    let parameter = if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
+        object.get("input")
+    } else {
+        object.get("arguments").or_else(|| object.get("input"))
+    };
+    let mut tool_use =
+        json!({"type":"tool_use","id":responses_tool_call_id_value(object),"name":name});
+    if parameter.is_some() {
+        tool_use["input"] = responses_function_call_input(object)?;
+    }
+    Ok(tool_use)
 }
 
 pub(super) fn responses_tool_output_as_anthropic_tool_result(
     object: &Map<String, Value>,
 ) -> Result<Value, V3AnthropicCodecError> {
-    let is_error = responses_tool_result_is_error(object.get("status"))?;
     let mut result = Map::new();
     result.insert("type".to_string(), Value::String("tool_result".to_string()));
     result.insert(
@@ -421,12 +427,26 @@ pub(super) fn responses_tool_output_as_anthropic_tool_result(
     );
     result.insert(
         "content".to_string(),
-        responses_tool_output_as_anthropic_content(object.get("output")),
+        responses_tool_output_as_anthropic_content(object.get("output"))?,
     );
-    if is_error {
+    if let Some(is_error) = tool_result_explicit_is_error(object)? {
+        result.insert("is_error".to_string(), is_error.clone());
+    } else if responses_tool_result_is_error(object.get("status"))? {
         result.insert("is_error".to_string(), Value::Bool(true));
     }
     Ok(Value::Object(result))
+}
+
+fn tool_result_explicit_is_error<'a>(
+    object: &'a Map<String, Value>,
+) -> Result<Option<&'a Value>, V3AnthropicCodecError> {
+    match object.get("routecodex_chat_extension") {
+        None => Ok(None),
+        Some(Value::Object(extension)) => Ok(extension.get("anthropic_tool_result_is_error")),
+        Some(_) => Err(V3AnthropicCodecError::MalformedField {
+            field: "routecodex_chat_extension",
+        }),
+    }
 }
 
 fn chat_tool_result_status<'a>(
@@ -452,107 +472,6 @@ fn responses_tool_result_is_error(status: Option<&Value>) -> Result<bool, V3Anth
             })
         }
     })
-}
-
-pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(
-    item: &Value,
-) -> Result<Value, V3AnthropicCodecError> {
-    let object = item
-        .as_object()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning item",
-        })?;
-    let content_text =
-        responses_reasoning_text_entries(object.get("content"), &["reasoning_text"])?;
-    let summary_text = responses_reasoning_text_entries(object.get("summary"), &["summary_text"])?;
-    if !content_text.is_empty() && !summary_text.is_empty() {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning item",
-        });
-    }
-    let thinking = if !content_text.is_empty() {
-        content_text.join("\n\n")
-    } else {
-        summary_text.join("\n\n")
-    };
-    let encrypted_content = match object.get("encrypted_content") {
-        None | Some(Value::Null) => None,
-        Some(value) => {
-            let value = value
-                .as_str()
-                .ok_or(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning item",
-                })?;
-            if value.trim().is_empty() {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "reasoning item",
-                });
-            }
-            Some(value)
-        }
-    };
-    if !thinking.is_empty() {
-        let mut block = json!({
-            "type":"thinking",
-            "thinking":thinking
-        });
-        if let Some(signature) = encrypted_content {
-            block["signature"] = Value::String(signature.to_string());
-        }
-        return Ok(block);
-    }
-    if let Some(data) = encrypted_content {
-        return Ok(json!({
-            "type":"redacted_thinking",
-            "data":data
-        }));
-    }
-    Err(V3AnthropicCodecError::MalformedField {
-        field: "reasoning item",
-    })
-}
-
-pub(super) fn responses_reasoning_text_entries(
-    value: Option<&Value>,
-    accepted_types: &[&str],
-) -> Result<Vec<String>, V3AnthropicCodecError> {
-    let Some(value) = value else {
-        return Ok(Vec::new());
-    };
-    if value.is_null() {
-        return Ok(Vec::new());
-    }
-    let entries = value
-        .as_array()
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning item",
-        })?;
-    let mut text = Vec::new();
-    for entry in entries {
-        let object = entry
-            .as_object()
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "reasoning item",
-            })?;
-        if !accepted_types
-            .iter()
-            .any(|accepted| object.get("type").and_then(Value::as_str) == Some(*accepted))
-        {
-            return Err(V3AnthropicCodecError::MalformedField {
-                field: "reasoning item",
-            });
-        }
-        let value = object
-            .get("text")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or(V3AnthropicCodecError::MalformedField {
-                field: "reasoning item",
-            })?;
-        text.push(value.to_string());
-    }
-    Ok(text)
 }
 
 pub(super) fn responses_web_search_call_as_anthropic_server_tool_history(
@@ -616,7 +535,6 @@ pub(super) fn responses_web_search_call_history_id(
 pub(super) fn validate_responses_web_search_action(
     action: &Map<String, Value>,
 ) -> Result<Map<String, Value>, V3AnthropicCodecError> {
-    reject_side_channel_object_keys(action)?;
     let action_type = action
         .get("type")
         .and_then(Value::as_str)
@@ -776,9 +694,10 @@ pub(super) fn responses_image_part_as_anthropic_image(
     part: &Value,
 ) -> Result<Value, V3AnthropicCodecError> {
     let image_url_value = part
-        .get("image_url")
+        .as_object()
+        .and_then(responses_image_url)
         .ok_or(V3AnthropicCodecError::MalformedField { field: "image_url" })?;
-    let image_url = match image_url_value {
+    let image_url = match &image_url_value {
         Value::String(value) => value.as_str(),
         Value::Object(object) => object.get("url").and_then(Value::as_str).ok_or(
             V3AnthropicCodecError::MalformedField {
@@ -812,10 +731,7 @@ pub(super) fn responses_function_call_input(
 ) -> Result<Value, V3AnthropicCodecError> {
     if object.get("type").and_then(Value::as_str) == Some("custom_tool_call") {
         return match object.get("input") {
-            Some(Value::String(raw)) => Ok(json!({"input": raw})),
-            Some(_) => Err(V3AnthropicCodecError::MalformedField {
-                field: "custom_tool_call.input",
-            }),
+            Some(input) => Ok(json!({"input": input})),
             None => Err(V3AnthropicCodecError::MalformedField {
                 field: "custom_tool_call.input",
             }),
@@ -830,86 +746,66 @@ pub(super) fn responses_function_call_input(
     }
 }
 
-pub(super) fn responses_tool_output_as_anthropic_content(value: Option<&Value>) -> Value {
-    match value {
-        Some(Value::String(text)) => Value::String(text.clone()),
-        Some(value) => Value::String(serde_json::to_string(value).unwrap_or_default()),
-        None => Value::String(String::new()),
-    }
+pub(super) fn responses_tool_output_as_anthropic_content(
+    value: Option<&Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    let Some(value) = value else {
+        return Ok(Value::String(String::new()));
+    };
+    let content = responses_tool_output_content(value).map_err(|_| {
+        V3AnthropicCodecError::MalformedField {
+            field: "tool output content",
+        }
+    })?;
+    Ok(match content {
+        Value::Array(parts) => Value::Array(
+            parts
+                .iter()
+                .map(responses_content_part_as_anthropic_content_part)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        other => other,
+    })
 }
 
 pub(super) fn responses_tools_for_anthropic_wire(
     object: &Map<String, Value>,
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
     let mut output = Vec::new();
-    let mut seen_names = HashSet::new();
-    append_responses_tools_for_anthropic_wire(object.get("tools"), &mut output, &mut seen_names)?;
-    for item in object
-        .get("input")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            append_responses_tools_for_anthropic_wire(
-                item.get("tools"),
-                &mut output,
-                &mut seen_names,
-            )?;
-        }
-    }
+    let mut tool_indexes = HashMap::new();
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &Value::Object(object.clone()),
+            "anthropic",
+        )
+        .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
+    let tools = registry
+        .project_tools(
+            "openai-responses",
+            object
+                .get("tools")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+        .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
+    append_responses_tools_for_anthropic_wire(
+        Some(&Value::Array(tools)),
+        &mut output,
+        &mut tool_indexes,
+    )?;
     Ok(output)
 }
 
 pub(super) fn append_responses_tools_for_anthropic_wire(
     tools: Option<&Value>,
     output: &mut Vec<Value>,
-    seen_names: &mut HashSet<String>,
+    tool_indexes: &mut HashMap<String, usize>,
 ) -> Result<(), V3AnthropicCodecError> {
     for tool in tools.and_then(Value::as_array).into_iter().flatten() {
         let tool_object = tool
             .as_object()
             .ok_or(V3AnthropicCodecError::MalformedField { field: "tools[]" })?;
-        if tool_object.get("type").and_then(Value::as_str) == Some("namespace") {
-            let namespace = tool_object.get("name").and_then(Value::as_str).ok_or(
-                V3AnthropicCodecError::MalformedField {
-                    field: "tools[].name",
-                },
-            )?;
-            for child in tool_object
-                .get("tools")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-            {
-                let mut child = child.clone();
-                if let Some(child_object) = child.as_object_mut() {
-                    let child_name = child_object
-                        .get("name")
-                        .or_else(|| child_object.get("function").and_then(|f| f.get("name")))
-                        .and_then(Value::as_str)
-                        .ok_or(V3AnthropicCodecError::MalformedField {
-                            field: "tools[].name",
-                        })?;
-                    if child_object.get("type").and_then(Value::as_str) != Some("namespace") {
-                        child_object.insert(
-                            "name".to_string(),
-                            Value::String(
-                                super::namespace_tool_names::anthropic_namespace_wire_name(
-                                    namespace, child_name,
-                                ),
-                            ),
-                        );
-                    }
-                }
-                append_responses_tools_for_anthropic_wire(
-                    Some(&Value::Array(vec![child])),
-                    output,
-                    seen_names,
-                )?;
-            }
-            continue;
-        }
         let anthropic_tool = responses_tool_as_anthropic_tool(tool_object)?;
         let name = anthropic_tool
             .get("name")
@@ -918,7 +814,10 @@ pub(super) fn append_responses_tools_for_anthropic_wire(
                 field: "tools[].name",
             })?
             .to_string();
-        if seen_names.insert(name) {
+        if let Some(index) = tool_indexes.get(&name).copied() {
+            output[index] = anthropic_tool;
+        } else {
+            tool_indexes.insert(name, output.len());
             output.push(anthropic_tool);
         }
     }
@@ -1208,280 +1107,6 @@ pub(super) fn responses_tool_choice_as_anthropic_tool_choice(
     Ok(projected)
 }
 
-pub(super) fn anthropic_usage_as_responses_usage(value: Option<&Value>) -> Option<Value> {
-    let object = value?.as_object()?;
-    let input = object
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let output = object
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let mut usage = Map::new();
-    usage.insert("input_tokens".to_string(), json!(input));
-    usage.insert("output_tokens".to_string(), json!(output));
-    usage.insert("total_tokens".to_string(), json!(input + output));
-    if let Some(cache_creation) = object.get("cache_creation_input_tokens") {
-        usage.insert(
-            "cache_creation_input_tokens".to_string(),
-            cache_creation.clone(),
-        );
-    }
-    if let Some(cache_read) = object.get("cache_read_input_tokens") {
-        usage.insert("cache_read_input_tokens".to_string(), cache_read.clone());
-    }
-    Some(Value::Object(usage))
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn anthropic_namespace_tools_expand_to_qualified_children() {
-        let object = json!({
-            "tools": [{
-                "type": "namespace",
-                "name": "mcp__mcpx",
-                "tools": [{
-                    "type": "function",
-                    "name": "workspace",
-                    "parameters": {"type": "object"}
-                }]
-            }]
-        });
-        let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap()).unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
-        assert_ne!(tools[0]["name"], "mcp__mcpx");
-    }
-
-    #[test]
-    fn anthropic_empty_namespace_is_omitted_from_provider_tools() {
-        let tools = responses_tools_for_anthropic_wire(
-            json!({"tools": [{"type": "namespace", "name": "mcp__mcpx", "tools": []}]} )
-                .as_object()
-                .unwrap(),
-        )
-        .unwrap();
-        assert!(tools.is_empty());
-    }
-
-    #[test]
-    fn anthropic_namespace_custom_child_is_projected_without_tools_shape_failure() {
-        let object = json!({
-            "tools": [{
-                "type": "namespace",
-                "name": "functions",
-                "tools": [{
-                    "type": "namespace",
-                    "name": "mcp__mcpx",
-                    "tools": [{
-                        "type": "function",
-                        "name": "workspace",
-                        "parameters": {"type": "object"}
-                    }]
-                }]
-            }]
-        });
-        let tools = responses_tools_for_anthropic_wire(object.as_object().unwrap())
-            .expect("custom namespace child must have a legal Anthropic projection");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "mcp__mcpx__workspace");
-    }
-
-    #[test]
-    fn anthropic_namespace_custom_history_uses_the_declared_provider_name() {
-        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
-            "model": "glm-5.3",
-            "messages": [
-                {"role": "assistant", "tool_calls": [{"id": "call_exec", "type": "function", "function": {"name": "functions.exec", "arguments": "{\"input\":\"pwd\"}"}}]},
-                {"role": "tool", "tool_call_id": "call_exec", "content": "/tmp"}
-            ],
-            "tools": [{"type": "namespace", "name": "functions", "tools": [
-                {"type": "custom", "name": "exec", "format": {"type": "text"}}
-            ]}]
-        }))
-        .expect("declared custom history must project to Anthropic");
-        assert_eq!(request["tools"][0]["name"], "functions__exec");
-        assert_eq!(
-            request["messages"][0]["content"][0]["name"],
-            "functions__exec"
-        );
-        assert_eq!(
-            request["messages"][1]["content"][0]["tool_use_id"],
-            "call_exec"
-        );
-    }
-
-    #[test]
-    fn anthropic_nested_namespace_custom_history_matches_its_declaration() {
-        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
-            "model":"glm-5.3",
-            "messages":[{"role":"assistant","tool_calls":[{"id":"call_nested","function":{"name":"functions.mcp__mcpx.exec","arguments":"{\"input\":\"pwd\"}"}}]}],
-            "tools":[{"type":"namespace","name":"functions","tools":[{"type":"namespace","name":"mcp__mcpx","tools":[{"type":"custom","name":"exec","format":{"type":"text"}}]}]}]
-        })).expect("nested custom history must project");
-        assert_eq!(request["tools"][0]["name"], "mcp__mcpx__exec");
-        assert_eq!(
-            request["messages"][0]["content"][0]["name"],
-            "mcp__mcpx__exec"
-        );
-    }
-
-    #[test]
-    fn anthropic_namespace_custom_choice_uses_declared_provider_name() {
-        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
-            "model":"glm-5.3", "input":"run pwd",
-            "tool_choice":{"type":"custom","name":"functions.exec"},
-            "tools":[{"type":"namespace","name":"functions","tools":[
-                {"type":"custom","name":"exec","format":{"type":"text"}}
-            ]}]
-        }))
-        .expect("namespace custom choice must project to Anthropic");
-        assert_eq!(request["tools"][0]["name"], "functions__exec");
-        assert_eq!(request["tool_choice"]["name"], "functions__exec");
-    }
-
-    #[test]
-    fn anthropic_namespace_tool_call_history_uses_declared_provider_name() {
-        let request = encode_v3_responses_semantic_as_anthropic_request(json!({
-            "model":"glm-5.3",
-            "input":[
-                {"type":"tool_call","call_id":"call_exec","name":"functions.exec","arguments":"{\"input\":\"pwd\"}"},
-                {"type":"tool_call_output","call_id":"call_exec","output":"/tmp"}
-            ],
-            "tools":[{"type":"namespace","name":"functions","tools":[
-                {"type":"custom","name":"exec","format":{"type":"text"}}
-            ]}]
-        })).expect("tool_call history must project to Anthropic");
-        assert_eq!(
-            request["messages"][0]["content"][0]["name"],
-            "functions__exec"
-        );
-    }
-
-    #[test]
-    fn openai_chat_tool_call_malformed_arguments_project_reversible_anthropic_input() {
-        let tool_use = openai_chat_tool_call_as_anthropic_tool_use(&json!({
-            "id": "call_malformed_chat",
-            "type": "function",
-            "function": {
-                "name": "exec_command",
-                "arguments": "{\"cmd\":\"one\"}{\"cmd\":\"two\"}"
-            }
-        }))
-        .expect("malformed historical Chat arguments project to legal Anthropic input");
-        assert_eq!(
-            tool_use["input"],
-            json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"})
-        );
-    }
-
-    #[test]
-    fn anthropic_tool_use_normalizes_legacy_mcp_function_name() {
-        let mut system_parts = Vec::new();
-        let messages = chat_messages_as_anthropic_messages(
-            &json!([{
-                "role": "assistant",
-                "tool_calls": [{
-                    "id": "call_review",
-                    "type": "function",
-                    "function": {
-                        "name": "functions.mcp__codex_review__review_start",
-                        "arguments": "{}"
-                    }
-                }]
-            }]),
-            &mut system_parts,
-        )
-        .expect("Anthropic messages must use the provider-safe MCP name");
-        assert_eq!(
-            messages[0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
-        );
-    }
-
-    #[test]
-    fn anthropic_tool_declaration_normalizes_legacy_mcp_function_name() {
-        let tools = responses_tools_for_anthropic_wire(
-            json!({
-                    "tools": [{
-                        "type": "function",
-                        "function": {
-                            "name": "functions.mcp__codex_review__review_start",
-                            "parameters": {"type": "object"}
-                        }
-                    }]
-                }
-            )
-            .as_object()
-            .unwrap(),
-        )
-        .expect("Anthropic tools must use the provider-safe MCP name");
-        assert_eq!(tools[0]["name"], "mcp__codex_review__review_start");
-    }
-
-    #[test]
-    fn responses_tool_history_normalizes_legacy_mcp_function_name() {
-        let mut messages = Vec::new();
-        responses_input_item_as_anthropic_messages(
-            &json!({
-                "type": "function_call",
-                "call_id": "call_review",
-                "name": "functions.mcp__codex_review__review_start",
-                "arguments": "{}"
-            }),
-            &mut messages,
-            &mut Vec::new(),
-        )
-        .expect("Responses tool history must use the provider-safe MCP name");
-        assert_eq!(
-            messages[0]["content"][0]["name"],
-            "mcp__codex_review__review_start"
-        );
-    }
-
-    #[test]
-    fn responses_function_call_malformed_arguments_project_reversible_anthropic_input() {
-        let mut object = Map::new();
-        object.insert("type".to_string(), json!("function_call"));
-        object.insert(
-            "arguments".to_string(),
-            json!("{\"cmd\":\"one\"}{\"cmd\":\"two\"}"),
-        );
-        let input = responses_function_call_input(&object)
-            .expect("malformed historical Responses arguments project to legal Anthropic input");
-        assert_eq!(input, json!({"input":"{\"cmd\":\"one\"}{\"cmd\":\"two\"}"}));
-    }
-}
-
-#[test]
-fn websearch_function_tool_maps_to_anthropic_hosted_web_search_server_tool() {
-    // chat 入口 client 声明 `{"type":"function","function":{"name":"websearch"}}`，
-    // Anthropic wire 必须以官方 hosted server tool（web_search_20250305）编码，
-    // 否则 MiniMax 等 provider 收不到搜索工具。
-    let tool = json!({
-        "type": "function",
-        "function": {
-            "name": "websearch",
-            "description": "Search the web",
-            "parameters": {"type":"object","properties":{"query":{"type":"string"}}}
-        }
-    });
-    let anthropic =
-        responses_tool_as_anthropic_tool(tool.as_object().unwrap()).expect("map must succeed");
-    assert_eq!(anthropic["type"], "web_search_20250305");
-    assert_eq!(anthropic["name"], "web_search");
-    // 大小写不敏感：WebSearch / WEBSEARCH 同样映射。
-    let upper = json!({"type":"function","function":{"name":"WEBSEARCH"}});
-    let mapped =
-        responses_tool_as_anthropic_tool(upper.as_object().unwrap()).expect("map must succeed");
-    assert_eq!(mapped["name"], "web_search");
-    // web_search 名（hosted 语义）保持官方 server tool。
-    let hosted = json!({"type":"web_search"});
-    let mapped =
-        responses_tool_as_anthropic_tool(hosted.as_object().unwrap()).expect("map must succeed");
-    assert_eq!(mapped["name"], "web_search");
-    assert_eq!(mapped["type"], "web_search_20250305");
-}
+#[path = "responses_to_anthropic_tests.rs"]
+mod tests;

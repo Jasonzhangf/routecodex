@@ -28,15 +28,15 @@ wire projection, response semantics, runtime configuration, Server cutover, or l
 ## Ownership budget
 
 Req01 owns one `serde_json::Value`. Req02 moves it into one Chat request. Req03 and Req04 move that
-same owner forward. Continuation lookup and hooks borrow typed facts. Source gates reject full
-payload `.clone()`, `serde_json::to_value/from_value`, and stringify/parse round trips in the request
-owner implementation.
+same owner forward. Continuation lookup and hooks borrow typed facts. The existing Relay payload-copy
+budget and ownership checks cover accidental full-payload copies. The retired request-semantics
+source scanner no longer locks private function bodies or JSON helper spellings.
 
 ## Verification
 
 - Focused Rust integration tests: `hub_relay_request_semantics`.
-- Request source/red fixture gate for forbidden topology, restore placement, dynamic hooks, and copy
-  residue.
+- Behavioral consumers cover lossless normalization, tool/history handling, hook order and required
+  hook failures. The registered static-hook and compile-fail gates retain their own boundaries.
 - Shared V3 architecture, resource, module-boundary, Rust-only, static-hook, compile-fail, fmt,
   Clippy, and workspace gates.
 

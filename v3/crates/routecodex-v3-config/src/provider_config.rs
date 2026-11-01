@@ -3,10 +3,10 @@ use crate::{
     provider_directory::V3ProviderDirectorySource, validation, V3ConfigError,
     V3ProviderAuthAuthoringConfig, V3ProviderAuthEntryAuthoringConfig, V3ProviderAuthType,
     V3ProviderAuthoringConfig, V3ProviderConcurrencyAuthoringConfig,
-    V3ProviderHealthAuthoringConfig, V3ProviderModelAuthoringConfig,
-    V3ProviderRequestCleanupAuthoringConfig, V3ProviderResponsesAuthoringConfig,
-    V3ProviderSemanticErrorPolicyAuthoringConfig, V3ResponsesTransportKind, V3StreamingPolicy,
-    V3WebSearchExecutionMode,
+    V3ProviderHealthAuthoringConfig, V3ProviderInterfaceAuthoringConfig,
+    V3ProviderModelAuthoringConfig, V3ProviderRequestCleanupAuthoringConfig,
+    V3ProviderResponsesAuthoringConfig, V3ProviderSemanticErrorPolicyAuthoringConfig,
+    V3ResponsesTransportKind, V3StreamingPolicy, V3WebSearchExecutionMode,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,8 +15,56 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// provider per-request 总超时默认值（毫秒）：300s。
-pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 300_000;
+/// provider per-request 总超时默认值（毫秒）：60s。
+pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
+
+pub(crate) fn validate_provider_headers(
+    provider_id: &str,
+    headers: &BTreeMap<String, String>,
+) -> Result<(), V3ConfigError> {
+    if headers
+        .keys()
+        .any(|name| name.trim().eq_ignore_ascii_case("authorization"))
+    {
+        return Err(validation(format!(
+            "provider {provider_id} headers cannot define Authorization; use provider auth"
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum V3ReasoningEffort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+pub(crate) fn validate_provider_protocol(
+    id: &str,
+    protocol: &str,
+    reasoning_effort: Option<V3ReasoningEffort>,
+) -> Result<(), V3ConfigError> {
+    if protocol.trim().is_empty() {
+        return Err(validation(format!("provider {id} type is empty")));
+    }
+    if !matches!(
+        protocol,
+        "responses" | "anthropic" | "gemini" | "openai_chat"
+    ) {
+        return Err(validation(format!(
+            "provider {id} declares unknown protocol {protocol}"
+        )));
+    }
+    if reasoning_effort.is_some() && !matches!(protocol, "openai_chat" | "responses") {
+        return Err(validation(format!(
+            "provider {id} reasoning_effort is unsupported for protocol {protocol}"
+        )));
+    }
+    Ok(())
+}
 
 pub(crate) fn compile_provider_directory(
     config_dir: &Path,
@@ -53,39 +101,36 @@ pub(crate) fn compile_provider_directory(
             )));
         }
         let auth = compile_v2_auth(config_dir, provider_id, source_hash, provider.auth)?;
-        let provider_type = match provider.provider_type.as_str() {
-            "openai" | "openai-standard" | "openai_chat" => "openai_chat",
-            "responses" => "responses",
-            "anthropic" => "anthropic",
-            "gemini" => "gemini",
-            value => {
-                return Err(validation(format!(
-                    "v2 provider {provider_id} declares unknown type {value}"
-                )))
+        let has_interfaces = !provider.interfaces.is_empty();
+        let provider_type = if has_interfaces && provider.provider_type.trim().is_empty() {
+            String::new()
+        } else {
+            match provider.provider_type.as_str() {
+                "openai" | "openai-standard" | "openai_chat" => "openai_chat",
+                "responses" => "responses",
+                "anthropic" => "anthropic",
+                "gemini" => "gemini",
+                value => {
+                    return Err(validation(format!(
+                        "v2 provider {provider_id} declares unknown type {value}"
+                    )))
+                }
             }
-        }
-        .to_string();
+            .to_string()
+        };
         let v2_responses = provider.responses.as_ref();
         let compatibility_profile = provider
             .compatibility_profile
             .or_else(|| resolve_v2_provider_default_compatibility_profile(provider_id));
-        let responses = if provider_type == "responses" {
-            Some(V3ProviderResponsesAuthoringConfig {
-                process: v2_responses
-                    .map(|responses| responses.process.clone())
-                    .unwrap_or_else(|| "chat".to_string()),
-                streaming: v2_responses
-                    .and_then(|responses| streaming_policy(responses.streaming.as_deref()))
-                    .unwrap_or(V3StreamingPolicy::Always),
-                transport: v2_responses
-                    .and_then(|responses| responses.transport)
-                    .unwrap_or(V3ResponsesTransportKind::Http),
-                websocket_v2_url: v2_responses
-                    .and_then(|responses| responses.websocket_v2_url.clone()),
-            })
-        } else {
-            None
-        };
+        let responses = v2_responses.map(|responses| V3ProviderResponsesAuthoringConfig {
+            process: responses.process.clone(),
+            streaming: streaming_policy(responses.streaming.as_deref())
+                .unwrap_or(V3StreamingPolicy::Always),
+            transport: responses
+                .transport
+                .unwrap_or(V3ResponsesTransportKind::Http),
+            websocket_v2_url: responses.websocket_v2_url.clone(),
+        });
         let v3 = provider.v3.unwrap_or_default();
         // An empty selection means the route uses the provider default model.
         // Keep the directory model table intact so validation can verify that
@@ -98,7 +143,7 @@ pub(crate) fn compile_provider_directory(
             provider_id.clone(),
             V3ProviderAuthoringConfig {
                 enabled: provider.enabled.unwrap_or(true),
-                provider_type,
+                legacy_provider_type: provider_type,
                 base_url: provider.base_url,
                 default_model: provider.default_model,
                 auth,
@@ -106,7 +151,7 @@ pub(crate) fn compile_provider_directory(
                 responses,
                 concurrency: provider.concurrency.map(|concurrency| {
                     V3ProviderConcurrencyAuthoringConfig {
-                        max_in_flight: concurrency.max_in_flight.unwrap_or(8),
+                        max_in_flight: concurrency.max_in_flight.unwrap_or(40),
                         acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
                         stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
                     }
@@ -114,12 +159,16 @@ pub(crate) fn compile_provider_directory(
                 health: v3.health,
                 semantic_error_policy: v3.semantic_error_policy,
                 provider_request_cleanup: v3.provider_request_cleanup,
+                reasoning_effort: v3.reasoning_effort,
                 compatibility_profile,
                 features: v3.features,
+                local: provider.local.unwrap_or(false),
                 request_timeout_ms: provider
                     .timeout
                     .unwrap_or(DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS),
                 sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
+                headers: provider.headers,
+                interfaces: provider.interfaces,
             },
         );
         provider_sources.push(V3ProviderDirectorySource {
@@ -262,6 +311,11 @@ fn compile_v2_auth(
                 api_key: None,
                 secret_file: None,
                 secret_key: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             });
             continue;
         }
@@ -292,6 +346,11 @@ fn compile_v2_auth(
                 api_key: None,
                 secret_file: Some(secret_file.to_string()),
                 secret_key: Some(secret_key.to_string()),
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             });
             continue;
         }
@@ -311,6 +370,11 @@ fn compile_v2_auth(
                 api_key: None,
                 secret_file: None,
                 secret_key: None,
+                oauth_source: None,
+                refresh_endpoint: None,
+                client_id: None,
+                refresh_before_seconds: None,
+                oauth_store: None,
             });
             continue;
         }
@@ -333,6 +397,11 @@ fn compile_v2_auth(
             api_key: Some(api_key),
             secret_file: None,
             secret_key: None,
+            oauth_source: None,
+            refresh_endpoint: None,
+            client_id: None,
+            refresh_before_seconds: None,
+            oauth_store: None,
         });
     }
     Ok(V3ProviderAuthAuthoringConfig {
@@ -371,6 +440,7 @@ fn compile_v2_provider_models(
                         .or(model.max_context),
                     context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                     features: model.features,
+                    availability: model.availability,
                 },
             )
         })
@@ -414,9 +484,13 @@ pub struct V2ProviderConfig {
     pub id: String,
     pub enabled: Option<bool>,
     #[serde(rename = "type")]
+    #[serde(default)]
     pub provider_type: String,
     #[serde(rename = "baseURL")]
+    #[serde(default)]
     pub base_url: String,
+    #[serde(default)]
+    pub interfaces: BTreeMap<String, V3ProviderInterfaceAuthoringConfig>,
     pub default_model: String,
     pub auth: V2ProviderAuthConfig,
     pub responses: Option<V2ProviderResponsesConfig>,
@@ -427,17 +501,25 @@ pub struct V2ProviderConfig {
     pub models: BTreeMap<String, V2ProviderModelConfig>,
     #[serde(default)]
     pub v3: Option<V2ProviderV3Config>,
-    /// per-request 总超时（毫秒）；默认 300_000（300s）。覆盖连接、响应头等待与 body 读取。
+    /// Declares a local provider served on this machine. Only a declared local
+    /// provider may exceed the remote first-byte budget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local: Option<bool>,
+    /// per-request 总超时（毫秒）；默认 60_000（60s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
     pub timeout: Option<u64>,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。
     #[serde(default, alias = "sse_first_frame_timeout_ms")]
     pub sse_first_frame_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct V2ProviderV3Config {
+    #[serde(default, rename = "reasoning_effort")]
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     #[serde(default, alias = "semantic_error_policy")]
@@ -486,6 +568,7 @@ pub struct V2ProviderResponsesConfig {
 #[serde(rename_all = "camelCase")]
 pub struct V2ProviderConcurrencyConfig {
     pub max_in_flight: Option<u32>,
+    /// Legacy compatibility field. Business request admission does not wait on concurrency.
     pub acquire_timeout_ms: Option<u64>,
     pub stale_lease_ms: Option<u64>,
 }
@@ -520,6 +603,10 @@ pub struct V2ProviderModelConfig {
     pub web_search_backend: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    /// Optional daily availability windows. Omitted means the model is always
+    /// available.
+    #[serde(default)]
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {

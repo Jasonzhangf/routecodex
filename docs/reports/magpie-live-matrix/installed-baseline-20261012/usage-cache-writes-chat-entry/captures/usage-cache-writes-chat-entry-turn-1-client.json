@@ -1,0 +1,86 @@
+{
+  "case_id": "usage-cache-writes-chat-entry",
+  "turn": 1,
+  "turn_id": null,
+  "request_source": "fixture",
+  "request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body_text": "{\"model\":\"mock.anthropic-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"stream\":true}"
+  },
+  "client_response": {
+    "url": "http://127.0.0.1:57312/v1/chat/completions",
+    "method": "POST",
+    "request_headers": {
+      "content-type": "application/json"
+    },
+    "status": 200,
+    "status_text": "OK",
+    "headers": {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "connection": "close",
+      "transfer-encoding": "chunked",
+      "date": "Mon, 12 Oct 2026 16:37:30 GMT"
+    },
+    "raw_headers": [
+      "content-type",
+      "text/event-stream",
+      "cache-control",
+      "no-cache",
+      "connection",
+      "close",
+      "transfer-encoding",
+      "chunked",
+      "date",
+      "Mon, 12 Oct 2026 16:37:30 GMT"
+    ],
+    "body": null,
+    "bodyText": ":\n\n",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": [
+        58,
+        10,
+        10
+      ]
+    },
+    "bodyBytesBase64": "OgoK",
+    "response_ended": false,
+    "complete": false,
+    "closed": true,
+    "aborted": true,
+    "truncated": false,
+    "elapsed_ms": 39,
+    "error": "aborted",
+    "error_detail": {
+      "name": "Error",
+      "message": "aborted",
+      "code": "ECONNRESET",
+      "errno": null,
+      "syscall": null,
+      "stack": "Error: aborted\n    at Socket.socketCloseListener (node:_http_client:535:19)\n    at Socket.emit (node:events:531:35)\n    at TCP.<anonymous> (node:net:346:12)"
+    }
+  },
+  "observation": {
+    "protocol": "openai_chat",
+    "kind": "sse",
+    "content_type": "text/event-stream",
+    "ok": true,
+    "frames": [],
+    "semantic": {}
+  },
+  "diagnostics": [
+    "client body_must text missing",
+    "client body_must finish_reason missing",
+    "client body_must usage.prompt_tokens missing",
+    "client body_must usage.completion_tokens missing",
+    "client body_must usage.total_tokens missing",
+    "client body_must usage.prompt_tokens_details.cache_write_tokens missing",
+    "client body_must usage.prompt_tokens_details.cached_tokens missing",
+    "semantic terminal missing from client output"
+  ]
+}

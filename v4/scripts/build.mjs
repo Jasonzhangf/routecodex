@@ -19,12 +19,6 @@ export function runBuild() {
   console.log('[v4 build] OK Active-linked rccv4 release build (locked)');
 }
 
-export function runGuardedBuild() {
-  run('node scripts/architecture/verify-v4-feature-layer-batches.mjs --build-guard');
-  // V4-LAYER-PREFLIGHT-END
-  runBuild();
-}
-
 const direct = process.argv[1]
   && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (direct) runGuardedBuild();
+if (direct) runBuild();

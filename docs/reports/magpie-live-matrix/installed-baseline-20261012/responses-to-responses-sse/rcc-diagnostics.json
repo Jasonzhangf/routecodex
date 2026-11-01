@@ -1,0 +1,15 @@
+{
+  "pid": 90956,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 90956,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791823048095,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/installed-baseline-20261012/responses-to-responses-sse/v3-protocol-live-mock-lifecycle-qRdNZy/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        09:37:27 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:57238, 127.0.0.1:57239\u001b[0m\n[RouteCodexV3] Server started version=0.90.4886 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:57238, 127.0.0.1:57239\n",
+  "stderr": "V3 Front HTTP connection failed: Custom { kind: Other, error: hyper::Error(User(Body), Error { inner: Error { inner: Error { inner: Error { inner: Custom { kind: Other, error: \"provider pool exhausted; SSE transport unavailable\" } } } } }) }\n"
+}

@@ -1,0 +1,140 @@
+{
+  "case_id": "namespace-custom-complete-args",
+  "turn": 1,
+  "turn_id": "namespace-call",
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "namespace-custom-complete-args",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "openai_chat",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "query": "",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:57089",
+        "content-length": "705"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"messages\":[{\"content\":\"go\",\"role\":\"user\"}],\"model\":\"chat-model\",\"stream\":false,\"tools\":[{\"function\":{\"name\":\"exec_command\",\"parameters\":{\"type\":\"object\"}},\"name\":\"exec_command\",\"type\":\"function\"},{\"function\":{\"description\":\"Spawns an agent.\",\"name\":\"collaboration__spawn_agent\",\"parameters\":{\"properties\":{\"message\":{\"type\":\"string\"}},\"type\":\"object\"}},\"name\":\"collaboration__spawn_agent\",\"type\":\"function\"},{\"function\":{\"description\":\"no JSON schema\",\"name\":\"collaboration__freeform\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"input\":{\"description\":\"Raw free-form tool input.\",\"type\":\"string\"}},\"required\":[\"input\"],\"type\":\"object\"}},\"name\":\"collaboration__freeform\",\"type\":\"function\"}]}",
+      "body": {
+        "messages": [
+          {
+            "content": "go",
+            "role": "user"
+          }
+        ],
+        "model": "chat-model",
+        "stream": false,
+        "tools": [
+          {
+            "function": {
+              "name": "exec_command",
+              "parameters": {
+                "type": "object"
+              }
+            },
+            "name": "exec_command",
+            "type": "function"
+          },
+          {
+            "function": {
+              "description": "Spawns an agent.",
+              "name": "collaboration__spawn_agent",
+              "parameters": {
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "name": "collaboration__spawn_agent",
+            "type": "function"
+          },
+          {
+            "function": {
+              "description": "no JSON schema",
+              "name": "collaboration__freeform",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "description": "Raw free-form tool input.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "input"
+                ],
+                "type": "object"
+              }
+            },
+            "name": "collaboration__freeform",
+            "type": "function"
+          }
+        ]
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791823044135,
+      "response_script": {
+        "protocol": "openai_chat",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {
+            "data": {
+              "id": "chatcmpl_ns",
+              "object": "chat.completion.chunk",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {
+                    "tool_calls": [
+                      {
+                        "index": 0,
+                        "id": "call_ns_1",
+                        "type": "function",
+                        "function": {
+                          "name": "collaboration__spawn_agent",
+                          "arguments": "{\"message\":\"do work\"}"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "data": {
+              "id": "chatcmpl_ns",
+              "object": "chat.completion.chunk",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {},
+                  "finish_reason": "tool_calls"
+                }
+              ]
+            }
+          },
+          {
+            "data": "[DONE]"
+          }
+        ]
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "business_attempts": 1,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

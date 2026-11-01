@@ -12,34 +12,36 @@ use super::anthropic_request_field_projection::{
     validate_responses_cache_and_store_for_anthropic,
 };
 use super::client_metadata_projection::unsupported_client_metadata_paths;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
 
 mod message_encoding;
 mod namespace_tool_names;
 mod projection_context;
+mod reasoning_projection;
 mod response_projection;
 mod responses_to_anthropic;
+use super::usage_normalization::project_v3_responses_usage_from_canonical;
 use message_encoding::non_empty_string;
 pub use projection_context::V3AnthropicResponsesProjectionContext;
+pub(crate) use reasoning_projection::project_v3_responses_reasoning_item_as_anthropic_content;
 use response_projection::{
     anthropic_reasoning_part_as_responses_reasoning,
     flush_v3_anthropic_text_content_as_responses_message,
     project_v3_anthropic_terminal_as_responses_terminal, V3AnthropicResponseContentBlockKind,
     V3AnthropicTerminalKind,
 };
+pub(crate) use responses_to_anthropic::responses_web_search_tool_as_anthropic_tool;
 use responses_to_anthropic::{
-    anthropic_usage_as_responses_usage, chat_messages_as_anthropic_messages,
-    responses_input_as_anthropic_messages, responses_system_as_anthropic_system,
-    responses_tool_choice_as_anthropic_tool_choice, responses_tools_for_anthropic_wire,
-};
-pub(crate) use responses_to_anthropic::{
-    project_v3_responses_reasoning_item_as_anthropic_content,
-    responses_web_search_tool_as_anthropic_tool,
+    chat_messages_as_anthropic_messages, responses_input_as_anthropic_messages,
+    responses_system_as_anthropic_system, responses_tool_choice_as_anthropic_tool_choice,
+    responses_tools_for_anthropic_wire,
 };
 
 const CLAUDE_CODE_SYSTEM_PROMPT_MD: &str = include_str!("claude_code_system_prompt.md");
 const ANTHROPIC_REQUEST_EXTENSION: &str = "anthropic_request";
+const ANTHROPIC_REASONING_EXTENSION: &str = "anthropic_reasoning";
+const ANTHROPIC_REASONING_BLOCKS_EXTENSION: &str = "anthropic_reasoning_blocks";
 const ANTHROPIC_ENTRY_PASSTHROUGH_EXTENSION_KEYS: &[&str] = &["context_management"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,8 +109,6 @@ pub enum V3AnthropicCodecError {
     ProviderProtocolNotAnthropic,
     #[error("Anthropic codec payload must be an object")]
     PayloadNotObject,
-    #[error("Anthropic codec payload leaked RouteCodex side-channel field: {field}")]
-    SideChannelLeaked { field: &'static str },
     #[error("Anthropic request messages must be an array")]
     MessagesNotArray,
     #[error("Anthropic response content must be an array")]
@@ -119,6 +119,11 @@ pub enum V3AnthropicCodecError {
     MalformedProviderError,
     #[error("Anthropic codec malformed {field}")]
     MalformedField { field: &'static str },
+    #[error("Anthropic tool input cannot represent provider arguments: {reason}")]
+    UnrepresentableToolArguments {
+        arguments: Option<Value>,
+        reason: String,
+    },
     #[error("Anthropic tool dispatch identity is ambiguous: {reason}")]
     AmbiguousToolDispatch { reason: String },
     #[error("Anthropic terminal field {field} is invalid: {reason}")]
@@ -154,7 +159,6 @@ pub fn validate_v3_anthropic_client_input_payload(
     if entry_protocol != V3HubEntryProtocol::Anthropic {
         return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
     }
-    reject_side_channel_fields(payload)?;
     require_object(payload)?;
     require_messages_array(payload)
 }
@@ -167,7 +171,6 @@ pub fn validate_v3_anthropic_provider_response_payload(
     if provider_protocol != V3HubProviderWireProtocol::Anthropic {
         return Err(V3AnthropicCodecError::ProviderProtocolNotAnthropic);
     }
-    reject_side_channel_fields(payload)?;
     require_object(payload)?;
     match transport_intent {
         V3HubTransportIntent::Json => validate_json_response(payload),
@@ -275,7 +278,18 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
-    let mut output = Map::new();
+    let mut output = object.clone();
+    for mapped in [
+        "messages",
+        "system",
+        "max_tokens",
+        "stop_sequences",
+        "thinking",
+        "output_config",
+        "metadata",
+    ] {
+        output.remove(mapped);
+    }
     output.insert(
         "model".to_string(),
         object.get("model").cloned().unwrap_or(Value::Null),
@@ -418,12 +432,18 @@ pub fn encode_v3_anthropic_request_as_responses_semantic(
 pub fn encode_v3_responses_semantic_as_anthropic_request(
     input: Value,
 ) -> Result<Value, V3AnthropicCodecError> {
-    reject_side_channel_fields(&input)?;
     namespace_tool_names::validate_anthropic_declared_tool_names(&input)
         .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
     let mut input = input;
+    let registry =
+        provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry::from_request(
+            &input,
+            "anthropic",
+        )
+        .map_err(|reason| V3AnthropicCodecError::AmbiguousToolDispatch { reason })?;
+    registry.project_references(&mut input);
     strip_unmapped_responses_reasoning_extensions(&mut input);
-    namespace_tool_names::rewrite_anthropic_declared_tool_history(&mut input);
+    consume_mapped_gemini_request_root_fields(&mut input);
     let object = input
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
@@ -485,7 +505,7 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
     project_responses_text_as_anthropic_output_config(&mut output, responses_request_extension)?;
     validate_responses_cache_and_store_for_anthropic(responses_request_extension)?;
     project_chat_reasoning_effort_as_anthropic_output_config(&mut output, object)?;
-    for key in ["temperature", "top_p", "top_k"] {
+    for key in ["temperature", "top_p", "top_k", "service_tier"] {
         if let Some(value) = object.get(key) {
             output.insert(key.to_string(), value.to_owned());
         }
@@ -512,7 +532,61 @@ pub fn encode_v3_responses_semantic_as_anthropic_request(
                 .unwrap_or(false),
         ),
     );
+    if let Some(records) = object
+        .get("routecodex_chat_extension")
+        .and_then(|extension| extension.get("gemini_native_fields"))
+    {
+        output.insert(
+            "routecodex_chat_extension".to_string(),
+            json!({"gemini_native_fields":records}),
+        );
+    }
     Ok(Value::Object(output))
+}
+
+fn consume_mapped_gemini_request_root_fields(input: &mut Value) {
+    let Some(row) = input.as_object_mut() else {
+        return;
+    };
+    let mut stream = None;
+    if let Some(extension) = row
+        .get_mut("routecodex_chat_extension")
+        .and_then(Value::as_object_mut)
+    {
+        if let Some(records) = extension
+            .get_mut("gemini_native_fields")
+            .and_then(Value::as_array_mut)
+        {
+            records.retain_mut(|record| {
+                if record.get("kind").and_then(Value::as_str) != Some("request") {
+                    return true;
+                }
+                let Some(fields) = record.get_mut("fields").and_then(Value::as_object_mut) else {
+                    return true;
+                };
+                if fields
+                    .get("generationConfig")
+                    .and_then(Value::as_object)
+                    .is_some_and(Map::is_empty)
+                {
+                    fields.remove("generationConfig");
+                }
+                if fields.get("stream").is_some_and(Value::is_boolean) {
+                    stream = fields.remove("stream");
+                }
+                !fields.is_empty()
+            });
+            if records.is_empty() {
+                extension.remove("gemini_native_fields");
+            }
+        }
+        if extension.is_empty() {
+            row.remove("routecodex_chat_extension");
+        }
+    }
+    if let Some(stream) = stream {
+        row.entry("stream").or_insert(stream);
+    }
 }
 
 fn claude_code_system_prompt_for_model(model: &str) -> Option<Value> {
@@ -580,10 +654,12 @@ fn responses_request_chat_extension(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "routecodex_chat_extension",
         })?;
-    if extension
-        .keys()
-        .any(|key| !matches!(key.as_str(), "responses_request" | "anthropic_request"))
-    {
+    if extension.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "responses_request" | "anthropic_request" | "gemini_native_fields"
+        )
+    }) {
         return Err(V3AnthropicCodecError::MalformedField {
             field: "routecodex_chat_extension",
         });
@@ -701,7 +777,10 @@ fn responses_reasoning_fields_as_anthropic_thinking(
             thinking.insert("type".to_string(), Value::String("adaptive".to_string()));
         }
         "disabled" => {
-            if explicit_budget.is_some() || display.is_some() || summary_policy.is_some() {
+            if explicit_budget.is_some_and(|budget| budget != 0)
+                || display.is_some()
+                || summary_policy.is_some()
+            {
                 return Err(V3AnthropicCodecError::MalformedField {
                     field: "reasoning_thinking_mode",
                 });
@@ -849,7 +928,6 @@ fn responses_reasoning_budget_tokens(value: &Value) -> Option<u64> {
     value
         .as_u64()
         .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
-        .filter(|budget| *budget > 0)
 }
 
 pub fn project_v3_anthropic_message_as_responses_response(
@@ -865,7 +943,6 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
     payload: &Value,
     context: &V3AnthropicResponsesProjectionContext,
 ) -> Result<Value, V3AnthropicCodecError> {
-    reject_side_channel_fields(payload)?;
     let object = payload
         .as_object()
         .ok_or(V3AnthropicCodecError::PayloadNotObject)?;
@@ -895,8 +972,8 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         return Err(V3AnthropicCodecError::InvalidTerminalField {
             field: "stop_reason",
             reason: format!(
-                "{} contradicts response.content[].type=tool_use",
-                terminal.source_stop_reason
+                "{:?} contradicts response.content[].type=tool_use",
+                terminal.kind
             ),
         });
     }
@@ -1133,7 +1210,25 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
             });
         }
     }
-    let mut response = Map::new();
+    // Expanded admission accepts ordinary business fields that happen to share
+    // control-like names. Preserve every field this converter does not
+    // explicitly interpret, in place, so its inverse association survives
+    // instead of being silently dropped. Only the Anthropic message fields
+    // owned by an explicit semantic mapping below are consumed.
+    let mut response = object.clone();
+    for consumed in [
+        "id",
+        "type",
+        "role",
+        "content",
+        "model",
+        "stop_reason",
+        "stop_sequence",
+        "stop_details",
+        "usage",
+    ] {
+        response.remove(consumed);
+    }
     response.insert(
         "id".to_string(),
         object
@@ -1150,13 +1245,15 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
         response.insert("model".to_string(), model.clone());
     }
     response.insert("output".to_string(), Value::Array(output_items));
-    if let Some(usage) = anthropic_usage_as_responses_usage(object.get("usage")) {
+    if let Some(usage) = object
+        .get("usage")
+        .and_then(project_v3_responses_usage_from_canonical)
+    {
         response.insert("usage".to_string(), usage);
     }
-    response.insert(
-        "finish_reason".to_string(),
-        Value::String(terminal.source_stop_reason),
-    );
+    // Responses has no `finish_reason` field. Terminality is carried by
+    // `status` alone; carrying the Anthropic `stop_reason` as `finish_reason`
+    // would fabricate a Chat-only field into a Responses client projection.
     if let Some(reason) = terminal.incomplete_reason {
         response.insert("incomplete_details".to_string(), json!({"reason": reason}));
     }
@@ -1180,7 +1277,6 @@ pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
     if entry_protocol != V3HubEntryProtocol::Anthropic {
         return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
     }
-    reject_side_channel_fields(&payload)?;
     require_object(&payload)?;
     require_messages_array(&payload)?;
     Ok(V3AnthropicHubRequestSemantic {
@@ -1195,7 +1291,6 @@ pub fn characterize_v3_anthropic_client_input_to_hub_semantic(
 pub fn characterize_v3_anthropic_hub_semantic_to_provider_wire(
     semantic: V3AnthropicHubRequestSemantic,
 ) -> Result<V3AnthropicProviderWirePayload, V3AnthropicCodecError> {
-    reject_side_channel_fields(&semantic.payload)?;
     require_object(&semantic.payload)?;
     require_messages_array(&semantic.payload)?;
     let V3AnthropicHubRequestSemantic {
@@ -1220,7 +1315,6 @@ pub fn characterize_v3_anthropic_provider_raw_to_hub_response_semantic(
     if provider_protocol != V3HubProviderWireProtocol::Anthropic {
         return Err(V3AnthropicCodecError::ProviderProtocolNotAnthropic);
     }
-    reject_side_channel_fields(&payload)?;
     require_object(&payload)?;
     match transport_intent {
         V3HubTransportIntent::Json => validate_json_response(&payload)?,
@@ -1260,7 +1354,6 @@ pub fn validate_v3_anthropic_hub_response_payload_for_client_projection(
     if entry_protocol != V3HubEntryProtocol::Anthropic {
         return Err(V3AnthropicCodecError::EntryProtocolNotAnthropic);
     }
-    reject_side_channel_fields(payload)?;
     require_object(payload)?;
     match transport_intent {
         V3HubTransportIntent::Json => validate_json_response(payload)?,
@@ -1395,45 +1488,5 @@ fn into_object(value: Value) -> Result<Map<String, Value>, V3AnthropicCodecError
     match value {
         Value::Object(object) => Ok(object),
         _ => Err(V3AnthropicCodecError::PayloadNotObject),
-    }
-}
-
-fn reject_side_channel_fields(value: &Value) -> Result<(), V3AnthropicCodecError> {
-    let object = require_object(value)?;
-    reject_side_channel_object_keys(object)
-}
-
-fn reject_side_channel_object_keys(
-    object: &Map<String, Value>,
-) -> Result<(), V3AnthropicCodecError> {
-    for key in object.keys() {
-        if is_internal_side_channel_field(key) {
-            return Err(V3AnthropicCodecError::SideChannelLeaked {
-                field: side_channel_label(key),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn is_internal_side_channel_field(key: &str) -> bool {
-    matches!(
-        key,
-        "routecodex_internal"
-            | "metadata_center"
-            | "debug_snapshot"
-            | "provider_protocol"
-            | "resource_handle"
-    )
-}
-
-fn side_channel_label(key: &str) -> &'static str {
-    match key {
-        "routecodex_internal" => "routecodex_internal",
-        "metadata_center" => "metadata_center",
-        "debug_snapshot" => "debug_snapshot",
-        "provider_protocol" => "provider_protocol",
-        "resource_handle" => "resource_handle",
-        _ => "unknown",
     }
 }

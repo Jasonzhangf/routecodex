@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-responses-sse/chat-to-responses-sse/v3-protocol-live-mock-lifecycle-Hme3K7/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-responses-sse/chat-to-responses-sse/v3-protocol-live-mock-lifecycle-Hme3K7/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 65325
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 65326
+    }
+  ],
+  "admin_bind": "127.0.0.1:65326",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:65326"
+  },
+  "mode": "relay",
+  "model": "mock.responses-model",
+  "wire_model": "responses-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-responses",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-responses-sse/chat-to-responses-sse/v3-protocol-live-mock-lifecycle-Hme3K7/provider/mock-responses/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-responses-sse/chat-to-responses-sse/provider.toml",
+      "model": "mock.responses-model",
+      "wire_model": "responses-model",
+      "sha256": "710beff3f15bad1a7c492275a307137264c78085cb05cb6fb47d1acdee9af090"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "responses",
+    "wire_model": "responses-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-responses/mock.responses-model",
+        "provider_id": "mock-responses",
+        "model": "mock.responses-model",
+        "wire_model": "responses-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-responses-sse/chat-to-responses-sse/v3-protocol-live-mock-lifecycle-Hme3K7/provider/mock-responses/config.v2.toml",
+        "provider_sha256": "710beff3f15bad1a7c492275a307137264c78085cb05cb6fb47d1acdee9af090",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-responses/mock.responses-model"
+  ]
+}

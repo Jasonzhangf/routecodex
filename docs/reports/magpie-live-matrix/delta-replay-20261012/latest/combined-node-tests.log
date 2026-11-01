@@ -1,0 +1,872 @@
+TAP version 13
+# Subtest: resolvePath follows dotted keys and array indices without conflating null and missing
+ok 1 - resolvePath follows dotted keys and array indices without conflating null and missing
+  ---
+  duration_ms: 0.823792
+  type: 'test'
+  ...
+# Subtest: deepEqual is structural, ordered for arrays, and never coerces
+ok 2 - deepEqual is structural, ordered for arrays, and never coerces
+  ---
+  duration_ms: 0.108208
+  type: 'test'
+  ...
+# Subtest: provider exact and body_must subset expectations both pass
+ok 3 - provider exact and body_must subset expectations both pass
+  ---
+  duration_ms: 1.07625
+  type: 'test'
+  ...
+# Subtest: provider exact is strict and never accepts an array prefix
+ok 4 - provider exact is strict and never accepts an array prefix
+  ---
+  duration_ms: 0.088875
+  type: 'test'
+  ...
+# Subtest: wrong provider model, path, and arguments are caught
+ok 5 - wrong provider model, path, and arguments are caught
+  ---
+  duration_ms: 0.097
+  type: 'test'
+  ...
+# Subtest: provider auth uses the protocol-native carrier and rejects empty credentials
+ok 6 - provider auth uses the protocol-native carrier and rejects empty credentials
+  ---
+  duration_ms: 0.311917
+  type: 'test'
+  ...
+# Subtest: provider forbidden rules and fake control leakage are caught
+ok 7 - provider forbidden rules and fake control leakage are caught
+  ---
+  duration_ms: 0.115833
+  type: 'test'
+  ...
+# Subtest: startup and probe captures are excluded only by explicit attempt_kind
+ok 8 - startup and probe captures are excluded only by explicit attempt_kind
+  ---
+  duration_ms: 0.078833
+  type: 'test'
+  ...
+# Subtest: strict closed rejects HTTP 500, empty HTTP 200, and any received bytes
+ok 9 - strict closed rejects HTTP 500, empty HTTP 200, and any received bytes
+  ---
+  duration_ms: 0.336291
+  type: 'test'
+  ...
+# Subtest: genuine socket close with no status or bytes satisfies expected closed
+ok 10 - genuine socket close with no status or bytes satisfies expected closed
+  ---
+  duration_ms: 0.288583
+  type: 'test'
+  ...
+# Subtest: completion accepts whole-body JSON and keeps missing distinct from null and zero
+ok 11 - completion accepts whole-body JSON and keeps missing distinct from null and zero
+  ---
+  duration_ms: 0.289917
+  type: 'test'
+  ...
+# Subtest: ordered arrays are exact: no prefix and no reordering pass
+ok 12 - ordered arrays are exact: no prefix and no reordering pass
+  ---
+  duration_ms: 0.208958
+  type: 'test'
+  ...
+# Subtest: SSE body expectations inspect a parsed observation, not substrings of the stream
+ok 13 - SSE body expectations inspect a parsed observation, not substrings of the stream
+  ---
+  duration_ms: 0.088208
+  type: 'test'
+  ...
+# Subtest: incomplete SSE without a parsed observation cannot prove completion or body expectations
+ok 14 - incomplete SSE without a parsed observation cannot prove completion or body expectations
+  ---
+  duration_ms: 0.073167
+  type: 'test'
+  ...
+# Subtest: the protocol dependency wires parsed observation and semantic terminal
+ok 15 - the protocol dependency wires parsed observation and semantic terminal
+  ---
+  duration_ms: 0.074
+  type: 'test'
+  ...
+# Subtest: the real protocol module wires whole-body JSON and SSE terminal detection
+ok 16 - the real protocol module wires whole-body JSON and SSE terminal detection
+  ---
+  duration_ms: 0.378417
+  type: 'test'
+  ...
+# Subtest: client forbidden fields and fake control leakage are caught
+ok 17 - client forbidden fields and fake control leakage are caught
+  ---
+  duration_ms: 0.082917
+  type: 'test'
+  ...
+# Subtest: a non-2xx completed response and a wrong terminal are rejected
+ok 18 - a non-2xx completed response and a wrong terminal are rejected
+  ---
+  duration_ms: 0.060375
+  type: 'test'
+  ...
+# Subtest: assertions never mutate actual or expected inputs
+ok 19 - assertions never mutate actual or expected inputs
+  ---
+  duration_ms: 0.177334
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence accepts either declared order with the correct wire body
+ok 20 - provider attempt sequence accepts either declared order with the correct wire body
+  ---
+  duration_ms: 0.181792
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence rejects a repeated identity even when the second attempt is healthy
+ok 21 - provider attempt sequence rejects a repeated identity even when the second attempt is healthy
+  ---
+  duration_ms: 0.088541
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence rejects an unknown authorization identity
+ok 22 - provider attempt sequence rejects an unknown authorization identity
+  ---
+  duration_ms: 0.132333
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence rejects missing and extra business attempts
+ok 23 - provider attempt sequence rejects missing and extra business attempts
+  ---
+  duration_ms: 0.081416
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence excludes only explicitly labelled probe and startup captures
+ok 24 - provider attempt sequence excludes only explicitly labelled probe and startup captures
+  ---
+  duration_ms: 0.72675
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence re-checks the wire body of every ordered attempt
+ok 25 - provider attempt sequence re-checks the wire body of every ordered attempt
+  ---
+  duration_ms: 0.049458
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence requires a declared auth_orders contract
+ok 26 - provider attempt sequence requires a declared auth_orders contract
+  ---
+  duration_ms: 0.032584
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence never mutates captures or expected
+ok 27 - provider attempt sequence never mutates captures or expected
+  ---
+  duration_ms: 0.075208
+  type: 'test'
+  ...
+# Subtest: runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence
+ok 28 - runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence
+  ---
+  duration_ms: 5.307834
+  type: 'test'
+  ...
+# Subtest: runCase uses the provider sequence assertion only when auth_orders is declared
+ok 29 - runCase uses the provider sequence assertion only when auth_orders is declared
+  ---
+  duration_ms: 2.105083
+  type: 'test'
+  ...
+# Subtest: runCase rejects wrong request client/terminal evidence and wrong provider attempt count
+ok 30 - runCase rejects wrong request client/terminal evidence and wrong provider attempt count
+  ---
+  duration_ms: 4.434667
+  type: 'test'
+  ...
+# Subtest: runCase executes the declared echo once from the actual response and sends actual call id/output
+ok 31 - runCase executes the declared echo once from the actual response and sends actual call id/output
+  ---
+  duration_ms: 2.645541
+  type: 'test'
+  ...
+# Subtest: runCase classifies setup and missing capabilities as explicit non-product outcomes
+ok 32 - runCase classifies setup and missing capabilities as explicit non-product outcomes
+  ---
+  duration_ms: 0.729
+  type: 'test'
+  ...
+# Subtest: real corpus loads 48 fixtures sorted with exact identities
+ok 33 - real corpus loads 48 fixtures sorted with exact identities
+  ---
+  duration_ms: 25.032875
+  type: 'test'
+  ...
+# Subtest: manifest identity and source mismatches are rejected
+ok 34 - manifest identity and source mismatches are rejected
+  ---
+  duration_ms: 2.620125
+  type: 'test'
+  ...
+# Subtest: duplicate manifest case ids are rejected
+ok 35 - duplicate manifest case ids are rejected
+  ---
+  duration_ms: 0.839417
+  type: 'test'
+  ...
+# Subtest: manifest case declared but missing on disk is rejected
+ok 36 - manifest case declared but missing on disk is rejected
+  ---
+  duration_ms: 1.360917
+  type: 'test'
+  ...
+# Subtest: file name and declared case_id mismatch is rejected
+ok 37 - file name and declared case_id mismatch is rejected
+  ---
+  duration_ms: 1.499291
+  type: 'test'
+  ...
+# Subtest: a case present on disk but not declared in the manifest is rejected
+ok 38 - a case present on disk but not declared in the manifest is rejected
+  ---
+  duration_ms: 2.2665
+  type: 'test'
+  ...
+# Subtest: missing json response script is reported without throwing
+ok 39 - missing json response script is reported without throwing
+  ---
+  duration_ms: 2.846209
+  type: 'test'
+  ...
+# Subtest: missing sse response script is reported
+ok 40 - missing sse response script is reported
+  ---
+  duration_ms: 1.109833
+  type: 'test'
+  ...
+# Subtest: fault script requires attempts and each attempt needs its kind script
+ok 41 - fault script requires attempts and each attempt needs its kind script
+  ---
+  duration_ms: 1.275458
+  type: 'test'
+  ...
+# Subtest: real fault fixture declares two candidates and both literal auth orders
+ok 42 - real fault fixture declares two candidates and both literal auth orders
+  ---
+  duration_ms: 2.281917
+  type: 'test'
+  ...
+# Subtest: runtime_setup accepts single and multi-candidate typed declarations
+ok 43 - runtime_setup accepts single and multi-candidate typed declarations
+  ---
+  duration_ms: 2.866209
+  type: 'test'
+  ...
+# Subtest: runtime_setup rejects unsupported or inconsistent typed declarations
+ok 44 - runtime_setup rejects unsupported or inconsistent typed declarations
+  ---
+  duration_ms: 2.219
+  type: 'test'
+  ...
+# Subtest: auth_orders requires exactly two ordered two-identity proofs
+ok 45 - auth_orders requires exactly two ordered two-identity proofs
+  ---
+  duration_ms: 2.566625
+  type: 'test'
+  ...
+# Subtest: invalid cell protocol, transport, mode, and direct mismatch are reported
+ok 46 - invalid cell protocol, transport, mode, and direct mismatch are reported
+  ---
+  duration_ms: 1.502166
+  type: 'test'
+  ...
+# Subtest: missing expected upstream/client assertions are reported
+ok 47 - missing expected upstream/client assertions are reported
+  ---
+  duration_ms: 1.006083
+  type: 'test'
+  ...
+# Subtest: invalid turns and bad tool_followup references are reported
+ok 48 - invalid turns and bad tool_followup references are reported
+  ---
+  duration_ms: 1.764333
+  type: 'test'
+  ...
+# Subtest: valid multi-turn definitions are accepted
+ok 49 - valid multi-turn definitions are accepted
+  ---
+  duration_ms: 0.816834
+  type: 'test'
+  ...
+# Subtest: arguments and media bytes survive the loader unchanged
+ok 50 - arguments and media bytes survive the loader unchanged
+  ---
+  duration_ms: 0.894333
+  type: 'test'
+  ...
+# Subtest: coverage tracks the 16 base cells and 32 variants
+ok 51 - coverage tracks the 16 base cells and 32 variants
+  ---
+  duration_ms: 1.928042
+  type: 'test'
+  ...
+# Subtest: non-base extension ids are reported, not rejected
+ok 52 - non-base extension ids are reported, not rejected
+  ---
+  duration_ms: 0.786917
+  type: 'test'
+  ...
+# Subtest: stale source references are reported rather than fabricated
+ok 53 - stale source references are reported rather than fabricated
+  ---
+  duration_ms: 1.120875
+  type: 'test'
+  ...
+# Subtest: generateRccConfig writes isolated V3 config with task-owned provider references
+ok 54 - generateRccConfig writes isolated V3 config with task-owned provider references
+  ---
+  duration_ms: 18.154667
+  type: 'test'
+  ...
+# Subtest: generateRccConfig authors the runtime candidate as a real provider model
+ok 55 - generateRccConfig authors the runtime candidate as a real provider model
+  ---
+  duration_ms: 1.816875
+  type: 'test'
+  ...
+# Subtest: generateRccConfig writes a supported execution policy and receipts the written mode
+ok 56 - generateRccConfig writes a supported execution policy and receipts the written mode
+  ---
+  duration_ms: 7.277792
+  type: 'test'
+  ...
+# Subtest: captureRuntimeIdentity records the real child version and binary hash
+ok 57 - captureRuntimeIdentity records the real child version and binary hash
+  ---
+  duration_ms: 26.790916
+  type: 'test'
+  ...
+# Subtest: sendHttp preserves status, headers, raw bytes, and complete-response state
+ok 58 - sendHttp preserves status, headers, raw bytes, and complete-response state
+  ---
+  duration_ms: 8.481875
+  type: 'test'
+  ...
+# Subtest: sendHttp distinguishes empty close, incomplete response, and timeout
+ok 59 - sendHttp distinguishes empty close, incomplete response, and timeout
+  ---
+  duration_ms: 55.890416
+  type: 'test'
+  ...
+# Subtest: diagnoseExactBind reports the original bind error without changing ports
+ok 60 - diagnoseExactBind reports the original bind error without changing ports
+  ---
+  duration_ms: 0.867833
+  type: 'test'
+  ...
+# Subtest: generateRccConfig overrides an inherited 8777 admin bind with a task-owned port
+ok 61 - generateRccConfig overrides an inherited 8777 admin bind with a task-owned port
+  ---
+  duration_ms: 2.334875
+  type: 'test'
+  ...
+# Subtest: diagnoseListenerSet checks every declared address in order and preserves errno
+ok 62 - diagnoseListenerSet checks every declared address in order and preserves errno
+  ---
+  duration_ms: 0.942042
+  type: 'test'
+  ...
+# Subtest: diagnoseListenerSet reports a fully free declared set as bound and released
+ok 63 - diagnoseListenerSet reports a fully free declared set as bound and released
+  ---
+  duration_ms: 0.596792
+  type: 'test'
+  ...
+# Subtest: startRcc and stopRcc use the owned child, then wait for exit and socket closure
+ok 64 - startRcc and stopRcc use the owned child, then wait for exit and socket closure
+  ---
+  duration_ms: 601.8585
+  type: 'test'
+  ...
+# Subtest: failed startup records the real child exit and never claims ready
+ok 65 - failed startup records the real child exit and never claims ready
+  ---
+  duration_ms: 507.783625
+  type: 'test'
+  ...
+# Subtest: fake health 200 without RCC identity is rejected and remains an owned cleanup failure
+ok 66 - fake health 200 without RCC identity is rejected and remains an owned cleanup failure
+  ---
+  duration_ms: 1119.358291
+  type: 'test'
+  ...
+# Subtest: stopRcc force-kills only its owned non-terminating child and records that fact
+ok 67 - stopRcc force-kills only its owned non-terminating child and records that fact
+  ---
+  duration_ms: 618.247333
+  type: 'test'
+  ...
+# Subtest: stopRcc records a still-open declared admin listener instead of claiming full cleanup
+ok 68 - stopRcc records a still-open declared admin listener instead of claiming full cleanup
+  ---
+  duration_ms: 820.428583
+  type: 'test'
+  ...
+# Subtest: generateRccConfig authors two same-tier providers with distinct fake identities
+ok 69 - generateRccConfig authors two same-tier providers with distinct fake identities
+  ---
+  duration_ms: 2.726125
+  type: 'test'
+  ...
+# Subtest: generateRccConfig rejects a multi-candidate model that leaves the declared model
+ok 70 - generateRccConfig rejects a multi-candidate model that leaves the declared model
+  ---
+  duration_ms: 0.413
+  type: 'test'
+  ...
+# Subtest: generateRccConfig rejects the same provider twice instead of collapsing to one
+ok 71 - generateRccConfig rejects the same provider twice instead of collapsing to one
+  ---
+  duration_ms: 0.135584
+  type: 'test'
+  ...
+# Subtest: generateRccConfig keeps the exhaustion model key distinct from its wire name
+ok 72 - generateRccConfig keeps the exhaustion model key distinct from its wire name
+  ---
+  duration_ms: 2.485042
+  type: 'test'
+  ...
+# Subtest: openai_chat JSON captures the exact raw request and returns the scripted body
+ok 73 - openai_chat JSON captures the exact raw request and returns the scripted body
+  ---
+  duration_ms: 16.699375
+  type: 'test'
+  ...
+# Subtest: all four endpoint families are accepted, including Gemini generate and stream plus query
+ok 74 - all four endpoint families are accepted, including Gemini generate and stream plus query
+  ---
+  duration_ms: 6.745
+  type: 'test'
+  ...
+# Subtest: SSE preserves exact raw chunks, frame order, and the raw [DONE] data literal
+ok 75 - SSE preserves exact raw chunks, frame order, and the raw [DONE] data literal
+  ---
+  duration_ms: 2.329125
+  type: 'test'
+  ...
+# Subtest: fault attempts advance deterministically and the recovered attempt is delivered
+ok 76 - fault attempts advance deterministically and the recovered attempt is delivered
+  ---
+  duration_ms: 2.814709
+  type: 'test'
+  ...
+# Subtest: reset destroys the transport and hold-open stays open until close()
+ok 77 - reset destroys the transport and hold-open stays open until close()
+  ---
+  duration_ms: 135.726167
+  type: 'test'
+  ...
+# Subtest: multi-turn fixtures switch scripts by turn and reset the per-turn attempt index
+ok 78 - multi-turn fixtures switch scripts by turn and reset the per-turn attempt index
+  ---
+  duration_ms: 1.849
+  type: 'test'
+  ...
+# Subtest: startup phase classifies catalog GET as probe and never labels business POST as probe
+ok 79 - startup phase classifies catalog GET as probe and never labels business POST as probe
+  ---
+  duration_ms: 2.001667
+  type: 'test'
+  ...
+# Subtest: explicit probe classifier hook classifies only non-business paths
+ok 80 - explicit probe classifier hook classifies only non-business paths
+  ---
+  duration_ms: 2.627041
+  type: 'test'
+  ...
+# Subtest: invalid fixtures fail explicitly as mock facility errors
+ok 81 - invalid fixtures fail explicitly as mock facility errors
+  ---
+  duration_ms: 1.810792
+  type: 'test'
+  ...
+# Subtest: close() retains captures and releases the listener
+ok 82 - close() retains captures and releases the listener
+  ---
+  duration_ms: 1.202958
+  type: 'test'
+  ...
+# Subtest: executes real corpus fault, [DONE], attempts, and multi-turn scripts
+ok 83 - executes real corpus fault, [DONE], attempts, and multi-turn scripts
+  ---
+  duration_ms: 4.092791
+  type: 'test'
+  ...
+# Subtest: every real corpus provider path is served by the mock
+ok 84 - every real corpus provider path is served by the mock
+  ---
+  duration_ms: 38.473375
+  type: 'test'
+  ...
+# Subtest: protocol semantics module is import-safe and exposes the suite protocols
+ok 85 - protocol semantics module is import-safe and exposes the suite protocols
+  ---
+  duration_ms: 1.244791
+  type: 'test'
+  ...
+# Subtest: parseSse preserves ordered frames and SSE transport shapes
+    # Subtest: CRLF, LF, comments, multiline data, data-less events, and raw [DONE]
+    ok 1 - CRLF, LF, comments, multiline data, data-less events, and raw [DONE]
+      ---
+      duration_ms: 0.289708
+      type: 'test'
+      ...
+    # Subtest: multiline data joins with a newline and is parsed as one JSON object
+    ok 2 - multiline data joins with a newline and is parsed as one JSON object
+      ---
+      duration_ms: 0.06775
+      type: 'test'
+      ...
+    # Subtest: truncated data is a raw literal and is not repaired
+    ok 3 - truncated data is a raw literal and is not repaired
+      ---
+      duration_ms: 0.059292
+      type: 'test'
+      ...
+    1..3
+ok 86 - parseSse preserves ordered frames and SSE transport shapes
+  ---
+  duration_ms: 0.64625
+  type: 'test'
+  ...
+# Subtest: parseClientBody keeps JSON, SSE, malformed, and unknown content separate
+ok 87 - parseClientBody keeps JSON, SSE, malformed, and unknown content separate
+  ---
+  duration_ms: 0.262375
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal accepts valid JSON terminals for all four protocols
+ok 88 - findSemanticTerminal accepts valid JSON terminals for all four protocols
+  ---
+  duration_ms: 0.209458
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal accepts valid SSE terminals for all four protocols
+ok 89 - findSemanticTerminal accepts valid SSE terminals for all four protocols
+  ---
+  duration_ms: 0.109583
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal rejects marker text in content
+ok 90 - findSemanticTerminal rejects marker text in content
+  ---
+  duration_ms: 0.372
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal rejects malformed and truncated observations
+ok 91 - findSemanticTerminal rejects malformed and truncated observations
+  ---
+  duration_ms: 0.213334
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal never converts provider error frames into terminals
+ok 92 - findSemanticTerminal never converts provider error frames into terminals
+  ---
+  duration_ms: 0.11675
+  type: 'test'
+  ...
+# Subtest: JSON content type selects JSON parsing and malformed JSON is not repaired
+ok 93 - JSON content type selects JSON parsing and malformed JSON is not repaired
+  ---
+  duration_ms: 0.068125
+  type: 'test'
+  ...
+# Subtest: SSE tool fragments stay ordered and are never concatenated into a synthetic terminal
+ok 94 - SSE tool fragments stay ordered and are never concatenated into a synthetic terminal
+  ---
+  duration_ms: 0.135417
+  type: 'test'
+  ...
+# Subtest: raw [DONE] alone never proves a semantic terminal
+ok 95 - raw [DONE] alone never proves a semantic terminal
+  ---
+  duration_ms: 0.113708
+  type: 'test'
+  ...
+# Subtest: unknown protocol and unknown content type have no semantic fallback
+ok 96 - unknown protocol and unknown content type have no semantic fallback
+  ---
+  duration_ms: 0.072083
+  type: 'test'
+  ...
+# Subtest: semantic observations match fixture expectations through the real assertion layer
+    # Subtest: openai_chat SSE derives text and terminal while preserving frames
+    ok 1 - openai_chat SSE derives text and terminal while preserving frames
+      ---
+      duration_ms: 1.074625
+      type: 'test'
+      ...
+    # Subtest: interleaved openai_chat tool fragments retain identity and complete arguments
+    ok 2 - interleaved openai_chat tool fragments retain identity and complete arguments
+      ---
+      duration_ms: 1.739667
+      type: 'test'
+      ...
+    # Subtest: anthropic SSE derives text and stop reason while preserving frames
+    ok 3 - anthropic SSE derives text and stop reason while preserving frames
+      ---
+      duration_ms: 0.442584
+      type: 'test'
+      ...
+    # Subtest: gemini SSE derives candidate text and finishReason
+    ok 4 - gemini SSE derives candidate text and finishReason
+      ---
+      duration_ms: 0.230542
+      type: 'test'
+      ...
+    # Subtest: responses event stream derives final item and summary keys
+    ok 5 - responses event stream derives final item and summary keys
+      ---
+      duration_ms: 0.190375
+      type: 'test'
+      ...
+    1..5
+ok 97 - semantic observations match fixture expectations through the real assertion layer
+  ---
+  duration_ms: 3.912666
+  type: 'test'
+  ...
+# Subtest: semantic observations expose response item arguments from actual events only
+ok 98 - semantic observations expose response item arguments from actual events only
+  ---
+  duration_ms: 0.432708
+  type: 'test'
+  ...
+# Subtest: responses SSE coalesces repeated function_call snapshots by call_id without duplicating the call
+ok 99 - responses SSE coalesces repeated function_call snapshots by call_id without duplicating the call
+  ---
+  duration_ms: 0.099834
+  type: 'test'
+  ...
+# Subtest: semantic observations do not invent missing terminals or complete arguments
+ok 100 - semantic observations do not invent missing terminals or complete arguments
+  ---
+  duration_ms: 0.102875
+  type: 'test'
+  ...
+# Subtest: responses SSE custom_tool_call retains exact raw input across split, structured, and interleaved items
+    # Subtest: assembled custom input preserves exact whitespace and is exposed through the real assertion layer
+    ok 1 - assembled custom input preserves exact whitespace and is exposed through the real assertion layer
+      ---
+      duration_ms: 0.21175
+      type: 'test'
+      ...
+    # Subtest: structured custom input is preserved verbatim and a complete done event replaces assembled fragments
+    ok 2 - structured custom input is preserved verbatim and a complete done event replaces assembled fragments
+      ---
+      duration_ms: 0.100333
+      type: 'test'
+      ...
+    # Subtest: interleaved custom and function items keep independent raw input, arguments, and call ordering
+    ok 3 - interleaved custom and function items keep independent raw input, arguments, and call ordering
+      ---
+      duration_ms: 0.076334
+      type: 'test'
+      ...
+    1..3
+ok 101 - responses SSE custom_tool_call retains exact raw input across split, structured, and interleaved items
+  ---
+  duration_ms: 0.531
+  type: 'test'
+  ...
+# Subtest: anthropic SSE assembles independently split input_json_delta fragments and complete terminal forms
+    # Subtest: split partial_json fragments assemble the exact raw tool_use input and satisfy the client assertion
+    ok 1 - split partial_json fragments assemble the exact raw tool_use input and satisfy the client assertion
+      ---
+      duration_ms: 0.267792
+      type: 'test'
+      ...
+    # Subtest: complete and incomplete anthropic terminals remain recognized while raw frames stay intact
+    ok 2 - complete and incomplete anthropic terminals remain recognized while raw frames stay intact
+      ---
+      duration_ms: 0.085
+      type: 'test'
+      ...
+    1..2
+ok 102 - anthropic SSE assembles independently split input_json_delta fragments and complete terminal forms
+  ---
+  duration_ms: 0.52025
+  type: 'test'
+  ...
+# Subtest: missing cells and variants stay visible as not covered or not run
+ok 103 - missing cells and variants stay visible as not covered or not run
+  ---
+  duration_ms: 2.101542
+  type: 'test'
+  ...
+# Subtest: same-protocol relay supplement is visible without blocking required direct coverage
+ok 104 - same-protocol relay supplement is visible without blocking required direct coverage
+  ---
+  duration_ms: 0.357959
+  type: 'test'
+  ...
+# Subtest: real corpus chat ids are recognized as the openai_chat base matrix
+ok 105 - real corpus chat ids are recognized as the openai_chat base matrix
+  ---
+  duration_ms: 0.273667
+  type: 'test'
+  ...
+# Subtest: actual corpus declarations cover every required base variant without claiming execution
+ok 106 - actual corpus declarations cover every required base variant without claiming execution
+  ---
+  duration_ms: 4.162875
+  type: 'test'
+  ...
+# Subtest: duplicate case ids are reported but do not inflate matrix or summary counts
+ok 107 - duplicate case ids are reported but do not inflate matrix or summary counts
+  ---
+  duration_ms: 1.103917
+  type: 'test'
+  ...
+# Subtest: startup failure is classified as infrastructure and never counted as product failure or pass
+ok 108 - startup failure is classified as infrastructure and never counted as product failure or pass
+  ---
+  duration_ms: 0.407708
+  type: 'test'
+  ...
+# Subtest: mixed statuses are counted exactly and missing variants remain distinct
+ok 109 - mixed statuses are counted exactly and missing variants remain distinct
+  ---
+  duration_ms: 0.284167
+  type: 'test'
+  ...
+# Subtest: zero runs with a passing config check do not become successful matrix evidence
+ok 110 - zero runs with a passing config check do not become successful matrix evidence
+  ---
+  duration_ms: 0.553583
+  type: 'test'
+  ...
+# Subtest: incomplete cleanup remains visible in the machine report and markdown
+ok 111 - incomplete cleanup remains visible in the machine report and markdown
+  ---
+  duration_ms: 0.536292
+  type: 'test'
+  ...
+# Subtest: render keeps original red diagnostics, identities, and stable evidence references
+ok 112 - render keeps original red diagnostics, identities, and stable evidence references
+  ---
+  duration_ms: 2.163208
+  type: 'test'
+  ...
+# Subtest: temporary evidence roots do not claim persistent report evidence
+ok 113 - temporary evidence roots do not claim persistent report evidence
+  ---
+  duration_ms: 0.8715
+  type: 'test'
+  ...
+# Subtest: P2 handoff groups only evidenced first external divergence and leaves unknown explicit
+ok 114 - P2 handoff groups only evidenced first external divergence and leaves unknown explicit
+  ---
+  duration_ms: 0.889583
+  type: 'test'
+  ...
+# Subtest: boundary cases are separate from the sixteen base matrix cells
+ok 115 - boundary cases are separate from the sixteen base matrix cells
+  ---
+  duration_ms: 0.762417
+  type: 'test'
+  ...
+# Subtest: finalizeReport returns a new report and does not mutate the input
+ok 116 - finalizeReport returns a new report and does not mutate the input
+  ---
+  duration_ms: 0.194416
+  type: 'test'
+  ...
+# Subtest: buildMatrixCoverage deduplicates duplicate ids without hiding failures
+ok 117 - buildMatrixCoverage deduplicates duplicate ids without hiding failures
+  ---
+  duration_ms: 0.105917
+  type: 'test'
+  ...
+# Subtest: extractToolCalls parses streamed Responses SSE fragments into one complete echo call
+ok 118 - extractToolCalls parses streamed Responses SSE fragments into one complete echo call
+  ---
+  duration_ms: 1.626916
+  type: 'test'
+  ...
+# Subtest: extractToolCalls preserves separate streamed arguments for parallel tool indices
+ok 119 - extractToolCalls preserves separate streamed arguments for parallel tool indices
+  ---
+  duration_ms: 0.42425
+  type: 'test'
+  ...
+# Subtest: executeDeclaredEchoTool uses actual arguments and rejects undeclared/non-echo/invalid calls
+ok 120 - executeDeclaredEchoTool uses actual arguments and rejects undeclared/non-echo/invalid calls
+  ---
+  duration_ms: 0.299166
+  type: 'test'
+  ...
+# Subtest: runToolFollowup executes exactly once from actual args and sends the next request
+ok 121 - runToolFollowup executes exactly once from actual args and sends the next request
+  ---
+  duration_ms: 0.304417
+  type: 'test'
+  ...
+# Subtest: runToolFollowup does not fabricate a result when no tool call is observed
+ok 122 - runToolFollowup does not fabricate a result when no tool call is observed
+  ---
+  duration_ms: 0.144417
+  type: 'test'
+  ...
+# Subtest: runToolFollowup does not execute undeclared/non-echo observed calls
+ok 123 - runToolFollowup does not execute undeclared/non-echo observed calls
+  ---
+  duration_ms: 0.07525
+  type: 'test'
+  ...
+# Subtest: runToolFollowup does not mutate fixture or client request input
+ok 124 - runToolFollowup does not mutate fixture or client request input
+  ---
+  duration_ms: 0.182542
+  type: 'test'
+  ...
+# Subtest: extractToolCalls does not use fixture expected_client as an execution source
+ok 125 - extractToolCalls does not use fixture expected_client as an execution source
+  ---
+  duration_ms: 0.045875
+  type: 'test'
+  ...
+# Subtest: namespace fixture preserves observed identity without granting execution or aliases
+ok 126 - namespace fixture preserves observed identity without granting execution or aliases
+  ---
+  duration_ms: 0.417084
+  type: 'test'
+  ...
+# Subtest: custom echo returns exact raw input and submits it without JSON wrapping
+ok 127 - custom echo returns exact raw input and submits it without JSON wrapping
+  ---
+  duration_ms: 0.572417
+  type: 'test'
+  ...
+# Subtest: omitted identity/input, malformed arguments and parallel calls never fabricate execution
+ok 128 - omitted identity/input, malformed arguments and parallel calls never fabricate execution
+  ---
+  duration_ms: 0.165833
+  type: 'test'
+  ...
+# Subtest: provider Chat wire is not a Responses client fallback and raw errors are not tools
+ok 129 - provider Chat wire is not a Responses client fallback and raw errors are not tools
+  ---
+  duration_ms: 0.186791
+  type: 'test'
+  ...
+# Subtest: send failure remains explicit and does not retry the echo execution
+ok 130 - send failure remains explicit and does not retry the echo execution
+  ---
+  duration_ms: 0.217
+  type: 'test'
+  ...
+1..130
+# tests 143
+# suites 0
+# pass 143
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5610.54975

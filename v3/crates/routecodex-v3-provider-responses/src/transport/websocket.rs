@@ -4,9 +4,116 @@
 
 use super::*;
 
+pub(super) async fn acquire_connection_slot(
+    sessions: &Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
+    request: &mut V3Transport13ResponsesRequest,
+    handoff: &crate::transport_handoff::V3ProviderTransportAttemptBroker,
+    attempt_key: Option<&crate::transport_handoff::V3ProviderTransportAttemptKey>,
+) -> Result<Option<OwnedMutexGuard<Option<ResponsesWebSocket>>>, V3ProviderError> {
+    let V3Transport13ResponsesRequestKind::WebSocketV2 {
+        request_id,
+        provider_id,
+        canonical_model_id,
+        url,
+        auth,
+        cancellation,
+        ..
+    } = &request.kind
+    else {
+        return Ok(None);
+    };
+    let mark_failed = |error| {
+        if let Some(attempt_key) = attempt_key {
+            let _ = handoff.transition(
+                attempt_key,
+                crate::transport_handoff::V3ProviderTransportAttemptState::Failed,
+            );
+        }
+        error
+    };
+    let session_key = websocket_session_key(provider_id, canonical_model_id, &auth.alias, url);
+    let session = {
+        let mut sessions = sessions.lock().await;
+        sessions
+            .entry(session_key)
+            .or_insert_with(|| Arc::new(Mutex::new(None)))
+            .clone()
+    };
+    ensure_not_cancelled(request_id, provider_id, cancellation.as_ref()).map_err(mark_failed)?;
+    if let Ok(connection) = session.clone().try_lock_owned() {
+        return Ok(Some(connection));
+    }
+    let request_id = request_id.clone();
+    let provider_id = provider_id.clone();
+    let cancellation = cancellation.clone();
+    // Only an actual session wait releases an already granted capacity lease.
+    request.release_pre_acquired_admission();
+    let lock = session.lock_owned();
+    match cancellation.clone() {
+        Some(cancellation) => {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => Err(V3ProviderError::ClientDisconnect {
+                    request_id: request_id.to_string(),
+                    provider_id: provider_id.to_string(),
+                }),
+                connection = lock => Ok(Some(connection)),
+            }
+        }
+        None => Ok(Some(lock.await)),
+    }
+    .map_err(mark_failed)
+}
+
+pub(super) async fn acquire_admission_and_connection_slot(
+    sessions: &Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
+    request: &mut V3Transport13ResponsesRequest,
+    handoff: &crate::transport_handoff::V3ProviderTransportAttemptBroker,
+    attempt_key: Option<&crate::transport_handoff::V3ProviderTransportAttemptKey>,
+    controller: V3AdaptiveConcurrencyController,
+    provider_key: String,
+) -> Result<
+    (
+        V3AdaptiveConcurrencyPermitGuard,
+        bool,
+        Option<OwnedMutexGuard<Option<ResponsesWebSocket>>>,
+    ),
+    V3ProviderError,
+> {
+    let connection_slot = acquire_connection_slot(sessions, request, handoff, attempt_key).await?;
+    let admission = super::take_or_acquire_provider_admission_scoped(
+        request.pre_acquired_admission.take(),
+        controller.clone(),
+        provider_key.clone(),
+        request.identity_scope.as_ref(),
+    );
+    if admission.is_err() {
+        if let Some(attempt_key) = attempt_key {
+            let _ = handoff.transition(attempt_key, V3ProviderTransportAttemptState::Failed);
+        }
+    }
+    let lease = admission.map_err(|error| {
+        super::provider_admission_error(error, request.request_id(), request.provider_id())
+    })?;
+    let was_probe = lease.is_probe();
+    let permit_guard =
+        V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), lease.into_permit());
+
+    Ok((permit_guard, was_probe, connection_slot))
+}
+
+fn websocket_session_key(
+    provider_id: &str,
+    canonical_model_id: &str,
+    auth_alias: &str,
+    url: &str,
+) -> String {
+    format!("{provider_id}\u{1f}{canonical_model_id}\u{1f}{auth_alias}\u{1f}{url}")
+}
+
 #[derive(Default)]
 pub(super) struct V3ResponsesWebSocketProtocolAggregate {
-    function_call_items: BTreeMap<u64, Value>,
+    output_items: BTreeMap<u64, Value>,
 }
 
 impl V3ResponsesWebSocketProtocolAggregate {
@@ -26,11 +133,9 @@ impl V3ResponsesWebSocketProtocolAggregate {
                         format!("{event_type} is missing item"),
                     ));
                 };
-                if item.get("type").and_then(Value::as_str) == Some("function_call") {
-                    let output_index =
-                        websocket_output_index(event, event_type, request_id, provider_id)?;
-                    self.function_call_items.insert(output_index, item.clone());
-                }
+                let output_index =
+                    websocket_output_index(event, event_type, request_id, provider_id)?;
+                self.output_items.insert(output_index, item.clone());
             }
             "response.function_call_arguments.delta" => {
                 let output_index =
@@ -42,16 +147,20 @@ impl V3ResponsesWebSocketProtocolAggregate {
                         "response.function_call_arguments.delta is missing delta",
                     )
                 })?;
-                let item = self
-                    .function_call_items
-                    .get_mut(&output_index)
-                    .ok_or_else(|| {
-                        websocket_protocol_error(
-                            request_id,
-                            provider_id,
-                            "response.function_call_arguments.delta arrived before function_call output_item",
-                        )
-                    })?;
+                let item = self.output_items.get_mut(&output_index).ok_or_else(|| {
+                    websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "response.function_call_arguments.delta arrived before function_call output_item",
+                    )
+                })?;
+                if item.get("type").and_then(Value::as_str) != Some("function_call") {
+                    return Err(websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "response.function_call_arguments.delta targets a non-function_call output_item",
+                    ));
+                }
                 let object = item.as_object_mut().ok_or_else(|| {
                     websocket_protocol_error(
                         request_id,
@@ -82,16 +191,20 @@ impl V3ResponsesWebSocketProtocolAggregate {
                                 "response.function_call_arguments.done is missing arguments",
                             )
                         })?;
-                let item = self
-                    .function_call_items
-                    .get_mut(&output_index)
-                    .ok_or_else(|| {
-                        websocket_protocol_error(
-                            request_id,
-                            provider_id,
-                            "response.function_call_arguments.done arrived before function_call output_item",
-                        )
-                    })?;
+                let item = self.output_items.get_mut(&output_index).ok_or_else(|| {
+                    websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "response.function_call_arguments.done arrived before function_call output_item",
+                    )
+                })?;
+                if item.get("type").and_then(Value::as_str) != Some("function_call") {
+                    return Err(websocket_protocol_error(
+                        request_id,
+                        provider_id,
+                        "response.function_call_arguments.done targets a non-function_call output_item",
+                    ));
+                }
                 let object = item.as_object_mut().ok_or_else(|| {
                     websocket_protocol_error(
                         request_id,
@@ -120,7 +233,7 @@ impl V3ResponsesWebSocketProtocolAggregate {
             .get("output")
             .and_then(Value::as_array)
             .is_some_and(|output| !output.is_empty());
-        if has_terminal_output || self.function_call_items.is_empty() {
+        if has_terminal_output || self.output_items.is_empty() {
             return Ok(response.clone());
         }
 
@@ -141,7 +254,7 @@ impl V3ResponsesWebSocketProtocolAggregate {
         })?;
         object.insert(
             "output".to_string(),
-            Value::Array(self.function_call_items.values().cloned().collect()),
+            Value::Array(self.output_items.values().cloned().collect()),
         );
         Ok(projected)
     }

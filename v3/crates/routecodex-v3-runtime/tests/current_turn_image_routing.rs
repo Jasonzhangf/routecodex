@@ -1,20 +1,19 @@
-//! VR 当前轮图片路由红测（真实故障 20260815）。
-//!
-//! 同一 session 首轮发图命中 multimodal 后，后续纯文本轮仍命中 multimodal
-//! （minimax_anthropic）——VR 必须只看当前轮：历史轮图片（含已归一化占位）
-//! 不得再产生 multimodal/vision 能力。chat / responses / gemini 三入口同契约。
+//! 分类只读取当前轮 typed 投影；历史图片仍完整保留在标准化请求中。
+//! Chat、Responses、Gemini 共用该规则。
 
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_runtime::{
-    build_v3_chat_req_04_standardized_from_v3_server_03, build_v3_router_request_facts_for_entry,
-    build_v3_router_request_facts_from_v3_req_04_chat, build_v3_server_03_http_request_raw,
+    build_v3_chat_req_04_standardized_from_v3_server_03,
+    build_v3_req_04_standardized_responses_from_v3_server_03,
+    build_v3_router_request_facts_for_entry, build_v3_router_request_facts_from_v3_req_04_chat,
+    build_v3_server_03_http_request_raw,
 };
 use serde_json::json;
 
 const TEST_LONGCONTEXT_THRESHOLD_TOKENS: Option<u64> = Some(180_000);
 
-fn manifest_mode_b_websearch_for_routing_facts() -> routecodex_v3_config::V3Config05ManifestPublished
+fn manifest_with_websearch_for_routing_facts() -> routecodex_v3_config::V3Config05ManifestPublished
 {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -32,8 +31,6 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "MM_KEY" }] }
 [providers.mm.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
 capabilities = ["text", "tools", "web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "MiniMax-M3"
 [route_groups.controlled.pools.web_search]
 selection = { strategy = "priority" }
 match = { precedence = 20, required_capabilities = ["web_search"] }
@@ -49,10 +46,7 @@ targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key
 }
 
 #[test]
-fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
-    // 真实故障 20260815：同一 session 首轮发图命中 multimodal 后，后续
-    // 纯文本轮仍命中 multimodal（minimax_anthropic）——VR 必须只看当前轮：
-    // 历史轮图片（含已归一化占位）不得再产生 multimodal/vision 能力。
+fn v3_req04_preserves_history_chat_image_while_text_only_turn_stays_thinking() {
     let raw = build_v3_server_03_http_request_raw(
         "server".to_string(),
         V3ProviderFailureSessionScope::new("server", "default", "request").expect("failure scope"),
@@ -70,6 +64,22 @@ fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
                         {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}
                     ]
                 },
+                {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_hist",
+                        "type": "function",
+                        "function": {"name": "read_image", "arguments": "{}"}
+                    }]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_hist",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64,TOOL_ONLY"}}
+                    ]
+                },
                 {"role": "assistant", "content": "old image described"},
                 {"role": "user", "content": "continue without image"}
             ]
@@ -78,24 +88,41 @@ fn v3_routing_facts_ignore_history_images_when_current_turn_is_text_only() {
 
     let normalized =
         build_v3_chat_req_04_standardized_from_v3_server_03(raw).expect("chat req04 normalize");
+    assert_eq!(
+        normalized.body["messages"][0]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,AAAA",
+        "history image bytes must stay in the standardized Chat request"
+    );
+    assert_eq!(normalized.body["messages"][2]["tool_call_id"], "call_hist");
+    assert_eq!(
+        normalized.body["messages"][2]["content"][0]["image_url"]["url"],
+        "data:image/png;base64,TOOL_ONLY",
+        "history tool image bytes and pairing must stay in the standardized Chat request"
+    );
     let facts = build_v3_router_request_facts_from_v3_req_04_chat(
         &normalized,
-        &manifest_mode_b_websearch_for_routing_facts(),
+        &manifest_with_websearch_for_routing_facts(),
     );
 
-    assert!(
-        !facts.capabilities.contains("multimodal"),
-        "history image must not route multimodal on a text-only current turn; caps={:?}",
+    assert_eq!(
+        facts.route_classification.route_name, "thinking",
+        "a later text-only turn must not inherit the history image; caps={:?}",
         facts.capabilities
     );
+    assert!(!facts.capabilities.contains("multimodal"));
     assert!(!facts.capabilities.contains("vision"));
 }
 
 #[test]
-fn v3_routing_facts_ignore_history_images_on_responses_text_only_current_turn() {
-    // 与 chat 同一根因：responses 入口历史轮 input_image 不得在纯文本
-    // 当前轮驱动 multimodal/vision。
-    let request = json!({
+fn v3_req04_preserves_history_responses_image_while_text_only_turn_stays_thinking() {
+    let raw = build_v3_server_03_http_request_raw(
+        "server".to_string(),
+        V3ProviderFailureSessionScope::new("server", "default", "request").expect("failure scope"),
+        "request".to_string(),
+        "execution".to_string(),
+        "POST".to_string(),
+        "/v1/responses".to_string(),
+        json!({
         "model": "deepseek-v4-flash",
         "input": [
             {
@@ -115,26 +142,33 @@ fn v3_routing_facts_ignore_history_images_on_responses_text_only_current_turn() 
                 "content": [{"type": "input_text", "text": "continue"}]
             }
         ]
-    });
+        }),
+    );
+
+    let normalized = build_v3_req_04_standardized_responses_from_v3_server_03(raw)
+        .expect("responses req04 normalize");
+    assert_eq!(
+        normalized.body["input"][0]["content"][1]["image_url"], "data:image/png;base64,AAAA",
+        "history image bytes must stay in the standardized Responses request"
+    );
 
     let facts = build_v3_router_request_facts_for_entry(
-        &request,
+        &normalized.body,
         "responses",
         TEST_LONGCONTEXT_THRESHOLD_TOKENS,
     );
 
-    assert!(
-        !facts.capabilities.contains("multimodal"),
-        "responses history image must not route multimodal on text-only turn; caps={:?}",
+    assert_eq!(
+        facts.route_classification.route_name, "thinking",
+        "a later text-only turn must not inherit the history image; caps={:?}",
         facts.capabilities
     );
+    assert!(!facts.capabilities.contains("multimodal"));
     assert!(!facts.capabilities.contains("vision"));
 }
 
 #[test]
-fn v3_routing_facts_ignore_history_images_on_gemini_text_only_current_turn() {
-    // gemini 入口 contents 同样只认当前轮：历史轮 inline_data 图片不得在
-    // 纯文本当前轮驱动 multimodal/vision。
+fn v3_gemini_history_image_does_not_classify_text_only_current_turn() {
     let request = json!({
         "model": "gemini-2.5-flash",
         "contents": [
@@ -156,18 +190,18 @@ fn v3_routing_facts_ignore_history_images_on_gemini_text_only_current_turn() {
         TEST_LONGCONTEXT_THRESHOLD_TOKENS,
     );
 
-    assert!(
-        !facts.capabilities.contains("multimodal"),
-        "gemini history image must not route multimodal on text-only turn; caps={:?}",
+    assert_eq!(
+        facts.route_classification.route_name, "thinking",
+        "a later text-only turn must not inherit the history image; caps={:?}",
         facts.capabilities
     );
+    assert!(!facts.capabilities.contains("multimodal"));
     assert!(!facts.capabilities.contains("vision"));
 }
 
 #[test]
 fn v3_routing_facts_current_turn_gemini_image_routes_multimodal() {
-    // 正向：gemini 当前轮 inline_data 图片仍必须驱动 multimodal，防止
-    // "只看当前轮" 修复误伤当前轮图片路由。
+    // 当前消息的真实图片也必须驱动 multimodal。
     let request = json!({
         "model": "gemini-2.5-flash",
         "contents": [
@@ -196,7 +230,7 @@ fn v3_routing_facts_current_turn_gemini_image_routes_multimodal() {
 }
 
 #[test]
-fn v3_responses_trailing_tool_output_images_do_not_route_multimodal() {
+fn v3_responses_trailing_tool_output_images_route_multimodal() {
     let cases = [
         (
             "function_call_output",
@@ -232,12 +266,12 @@ fn v3_responses_trailing_tool_output_images_do_not_route_multimodal() {
             TEST_LONGCONTEXT_THRESHOLD_TOKENS,
         );
 
-        assert_ne!(
+        assert_eq!(
             facts.route_classification.route_name, "multimodal",
-            "trailing {output_type} image must not activate multimodal: {:?}",
+            "latest {output_type} image must activate multimodal: {:?}",
             facts.route_classification
         );
-        assert!(!facts.capabilities.contains("multimodal"));
-        assert!(!facts.capabilities.contains("vision"));
+        assert!(facts.capabilities.contains("multimodal"));
+        assert!(facts.capabilities.contains("vision"));
     }
 }

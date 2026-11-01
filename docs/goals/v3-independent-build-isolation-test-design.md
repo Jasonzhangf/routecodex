@@ -1,10 +1,10 @@
 # V3 Independent Build Isolation Test Design
 
-Status: active; positive, negative, distribution, install, live, and review-remediation coverage implemented
+Status: active behavior contract, updated for governance ablation. Historical implementation results remain in run records.
 
 ## Goal
 
-Prove that V3 compilation, tests, architecture admission, install-build, assembly,
+Prove that V3 compilation, tests, install-build, assembly,
 package staging, and release artifacts are owned by `v3/`, while explicit global
 publication is limited to the verified `~/.local/bin/rccv3` binary. Runtime protocol,
 payload, control-plane, Direct/Relay, continuation, provider, Error, and SSE semantics
@@ -14,9 +14,8 @@ must remain equivalent.
 
 1. `V3BuildDomain00RootDispatcher` may dispatch to a V3-local canonical command.
 2. `V3BuildDomain01LocalContractsLoaded` loads only V3-local Node, Cargo, toolchain,
-   version, and admission contracts.
-3. `V3BuildDomain02AdmissionVerified` rejects missing, stale, tampered, escaping, or
-   root-fallback inputs.
+   and version contracts.
+3. `V3BuildDomain02AdmissionVerified` checks required local inputs, dependency ownership and dependency/output path isolation. Its historical name does not require an admission snapshot.
 4. `V3BuildDomain03LocalArtifactsProduced` writes only declared V3-local mutable roots.
 5. `V3BuildDomain04ReleaseSurfaceReady` emits V3-local packages or atomically
    publishes the already-built verified binary.
@@ -29,8 +28,7 @@ must remain equivalent.
   and zero escaping path dependencies.
 - The three relocated crates retain package names, public APIs, tests, and dependency
   direction while moving to one V3-local source owner.
-- Architecture admission is deterministic, source-bound, schema-validated, and
-  consumed without ordinary-build access to root maps.
+- Architecture tools read canonical maps directly. Builds do not create admission mirrors.
 - Cargo test artifact cleanup preserves reusable dependencies and enforces the 2 GiB
   idle budget on success and failure.
 - Install and pack run-scoped targets/staging are created and released under
@@ -39,15 +37,13 @@ must remain equivalent.
 
 ## White-Box Negative
 
-- Reject missing V3 package/toolchain/config/admission inputs.
+- Reject missing V3 package/toolchain/config inputs.
 - Reject any Cargo path dependency, source import, target, temp, staging, dist, or
   artifact path escaping V3.
 - Reject root dependency/module fallback, root version/build-info input, sharedmodule
   crate revival, duplicate crate owner, and duplicate package source identity.
 - Reject root `bin` publication, root `dist/` package output, and resurrection of the
   retired root `start`/`dev`/`start:bg`/`start:fg` lifecycle aliases.
-- Reject a V3 isolation change set that modifies root `src/build-info.ts`; the root
-  admission compiler owns this diff-aware integration check and its mutation fixtures.
 - Reject root package, CI, or release enumeration of V3 crates or internal gates.
 - Reject missing/empty test resources and skipped gate matrices.
 - Reject build/install/package identity in request/response/provider wire,
@@ -63,15 +59,13 @@ must remain equivalent.
   globally installed `routecodex restart` lifecycle.
 - Run a standalone V3 copy with root package, root modules, root scripts, V4,
   sharedmodule source, and ancestor Cargo config unavailable.
-- Compare pre/post Cargo metadata, tree, focused crate tests, workspace tests, CLI
-  behavior, package contents, hashes, and architecture gate inventory.
+- Check affected Cargo metadata, consumers, CLI behavior and package contents. Reuse unchanged evidence.
 
 ## Project Black-Box
 
 - Audit filesystem writes before/after the full stack; only declared V3 roots and
   external download caches may change before explicit publication.
-- Install the V3-local build globally, verify binary/alias/hash/version identity, run
-  config check, then execute exactly one aggregate restart.
+- When runtime installation is in scope, use the formal install entry, verify command/version and config behavior, then request explicit approval before a live restart.
 - Verify every configured listener health endpoint and replay required Direct/Relay
   JSON/SSE old samples through their original entries.
 - Audit canonical samples and logs for build-path, provider, pipeline, Error, SSE,
@@ -85,16 +79,12 @@ must remain equivalent.
 - `npm run verify:v3-module-boundaries`
 - `npm --prefix v3 run verify:isolation`
 - `npm --prefix v3 run test:isolation:red`
-- `npm --prefix v3 run verify:admission`
-- `npm --prefix v3 run test:admission:red`
 - `npm --prefix v3 run verify:ci`
 - `npm --prefix v3 run test:distribution`
 - `npm --prefix v3 run test:install-cleanup`
-- Filesystem write-set audit recorded in the collaboration evidence ledger.
-- Post-install review after canonical install, one aggregate restart, all-listener
-  health, and same-entry protocol replay.
+- Select affected isolation, distribution and cleanup checks from actual failure modes. This list does not require rerunning all gates for each edit.
+- One milestone review follows author verification. Runtime changes require applicable health and same-entry replay; tooling-only changes use their scoped consumers.
 
 ## Known Gaps
 
-The source and live gates are implemented. Delivery remains open until the repaired
-change set receives a post-live review with no blocking finding.
+Current execution gaps belong to the owning run notes. This design does not claim current build, installation, live acceptance or delivery.

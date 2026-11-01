@@ -1,0 +1,300 @@
+{
+  "schema_version": 1,
+  "case_id": "direct-chat-echo-control",
+  "cell": {
+    "entry_protocol": "openai_chat",
+    "provider_protocol": "openai_chat",
+    "transport": "sse",
+    "mode": "direct"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": { "content-type": "application/json" },
+    "body": {
+      "model": "mock.chat-model",
+      "messages": [
+        { "role": "user", "content": "call echo with control-42" }
+      ],
+      "stream": true,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "echo",
+            "description": "Return the text argument unchanged.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "text": { "type": "string" }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/chat/completions"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "chat-model"
+    },
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "openai_chat",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {
+        "data": {
+          "id": "chatcmpl_direct_echo_control",
+          "object": "chat.completion.chunk",
+          "model": "chat-model",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "index": 0,
+                    "id": "call_direct_echo_control",
+                    "type": "function",
+                    "function": {
+                      "name": "echo",
+                      "arguments": "{\"text\":\"control-42\"}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "data": {
+          "id": "chatcmpl_direct_echo_control",
+          "object": "chat.completion.chunk",
+          "model": "chat-model",
+          "choices": [
+            {
+              "index": 0,
+              "delta": {},
+              "finish_reason": "tool_calls"
+            }
+          ]
+        }
+      },
+      { "data": "[DONE]" }
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "tool_calls.0.id": "call_direct_echo_control",
+      "tool_calls.0.function.name": "echo",
+      "tool_calls.0.function.arguments": "{\"text\":\"control-42\"}",
+      "finish_reason": "tool_calls"
+    },
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": false
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "turns": [
+    {
+      "turn_id": "direct-chat-echo-call",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": { "content-type": "application/json" },
+        "body": {
+          "model": "mock.chat-model",
+          "messages": [
+            { "role": "user", "content": "call echo with control-42" }
+          ],
+          "stream": true,
+          "tools": [
+            {
+              "type": "function",
+              "function": {
+                "name": "echo",
+                "description": "Return the text argument unchanged.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {
+                    "text": { "type": "string" }
+                  },
+                  "required": ["text"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expected_provider_exact": null,
+      "expected_client_must": {
+        "tool_calls.0.id": "call_direct_echo_control",
+        "tool_calls.0.function.name": "echo",
+        "tool_calls.0.function.arguments": "{\"text\":\"control-42\"}",
+        "finish_reason": "tool_calls"
+      },
+      "upstream_response": {
+        "protocol": "openai_chat",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {
+            "data": {
+              "id": "chatcmpl_direct_echo_control",
+              "object": "chat.completion.chunk",
+              "model": "chat-model",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {
+                    "role": "assistant",
+                    "tool_calls": [
+                      {
+                        "index": 0,
+                        "id": "call_direct_echo_control",
+                        "type": "function",
+                        "function": {
+                          "name": "echo",
+                          "arguments": "{\"text\":\"control-42\"}"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "data": {
+              "id": "chatcmpl_direct_echo_control",
+              "object": "chat.completion.chunk",
+              "model": "chat-model",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {},
+                  "finish_reason": "tool_calls"
+                }
+              ]
+            }
+          },
+          { "data": "[DONE]" }
+        ]
+      }
+    },
+    {
+      "turn_id": "direct-chat-echo-output-followup",
+      "client_request": {
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "headers": { "content-type": "application/json" },
+        "body": {
+          "model": "mock.chat-model",
+          "messages": [
+            { "role": "user", "content": "call echo with control-42" },
+            {
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "id": "call_direct_echo_control",
+                  "type": "function",
+                  "function": {
+                    "name": "echo",
+                    "arguments": "{\"text\":\"control-42\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_direct_echo_control",
+              "content": "control-42"
+            }
+          ],
+          "stream": false
+        }
+      },
+      "expected_provider_exact": {
+        "model": "chat-model",
+        "stream": false,
+        "messages": [
+          { "role": "user", "content": "call echo with control-42" },
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "id": "call_direct_echo_control",
+                "type": "function",
+                "function": {
+                  "name": "echo",
+                  "arguments": "{\"text\":\"control-42\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_direct_echo_control",
+            "content": "control-42"
+          }
+        ]
+      },
+      "expected_client_must": {
+        "choices.0.message.content": "control-42",
+        "choices.0.finish_reason": "stop"
+      },
+      "upstream_response": {
+        "protocol": "openai_chat",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "id": "chatcmpl_direct_echo_followup",
+          "object": "chat.completion",
+          "model": "chat-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "control-42"
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 21,
+            "completion_tokens": 3,
+            "total_tokens": 24
+          }
+        }
+      }
+    }
+  ],
+  "tool_followup": {
+    "consumer": "echo",
+    "side_effect": "none",
+    "input": { "text": "control-42" },
+    "expected_output": "control-42",
+    "assert_tool_executed_once": true
+  }
+}

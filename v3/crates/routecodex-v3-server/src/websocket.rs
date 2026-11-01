@@ -1,6 +1,6 @@
 use crate::*;
 use axum::body::Body;
-use axum::extract::{Request, State, WebSocketUpgrade};
+use axum::extract::{Extension, Request, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -8,6 +8,20 @@ use std::sync::Arc;
 
 pub(crate) async fn responses_websocket_endpoint(
     State(state): State<Arc<V3ListenerState>>,
+    headers: HeaderMap,
+    connection: Option<Extension<V3FrontConnectionIdentity>>,
+    ws: Option<WebSocketUpgrade>,
+) -> Response<Body> {
+    let response = responses_websocket_upgrade(state.clone(), headers, ws).await;
+    commit_model_transport_outcome(
+        &state,
+        connection.map(|Extension(identity)| identity),
+        response,
+    )
+}
+
+async fn responses_websocket_upgrade(
+    state: Arc<V3ListenerState>,
     headers: HeaderMap,
     ws: Option<WebSocketUpgrade>,
 ) -> Response<Body> {
@@ -93,6 +107,28 @@ pub(crate) async fn responses_websocket_endpoint(
     })
 }
 
+/// Record a provider terminal on the WebSocket entry as provider-private
+/// evidence, exactly as the HTTP/SSE entry does.
+///
+/// The WebSocket client boundary is a transport break, so this is the only
+/// reader the witness has on this entry. The artifact and its shape have one
+/// owner (`persist_v3_provider_terminal_evidence`); this only supplies the
+/// entry identity, which the endpoint guard above already pins to
+/// `/v1/responses` over the `responses` entry protocol.
+fn record_responses_websocket_provider_terminal_evidence(
+    state: &Arc<V3ListenerState>,
+    request_id: &str,
+    disposition: &routecodex_v3_error::V3ProviderTerminalDisposition,
+) {
+    persist_v3_provider_terminal_evidence(
+        state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        disposition,
+    );
+}
+
 // feature_id: v3.responses_inbound_websocket_proxy
 pub(crate) async fn responses_websocket_session(
     state: Arc<V3ListenerState>,
@@ -149,6 +185,20 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             return Err(());
         }
     };
+    let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
+        Ok(captured) => captured,
+        Err(error) => {
+            let result = routecodex_v3_runtime::project_v3_server_boundary_error_via_sdk(
+                routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+                "V3OperationRunnerCaptureClientJson",
+                "operation_runner_capture_client_json_failed",
+                error.to_string(),
+                Some(598),
+            );
+            let _ = send_responses_websocket_error_sdk_result(socket, result).await;
+            return Err(());
+        }
+    };
     if payload
         .get("previous_response_id")
         .is_some_and(|value| !value.is_null())
@@ -170,7 +220,14 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             }
         };
     let request_id = request_identity.request_id.clone();
+    // The executors below take `request_id` by value, but the provider-terminal
+    // arms still need it to record provider-private evidence.
+    let evidence_request_id = request_id.clone();
     let execution_id = state.debug.next_execution_id(&state.server.id);
+    let execution_scope = state
+        .debug
+        .start_trace(&state.server.id, &request_id, &execution_id)
+        .ok();
     let entry_facts = V3ResponsesEntryFacts::project(&payload);
     let protocol_plan = None;
     let effective_execution_mode =
@@ -191,15 +248,44 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 None,
                 None,
                 None,
+                None,
                 V3RequestPurpose::Conversation,
             )
             .await;
+            outcome.publish_observations(
+                state,
+                execution_scope.as_ref(),
+                "responses",
+                "/v1/responses",
+                &evidence_request_id,
+            );
             match outcome {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
+                    // A provider terminal never projects onto the client. The
+                    // WebSocket client boundary is a transport break, exactly
+                    // like the HTTP/SSE boundary: close without a payload. The
+                    // provider's own status, headers, and body are recorded as
+                    // provider-private evidence first, because otherwise the
+                    // witness built and carried across every attempt would be
+                    // dropped at this boundary with no reader at all.
+                    record_responses_websocket_provider_terminal_evidence(
+                        state,
+                        &evidence_request_id,
+                        &terminal.disposition,
+                    );
+                    Err(())
+                }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                    send_responses_relay_websocket_output(socket, output).await
+                    send_responses_relay_websocket_output(
+                        state,
+                        &evidence_request_id,
+                        socket,
+                        output,
+                    )
+                    .await
                 }
             }
         }
@@ -214,12 +300,40 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 protocol_plan.as_ref(),
             )
             .await;
+            outcome.publish_observations(
+                state,
+                execution_scope.as_ref(),
+                "responses",
+                "/v1/responses",
+                &evidence_request_id,
+            );
             match outcome {
+                V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
+                    // A provider terminal never projects onto the client. The
+                    // WebSocket client boundary is a transport break, exactly
+                    // like the HTTP/SSE boundary: close without a payload. The
+                    // provider's own status, headers, and body are recorded as
+                    // provider-private evidence first, because otherwise the
+                    // witness built and carried across every attempt would be
+                    // dropped at this boundary with no reader at all.
+                    record_responses_websocket_provider_terminal_evidence(
+                        state,
+                        &evidence_request_id,
+                        &terminal.disposition,
+                    );
+                    Err(())
+                }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(output) => {
-                    send_responses_relay_websocket_output(socket, output).await
+                    send_responses_relay_websocket_output(
+                        state,
+                        &evidence_request_id,
+                        socket,
+                        output,
+                    )
+                    .await
                 }
             }
         }
@@ -246,23 +360,6 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     payload: Value,
     protocol_plan: Option<&V3ResponsesProtocolExecutionPlan>,
 ) -> V3ResponsesDirectServerOutcome {
-    let server_tool_scope = match build_responses_relay_server_tool_scope(
-        headers,
-        Some(&payload),
-        &request_id,
-        &state.server,
-        "/v1/responses",
-    ) {
-        Ok(scope) => scope,
-        Err(message) => {
-            return V3ResponsesDirectServerOutcome::RelayOutput(
-                project_v3_responses_relay_runtime_failure(
-                    V3ResponsesRelayRuntimeError::ProviderWireEncoding(message),
-                    None,
-                ),
-            );
-        }
-    };
     let provider_failure_session_scope =
         match get_failure_session_scope(&state.server, headers, &request_id) {
             Ok(scope) => scope,
@@ -283,38 +380,32 @@ pub(crate) async fn execute_responses_relay_websocket_output(
     };
     let output = match protocol_plan {
         Some(plan) => {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,
                 input,
                 &state.provider_health,
-                &state.responses_relay_server_tool_state,
-                server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(false, false),
                 None,
                 None,
                 Some(plan.decision.target.clone()),
                 Some(plan.expanded.clone()),
                 BTreeSet::new(),
-                None,
-                None,
+                plan.relay_runtime_seeds(),
             )
             .await
         }
         None => {
-            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
+            execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,
                 input,
                 &state.provider_health,
-                &state.responses_relay_server_tool_state,
-                server_tool_scope,
                 V3ResponsesRelayProviderSnapshotCapture::new(false, false),
                 None,
                 None,
                 None,
                 None,
                 BTreeSet::new(),
-                None,
-                None,
+                V3ResponsesRelayRuntimeSeeds::default(),
             )
             .await
         }
@@ -324,10 +415,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         Err(error) => project_v3_responses_relay_runtime_failure(error, None),
     };
     if let Some(handoff) = relay_output.protocol_direct_handoff.take() {
-        let relay_trace = merge_v3_protocol_plan_trace(
-            relay_output.node_trace.clone(),
-            handoff.node_trace.clone(),
-        );
+        let relay_trace = relay_output.node_trace.clone();
         let mut relay_events = relay_output
             .observability
             .as_ref()
@@ -335,7 +423,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             .unwrap_or_default();
         relay_events.extend(handoff.provider_failure_events);
         let request_execution_control = handoff.request_execution_control;
-        let outcome = execute_responses_direct_server_outcome(
+        let mut outcome = execute_responses_direct_server_outcome(
             state,
             headers,
             "WEBSOCKET".to_string(),
@@ -349,24 +437,12 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             Some(request_execution_control),
             None,
             None,
+            None,
             V3RequestPurpose::Conversation,
         )
         .await;
-        return match outcome {
-            V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
-                prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &relay_trace);
-                merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-                    &mut frame,
-                    relay_events,
-                );
-                V3ResponsesDirectServerOutcome::DirectFrame(frame)
-            }
-            V3ResponsesDirectServerOutcome::RelayOutput(mut output) => {
-                prepend_v3_protocol_plan_trace_to_responses_relay_output(&mut output, &relay_trace);
-                merge_v3_direct_handoff_provider_failure_events(&mut output, relay_events);
-                V3ResponsesDirectServerOutcome::RelayOutput(output)
-            }
-        };
+        outcome.prepend_observations(&relay_trace, relay_events);
+        return outcome;
     }
     V3ResponsesDirectServerOutcome::RelayOutput(relay_output)
 }
@@ -521,9 +597,19 @@ pub(crate) async fn send_responses_websocket_committed_sse_stream(
 }
 
 pub(crate) async fn send_responses_relay_websocket_output(
+    state: &Arc<V3ListenerState>,
+    request_id: &str,
     socket: &mut WebSocket,
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
+    if let Some(disposition) = output.terminal_disposition.as_ref() {
+        // A provider terminal never projects onto the client: close the socket
+        // without a payload, exactly like the HTTP/SSE transport break. The
+        // witness is still recorded as provider-private evidence first, because
+        // the relay lane is a client boundary with no other reader.
+        record_responses_websocket_provider_terminal_evidence(state, request_id, disposition);
+        return Err(());
+    }
     if !output.error_chain.as_ref().is_none_or(Vec::is_empty) || output.status >= 400 {
         let message = match output.client_body {
             V3ResponsesRelayClientBody::Json(value) => value
@@ -647,12 +733,82 @@ pub(crate) async fn send_responses_websocket_error(
     code: &'static str,
     message: impl Into<String>,
 ) -> Result<(), ()> {
-    let projected = project_v3_server_websocket_error(code, message);
-    let event = json!({
-        "type": "error",
-        "error": projected.body["error"].clone()
-    });
-    send_responses_websocket_json(socket, &event).await
+    let result = routecodex_v3_runtime::project_v3_server_websocket_error_via_sdk(code, message);
+    send_responses_websocket_error_sdk_result(socket, result).await
+}
+
+pub(crate) async fn send_responses_websocket_error_sdk_result(
+    socket: &mut WebSocket,
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) -> Result<(), ()> {
+    match result {
+        Ok(projected) => send_responses_websocket_projected_error(socket, projected).await,
+        Err(fault) => {
+            send_responses_websocket_sdk_fault_diagnostic(fault);
+            Err(())
+        }
+    }
+}
+
+fn send_responses_websocket_sdk_fault_diagnostic(
+    fault: routecodex_v3_runtime::V3RelayErrorOperatorFault,
+) {
+    let policy = &fault.policy_failure;
+    let original = fault
+        .original_source
+        .as_ref()
+        .map(|source| {
+            format!(
+                "original_kind={:?} original_stage={} original_code={} original_message={:?}",
+                source.source_kind, source.source_stage, source.code, source.message
+            )
+        })
+        .unwrap_or_else(|| "original=<none>".to_string());
+    let message = format!(
+        "[v3-websocket-internal-error] class=runtime_failure policy_kind={:?} policy_stage={} policy_code={} policy_message={:?} {}",
+        policy.source_kind, policy.source_stage, policy.code, policy.message, original
+    );
+    #[cfg(test)]
+    record_responses_websocket_sdk_fault_diagnostic(&message);
+    eprintln!("{message}");
+}
+
+#[cfg(test)]
+static RESPONSES_WEBSOCKET_SDK_FAULT_DIAGNOSTICS: std::sync::OnceLock<
+    std::sync::Mutex<Vec<String>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+fn record_responses_websocket_sdk_fault_diagnostic(message: &str) {
+    RESPONSES_WEBSOCKET_SDK_FAULT_DIAGNOSTICS
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(message.to_string());
+}
+
+#[cfg(test)]
+pub(crate) fn take_responses_websocket_sdk_fault_diagnostics() -> Vec<String> {
+    RESPONSES_WEBSOCKET_SDK_FAULT_DIAGNOSTICS
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .drain(..)
+        .collect()
+}
+
+async fn send_responses_websocket_projected_error(
+    _socket: &mut WebSocket,
+    projected: routecodex_v3_error::V3Error06ClientProjected,
+) -> Result<(), ()> {
+    eprintln!(
+        "[v3-websocket-internal-error] class={} cause={}",
+        projected.error_class, projected.error_detail
+    );
+    Err(())
 }
 
 pub(crate) async fn send_responses_websocket_json(
