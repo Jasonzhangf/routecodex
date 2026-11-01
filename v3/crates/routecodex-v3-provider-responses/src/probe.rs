@@ -1,6 +1,6 @@
 use crate::transport::{
     build_v3_anthropic_provider_request_header,
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeouts,
     build_v3_transport_13_responses_http_request_from_v3_provider_12, V3ProviderRequestHeader,
     V3Transport13ResponsesRequest,
 };
@@ -112,11 +112,7 @@ pub fn build_v3_provider_global_request(
     } else {
         V3ResponsesStreamIntent::Json
     };
-    let identity_scope = crate::adaptive_concurrency::V3ConcurrencyIdentityScope {
-        interface_id: target.interface_id.clone(),
-        model_id: target.canonical_model_id.clone(),
-    };
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeouts(
         request_id,
         target.provider_id,
         url,
@@ -125,10 +121,8 @@ pub fn build_v3_provider_global_request(
         body,
         headers.into_iter().chain(provider_headers).collect(),
         Some(std::time::Duration::from_millis(target.request_timeout_ms)),
-        target.concurrency_acquire_timeout_ms,
         None,
     )
-    .map(|request| request.with_identity_scope(identity_scope))
     .map_err(|error| error.to_string())
 }
 
@@ -162,8 +156,6 @@ mod tests {
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 120_000,
             sse_first_frame_timeout_ms: None,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
         };
         let request =
             build_v3_provider_global_probe_request(target.clone(), "probe-provider-header".into())

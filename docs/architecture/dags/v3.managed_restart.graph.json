@@ -18,6 +18,8 @@
   ],
   "outputs": ["restart-outcome"],
   "invariants": [
+    "探测任务和 sample cutoff 独立于业务请求；请求入口没有共享准入、permit 或 dispatch guard。正式重启由生命周期处理 Front 快照、传输关闭和 exec 交接，不等待业务请求排空。",
+    "执行前完成健康状态的可确认持久准备；准备失败或不确定时拒绝 exec，释放准备 guard 并保留原 owner。新进程采用其实际加载的配置；不等待所有业务请求排空。",
     "生命周期端口可用性、陈旧发现、跨实例释放与残留 PID 扫描仅针对业务 listeners（server_id != \"admin_webui\"）；admin-only foreign PID 永远不进入被接管、收割或信号范围。",
     "run_managed_child_with_declaration 启动 Server aggregate 时，admin_webui 被视为可选附属监听：失败显式告警并跳过 admin router/background 注册，不回滚业务 listeners；业务 listener 真实端口冲突显式失败。",
     "declaration.listeners 完整保留 admin_webui 序列化，维护 instance.json 与 PreviousReleaseRestartTransfer 的跨版本精确匹配；不得删除该条目来绕开发现范围问题。",

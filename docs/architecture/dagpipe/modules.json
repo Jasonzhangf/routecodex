@@ -24,6 +24,26 @@
   ],
   "extensions": [
     {
+      "id": "provider-session-health-probe",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/provider-session-health-probe.graph.json"
+    },
+    {
+      "id": "provider-request-recovery-step",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/provider-request-recovery-step.graph.json"
+    },
+    {
+      "id": "provider-session-health-observation",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/provider-session-health-observation.graph.json"
+    },
+    {
+      "id": "provider-websocket-attempt",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/provider-websocket-attempt.graph.json"
+    },
+    {
       "id": "provider-listener-health",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/graphs/provider-listener-health.graph.json"

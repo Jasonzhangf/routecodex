@@ -3,22 +3,20 @@ mod persistence;
 mod probe_schedule;
 mod rate_limit;
 
-pub use manual::V3_COOLDOWN_MANUAL_MAX_MS;
-
 use crate::global_cooldown::{V3ProviderCooldownFailureClass, V3ProviderRateLimitEpisode};
 use crate::key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderProbePurpose,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 use crate::probe_backoff::{
-    adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms,
-    provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
+    long_probe_backoff_ms, probe_backoff_ms, provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
 };
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
     V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
 };
+pub use manual::V3_COOLDOWN_MANUAL_MAX_MS;
 use persistence::{
     legacy_provider_cooldown_state_path_for_listener,
     legacy_provider_cooldown_state_path_for_manifest, listener_scoped_state_suffix,
@@ -52,13 +50,6 @@ pub struct V3ProviderQuotaState {
     pub scope_label: String,
     pub remaining: u64,
     pub reset_at_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct V3ProviderConcurrencyState {
-    pub provider_id: String,
-    pub in_flight: u32,
-    pub limit: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -105,6 +96,8 @@ pub struct V3ProviderFailureRecord {
     pub state: String,
     pub failure_count: u32,
     pub cooldown_until_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_success_revision: Option<u64>,
     pub reason: Option<String>,
 }
 
@@ -139,7 +132,7 @@ pub trait V3ProviderAvailabilityReader {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         let _ = interface_id;
         self.availability(provider_id, auth_alias, model_id, now_ms)
     }
@@ -150,7 +143,7 @@ pub trait V3ProviderAvailabilityReader {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection;
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError>;
 }
 
 #[derive(Debug, Clone, Default)]
@@ -163,15 +156,15 @@ impl V3ProviderAvailabilityReader for V3ProviderAllAvailable {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         _now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
-        V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
+        Ok(V3ProviderAvailabilityProjection {
             provider_id: provider_id.to_string(),
             interface_id: "default".to_string(),
             auth_alias: auth_alias.map(ToOwned::to_owned),
             model_id: model_id.map(ToOwned::to_owned),
             available: true,
             blocked_scopes: Vec::new(),
-        }
+        })
     }
 }
 
@@ -233,7 +226,7 @@ impl V3ProviderAvailabilityReader for V3ProviderSessionAvailabilityReader {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         self.store.availability_for_session_for_interface(
             &self.failure_session_scope,
             provider_id,
@@ -250,7 +243,7 @@ impl V3ProviderAvailabilityReader for V3ProviderSessionAvailabilityReader {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         self.store.availability_for_session(
             &self.failure_session_scope,
             provider_id,
@@ -281,7 +274,7 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         self.store.availability_for_interface(
             provider_id,
             interface_id,
@@ -297,7 +290,7 @@ impl V3ProviderAvailabilityReader for V3ProviderAvailabilityRegistry {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         self.store
             .availability(provider_id, auth_alias, model_id, now_ms)
     }
@@ -323,12 +316,13 @@ pub(super) struct V3ProviderHealthState {
         BTreeMap<V3ProviderCooldownProbeKey, crate::key_health::V3ProbeAcquisitionId>,
     adaptive_history: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderAdaptiveHistory>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
-    concurrency: BTreeMap<String, V3ProviderConcurrencyState>,
 }
 
 #[derive(Debug, Clone)]
 struct V3ProviderAdaptiveHistory {
     rate_limit_episode: Option<V3ProviderRateLimitEpisode>,
+    real_error_streak: u32,
+    first_global_429_ms: Option<u64>,
     attempts: u32,
     failures: u32,
     recovery_ewma_ms: Option<u64>,
@@ -341,6 +335,7 @@ struct V3ProviderAdaptiveHistory {
     failure_fingerprint: Option<V3ProviderErrorFingerprint>,
     success_streak: u32,
     last_success_at_ms: Option<u64>,
+    recovery_success_revision: u64,
     score_generation: u64,
 }
 
@@ -348,6 +343,8 @@ impl Default for V3ProviderAdaptiveHistory {
     fn default() -> Self {
         Self {
             rate_limit_episode: None,
+            real_error_streak: 0,
+            first_global_429_ms: None,
             attempts: 0,
             failures: 0,
             recovery_ewma_ms: None,
@@ -357,6 +354,7 @@ impl Default for V3ProviderAdaptiveHistory {
             failure_fingerprint: None,
             success_streak: 0,
             last_success_at_ms: None,
+            recovery_success_revision: 0,
             score_generation: 0,
         }
     }
@@ -413,8 +411,9 @@ impl V3ProviderHealthError {
 
 impl V3ProviderHealthStore {
     pub fn publish_availability_change(&self) {
-        let next = self.availability_generation.borrow().wrapping_add(1);
-        self.availability_generation.send_replace(next);
+        self.availability_generation.send_modify(|generation| {
+            *generation = generation.wrapping_add(1);
+        });
     }
 
     pub fn availability_generation(&self) -> u64 {
@@ -564,10 +563,7 @@ impl V3ProviderHealthStore {
                         | V3ProviderCooldownFailureClass::RateLimit
                         | V3ProviderCooldownFailureClass::ProbeLong
                         | V3ProviderCooldownFailureClass::ManualAuth
-                ) {
-                    continue;
-                }
-                if state.health_disabled.contains(&key.provider_id)
+                ) || state.health_disabled.contains(&key.provider_id)
                     || state.configured_disabled.contains(&key.provider_id)
                 {
                     continue;
@@ -627,7 +623,7 @@ impl V3ProviderHealthStore {
                 {
                     continue;
                 }
-                let key = provider_cooldown_probe_key_for_interface(
+                let probe_key = provider_cooldown_probe_key_for_interface(
                     &key.provider_id,
                     &key.interface_id,
                     key.auth_alias.as_deref(),
@@ -635,7 +631,7 @@ impl V3ProviderHealthStore {
                 );
                 state
                     .adaptive_history
-                    .entry(key)
+                    .entry(probe_key)
                     .or_default()
                     .rate_limit_episode = Some(episode);
             }
@@ -680,6 +676,7 @@ impl V3ProviderHealthStore {
                 state: "health_disabled".to_string(),
                 failure_count: 0,
                 cooldown_until_ms: None,
+                recovery_success_revision: None,
                 reason: reason.map(str::to_string),
             });
         }
@@ -733,6 +730,7 @@ impl V3ProviderHealthStore {
                     .into(),
                     failure_count: projection.failure_streak,
                     cooldown_until_ms: projection.cooldown_until_ms,
+                    recovery_success_revision: Some(projection.recovery_success_revision),
                     reason: reason.map(str::to_string),
                 });
             }
@@ -756,6 +754,7 @@ impl V3ProviderHealthStore {
                 state: "cooldown".to_string(),
                 failure_count,
                 cooldown_until_ms,
+                recovery_success_revision: None,
                 reason: reason.map(str::to_string),
             });
         }
@@ -810,6 +809,7 @@ impl V3ProviderHealthStore {
             state: record_state,
             failure_count,
             cooldown_until_ms,
+            recovery_success_revision: None,
             reason: record_reason,
         })
     }
@@ -870,6 +870,7 @@ impl V3ProviderHealthStore {
                 state: "health_disabled".to_string(),
                 failure_count: 0,
                 cooldown_until_ms: None,
+                recovery_success_revision: None,
                 reason: reason.map(str::to_string),
             });
         }
@@ -889,6 +890,7 @@ impl V3ProviderHealthStore {
                 state: "cooldown".to_string(),
                 failure_count,
                 cooldown_until_ms: cooldown.until_ms,
+                recovery_success_revision: None,
                 reason: reason.map(str::to_string),
             });
         }
@@ -908,12 +910,12 @@ impl V3ProviderHealthStore {
             state: "transient_bypass".to_string(),
             failure_count: 0,
             cooldown_until_ms: Some(until_ms),
+            recovery_success_revision: None,
             reason: reason.map(str::to_string),
         })
     }
 
-    /// 成功响应清零该完整 provider/key/model 的连续失败与 cooldown，
-    /// 让其他 session 也能立即恢复该精确 key/model。
+    /// A real success restores this provider identity across sessions.
     pub fn record_provider_success_in_session(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -934,7 +936,7 @@ impl V3ProviderHealthStore {
 
     pub fn record_provider_success_in_session_for_interface(
         &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
+        _failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: &str,
         interface_id: &str,
         auth_alias: Option<&str>,
@@ -943,27 +945,45 @@ impl V3ProviderHealthStore {
     ) -> Result<(), V3ProviderHealthError> {
         let provider_runtime_identity =
             provider_key_label(provider_id, interface_id, auth_alias, model_id);
-        let key = provider_failure_session_key_for_interface(
-            failure_session_scope,
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-        );
         let mut state = self
             .state
             .write()
             .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
-        state.cooldowns.remove(&key);
-        // A real success in any session is recovery evidence for this exact
-        // provider:key:model. Close the same identity's consecutive-failure
-        // window across sessions while retaining adaptive history.
         state.cooldowns.retain(|session_key, _| {
             session_key.provider_runtime_identity != provider_runtime_identity
         });
         state.consecutive_failures.retain(|session_key, _| {
             session_key.provider_runtime_identity != provider_runtime_identity
         });
+        let matching_sessions: Vec<_> = state
+            .adaptive_history
+            .keys()
+            .filter(|candidate| {
+                matches!(
+                    &candidate.scope,
+                    crate::provider_cooldown_probe::V3ProviderCooldownHealthScope::Session { .. }
+                ) && candidate.provider_id == provider_id
+                    && candidate.interface_id == interface_id
+                    && candidate.auth_alias.as_deref() == auth_alias
+                    && candidate.model_id.as_deref() == model_id
+            })
+            .cloned()
+            .collect();
+        for session_key in matching_sessions {
+            rate_limit::reset_on_business_success(&mut state, &session_key, _now_ms);
+            if let Some(history) = state.adaptive_history.get_mut(&session_key) {
+                history.score_generation = history.score_generation.saturating_add(1);
+            }
+            if state
+                .provider_cooldown_probes
+                .get(&session_key)
+                .is_some_and(|probe| {
+                    probe.cooldown_cause == Some(V3ProviderCooldownFailureClass::RateLimit)
+                })
+            {
+                state.provider_cooldown_probes.remove(&session_key);
+            }
+        }
         let model_key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,
@@ -971,9 +991,7 @@ impl V3ProviderHealthStore {
             model_id,
         );
         record_adaptive_success(&mut state, &model_key, _now_ms);
-        // A business success resets session evidence only. A pending provider
-        // cooldown remains blocked until the typed probe owner reports probe
-        // success; business traffic must never resurrect it.
+        // Identity-scoped policies are handled by their existing health owner.
         persist_cooldown_state(state);
         self.publish_availability_change();
         Ok(())
@@ -1143,6 +1161,7 @@ impl V3ProviderHealthStore {
             auth_alias,
             model_id,
             None,
+            false,
         )
     }
 
@@ -1267,6 +1286,25 @@ impl V3ProviderHealthStore {
         )
     }
 
+    /// Account for one real probe error under the same current permit that
+    /// owns the recovery schedule. `None` status is a real transport failure.
+    pub fn complete_provider_cooldown_probe_real_failure_with_permit(
+        &self,
+        permit: &V3ProviderHealthProbePermit,
+        status: Option<u16>,
+        now_ms: u64,
+    ) -> Result<(), V3ProviderHealthError> {
+        self.complete_provider_cooldown_probe_failure_impl(
+            permit.provider_id(),
+            permit.interface_id(),
+            permit.auth_alias(),
+            permit.model_id(),
+            now_ms,
+            Some(permit),
+            Some(status),
+        )
+    }
+
     fn complete_provider_cooldown_probe_success_impl(
         &self,
         provider_id: &str,
@@ -1291,13 +1329,17 @@ impl V3ProviderHealthStore {
                 return Ok(false);
             }
         }
-        let key = resolve_provider_cooldown_probe_key_for_interface(
-            &state.provider_cooldown_probes,
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-        );
+        let key = permit
+            .map(V3ProviderHealthProbePermit::cooldown_key)
+            .unwrap_or_else(|| {
+                resolve_provider_cooldown_probe_key_for_interface(
+                    &state.provider_cooldown_probes,
+                    provider_id,
+                    interface_id,
+                    auth_alias,
+                    model_id,
+                )
+            });
         let recovered = complete_provider_probe_success_at_generation(
             &mut state,
             &key,
@@ -1342,6 +1384,7 @@ impl V3ProviderHealthStore {
             model_id,
             now_ms,
             None,
+            None,
         )
     }
 
@@ -1357,6 +1400,7 @@ impl V3ProviderHealthStore {
             permit.model_id(),
             now_ms,
             Some(permit),
+            None,
         )
     }
 
@@ -1368,6 +1412,7 @@ impl V3ProviderHealthStore {
         model_id: Option<&str>,
         now_ms: u64,
         permit: Option<&V3ProviderHealthProbePermit>,
+        real_failure_status: Option<Option<u16>>,
     ) -> Result<(), V3ProviderHealthError> {
         if permit.is_some_and(|permit| permit.purpose() != V3ProviderProbePurpose::CooldownRecovery)
         {
@@ -1384,14 +1429,18 @@ impl V3ProviderHealthStore {
                 return Ok(());
             }
         }
-        let key = resolve_provider_cooldown_probe_key_for_interface(
-            &state.provider_cooldown_probes,
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-        );
-        let Some(existing_probe) = state.provider_cooldown_probes.get(&key) else {
+        let key = permit
+            .map(V3ProviderHealthProbePermit::cooldown_key)
+            .unwrap_or_else(|| {
+                resolve_provider_cooldown_probe_key_for_interface(
+                    &state.provider_cooldown_probes,
+                    provider_id,
+                    interface_id,
+                    auth_alias,
+                    model_id,
+                )
+            });
+        let Some(existing_probe) = state.provider_cooldown_probes.get(&key).cloned() else {
             return Ok(());
         };
         let max_probe_interval_ms = existing_probe.max_probe_interval_ms;
@@ -1412,6 +1461,40 @@ impl V3ProviderHealthStore {
                 self.publish_availability_change();
                 return Ok(());
             }
+        }
+        if let (Some(status), Some(auth_alias), Some(model_id)) =
+            (real_failure_status, auth_alias, model_id)
+        {
+            if !state.health_disabled.contains(provider_id)
+                && status.is_none_or(|value| {
+                    (100..=599).contains(&value) && !(200..300).contains(&value)
+                })
+            {
+                let identity = provider_cooldown_probe_key_for_interface(
+                    provider_id,
+                    interface_id,
+                    Some(auth_alias),
+                    Some(model_id),
+                );
+                Self::record_real_failure_locked(&mut state, &identity, status, now_ms);
+            }
+        }
+        if existing_probe.cooldown_cause == Some(V3ProviderCooldownFailureClass::RateLimit) {
+            let probe = state
+                .provider_cooldown_probes
+                .get_mut(&key)
+                .expect("probe was checked");
+            if probe.next_probe_at_ms.is_none_or(|next| next <= now_ms) {
+                let midnight = (now_ms.saturating_add(8 * 3_600_000) / 86_400_000)
+                    .saturating_add(1)
+                    .saturating_mul(86_400_000)
+                    .saturating_sub(8 * 3_600_000);
+                probe.next_probe_at_ms =
+                    Some(now_ms.saturating_add(probe.probe_interval_ms).min(midnight));
+            }
+            persist_cooldown_state(state);
+            self.publish_availability_change();
+            return Ok(());
         }
         let next_probe_failure_count = if advisory_probe {
             existing_probe.probe_failure_count
@@ -1470,6 +1553,72 @@ impl V3ProviderHealthStore {
             action,
             now_ms,
         )
+    }
+
+    /// Record one typed upstream HTTP or transport failure for the complete identity.
+    /// This is independent of the session-local recovery observation.
+    pub fn record_real_provider_failure_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+        status: Option<u16>,
+        now_ms: u64,
+    ) -> Result<(), String> {
+        if status
+            .is_some_and(|status| !(100..=599).contains(&status) || (200..300).contains(&status))
+        {
+            return Ok(());
+        }
+        let key = provider_cooldown_probe_key_for_interface(
+            provider_id,
+            interface_id,
+            Some(auth_alias),
+            Some(model_id),
+        );
+        let mut state = self.state.write().map_err(|error| error.to_string())?;
+        if state.health_disabled.contains(provider_id) {
+            return Ok(());
+        }
+        Self::record_real_failure_locked(&mut state, &key, status, now_ms);
+        drop(state);
+        self.publish_availability_change();
+        Ok(())
+    }
+
+    fn record_real_failure_locked(
+        state: &mut V3ProviderHealthState,
+        key: &V3ProviderCooldownProbeKey,
+        status: Option<u16>,
+        now_ms: u64,
+    ) {
+        let history = state.adaptive_history.entry(key.clone()).or_default();
+        history.real_error_streak = history.real_error_streak.saturating_add(1);
+        history.score_generation = history.score_generation.saturating_add(1);
+        if status == Some(429) {
+            history.first_global_429_ms.get_or_insert(now_ms);
+        }
+        let should_cool = history.real_error_streak >= 10
+            && (status != Some(429)
+                || history
+                    .first_global_429_ms
+                    .is_some_and(|first| now_ms.saturating_sub(first) > 120_000));
+        if should_cool {
+            let interval = V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS;
+            upsert_provider_cooldown_probe_with_interval(
+                state,
+                &key.provider_id,
+                &key.interface_id,
+                key.auth_alias.as_deref(),
+                key.model_id.as_deref(),
+                now_ms,
+                now_ms.saturating_add(interval),
+                interval,
+                false,
+                false,
+            );
+        }
     }
 
     pub fn record_provider_failure_action_for_interface(
@@ -1559,37 +1708,33 @@ impl V3ProviderHealthStore {
             self.publish_availability_change();
             return Ok(Some(projection));
         }
+        let interrupted_rate_limit_streak = action
+            .failure_fingerprint
+            .as_ref()
+            .is_some_and(|fingerprint| fingerprint.http_status != 429)
+            && state
+                .adaptive_history
+                .get_mut(&key)
+                .and_then(|history| history.rate_limit_episode.as_mut())
+                .is_some_and(|episode| {
+                    let changed = episode.consecutive_429 != 0;
+                    episode.consecutive_429 = 0;
+                    changed
+                });
         if matches!(
             action.recovery,
             V3ProviderRecoveryKind::NotProviderHealth
                 | V3ProviderRecoveryKind::HealthNeutralTransient
         ) {
-            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+            let projection = key_health_projection(&state, &key, now_ms);
+            if interrupted_rate_limit_streak {
+                persist_cooldown_state(state);
+            }
+            return Ok(Some(projection));
         }
         if state.health_disabled.contains(provider_id) {
             return Ok(Some(key_health_projection(&state, &key, now_ms)));
         }
-        let configured_max_probe_interval_ms = state
-            .failure_policies
-            .get(provider_id)
-            .and_then(|policy| policy.max_probe_interval_ms);
-        // Advisory probe is a per-provider configuration, so it applies to every
-        // failure action for that provider. Callers only carry the typed
-        // classification; the store is the single owner that stamps configured
-        // policy onto the probe state it creates.
-        let advisory_probe = action.advisory_probe
-            || state
-                .failure_policies
-                .get(provider_id)
-                .is_some_and(|policy| policy.advisory_probe);
-        // Consume nonzero typed thresholds unchanged; their numeric value is
-        // not evidence that a policy was implicit or explicit.
-        let failure_threshold = match action.recovery {
-            V3ProviderRecoveryKind::RecoverableCounted if action.failure_threshold == 0 => {
-                V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
-            }
-            _ => action.failure_threshold.max(1),
-        };
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
             action.recovery,
@@ -1606,8 +1751,7 @@ impl V3ProviderHealthStore {
                 // 连续失败必须同源：只有同一个 typed fingerprint 的失败才累计
                 // streak，500/502 这类不同错误不会凑够阈值而误冷却 provider。
                 // 没有上游状态的失败已由分类器落到失败类别身份，不比较 class_code
-                // 之外的隐式状态。HTTP 429 走同一个有界 hold：指纹相同的连续 429
-                // 累计 streak，但阈值已由分类器置为 1，所以首个 429 立刻触发。
+                // 之外的隐式状态。真实 HTTP 429 已由专用 rate-limit episode 处理。
                 history.failure_streak =
                     if history.failure_fingerprint == action.failure_fingerprint {
                         history.failure_streak.saturating_add(1)
@@ -1630,47 +1774,8 @@ impl V3ProviderHealthStore {
             history.attempts = history.attempts.saturating_add(1);
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
-            let failure_streak = history.failure_streak;
-            let observed_attempts = history.attempts;
-            let observed_failures = history.failures;
-            // A configured fast-recovery provider caps the first ladder step;
-            // otherwise the first probe is the fixed 5s ladder step.
-            let interval = configured_max_probe_interval_ms
-                .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
-                .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
-            // The exact key/model failure streak admits cooldown. The default
-            // threshold is one; explicit policies may still declare a higher
-            // threshold. A globally scored identity that reaches zero is an
-            // additional, independent cooldown trigger.
-            let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
-                && match action.recovery {
-                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-                    | V3ProviderRecoveryKind::RecoverableCounted => {
-                        history.score_milli == 0 || history.failure_streak >= failure_threshold
-                    }
-                    _ => false,
-                };
-            if should_block {
-                // Real 429 observations already returned through the episode
-                // owner. Ordinary failures retain their business ladder.
-                let blocked_until_ms = now_ms.saturating_add(provider_failure_cooldown_ms(
-                    failure_streak,
-                    observed_attempts,
-                    observed_failures,
-                ));
-                upsert_provider_cooldown_probe_with_interval(
-                    &mut state,
-                    provider_id,
-                    interface_id,
-                    Some(auth_alias),
-                    Some(model_id),
-                    now_ms,
-                    blocked_until_ms,
-                    interval,
-                    action.long_probe_backoff,
-                    advisory_probe,
-                );
-            }
+            // Observation bookkeeping is not a new business failure. Only
+            // the real-attempt counter can commit identity-wide cooldown.
         }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
@@ -1740,15 +1845,41 @@ impl V3ProviderHealthStore {
             history.failures = 0;
             record_health_delta(history, 1);
             history.failure_streak = 0;
+            history.real_error_streak = 0;
+            history.first_global_429_ms = None;
             history.failure_fingerprint = None;
             history.success_streak = history.success_streak.saturating_add(1);
             history.last_success_at_ms = Some(now_ms);
+            history.recovery_success_revision = history.recovery_success_revision.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
         }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
         self.publish_availability_change();
         Ok(projection)
+    }
+
+    /// Returns the current listener-local revision of real successful responses
+    /// or accepted probes for one exact provider identity. Notifications and
+    /// failures do not advance this value.
+    pub fn recovery_success_revision_for_interface(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: &str,
+        model_id: &str,
+    ) -> Result<u64, String> {
+        let key = provider_cooldown_probe_key_for_interface(
+            provider_id,
+            interface_id,
+            Some(auth_alias),
+            Some(model_id),
+        );
+        let state = self.state.read().map_err(|error| error.to_string())?;
+        Ok(state
+            .adaptive_history
+            .get(&key)
+            .map_or(0, |history| history.recovery_success_revision))
     }
 
     pub fn complete_probe_success(
@@ -1852,7 +1983,7 @@ impl V3ProviderHealthStore {
         priority: i32,
         base_weight: u32,
         _now_ms: u64,
-    ) -> Result<V3ProviderSchedulingProjection, String> {
+    ) -> Result<V3ProviderSchedulingProjection, V3ProviderHealthError> {
         self.scheduling_projection_for_key_with_interface(
             provider_id,
             "default",
@@ -1873,7 +2004,7 @@ impl V3ProviderHealthStore {
         priority: i32,
         base_weight: u32,
         _now_ms: u64,
-    ) -> Result<V3ProviderSchedulingProjection, String> {
+    ) -> Result<V3ProviderSchedulingProjection, V3ProviderHealthError> {
         let key = provider_cooldown_probe_key_for_interface(
             provider_id,
             interface_id,
@@ -1883,7 +2014,7 @@ impl V3ProviderHealthStore {
         let state = self
             .state
             .read()
-            .map_err(|error| format!("provider health state poisoned: {error}"))?;
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         let (score_milli, score_generation) = state
             .adaptive_history
             .get(&key)
@@ -1915,8 +2046,7 @@ impl V3ProviderHealthStore {
             effective_priority: priority,
             score_milli,
             base_weight,
-            effective_weight_milli: u64::from(base_weight.max(1))
-                .saturating_mul(u64::from(score_milli.max(1))),
+            effective_weight_milli: u64::from(base_weight.max(1)).saturating_mul(100),
             available,
             blocked_scopes: if available {
                 Vec::new()
@@ -1935,7 +2065,7 @@ impl V3ProviderHealthStore {
         priority: i32,
         base_weight: u32,
         now_ms: u64,
-    ) -> Result<V3ProviderSchedulingProjection, String> {
+    ) -> Result<V3ProviderSchedulingProjection, V3ProviderHealthError> {
         self.scheduling_projection_for_key(
             provider_id,
             auth_alias,
@@ -1965,26 +2095,6 @@ impl V3ProviderHealthStore {
         Ok(quota)
     }
 
-    pub(crate) fn update_concurrency_state(
-        &self,
-        provider_id: impl Into<String>,
-        in_flight: u32,
-        limit: u32,
-    ) -> Result<V3ProviderConcurrencyState, V3ProviderHealthError> {
-        let provider_id = provider_id.into();
-        let concurrency = V3ProviderConcurrencyState {
-            provider_id: provider_id.clone(),
-            in_flight,
-            limit,
-        };
-        self.state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?
-            .concurrency
-            .insert(provider_id, concurrency.clone());
-        Ok(concurrency)
-    }
-
     pub fn availability_for_session(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -1992,7 +2102,7 @@ impl V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         self.availability_for_session_for_interface(
             failure_session_scope,
             provider_id,
@@ -2011,7 +2121,7 @@ impl V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         let key = provider_failure_session_key_for_interface(
             failure_session_scope,
             provider_id,
@@ -2022,7 +2132,7 @@ impl V3ProviderHealthStore {
         let mut state = self
             .state
             .write()
-            .expect("provider health lock should not be poisoned in session projection");
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
         remove_expired_session_state(&mut state, now_ms);
         let mut projection = global_availability_projection(
             &state,
@@ -2084,6 +2194,16 @@ impl V3ProviderHealthStore {
                 model_id,
             ),
             now_ms,
+        ) || key_blocks_availability(
+            &state,
+            &crate::provider_cooldown_probe::session_cooldown_probe_key_for_interface(
+                failure_session_scope,
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+            ),
+            now_ms,
         );
         if cooldown_probe_pending {
             projection.available = false;
@@ -2097,7 +2217,7 @@ impl V3ProviderHealthStore {
                     .push("provider_cooldown_probe_pending".to_string());
             }
         }
-        projection
+        Ok(projection)
     }
 }
 
@@ -2315,19 +2435,20 @@ impl V3ProviderAvailabilityReader for V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
+        self.expire_rate_limit_day(provider_id, interface_id, auth_alias, model_id, now_ms)?;
         let state = self
             .state
             .read()
-            .expect("provider health lock should not be poisoned in projection");
-        global_availability_projection(
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        Ok(global_availability_projection(
             &state,
             provider_id,
             interface_id,
             auth_alias,
             model_id,
             now_ms,
-        )
+        ))
     }
 
     fn availability(
@@ -2336,12 +2457,50 @@ impl V3ProviderAvailabilityReader for V3ProviderHealthStore {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
+        self.expire_rate_limit_day(provider_id, "default", auth_alias, model_id, now_ms)?;
         let state = self
             .state
             .read()
-            .expect("provider health lock should not be poisoned in projection");
-        global_availability_projection(&state, provider_id, "default", auth_alias, model_id, now_ms)
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        Ok(global_availability_projection(&state, provider_id, "default", auth_alias, model_id, now_ms))
+    }
+}
+
+impl V3ProviderHealthStore {
+    fn expire_rate_limit_day(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+        now_ms: u64,
+    ) -> Result<(), V3ProviderHealthError> {
+        let key = provider_cooldown_probe_key_for_interface(
+            provider_id,
+            interface_id,
+            auth_alias,
+            model_id,
+        );
+        let expired = {
+            let state = self
+                .state
+                .read()
+                .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+            rate_limit::is_expired_day(&state, &key, now_ms)
+        };
+        if !expired {
+            return Ok(());
+        }
+        let mut state = self
+            .state
+            .write()
+            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?;
+        if rate_limit::reset_expired_day(&mut state, &key, now_ms) {
+            persist_cooldown_state(state);
+            self.publish_availability_change();
+        }
+        Ok(())
     }
 }
 
@@ -2368,20 +2527,6 @@ pub(crate) fn explain_provider_health_reasons(
                     .is_none_or(|reset_at_ms| reset_at_ms > now_ms)
         })
         .map(|quota| format!("quota:{}:exhausted", quota.scope_label))
-        .chain(
-            state
-                .concurrency
-                .get(provider_id)
-                .filter(|concurrency| {
-                    concurrency.limit > 0 && concurrency.in_flight >= concurrency.limit
-                })
-                .map(|concurrency| {
-                    format!(
-                        "concurrency:provider_instance:{}:{}/{}",
-                        provider_id, concurrency.in_flight, concurrency.limit
-                    )
-                }),
-        )
         .collect()
 }
 
@@ -2416,15 +2561,6 @@ fn global_availability_projection(
             })
             .map(|key| format!("quota:{key}")),
     );
-    if state
-        .concurrency
-        .get(provider_id)
-        .is_some_and(|concurrency| {
-            concurrency.limit > 0 && concurrency.in_flight >= concurrency.limit
-        })
-    {
-        blocked_scopes.push(format!("concurrency:provider_instance:{provider_id}"));
-    }
     if key_blocks_availability(
         state,
         &provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id),

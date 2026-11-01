@@ -971,7 +971,6 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
-  - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
   - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
@@ -1181,27 +1180,22 @@ features:
     web_search route activation requires strict current-user keyword intent or an
     explicit current-turn model web-search call; exposed tool declarations alone
     never set the web_search route or capability.
-  - Ordinary route classification consumes only the current turn and evaluates configured
-    non-empty pools in the fixed order hosted web_search, multimodal, longcontext, coding, thinking,
-    search, tools, default. The first matching pool is the only captured pool; no implicit
-    capability pool is built and no default or other pool is appended after it.
-  - Absent or empty optional pools are skipped without rejecting the request; the default
-    pool remains required and non-empty. The longcontext capability is retained and
-    its pool is skipped when absent or empty.
+  - Ordinary route classification consumes only the current turn. The selected route's
+    configured tiers precede the declared default pool; no implicit pool is synthesized.
+    A temporary lack of selectable providers never changes configured pool existence.
   - V3Router07OpaqueTargetHitOnce carries request route facts to Target as route/pool
     selection signals; route selection is not model capability filtering.
-  - 'Target hard capability_mismatch is allowed only for capabilities the selected
-    model/provider may genuinely lack: web_search/search and multimodal/vision.'
-  - After genuine web_search/search and multimodal/vision capability validation, Target10
+  - Provider capabilities are route classification signals, not Target candidate filters.
+    Unsupported selected-provider content is handled by the declared protocol owner.
+  - Target10
     preserves configured candidate order among candidates within their declared context
     window; an omitted max_context_tokens compiles to the documented 200000-token default,
     and a candidate whose max_context_tokens is below request_input_tokens is marked
     context_window_exceeded and skipped before availability/transport. A candidate at 90
-    percent through 100 percent remains eligible, is demoted only below normal candidates
-    in the same route tier, and still outranks every lower route tier inside the captured
-    pool. Explicit direct pins remain eligible only inside their resolved direct plan;
+    percent through 100 percent remains eligible. Explicit direct pins remain eligible
+    only inside their resolved direct plan;
     Provider availability/health and request-local provider-failure exclusion remain
-    explicit switch inputs and no default-pool floor is appended after a matched pool.
+    explicit switch inputs; the declared default pool follows the current route's tiers.
   - Tools, tool_outputs, reasoning/thinking, coding, and
     local_materialization are route/protocol signals; they may steer pool choice but
     must not mark a candidate as capability_mismatch.
@@ -1209,9 +1203,8 @@ features:
     capability or provider-selection signal.
   - OpenAI Responses request.reasoning is also exposed as the thinking route fact
     so configs using either vocabulary route the same request.
-  - Target candidate dedupe preserves pool provenance and required capabilities inside
-    the single captured pool; no default floor is appended after a matched pool and no
-    recovery or health change crosses into another classification pool.
+  - Target candidate dedupe preserves pool provenance across the selected route and
+    declared default; cooldown changes only the relevant provider identity.
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
@@ -2390,6 +2383,7 @@ features:
   - v3-ws2-02
   entry_symbols:
   - ProviderResponsesTransport::send_websocket_v2
+  - WebSocketAttemptSlot
   - RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE
   - websocket_sse_stream
   - next_websocket_message
@@ -3921,21 +3915,16 @@ features:
 - feature_id: v3.responses_session_inflight_admission
   owner_crate: routecodex-v3-server
   owner_files:
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.server.validated_http_input
-  - v3.front.request_activity_gate
   mainline_bindings:
   - v3-responses-independent-dispatch-01
   entry_symbols:
   - read_json_payload
   - pending_endpoint_after_json_parse
   - responses_control_scope_headers
-  - V3ServerRequestActivityGate::admit
-  - hold_response_body_request_activity_permit
   allowed_paths:
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - docs/architecture/manifests/v3.responses_session_admission.mainline.yml
@@ -3951,14 +3940,11 @@ features:
   required_gates:
   - npm run verify:v3-responses-session-admission
   - npm run test:v3-responses-session-admission
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib session_admission
-    -- --nocapture
   - git diff --check
   semantic_contract:
   - Requests with matching session or conversation independently enter Runtime;
     no response-body lifetime or business failure of another request gates dispatch.
-  - Explicit maintenance pauses new dispatch; activity and front-flush custody
-    remain request-local. Provider capacity retains its declared identity scope.
+  - Restart preparation does not pause business dispatch or require a request permit.
   runtime_status: source_pending_live_replay
 - feature_id: v3.sse_http_keepalive_boundary
   owner_crate: routecodex-v3-server
@@ -4008,7 +3994,7 @@ features:
 - feature_id: v3.client_sse_head_commit
   status: source_controlled_blackbox_verified
   owner_crate: routecodex-v3-server
-  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt; the channel carries transport-only keepalives before the runtime outcome, frames the projected successful payload through the SSE transport codec afterwards, and closes without an error frame when the outcome has no successful client payload; exec replacement pauses new dispatch without draining business requests, leaves valid existing responses deliverable during preparation, and permits detectable interruption for client-managed retries.
+  owner_scope: Server-owned client SSE transport channel for a streamed client request while the Runtime still buffers the full provider attempt; the channel carries transport-only keepalives before the runtime outcome, frames the projected successful payload through the SSE transport codec afterwards, and closes without an error frame when the outcome has no successful client payload; restart preparation keeps dispatch independent and leaves valid existing responses deliverable, while successful exec permits detectable interruption for client-managed retries.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -4019,10 +4005,8 @@ features:
   - v3.sse.transport_encoded_chunk
   - v3.response.client_payload
   - v3.config.http_sse_keepalive_interval
-  - v3.front.request_activity_gate
   mainline_bindings:
   - v3-client-sse-head-commit-01
-  - v3-client-body-eof-front-held
   - v3-client-front-flush-completed
   entry_symbols:
   - accept_v3_client_sse_transport
@@ -4030,10 +4014,6 @@ features:
   - V3DirectSseAccept03ProjectedClientFrame
   - V3ClientSseChannelStream
   - build_v3_client_sse_data_frame
-  - V3ServerRequestActivityGate::begin_maintenance
-  - V3ServerRequestActivityGate::pause_dispatch
-  - V3ServerMaintenanceGuard::wait_for_quiescence
-  - V3StableFrontSocket::hold_activity_until_flush
   - V3FrontHttpIo::poll_flush
   - write_front_command
   - write_front_response_frame
@@ -4044,7 +4024,6 @@ features:
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff.rs
   - v3/crates/routecodex-v3-server/src/restart_closeout.rs
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/tests/client_transport_boundary_controlled.rs
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
@@ -4258,7 +4237,7 @@ features:
   status: active
   runtime_status: source_active_live_verification_required
   owner_crate: routecodex-v3-runtime
-  owner_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
+  owner_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   resource_bindings:
   - v3.error.execution_decision
   - v3.error.provider_action_gate
@@ -4270,39 +4249,16 @@ features:
   - v3-provider-action-gate-04
   - v3-provider-action-gate-05
   - v3-provider-action-gate-06
-  - v3-provider-action-gate-07
-  - v3-provider-action-gate-08
-  - v3-provider-action-gate-10
-  - v3-provider-action-gate-11
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
   - v3-provider-action-gate-14
   - v3-provider-action-gate-15
   - v3-provider-action-gate-16
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-21
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-23
-  - v3-provider-action-gate-24
-  - v3-provider-action-gate-25
-  - v3-provider-action-gate-26
-  - v3-provider-action-gate-27
-  - v3-provider-action-gate-28
-  - v3-provider-action-gate-29
-  - v3-provider-action-gate-30
-  - v3-provider-action-gate-31
-  - v3-provider-action-gate-32
   - v3-provider-action-gate-33
   - v3-provider-action-gate-34
   - v3-provider-action-gate-35
   - v3-provider-action-gate-36
   - v3-provider-action-gate-37
-  - v3-provider-action-gate-38
   - v3-provider-action-gate-39
   - v3-provider-action-gate-40
-  - v3-provider-action-gate-41
-  - v3-provider-action-gate-42
   - v3-provider-action-gate-43
   - v3-provider-action-gate-44
   - v3-provider-action-gate-45
@@ -4312,35 +4268,19 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
-  - v3-provider-action-gate-52
-  - v3-provider-action-gate-53
-  - v3-provider-action-gate-54
-  - v3-provider-action-gate-55
-  - v3-provider-action-gate-56
   entry_symbols:
-  - V3ProviderActionGate
-  - V3ProviderActionGate::try_admit_exact_rate_limit
-  - V3ProviderFailureRuntimeHealth::defer_provider_health_action
-  - V3ProviderFailureRuntimeHealth::managed_precool_probe
-  - V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
-  - V3RuntimeProviderAdmission::take_rate_limit_control
+  - hold_provider_error_return
+  - V3ProviderFailureRuntimeHealth::record_provider_health_action_immediately
+  - run_v3_relay_provider_failure_policy_with_response_source_inner
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
-  - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
-  - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
-  - V3ProviderActionAdmission::take_permit
-  - V3ProviderActionPermit::drop
-  - V3ProviderActionGate::abandon_admission
-  - V3ProviderActionGate::commit_terminal_admission
-  - V3ProviderActionGate::record_failure_and_commit_terminal_projection
   allowed_paths:
-  - v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_health_observation.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
-  - v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs
+  - v3/crates/routecodex-v3-server/tests/support/pool_empty_recovery_blackbox.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
@@ -4350,7 +4290,6 @@ features:
   - scripts/architecture/v3-provider-action-gate-lib.mjs
   required_gates:
   - npm run test:v3-provider-action-gate
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract isolated_terminal_projection_commits_without_waiting_for_provider_action_admission -- --exact --nocapture
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
   - npm run test:v3-provider-session-cooldown
@@ -4634,7 +4573,10 @@ features:
   owner_scope: Unified Relay main-loop skeleton. Single lifecycle owner for relay
     orchestration (VR retry loop, provider action recovery, error policy loop);
     protocol differences converge in per-protocol V3RelayProtocolCodec impls;
-    skeleton logic carries no lifecycle of its own.
+    skeleton logic carries no lifecycle of its own. Before semantic progress,
+    bounded native Anthropic events that need codec diagnosis are handed to
+    the registered codec without marking progress or committing client bytes;
+    framing and transport errors retain their own typed paths.
   owner_crates:
   - routecodex-v3-runtime
   owner_files:
@@ -4662,10 +4604,6 @@ features:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-provider-action-gate
   mainline_bindings:
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-27
   - v3-chat-direct-relay-handoff-02
   runtime_status: source_controlled_runtime_boundary_verified
 
@@ -4734,27 +4672,27 @@ features:
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.history_image_cleanup
-  status: retired_for_ordinary_classification
+  status: selected_provider_capability_projection
   change_risk: medium
-  owner_kind: retired_v3_runtime_chat_process_gate
-  owner_scope: Ordinary request classification no longer depends on destructive
-    historical-image rewriting. The earlier latest-carrier placeholder rule must
-    not be used to keep historical images out of current-turn classification or
-    to drop business history. If a target protocol cannot represent an image, the
-    projection stays at the adjacent ProviderReqCompat owner and keeps complete
-    opaque data. Current-turn image detection is owned by the route-classifier
-    current-turn fact builder.
+  owner_kind: selected_provider_chat_process_and_direct_hooks
+  owner_scope: Route classification uses image facts without modifying the request.
+    After selection, Chat Process or the registered Direct request hook replaces image
+    content with an image placeholder only when that selected provider lacks image
+    support. Preserve text, ordering, tool history and the original retry input.
   owner_crates:
   - routecodex-v3-runtime
   owner_files:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   forbidden_paths:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/req_inbound_02_normalized.rs
-  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_chat_process_04_governed.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/resp_outbound_05_client_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/server_resp_outbound_06_client_frame.rs
   required_gates:
@@ -4801,10 +4739,7 @@ features:
   entry_symbols:
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
   - collapse_direct_client_sse_to_json
-  mainline_bindings:
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-24
+  mainline_bindings: []
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.provider_global_subscription_probe
@@ -4814,10 +4749,10 @@ features:
   cross_feature_extensions:
   - path: v3/crates/routecodex-v3-config/src/internal.rs
     owner_feature_id: v3.simplified_user_config
-    reason: Declares the internal typed429 observation, minimumcooldown and probe-required windows consumed by the provider health owner, without adding user configuration or runtime state.
+    reason: Declares shared error classification and recovery settings; the provider health owner retains the separate real429 episode and cooldown state.
   - path: v3/crates/routecodex-v3-config/src/internal.toml
     owner_feature_id: v3.simplified_user_config
-    reason: Single source for the user-authorized120000,1800000,3600000 millisecond policy declarations; data-plane payloads and public config remain unchanged.
+    reason: Declares common error classifications and non429 recovery settings; 429 cooldown follows the provider-owned three-response and exponential policy.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -4839,7 +4774,6 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
-  - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
@@ -4862,7 +4796,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
-  - v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_health_observation.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
@@ -4887,7 +4821,6 @@ features:
   - v3.provider.cooldown_probe_state
   - v3.config.published_manifest
   - v3.provider.responses_transport_capability
-  - v3.provider.adaptive_concurrency_admission
   mainline_bindings:
   - v3-zen-health-probe-compat
   - v3-rd-target-select-direct-admission-rescue
@@ -4895,7 +4828,6 @@ features:
   - v3-rd-target-select-relay-core-admission-rescue
   - v3-rd-target-select-responses-relay-admission-rescue
   - v3-rd-target-select-anthropic-relay-admission-rescue
-  - v3-provider-admission-lease-lifecycle
   - v3-provider-global-probe-http-status
   - v3-provider-global-probe-02
   - v3-provider-global-probe-02-owner
@@ -4903,7 +4835,7 @@ features:
   - v3-provider-global-probe-02-quiesce
   - v3-provider-global-probe-02-schedule
   - v3-provider-global-probe-429-status
-  - v3-provider-precool-probe-429-status
+  - v3-provider-precool-local-settle
   - v3-provider-precool-join-existing-cooldown
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
@@ -4931,38 +4863,18 @@ features:
   - AggregateProbeLifecycle::supervise
   - AggregateProbeLifecycle::quiesce
   - AggregateProbeLifecycle::join
-  - V3ProviderFailureRuntimeHealth::initiate_cooldown_rescue_probe
   - V3ProviderFailureRuntimeHealth::managed_probe
   - complete_v3_provider_health_probe
   - classify_provider_probe_failure
   - V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
   - V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit
-  - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
-  - run_v3_plan_execution_operator_with_probes
+  - run_v3_plan_execution_operator_with_recovery
   - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
   - step_v3_target_planning_with_admission_sync
-  - try_admit_v3_selected_target
-  - V3RuntimeProviderAdmission::into_lease
-  - V3RuntimeProviderAdmission::drop
-  - V3PreAcquiredProviderAdmission::release
-  - V3AdaptiveConcurrencyPermitGuard::drop
-  - V3AdaptiveConcurrencyController::observe_rate_limit
-  - V3AdaptiveConcurrencyController::observe_business_success
-  - V3AdaptiveConcurrencyController::observe_rate_limit_scoped
-  - V3AdaptiveConcurrencyController::observe_business_success_scoped
-  - V3AdaptiveConcurrencyController::try_acquire_business_scoped
-  - V3AdaptiveConcurrencyController::wait_for_scoped_capacity_change
-  - V3AdaptiveConcurrencyController::snapshot_for_scope
-  - V3ConcurrencyIdentityScope
-  - V3AdaptiveConcurrencyController::complete_probe
-  - V3AdaptiveConcurrencyController::process_shared
-  - V3AdaptiveConcurrencyController::snapshot
-  - V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS
-  - V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT
-  - V3AdaptiveConcurrencyRateLimitSample
+  - V3RuntimeProviderAdmission::take_rate_limit_control
   - V3ProviderResponsesTransport::send
   - ProviderResponsesTransport::send_probe
   - execute_v3_anthropic_relay_runtime_inner
@@ -4982,7 +4894,6 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
-  - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
@@ -5017,7 +4928,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/cooldown_exhaustion.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
-  - v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
+  - v3/crates/routecodex-v3-runtime/src/provider_health_observation.rs
   - v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests/probe_recovery.rs
@@ -5054,11 +4965,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
-  - npm run test:v3-provider-adaptive-concurrency
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib saturated_provider_admission_without_preacquired_lease_does_not_wait -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test responses_relay_field_parity_integration no_concurrency_relay_same_session_reaches_upstream_before_release -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server no_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map
@@ -5392,7 +5300,6 @@ features:
   - v3/vendor/hyper/src/proto/h1/conn.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
@@ -5403,8 +5310,6 @@ features:
   - v3.front.runtime_handoff_checkpoint
   - v3.front.client_frame_sequence
   - v3.front.client_closeout_frame
-  - v3.front.deadline_budget
-  - v3.front.request_activity_gate
   - v3.server.http_parse_error_policy
   entry_symbols:
   - V3FrontRequestLease
@@ -5415,7 +5320,6 @@ features:
   - set_automatic_error_responses
   - V3FrontTransportCloseoutState::close_for_exec_replacement
   - V3FrontDeadlineBudget
-  - V3ServerRequestActivityGate
   - V3ServerAggregateHandle::prepare_for_exec
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/client_transport_observation.rs
@@ -5431,7 +5335,6 @@ features:
   - v3/crates/routecodex-v3-server/tests/multi_listener_server.rs
   - v3/crates/routecodex-v3-server/src/restart_handoff/tests/restart_handoff_closeout.rs
   - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
-  - v3/crates/routecodex-v3-server/src/session_admission.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/tests/mod.rs
   - v3/crates/routecodex-v3-lifecycle/src/control_plane.rs
@@ -5555,7 +5458,7 @@ features:
   status: source_controlled_runtime_pending_live_replay
   change_risk: critical
   owner_kind: rust_v3_provider_key_health_scoring
-  owner_scope: Provider-owned bounded key score with neutral 100 baseline and 0..150 clamp, failure/success streak, typed recovery action application, score-zero exact cooldown admission, process-local cooldown/probe recovery, and Target scheduling projection. Effective priority always equals configured priority; health only controls availability and diagnostics.
+  owner_scope: Provider-owned bounded key score with neutral 100 baseline and 0..150 clamp, typed real-error streak and recovery action application, session-local 429 cooldown, ten-real-error exact-identity global cooldown, process-local probe recovery, and Target scheduling projection. Score alone does not trigger cooldown. Effective priority always equals configured priority; health only controls availability and diagnostics.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -6096,6 +5999,7 @@ features:
   - execute_v3_direct_runtime_kernel_core_resident
   - execute_v3_responses_direct_runtime_kernel_core_resident
   - V3RequestExecutionControl
+  - V3RequestCandidateScan
   allowed_paths:
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
@@ -6119,7 +6023,7 @@ features:
   - real local TCP SSE replacement stream reaches protocol terminal on the resident Runtime
   - no SSE wrapper creates a Runtime or re-enters a full executor
   - one request-level attempt/deadline budget survives Direct, Relay, and typed handoff
-  - generic Direct registers the selected plan candidate count before admission without resetting cumulative attempts or changing the configured ceiling
+  - Direct and Relay reserve the selected complete identity in the same request-local scan before wire send; an unsent reservation is released, and no fixed ordinary attempt ceiling truncates the captured pool or a later scan
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   - git diff --check
 
@@ -6130,18 +6034,30 @@ features:
   owner_crates:
   - routecodex-v3-config
   - routecodex-v3-runtime
+  - routecodex-v3-error
   owner_files:
   - v3/crates/routecodex-v3-config/src/internal.rs
   - v3/crates/routecodex-v3-config/src/internal.toml
+  - v3/crates/routecodex-v3-error/src/lib.rs
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
   resource_bindings:
   - v3.execution.attempt_budget
   - v3.execution.attempt_payload_store
@@ -6149,6 +6065,15 @@ features:
   - V3AttemptBudget::admit_transport_attempt
   - V3AttemptBudget::current_target_recovery_deadline
   - V3AttemptBudget::advance_target_recovery_step_if_due
+  - V3AttemptPrefixBuffer::push
+  - V3AttemptPrefixBuffer::replay
+  - V3AttemptPrefixBuffer::replay_retained
+  - V3AttemptMaterializationContext::reserve
+  - V3MaterializationLease::grow
+  - V3MaterializationLease::split_off
+  - V3AttemptMaterializationContext::adopt_prefix
+  - V3MaterializationInputStream::new
+  - V3CommittedClientSseBuilder::push_json_event
   - V3CommittedClientSseBuilder::push
   - collect_direct_sse_attempt_after_terminal
   - build_v3_server_resp_outbound_06_sse_transport_frames_from_resp05_with_budget
@@ -6156,9 +6081,19 @@ features:
   allowed_paths:
   - v3/crates/routecodex-v3-config/src/internal.rs
   - v3/crates/routecodex-v3-config/src/internal.toml
+  - v3/crates/routecodex-v3-error/src/lib.rs
+  - v3/crates/routecodex-v3-error/tests/error_chain_contract.rs
   - v3/crates/routecodex-v3-config/src/attempt_store.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control.rs
   - v3/crates/routecodex-v3-runtime/src/execution_control/tests.rs
+  - v3/crates/routecodex-v3-runtime/src/shared.rs
+  - v3/crates/routecodex-v3-runtime/src/direct_response_hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks.rs
+  - v3/crates/routecodex-v3-runtime/src/hooks_tests.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_protocol_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_anthropic_codec.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
   - v3/crates/routecodex-v3-runtime/src/nodes.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
@@ -6166,6 +6101,13 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/provider_stream_materialization.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
   - v3/crates/routecodex-v3-runtime/tests
   - docs/architecture
   forbidden_paths:

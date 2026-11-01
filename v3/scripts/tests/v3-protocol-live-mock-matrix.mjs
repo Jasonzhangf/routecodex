@@ -221,6 +221,10 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         candidate_ids: generated.candidate_ids ?? candidateIds ?? null,
         attempt_store: generated.attempt_store ?? null,
         attempt_store_receipt: generated.attempt_store_receipt ?? null,
+        process: generated.process ?? null,
+        process_receipt: generated.process_receipt ?? null,
+        provider_health: generated.provider_health ?? null,
+        provider_health_receipt: generated.provider_health_receipt ?? null,
       }, null, 2));
       // Explicit same-protocol Relay needs an API that really authors the mode.
       // Do not count a default Direct run as supplemental Relay evidence.

@@ -197,6 +197,7 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
         let tool_thinking_enabled = context.tool_thinking_enabled;
         let toolreason_client_projection = context.toolreason_client_projection;
         let observation_session_id = context.toolreason_observation_session_id.clone();
+        let attempt_budget = context.attempt_budget.clone();
         Box::pin(async move {
             crate::shared::project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
                 raw,
@@ -204,6 +205,7 @@ impl V3DirectProtocolCodec for V3AnthropicDirectCodec {
                 tool_thinking_enabled,
                 toolreason_client_projection,
                 observation_session_id.as_deref(),
+                attempt_budget,
             )
             .await
         })
@@ -269,7 +271,7 @@ fn project_anthropic_direct_request(
     request_key_catalog: &V3DirectRequestKeyHookCatalog,
 ) -> crate::shared::V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
     let candidate = &policy.target.candidate;
-    let request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
+    let mut request_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
         policy.request_body.clone(),
         candidate,
     )
@@ -284,6 +286,15 @@ fn project_anthropic_direct_request(
         )
         .map(|(_, source)| source)
     })?;
+    crate::hub_v1::project_selected_provider_hosted_search(
+        &mut request_body,
+        &candidate.model_capabilities,
+    );
+    crate::hub_v1::project_selected_provider_images(
+        &mut request_body,
+        &candidate.model_capabilities,
+        false,
+    );
     let mut catalog = *request_key_catalog;
     let request_body = apply_v3_direct_request_key_hook(
         request_body,
@@ -358,8 +369,6 @@ fn project_anthropic_direct_request(
         provider_request_cleanup: candidate.provider_request_cleanup.clone(),
         request_timeout_ms: candidate.request_timeout_ms,
         sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
-        initial_concurrency_budget: candidate.initial_concurrency_budget,
-        concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
     };
     build_v3_provider_12_responses_wire_payload(policy.request_id.clone(), target, request_body)
         .map_err(|error| {
@@ -521,8 +530,6 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
                 reasoning_effort: None,
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
                 compatibility_profile: None,
                 headers: BTreeMap::from([(
                     "anthropic-version".to_string(),

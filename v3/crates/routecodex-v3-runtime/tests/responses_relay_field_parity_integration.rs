@@ -72,6 +72,7 @@ type = "openai_chat"
 base_url = "http://chatwire.invalid/v1"
 default_model = "chat-wire-model"
 auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
+concurrency = { max_in_flight = 1, acquire_timeout_ms = 10000, stale_lease_ms = 60000 }
 [providers.chatwire.models.chat-wire-model]
 wire_name = "chat-wire-model"
 supports_streaming = true
@@ -134,6 +135,174 @@ fn normalization_transport() -> ProviderProjectionJsonTransport {
             "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
         }),
     }
+}
+
+struct HeldArrivalTransport {
+    arrivals: AtomicUsize,
+    release: tokio::sync::Semaphore,
+}
+
+#[async_trait::async_trait]
+impl routecodex_v3_provider_responses::ResponsesTransport for HeldArrivalTransport {
+    async fn send(
+        &self,
+        request: routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+    ) -> Result<
+        routecodex_v3_provider_responses::V3ProviderResp14Raw,
+        routecodex_v3_provider_responses::V3ProviderError,
+    > {
+        self.arrivals.fetch_add(1, Ordering::SeqCst);
+        self.release.acquire().await.unwrap().forget();
+        Ok(routecodex_v3_provider_responses::V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&serde_json::json!({
+                "id":"held", "object":"chat.completion", "model":"chat-wire-model",
+                "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+            })).unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn no_concurrency_relay_same_session_reaches_upstream_before_release() {
+    let manifest = manifest_openai_chat_wire();
+    let transport = HeldArrivalTransport {
+        arrivals: AtomicUsize::new(0),
+        release: tokio::sync::Semaphore::new(0),
+    };
+    let payload = serde_json::json!({"input":"hi","stream":false});
+    let first = execute_v3_responses_relay_runtime(&manifest, responses_relay_input("no-concurrency-1", payload.clone()), &transport);
+    let second = execute_v3_responses_relay_runtime(&manifest, responses_relay_input("no-concurrency-2", payload.clone()), &transport);
+    let third = execute_v3_responses_relay_runtime(&manifest, responses_relay_input("no-concurrency-3", payload), &transport);
+    let observe = async {
+        let all_arrived = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while transport.arrivals.load(Ordering::SeqCst) < 3 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.is_ok();
+        transport.release.add_permits(3);
+        all_arrived
+    };
+    let (a, b, c, all_arrived) = tokio::join!(first, second, third, observe);
+    assert!(all_arrived, "three same-session requests must reach upstream before any response is released");
+    assert!(a.unwrap().error_chain.is_none());
+    assert!(b.unwrap().error_chain.is_none());
+    assert!(c.unwrap().error_chain.is_none());
+}
+
+struct AlwaysRateLimitedTransport {
+    arrivals: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl routecodex_v3_provider_responses::ResponsesTransport for AlwaysRateLimitedTransport {
+    async fn send(
+        &self,
+        request: routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+    ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw,
+        routecodex_v3_provider_responses::V3ProviderError> {
+        self.arrivals.fetch_add(1, Ordering::SeqCst);
+        Err(routecodex_v3_provider_responses::V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                request_id: request.request_id().into(),
+                provider_id: request.provider_id().into(),
+                status: 429,
+                headers: vec![],
+                body: br#"{"error":{"message":"rate limited"}}"#.to_vec(),
+                body_read_failure: None,
+            }),
+        })
+    }
+}
+
+#[tokio::test]
+async fn no_alternative_429_waits_before_same_request_retries() {
+    let manifest = manifest_openai_chat_wire();
+    let transport = AlwaysRateLimitedTransport { arrivals: AtomicUsize::new(0) };
+    let request = execute_v3_responses_relay_runtime(
+        &manifest,
+        responses_relay_input("independent-rate-limit", serde_json::json!({"input":"hi","stream":false})),
+        &transport,
+    );
+    tokio::pin!(request);
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(250), &mut request).await.is_err(),
+        "a request with a recoverable 429 must remain pending");
+    assert_eq!(transport.arrivals.load(Ordering::SeqCst), 1,
+        "the same request must not immediately hammer the only provider");
+    let retried = async {
+        while transport.arrivals.load(Ordering::SeqCst) < 2 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    };
+    tokio::select! {
+        result = &mut request => panic!("recoverable request ended instead of retrying: {:?}", result.err()),
+        result = tokio::time::timeout(std::time::Duration::from_secs(2), retried) => {
+            assert!(result.is_ok(), "request must retry after its own delay");
+        }
+    }
+}
+
+struct CancelIndependentTransport {
+    cancelled: AtomicUsize,
+}
+
+struct CancellationObservation<'a>(&'a AtomicUsize);
+impl Drop for CancellationObservation<'_> {
+    fn drop(&mut self) { self.0.fetch_add(1, Ordering::SeqCst); }
+}
+
+#[async_trait::async_trait]
+impl routecodex_v3_provider_responses::ResponsesTransport for CancelIndependentTransport {
+    async fn send(
+        &self,
+        request: routecodex_v3_provider_responses::V3Transport13ResponsesHttpRequest,
+    ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw,
+        routecodex_v3_provider_responses::V3ProviderError> {
+        if request.request_id() == "cancelled-request" {
+            let _cancelled = CancellationObservation(&self.cancelled);
+            std::future::pending().await
+        } else {
+            Ok(routecodex_v3_provider_responses::V3ProviderResp14Raw::from_json(
+                request.request_id(), request.provider_id(), 200,
+                vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                    name: "content-type".into(), value: b"application/json".to_vec(),
+                }],
+                serde_json::to_vec(&serde_json::json!({
+                    "id":"independent", "object":"chat.completion", "model":"chat-wire-model",
+                    "choices":[{"index":0,"message":{"role":"assistant","content":"independent-response-marker"},"finish_reason":"stop"}]
+                })).unwrap(),
+            ))
+        }
+    }
+}
+
+#[tokio::test]
+async fn relay_same_session_cancellation_does_not_block_independent_response() {
+    let manifest = manifest_openai_chat_wire();
+    let transport = CancelIndependentTransport { cancelled: AtomicUsize::new(0) };
+    let first = execute_v3_responses_relay_runtime(
+        &manifest, responses_relay_input("cancelled-request", serde_json::json!({"input":"one","stream":false})), &transport,
+    );
+    let second = execute_v3_responses_relay_runtime(
+        &manifest, responses_relay_input("independent-request", serde_json::json!({"input":"two","stream":false})), &transport,
+    );
+    let (cancelled, independent) = tokio::join!(
+        tokio::time::timeout(std::time::Duration::from_millis(250), first),
+        tokio::time::timeout(std::time::Duration::from_millis(200), second),
+    );
+    assert!(cancelled.is_err(), "the held request must be cancelled by its own timeout");
+    assert_eq!(transport.cancelled.load(Ordering::SeqCst), 1, "the held transport must be dropped");
+    let output = independent.expect("the independent request must finish").unwrap();
+    let routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("expected independent JSON response");
+    };
+    assert!(body.to_string().contains("independent-response-marker"));
 }
 
 #[tokio::test]

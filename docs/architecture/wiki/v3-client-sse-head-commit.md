@@ -83,34 +83,25 @@ payload.
 
 ## Invariants
 
-- The Server owns the committed client SSE transport channel and its
-  transport-only keepalives; the Runtime buffers the provider attempt until the
-  first committable business frame, then delivers frame-by-frame under an
-  append-only ledger that never rewrites, replaces, suppresses, or re-emits a
-  delivered frame.
+- The Server owns the accepted client SSE transport and transport-only
+  keepalives. Runtime buffers every provider attempt through its complete
+  terminal and registered governance before sealing and projecting any business
+  frame. A failed attempt contributes zero client payload bytes.
 - Establishing the channel is not a semantic client commit.
-- Without first-frame commit enabled, no provider payload byte or provider status
-  reaches the client before the runtime outcome exists; with it enabled, the
-  first committable business frame crosses at its provider arrival time and the
-  terminal remainder replays only the undelivered tail. The Direct content probe
-  certifies that frame: it requires client-visible business content (visible
-  output_text or a named tool-call item start) and no governed text marker, so a
-  reasoning-only, whitespace-only, or nameless-item prefix never commits. A
-  tool-call argument payload stays held until its item completes, so the client
-  receives the complete payload once and never a partial one. That gate and the
-  tool-call certification are decided only by the incremental item carriers
-  (`output_item.added`/`output_item.done`) and the terminal snapshot: a
-  non-terminal `created`/`in_progress`/`queued` state mirror may list the item
-  together with a partial payload, so it neither certifies a start nor releases
-  the gate.
-- After the commit the probe is only a hold signal: while the newest text may
-  still be governed, the collector suspends projection, keeps those frames in the
-  attempt, and the registered complete-attempt owner decides the whole attempt at
-  the terminal. Protected business text (fenced or inline code, quoted text) is
-  delivered unchanged and governed text is never projected.
-- A post-commit provider failure records provider health for the attempted
-  identity and ends the transport as a 200 SSE body break: no error frame, no
-  keepalive, and no normal chunked terminator.
+- Provider semantic progress is attempt control, distinct from a client commit
+  and from complete provider success. Headers, comments, empty envelopes and
+  signature-only deltas do not satisfy the first-semantic-output deadline.
+- After real semantic progress, no total, residence or frame-interval timer may
+  cut the active attempt. Byte capacity and client cancellation remain enforced.
+  A failed attempt cannot renew the original acquisition or recovery budgets.
+- Complete-attempt owners decide DSML, thinking and tool projection before
+  sealing. Representable tool arguments and protected business text remain
+  faithful, including model-generated invalid arguments. There is no provisional
+  client prefix to retract or to constrain those owners.
+- A provider failure enters the typed Error chain before client payload commit.
+  Runtime may select another eligible provider within the original budget.
+  Exhaustion ends only this request transport without an error payload or a
+  fabricated normal completion.
 - An outcome that arrives inside one keepalive interval returns the exact runtime
   status, headers, and body. The race adds no framing of its own.
 - A client never receives a provider error payload on the committed channel. The

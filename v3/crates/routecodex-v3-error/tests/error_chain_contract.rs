@@ -338,6 +338,34 @@ fn recoverable_response_processing_predicate_requires_the_typed_internal_code() 
 }
 
 #[test]
+fn local_response_capacity_is_not_provider_recovery() {
+    let source = build_v3_error_01_source_raised_internal(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ExecutionAttemptPayloadStore",
+        "local_response_capacity",
+        "retained response exceeds declared capacity",
+        V3InternalErrorCode::V3ExecutionResponsePayloadStore,
+    );
+    assert!(!is_v3_recoverable_response_processing_source(&source));
+    assert!(source.external_error.is_none());
+    assert_eq!(source.internal_error.as_ref().unwrap().lane,
+        routecodex_v3_error::V3InternalErrorLane::Response);
+    let decision = V3ErrorHandlingCenter::decide_provider(
+        V3ErrorHandlingCenterInput {
+            source,
+            action_scope: V3ErrorActionScope::ProviderKeyModel {
+                provider_id: "provider-a".into(), auth_alias: "key-a".into(), model_id: "model-a".into(),
+            },
+            candidates_remaining: 1,
+            source_status: Some(200),
+        }, false, false, None,
+    );
+    assert_eq!(decision.action, V3Error05ExecutionAction::RejectNonProviderError);
+    assert!(!decision.exhaustion.local_action.action.retry_eligible);
+    assert!(!decision.exhaustion.local_action.action.health_affecting);
+}
+
+#[test]
 fn client_disconnect_is_health_neutral_and_terminal_projection_is_not_success() {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ClientDisconnect,

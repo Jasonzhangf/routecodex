@@ -14,6 +14,8 @@ pub struct V3ProviderKeyHealthProjection {
     pub cooldown_until_ms: Option<u64>,
     pub available: bool,
     pub score_generation: u64,
+    /// Successful recovery revision observed in the same health-store snapshot.
+    pub recovery_success_revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -34,6 +36,7 @@ pub struct V3ProviderSchedulingProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderHealthProbePermit {
+    health_scope: crate::provider_cooldown_probe::V3ProviderCooldownHealthScope,
     provider_id: String,
     interface_id: String,
     auth_alias: Option<String>,
@@ -55,6 +58,8 @@ pub enum V3ProviderProbePurpose {
     /// Observation probe for a healthy/held identity before any cooling
     /// decision. It shares the same physical slot but holds no cooldown entry.
     PrecoolObservation,
+    /// A new listener run probes configured identity without blocking traffic.
+    StartupObservation,
 }
 
 /// Typed result of closing one owned pre-cool observation probe.
@@ -111,6 +116,7 @@ impl V3ProviderHealthProbePermit {
         purpose: V3ProviderProbePurpose,
     ) -> Self {
         Self {
+            health_scope: crate::provider_cooldown_probe::V3ProviderCooldownHealthScope::Identity,
             provider_id,
             interface_id,
             auth_alias,
@@ -119,6 +125,28 @@ impl V3ProviderHealthProbePermit {
             purpose,
             acquisition_id,
         }
+    }
+
+    pub fn health_scope(&self) -> &crate::provider_cooldown_probe::V3ProviderCooldownHealthScope {
+        &self.health_scope
+    }
+
+    pub(crate) fn cooldown_key(&self) -> crate::provider_cooldown_probe::V3ProviderCooldownProbeKey {
+        crate::provider_cooldown_probe::V3ProviderCooldownProbeKey {
+            scope: self.health_scope.clone(),
+            provider_id: self.provider_id.clone(),
+            interface_id: self.interface_id.clone(),
+            auth_alias: self.auth_alias.clone(),
+            model_id: self.model_id.clone(),
+        }
+    }
+
+    pub(crate) fn with_health_scope(
+        mut self,
+        scope: crate::provider_cooldown_probe::V3ProviderCooldownHealthScope,
+    ) -> Self {
+        self.health_scope = scope;
+        self
     }
 
     pub fn provider_id(&self) -> &str {
@@ -156,7 +184,7 @@ pub trait V3ProviderSchedulingReader {
         priority: i32,
         base_weight: u32,
         now_ms: u64,
-    ) -> V3ProviderSchedulingProjection {
+    ) -> Result<V3ProviderSchedulingProjection, crate::V3ProviderHealthError> {
         let _ = interface_id;
         self.scheduling_projection(
             provider_id,
@@ -176,7 +204,7 @@ pub trait V3ProviderSchedulingReader {
         priority: i32,
         base_weight: u32,
         now_ms: u64,
-    ) -> V3ProviderSchedulingProjection;
+    ) -> Result<V3ProviderSchedulingProjection, crate::V3ProviderHealthError>;
 }
 
 impl V3ProviderSchedulingProjection {

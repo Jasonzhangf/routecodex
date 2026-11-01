@@ -165,10 +165,9 @@ async fn assert_sustained_window(direct: bool, hour: bool) {
         }
     }
     let first_id = format!("concurrency_first_{}", manifest.servers["a"].port);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
+    // Fixed Beijing afternoon leaves enough time for the doubling ladder
+    // without crossing the policy's midnight reset during this case.
+    let now = 1_800_000_000_000u64;
     let clock = Arc::new(ObservationClock(std::sync::atomic::AtomicU64::new(now)));
     let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
         manifest,
@@ -191,24 +190,33 @@ async fn assert_sustained_window(direct: bool, hour: bool) {
     sleep(Duration::from_millis(1100)).await;
     clock
         .0
-        .store(now + 120000, std::sync::atomic::Ordering::SeqCst);
+        .store(now + 1000, std::sync::atomic::Ordering::SeqCst);
     assert!(quota_business(&client, &base, "quota-window-boundary")
         .await
         .contains("quota-window-fallback"));
     assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(quota_entries(&client, &base).await.is_empty(), "two real429 responses cannot cool");
+    sleep(Duration::from_millis(1100)).await;
+    clock.0.store(now + 2000, std::sync::atomic::Ordering::SeqCst);
+    assert!(quota_business(&client, &base, "quota-third")
+        .await
+        .contains("quota-window-fallback"));
+    assert_eq!(business.load(std::sync::atomic::Ordering::SeqCst), 3);
     let entries = quota_entries(&client, &base).await;
     assert!(
         entries
             .iter()
             .any(|entry| entry["provider_id"] == first_id && entry["auth_alias"] == "key"),
-        "a real429 crossing the observation window must cool the exact identity: {entries:?}"
+        "the third consecutive real429 must cool the exact identity: {entries:?}"
     );
+    let first_entry = entries.iter().find(|entry| entry["provider_id"] == first_id).unwrap();
+    assert_eq!(first_entry["until_ms"].as_u64(), Some(now + 32_000), "initial cooldown is 30 seconds");
     assert!(quota_business(&client, &base, "quota-fresh-fallback")
         .await
         .contains("quota-window-fallback"));
     assert_eq!(
         business.load(std::sync::atomic::Ordering::SeqCst),
-        2,
+        3,
         "fresh requests must skip cooled A"
     );
     assert!(
@@ -223,102 +231,34 @@ async fn assert_sustained_window(direct: bool, hour: bool) {
 
     let probe_body = json!({"provider_id":first_id,"interface_id":"default","auth_alias":"key","model_id":"test"});
     if hour {
-        // The independent listener above also sent one real A429. Count only
-        // additional sends here instead of attributing its traffic to this port.
-        let business_before_hour = business.load(std::sync::atomic::Ordering::SeqCst);
-        clock
-            .0
-            .store(now + 3600000, std::sync::atomic::Ordering::SeqCst);
-        let before = probes.load(std::sync::atomic::Ordering::SeqCst);
-        client
-            .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
-            .json(&probe_body)
-            .send()
-            .await
-            .unwrap();
-        timeout(Duration::from_secs(3), async {
-            loop {
-                let entries = quota_entries(&client, &base).await;
-                if probes.load(std::sync::atomic::Ordering::SeqCst) > before
-                    && entries.iter().any(|entry| {
-                        entry["provider_id"] == first_id
-                            && entry["failure_count"].as_u64().unwrap_or(0) > 0
-                    })
-                {
-                    break;
+        let mut observed_at = now + 2_000;
+        let mut cooldown = 30_000u64;
+        for count in 4..=10 {
+            observed_at += cooldown;
+            clock.0.store(observed_at, std::sync::atomic::Ordering::SeqCst);
+            let before = probes.load(std::sync::atomic::Ordering::SeqCst);
+            let response = client.post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
+                .json(&probe_body).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let expected = if count == 10 { 3_600_000 } else { cooldown * 2 };
+            timeout(Duration::from_secs(3), async {
+                loop {
+                    let entries = quota_entries(&client, &base).await;
+                    if probes.load(std::sync::atomic::Ordering::SeqCst) > before
+                        && entries.iter().any(|entry| entry["provider_id"] == first_id
+                            && entry["until_ms"].as_u64() == Some(observed_at + expected)) {
+                        break;
+                    }
+                    sleep(Duration::from_millis(20)).await;
                 }
-                sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("real429 probe must keep the hour-long episode excluded");
+            }).await.expect("each actual429 probe must publish the expected next cooldown");
+            cooldown = expected;
+        }
         assert!(quota_business(&client, &base, "quota-hour-fallback")
-            .await
-            .contains("quota-window-fallback"));
-        assert_eq!(
-            business.load(std::sync::atomic::Ordering::SeqCst),
-            business_before_hour
-        );
-
-        quota.store(false, std::sync::atomic::Ordering::SeqCst);
-        probe_status.store(503, std::sync::atomic::Ordering::SeqCst);
-        let before = probes.load(std::sync::atomic::Ordering::SeqCst);
-        client
-            .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
-            .json(&probe_body)
-            .send()
-            .await
-            .unwrap();
-        timeout(Duration::from_secs(3), async {
-            while probes.load(std::sync::atomic::Ordering::SeqCst) == before {
-                sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("real non429 HTTP failure must be observed");
-        assert!(quota_business(&client, &base, "quota-hour-503-fallback")
-            .await
-            .contains("quota-window-fallback"));
-        assert!(
-            quota_entries(&client, &base)
-                .await
-                .iter()
-                .any(|entry| entry["provider_id"] == first_id),
-            "non429503 is not a healthy probe and must not open business routing"
-        );
-        probe_status.store(202, std::sync::atomic::Ordering::SeqCst);
-    } else {
-        quota.store(false, std::sync::atomic::Ordering::SeqCst);
-        let before = probes.load(std::sync::atomic::Ordering::SeqCst);
-        let response = client
-            .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
-            .json(&probe_body)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        timeout(Duration::from_secs(3), async {
-            while probes.load(std::sync::atomic::Ordering::SeqCst) == before {
-                sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("a real early probe must run");
-        assert!(
-            quota_entries(&client, &base)
-                .await
-                .iter()
-                .any(|entry| entry["provider_id"] == first_id),
-            "early202 probe cannot shorten30-minute minimum"
-        );
-        assert!(quota_business(&client, &base, "quota-minimum-fallback")
-            .await
-            .contains("quota-window-fallback"));
-
-        clock
-            .0
-            .store(now + 1920000, std::sync::atomic::Ordering::SeqCst);
+            .await.contains("quota-window-fallback"));
+        clock.0.store(observed_at + cooldown, std::sync::atomic::Ordering::SeqCst);
     }
+    quota.store(false, std::sync::atomic::Ordering::SeqCst);
     let before = probes.load(std::sync::atomic::Ordering::SeqCst);
     client
         .post(format!("{base}/_routecodex/health/cooldown-pool/probe"))
@@ -340,7 +280,7 @@ async fn assert_sustained_window(direct: bool, hour: bool) {
         }
     })
     .await
-    .expect("current202 probe after minimum must recover exact A");
+    .expect("a valid matching202 probe must recover exact A");
     assert!(quota_business(&client, &base, "quota-restored")
         .await
         .contains("quota-window-primary"));

@@ -159,7 +159,7 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
                 "wouldReturnProviderNotAvailable": false
             })
         }
-        Err(exhausted) => json!({
+        Err(routecodex_v3_target::V3TargetSelectionError::Exhausted(exhausted)) => json!({
             "selectedRouteName": exhausted.route.routing_group_id,
             "selectedPoolId": exhausted.route.pool_id,
             "candidateProviderKeys": candidate_keys,
@@ -168,6 +168,9 @@ pub fn project_v3_virtual_router_dry_run<R: V3ProviderAvailabilityReader>(
             "defaultFloorSelection": exhausted.route.pool_id == "default",
             "wouldReturnProviderNotAvailable": true
         }),
+        Err(error @ routecodex_v3_target::V3TargetSelectionError::Health { .. }) => {
+            return Err(error.to_string());
+        }
     };
     Ok(json!({
         "ok": true,
@@ -472,8 +475,10 @@ fn provider_target_status_snapshot(
         });
     };
     let interface_id = interface_id.unwrap_or("default");
-    let projection =
-        availability.availability_for_interface(provider, interface_id, key, model, now_ms);
+    let projection = match availability.availability_for_interface(provider, interface_id, key, model, now_ms) {
+        Ok(projection) => projection,
+        Err(error) => return json!({"providerKey": provider_key, "healthReadError": error.to_string()}),
+    };
     json!({
         "providerKey": provider_key,
         "available": projection.available,
@@ -892,8 +897,8 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k"
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             _now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
-            self.projection(provider_id, interface_id, auth_alias, model_id)
+        ) -> Result<V3ProviderAvailabilityProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
+            Ok(self.projection(provider_id, interface_id, auth_alias, model_id))
         }
 
         fn availability(
@@ -902,8 +907,8 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k"
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             _now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
-            self.projection(provider_id, "default", auth_alias, model_id)
+        ) -> Result<V3ProviderAvailabilityProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
+            Ok(self.projection(provider_id, "default", auth_alias, model_id))
         }
     }
 
@@ -914,9 +919,9 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k"
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
+        ) -> Result<V3ProviderAvailabilityProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
             let blocked = now_ms < self.until_ms;
-            V3ProviderAvailabilityProjection {
+            Ok(V3ProviderAvailabilityProjection {
                 provider_id: provider_id.to_string(),
                 interface_id: "default".to_string(),
                 auth_alias: auth_alias.map(str::to_string),
@@ -933,7 +938,7 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k"
                     })
                     .into_iter()
                     .collect(),
-            }
+            })
         }
     }
 
@@ -946,9 +951,9 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k"
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             _now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
+        ) -> Result<V3ProviderAvailabilityProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
             let blocked = auth_alias == Some("key1");
-            V3ProviderAvailabilityProjection {
+            Ok(V3ProviderAvailabilityProjection {
                 provider_id: provider_id.to_string(),
                 interface_id: "default".to_string(),
                 auth_alias: auth_alias.map(str::to_string),
@@ -965,7 +970,7 @@ targets = [{ kind = "provider_model", provider = "multi", model = "m", key = "k"
                     })
                     .into_iter()
                     .collect(),
-            }
+            })
         }
     }
 

@@ -29,6 +29,30 @@ fn gemini_text_only_request() -> serde_json::Value {
 }
 
 #[test]
+fn gemini_selected_text_only_target_keeps_function_and_removes_image_and_hosted_search() {
+    let source = json!({
+        "contents":[{"role":"user","parts":[
+            {"text":"keep"}, {"inlineData":{"mimeType":"image/png","data":"AAAA"}}
+        ]}],
+        "tools":[{"googleSearch":{}}, {"functionDeclarations":[{
+            "name":"web_search","parameters":{"type":"object"}
+        }]}]
+    });
+    let mut canonical = crate::hub_v1::build_v3_chat_canonical_request_from_gemini_payload(&source).unwrap();
+    crate::hub_v1::project_selected_provider_hosted_search(&mut canonical, &["text".into()]);
+    crate::hub_v1::project_selected_provider_images(&mut canonical, &["text".into()], false);
+    let wire = project_outbound_payload_for_selected_target_protocol(
+        &canonical, V3OutboundTargetProtocol::Gemini, &["text".into()],
+    ).unwrap();
+    let rendered = wire.to_string();
+    assert!(!rendered.contains("AAAA"), "image must not be restored: {wire}");
+    assert!(!rendered.contains("googleSearch"), "hosted search must not be restored: {wire}");
+    assert!(rendered.contains("[Image]"), "image placeholder missing: {wire}");
+    assert!(rendered.contains("web_search"), "local function missing: {wire}");
+    assert!(rendered.contains("keep"), "text missing: {wire}");
+}
+
+#[test]
 fn gemini_explicit_thinking_budgets_reach_anthropic_standard_consumer() {
     for budget in [0, 4096] {
         let source = json!({

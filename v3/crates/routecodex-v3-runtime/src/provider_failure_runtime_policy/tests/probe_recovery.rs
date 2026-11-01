@@ -5,6 +5,38 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
 
+fn typed_post_commit_transport_failure() -> V3Error01SourceRaised {
+    build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure, "V3ProviderRespInbound01Raw",
+        "provider_transport_error", "connection closed",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Transport, status: None,
+            code: Some("TRANSPORT_ERROR".into()), provider_id: Some("primary".into()),
+            upstream_request_id: None, message: Some("connection closed".into()),
+        },
+    )
+}
+
+#[test]
+fn post_commit_transport_failure_contributes_to_global_error_threshold() {
+    let manifest = target_resolution_manifest("post_commit_transport_global_count");
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let session = test_provider_failure_scope(
+        "post_commit_transport_global_count", "post_commit_transport_global_count", "session",
+    ).unwrap();
+    let source = typed_post_commit_transport_failure();
+    for index in 0..10 {
+        health.record_post_commit_provider_stream_failure_from_source(
+            &session, "primary", Some("key1"), Some("gpt-test"), &source,
+        ).unwrap();
+        let now = v3_relay_provider_policy_now_epoch_ms().unwrap();
+        assert_eq!(health.availability("primary", Some("key1"), Some("gpt-test"), now).unwrap().available,
+            index < 9, "each real transport failure must count once toward the ten-error threshold");
+    }
+    assert!(health.availability("primary", Some("other"), Some("gpt-test"), v3_relay_provider_policy_now_epoch_ms().unwrap()).unwrap().available,
+        "a sibling key must not inherit the failed identity's cooldown");
+}
+
 #[test]
 fn unpolled_probe_cancellation_releases_exact_generation() {
     let manifest = target_resolution_manifest("unpolled_probe_guard");
@@ -84,26 +116,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
     provider.auth.entries[0].env = Some("V3_MANAGED_LIFECYCLE_TEST_KEY".into());
     std::env::set_var("V3_MANAGED_LIFECYCLE_TEST_KEY", "fixture-only");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
-    let scope = test_provider_failure_scope(&scope_name, &scope_name, "lifecycle").unwrap();
     let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
-    let expanded = build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id: &scope_name,
-        failure_session_scope: &scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"test"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms,
-        deterministic_sample: 0,
-    })
-    .unwrap_or_else(|_| panic!("lifecycle candidate expansion"));
-    let candidate = expanded
-        .candidates
-        .iter()
-        .find(|candidate| candidate.provider_id == provider_id)
-        .unwrap();
     health
         .store
         .record_provider_cooldown_failure(
@@ -123,27 +136,14 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
     let slots = (0..V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY)
         .map(|_| owner.capacity.clone().try_acquire_owned().unwrap())
         .collect::<Vec<_>>();
-    assert!(matches!(
-        health
-            .initiate_cooldown_rescue_probe(&manifest, candidate, now_ms)
-            .await
-            .unwrap(),
-        V3ProbeInitiation::CapacityUnavailable
-    ));
+    let task = tokio::spawn(lifecycle);
+    tokio::task::yield_now().await;
     assert!(health
         .store
         .cooldown_entries(now_ms)
         .iter()
         .all(|entry| entry.state != "probing"));
     drop(slots);
-    assert!(matches!(
-        health
-            .initiate_cooldown_rescue_probe(&manifest, candidate, now_ms)
-            .await
-            .unwrap(),
-        V3ProbeInitiation::Initiated
-    ));
-    let task = tokio::spawn(lifecycle);
     let (mut socket, _) = tokio::time::timeout(Duration::from_secs(2), listener.accept())
         .await
         .unwrap()
@@ -159,16 +159,16 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
     .await
     .unwrap();
     assert!(String::from_utf8_lossy(&headers).contains("Bearer fixture-only"));
-    assert!(matches!(
+    assert_eq!(
         health
-            .initiate_cooldown_rescue_probe(&manifest, candidate, now_ms)
-            .await
-            .unwrap(),
-        V3ProbeInitiation::AlreadyOwned
-    ));
-    let capacity_key = format!("{provider_id}:key1");
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    assert_eq!(controller.snapshot(&capacity_key).unwrap().in_flight, 1);
+            .store
+            .cooldown_entries(now_ms)
+            .iter()
+            .find(|entry| entry.kind == "probe")
+            .unwrap()
+            .state,
+        "probing"
+    );
     if newer_generation {
         health
             .store
@@ -200,9 +200,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
                     while owner.capacity.available_permits() != V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {
                         tokio::task::yield_now().await;
                     }
-                } => {
-                    assert_eq!(controller.snapshot(&capacity_key).unwrap().in_flight, 0);
-                }
+                } => {}
                 accepted = listener.accept(), if newer_generation => {
                     let (mut replacement, _) = accepted.unwrap();
                     let mut headers = Vec::new();
@@ -224,8 +222,8 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
                     // A real successor proves the old health acquisition ended.
                     // One occupied slot/transport proves the old resources ended,
                     // even when the aggregate's all-free state was transient.
-                    while owner.capacity.available_permits() != V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY - 1
-                        || controller.snapshot(&capacity_key).unwrap().in_flight != 1
+                    while owner.capacity.available_permits()
+                        != V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY - 1
                     {
                         tokio::task::yield_now().await;
                     }
@@ -236,7 +234,6 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
                     assert_eq!(probe.until_ms, newer_probe.until_ms);
                     assert_eq!(probe.remaining_ms, newer_probe.remaining_ms);
                     assert_eq!(health.store.scheduling_projection_for_key(&provider_id, "key1", "gpt-test", 1, 1, now_ms + 1).unwrap().score_generation, newer_score_generation);
-                    eprintln!("completed old probe; authenticated successor owns one manager slot and one transport: {capacity_key}");
                     replacement_socket = Some(replacement);
                 }
             }
@@ -250,7 +247,6 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
         .expect("shutdown must not wait for held socket release")
         .unwrap();
     drop(replacement_socket);
-    assert_eq!(controller.snapshot(&capacity_key).unwrap().in_flight, 0);
     assert_eq!(
         owner.capacity.available_permits(),
         V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY
@@ -276,12 +272,14 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
         assert!(
             !health
                 .availability(&provider_id, Some("key1"), Some("gpt-test"), now_ms + 1)
+                .unwrap()
                 .available
         );
     } else if status.is_some() {
         assert!(
             health
                 .availability(&provider_id, Some("key1"), Some("gpt-test"), now_ms + 1)
+                .unwrap()
                 .available
         );
     } else {
@@ -292,20 +290,14 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
         assert!(
             !health
                 .availability(&provider_id, Some("key1"), Some("gpt-test"), now_ms)
+                .unwrap()
                 .available
         );
     }
-    assert!(matches!(
-        health
-            .initiate_cooldown_rescue_probe(&manifest, candidate, now_ms)
-            .await
-            .unwrap(),
-        V3ProbeInitiation::OwnerUnavailable
-    ));
 }
 
 #[test]
-fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
+fn post_commit_transport_failures_cool_provider_after_ten_real_errors() {
     let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -314,14 +306,9 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
         "single-failure-session",
     )
     .expect("single failure session scope");
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderRespInbound01Raw",
-        "provider_response_sse_stream",
-        "Responses SSE event must be a JSON object",
-    );
+    let source = typed_post_commit_transport_failure();
 
-    for _attempt in 0..1 {
+    for attempt in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -341,15 +328,15 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
                 1,
                 1,
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
-            );
+            )
+            .unwrap();
         assert_eq!(
-            projection.available, false,
-            "one typed recoverable post-commit SSE failure must cool the exact identity"
+            projection.available, attempt < 9,
+            "only the tenth real transport failure must cool the exact identity"
         );
-        assert!(projection
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope == "provider_cooldown_probe_pending"));
+        if attempt == 9 {
+            assert!(projection.blocked_scopes.iter().any(|scope| scope == "provider_cooldown_probe_pending"));
+        }
     }
 }
 
@@ -363,14 +350,9 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         "success-reset-session",
     )
     .expect("success reset session scope");
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderRespInbound01Raw",
-        "provider_response_sse_stream",
-        "Responses SSE event must be a JSON object",
-    );
+    let source = typed_post_commit_transport_failure();
 
-    for _ in 0..1 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -408,7 +390,8 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
             1,
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
-        );
+        )
+        .unwrap();
     assert!(
         projection.available,
         "a real matching business success must release this exact recoverable identity"
@@ -427,7 +410,7 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         "a matching business success must remove the exact cooldown instead of keeping its probe"
     );
 
-    for _ in 0..1 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -447,10 +430,11 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
             1,
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
-        );
+        )
+        .unwrap();
     assert!(
         !after_post_success_failures.available,
-        "after the business-success release, one non-429 provider failure must cool again"
+        "after business-success release, ten real provider failures must cool again"
     );
 
     let permit = health
@@ -468,12 +452,13 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
     assert!(
         health
             .availability("primary", Some("key1"), Some("gpt-test"), u64::MAX)
+            .unwrap()
             .available
     );
 }
 
 #[test]
-fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
+fn ten_post_commit_transport_failures_start_recovery_probe_after_five_seconds() {
     let manifest = target_resolution_manifest("post_commit_sse_probe_due");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -482,15 +467,10 @@ fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
         "probe-due-session",
     )
     .expect("probe due session scope");
-    let source = build_v3_error_01_source_raised(
-        V3ErrorSourceKind::ProviderFailure,
-        "V3ProviderRespInbound01Raw",
-        "provider_response_sse_stream",
-        "Responses SSE event must be a JSON object",
-    );
+    let source = typed_post_commit_transport_failure();
     let before_failures_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
 
-    for _ in 0..3 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -522,7 +502,7 @@ fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
             Some("key1".to_string()),
             Some("gpt-test".to_string()),
         )],
-        "three post-commit SSE failures must enter the 429-equivalent recovery ladder at 5s"
+        "ten real post-commit transport failures must schedule recovery at 5s"
     );
 }
 
@@ -657,6 +637,7 @@ async fn completed_probe_updates_health_before_slower_probe_finishes() {
                 Some("gpt-test"),
                 0,
             )
+            .unwrap()
             .available,
         "a completed probe must clear its provider cooldown before slower probes finish"
     );

@@ -508,7 +508,7 @@ pub struct V2ProviderConfig {
     /// per-request 总超时（毫秒）；默认 60_000（60s）。覆盖连接、响应头等待与 body 读取。
     #[serde(default)]
     pub timeout: Option<u64>,
-    /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。
+    /// provider SSE 首帧超时（毫秒）；默认 60s。本地慢部署按 provider 放宽。
     #[serde(default, alias = "sse_first_frame_timeout_ms")]
     pub sse_first_frame_timeout_ms: Option<u64>,
     #[serde(default)]

@@ -48,8 +48,6 @@ pub struct V3TargetCandidate {
     pub reasoning_effort: Option<V3ReasoningEffort>,
     pub request_timeout_ms: u64,
     pub sse_first_frame_timeout_ms: Option<u64>,
-    pub initial_concurrency_budget: u32,
-    pub concurrency_acquire_timeout_ms: u64,
     pub compatibility_profile: Option<String>,
     pub headers: BTreeMap<String, String>,
     pub env_name: Option<String>,
@@ -74,7 +72,7 @@ pub struct V3Target09CandidateSetExpanded {
     pub route_pool_tier_priorities: BTreeMap<String, Vec<i32>>,
     /// Declared member identity of each pool that participated in the target
     /// plan, expanded without request-scoped filters (`requested_model_filter`,
-    /// capability or availability). Session-sticky bindings prune against this
+    /// context capacity or availability). Session-sticky bindings prune against this
     /// set so a request that only makes part of a pool eligible cannot evict
     /// the session's remembered provider.
     pub sticky_pool_members: BTreeMap<String, Vec<V3StickyMember>>,
@@ -95,6 +93,21 @@ pub struct V3Target10ConcreteProviderSelected {
 pub struct V3TargetExhaustion {
     pub route: Box<V3Router07OpaqueTargetHitOnce>,
     pub attempted_candidates: Vec<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum V3TargetSelectionError {
+    #[error(transparent)]
+    Exhausted(#[from] V3TargetExhaustion),
+    #[error("provider health read failed for {provider_id}/{interface_id}/{auth_alias}/{model_id}: {source}")]
+    Health {
+        provider_id: String,
+        interface_id: String,
+        auth_alias: String,
+        model_id: String,
+        #[source]
+        source: routecodex_v3_provider_responses::V3ProviderHealthError,
+    },
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -159,14 +172,14 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
         priority: i32,
         base_weight: u32,
         now_ms: u64,
-    ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+    ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
         let availability = self.availability.availability_for_interface(
             provider_id,
             interface_id,
             Some(auth_alias),
             Some(model_id),
             now_ms,
-        );
+        )?;
         let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
             provider_id,
             interface_id,
@@ -178,7 +191,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
         );
         projection.available = availability.available;
         projection.blocked_scopes = availability.blocked_scopes;
-        projection
+        Ok(projection)
     }
 
     fn scheduling_projection(
@@ -189,14 +202,14 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
         priority: i32,
         base_weight: u32,
         now_ms: u64,
-    ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+    ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
         let availability = self.availability.availability_for_interface(
             provider_id,
             "default",
             Some(auth_alias),
             Some(model_id),
             now_ms,
-        );
+        )?;
         let mut projection = routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
             provider_id,
             "default",
@@ -208,7 +221,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderSchedulingReader
         );
         projection.available = availability.available;
         projection.blocked_scopes = availability.blocked_scopes;
-        projection
+        Ok(projection)
     }
 }
 
@@ -271,7 +284,6 @@ impl V3TargetInterpreter {
                                 candidate.interface_id.clone(),
                                 candidate.auth_alias.clone(),
                                 candidate.model_id.clone(),
-                                candidate_satisfies_required_capabilities(&candidate),
                             );
                             if let Some(index) = candidate_indices.get(&key).copied() {
                                 merge_candidate_route_provenance(
@@ -299,15 +311,7 @@ impl V3TargetInterpreter {
                 last_error = Some(V3TargetError::OpaqueTargetMissing);
                 continue;
             };
-            let mut required_capabilities = route_required_capabilities.clone();
-            // The default tier is reached after capability tiers are absent or
-            // exhausted. ProviderReqCompat projects retained images to the
-            // session placeholder for a selected text-only target.
-            if entry.pool_id == "default" {
-                required_capabilities.retain(|capability| {
-                    !matches!(capability.as_str(), "web_search" | "multimodal" | "vision")
-                });
-            }
+            let required_capabilities = route_required_capabilities.clone();
             let mut visited = BTreeSet::new();
             match self.expand_route_target(
                 manifest,
@@ -330,7 +334,6 @@ impl V3TargetInterpreter {
                             candidate.interface_id.clone(),
                             candidate.auth_alias.clone(),
                             candidate.model_id.clone(),
-                            candidate_satisfies_required_capabilities(&candidate),
                         );
                         if let Some(index) = candidate_indices.get(&key).copied() {
                             merge_candidate_route_provenance(&mut candidates[index], &candidate);
@@ -429,20 +432,6 @@ impl V3TargetInterpreter {
             .collect()
     }
 
-    pub fn ignores_single_candidate_automatic_cooldown(
-        candidate_count: usize,
-        blocked_scopes: &[String],
-    ) -> bool {
-        candidate_count == 1
-            && !blocked_scopes.is_empty()
-            && blocked_scopes.iter().all(|scope| {
-                matches!(
-                    scope.as_str(),
-                    "provider_key_health_cooldown" | "provider_cooldown_probe_pending"
-                )
-            })
-    }
-
     /// Whether `now_ms` falls inside the candidate's declared availability
     /// window. A candidate without a declared window is always inside it. This
     /// predicate is shared by admission, the direct send gate and real provider
@@ -455,19 +444,28 @@ impl V3TargetInterpreter {
             .is_none_or(|availability| availability.is_available_at(now_ms))
     }
 
-    /// A candidate is admitted when its declared capabilities match the
-    /// request and its provider-model availability window contains `now_ms`.
+    /// A candidate is available when its declared availability window contains
+    /// `now_ms`. Capability signals do not exclude provider candidates.
     /// This is the single admission basis shared by Target10 selection, the
     /// direct send gate, remaining-candidate accounting and recovery probes:
     /// every consumer must agree on which candidates the route can actually
     /// reach, or a candidate admitted by one stage is refused by another and a
     /// provider that was never contacted receives a health failure.
     pub fn candidate_admitted(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
-        candidate_satisfies_required_capabilities(candidate)
-            && Self::candidate_in_availability_window(candidate, now_ms)
+        Self::candidate_in_availability_window(candidate, now_ms)
     }
 
-    /// Number of candidates admitted by capability and declared availability.
+    /// Request-specific selection also enforces the declared context capacity.
+    pub fn candidate_admitted_for_request(
+        candidate: &V3TargetCandidate,
+        now_ms: u64,
+        request_input_tokens: u64,
+    ) -> bool {
+        Self::candidate_admitted(candidate, now_ms)
+            && context_window_exceeded_reason(request_input_tokens, candidate).is_none()
+    }
+
+    /// Number of candidates within declared availability and context capacity.
     pub fn admitted_candidate_count(
         expanded: &V3Target09CandidateSetExpanded,
         now_ms: u64,
@@ -475,7 +473,13 @@ impl V3TargetInterpreter {
         expanded
             .candidates
             .iter()
-            .filter(|candidate| Self::candidate_admitted(candidate, now_ms))
+            .filter(|candidate| {
+                Self::candidate_admitted_for_request(
+                    candidate,
+                    now_ms,
+                    expanded.route.request_input_tokens,
+                )
+            })
             .count()
     }
 
@@ -485,7 +489,7 @@ impl V3TargetInterpreter {
         scheduling: &R,
         now_ms: u64,
         deterministic_sample: u64,
-    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetSelectionError> {
         self.select_available_with_health_inner(
             expanded,
             scheduling,
@@ -498,7 +502,7 @@ impl V3TargetInterpreter {
     /// Session-sticky admission of `select_available_with_health`.
     ///
     /// The sticky scope only reorders candidates inside the highest eligible
-    /// route-tier/priority bucket; health, capability, availability and
+    /// route-tier/priority bucket; health, context capacity, availability and
     /// request-local exclusions keep their existing meaning. Without a sticky
     /// scope the plain weighted selection runs unchanged.
     pub fn select_available_with_health_sticky<R: V3ProviderSchedulingReader>(
@@ -508,7 +512,7 @@ impl V3TargetInterpreter {
         now_ms: u64,
         deterministic_sample: u64,
         sticky: &V3StickySelectionScope,
-    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetSelectionError> {
         self.select_available_with_health_inner(
             expanded,
             scheduling,
@@ -525,23 +529,18 @@ impl V3TargetInterpreter {
         now_ms: u64,
         deterministic_sample: u64,
         sticky: Option<&V3StickySelectionScope>,
-    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetSelectionError> {
         let mut unavailable = Vec::new();
         // Candidates of the sticky pool that this attempt cannot use because of
         // health, cooldown or a declared availability window. Only these hand
         // the main slot over; a request-local failure never does.
         let mut sticky_cooled = BTreeSet::new();
         let mut eligible = Vec::new();
-        // Automatic-cooldown exemption counts only candidates still admitted by
-        // capability and declared availability, so a window-inactive or
-        // capability-mismatched sibling cannot inflate the pool size.
-        let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
         for (index, candidate) in expanded.candidates.iter().enumerate() {
-            if !candidate_satisfies_required_capabilities(candidate) {
-                unavailable.push(format!(
-                    "{}:{}:{}:capability_mismatch",
-                    candidate.provider_id, candidate.auth_alias, candidate.model_id
-                ));
+            if let Some(reason) =
+                context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
+            {
+                unavailable.push(reason);
                 continue;
             }
             // Availability is declared on the provider model and is not a
@@ -561,11 +560,8 @@ impl V3TargetInterpreter {
                 ));
                 continue;
             }
-            // The context estimate is advisory ordering evidence, never an
-            // admission boundary or provider refusal. Preserve health,
-            // capability and request-local exclusion; demote an eligible
-            // candidate only inside its route tier when its scaled estimate
-            // is near or above its declared window.
+            // Candidates above the context window were excluded above. Demote
+            // candidates near that limit only inside the same route tier.
             let near_limit =
                 context_window_exceeded_reason(expanded.route.request_input_tokens, candidate)
                     .is_some()
@@ -592,18 +588,13 @@ impl V3TargetInterpreter {
                 candidate.priority,
                 candidate.weight,
                 now_ms,
-            );
-            // A configured singleton does not participate in automatic health
-            // scheduling. Keep manual auth, capacity and request-local blocks.
-            if !projection.available
-                && Self::ignores_single_candidate_automatic_cooldown(
-                    admitted_candidate_count,
-                    &projection.blocked_scopes,
-                )
-            {
-                projection.available = true;
-                projection.blocked_scopes.clear();
-            }
+            ).map_err(|source| V3TargetSelectionError::Health {
+                provider_id: candidate.provider_id.clone(),
+                interface_id: candidate.interface_id.clone(),
+                auth_alias: candidate.auth_alias.clone(),
+                model_id: candidate.model_id.clone(),
+                source,
+            })?;
             let scheduled_priority =
                 self.provider_priority_schedule_priority(&expanded, candidate, now_ms);
             projection.effective_priority = projection
@@ -645,21 +636,6 @@ impl V3TargetInterpreter {
         // The attempt budget includes the text candidates that become
         // selectable after the available vision candidates fail.
         let candidate_count = eligible.len().max(1);
-        // A text-only default candidate may project images only after every
-        // captured, available vision candidate has been exhausted.
-        if expanded
-            .route
-            .request_capabilities
-            .iter()
-            .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
-            && eligible.iter().any(|(_, candidate, _, _, _, _)| {
-                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-            })
-        {
-            eligible.retain(|(_, candidate, _, _, _, _)| {
-                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-            });
-        }
         // A route pool can encode its configured tiers as target priority.
         // Plan tier index orders separate pools; scheduled priority orders the
         // tiers inside one pool. Near-limit is only a same-tier demotion, so it
@@ -674,7 +650,7 @@ impl V3TargetInterpreter {
             return Err(V3TargetExhaustion {
                 route: Box::new(expanded.route),
                 attempted_candidates: unavailable,
-            });
+            }.into());
         };
         let highest_route_tier_has_normal = eligible.iter().any(
             |(_, _, _, route_tier_rank, scheduled_priority, near_limit)| {
@@ -698,7 +674,7 @@ impl V3TargetInterpreter {
             return Err(V3TargetExhaustion {
                 route: Box::new(expanded.route),
                 attempted_candidates: unavailable,
-            });
+            }.into());
         };
         let mut tier = candidates
             .drain(..)
@@ -723,7 +699,7 @@ impl V3TargetInterpreter {
             let scope_key = scope.scope_key(tier_pool_id);
             // The sticky universe is the pool's declared member set, not the
             // per-request expansion: a request that only makes part of the pool
-            // eligible (model filter, capability, availability) must not evict
+            // eligible (model filter, context capacity, availability) must not evict
             // the session's remembered provider from the pool.
             let universe = expanded
                 .sticky_pool_members
@@ -852,9 +828,9 @@ impl V3TargetInterpreter {
         expanded: V3Target09CandidateSetExpanded,
         availability: &R,
         now_ms: u64,
-    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+    ) -> Result<V3Target10ConcreteProviderSelected, V3TargetSelectionError> {
         let scheduling = V3AvailabilitySchedulingAdapter::new(availability);
-        let normalize = |candidates: &mut Vec<String>| {
+        let normalize = |candidates: &mut Vec<String>| -> Result<(), V3TargetSelectionError> {
             for unavailable in candidates {
                 if let Some(candidate) = expanded.candidates.iter().find(|candidate| {
                     format!(
@@ -871,11 +847,18 @@ impl V3TargetInterpreter {
                         Some(&candidate.auth_alias),
                         Some(&candidate.model_id),
                         now_ms,
-                    );
+                    ).map_err(|source| V3TargetSelectionError::Health {
+                        provider_id: candidate.provider_id.clone(),
+                        interface_id: candidate.interface_id.clone(),
+                        auth_alias: candidate.auth_alias.clone(),
+                        model_id: candidate.model_id.clone(),
+                        source,
+                    })?;
                     *unavailable =
                         format_candidate_availability_unavailable(candidate, &projection);
                 }
             }
+            Ok(())
         };
         let deterministic_sample = legacy_selection_sample(&expanded);
         match self.select_available_with_health(
@@ -885,13 +868,14 @@ impl V3TargetInterpreter {
             deterministic_sample,
         ) {
             Ok(mut selected) => {
-                normalize(&mut selected.unavailable_candidates);
+                normalize(&mut selected.unavailable_candidates)?;
                 Ok(selected)
             }
-            Err(mut exhausted) => {
-                normalize(&mut exhausted.attempted_candidates);
-                Err(exhausted)
+            Err(V3TargetSelectionError::Exhausted(mut exhausted)) => {
+                normalize(&mut exhausted.attempted_candidates)?;
+                Err(exhausted.into())
             }
+            Err(error) => Err(error),
         }
     }
 
@@ -1111,14 +1095,6 @@ impl V3TargetInterpreter {
                     reasoning_effort: provider.reasoning_effort,
                     request_timeout_ms: provider.request_timeout_ms,
                     sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-                    initial_concurrency_budget: provider
-                        .concurrency
-                        .as_ref()
-                        .map_or(40, |concurrency| concurrency.max_in_flight),
-                    concurrency_acquire_timeout_ms: provider
-                        .concurrency
-                        .as_ref()
-                        .map_or(60_000, |concurrency| concurrency.acquire_timeout_ms),
                     compatibility_profile: interface
                         .compatibility_profile
                         .clone()
@@ -1374,13 +1350,6 @@ fn merge_candidate_route_provenance(
     existing.default_pool_member |= duplicate.default_pool_member;
 }
 
-fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> bool {
-    candidate
-        .required_capabilities
-        .iter()
-        .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
-}
-
 fn legacy_selection_sample(expanded: &V3Target09CandidateSetExpanded) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for value in [
@@ -1441,15 +1410,6 @@ fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_toke
         + 9_999)
         / 10_000)
         .min(u128::from(u64::MAX)) as u64
-}
-
-fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
-    let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
-    match required {
-        "search" | "web_search" => has("web_search"),
-        "multimodal" | "vision" => has("multimodal") || has("vision"),
-        _ => true,
-    }
 }
 
 fn format_candidate_availability_unavailable(

@@ -125,7 +125,6 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
             assert_eq!(record.failure_count, 0);
             assert_eq!(record.cooldown_until_ms, None);
         }
-        complete_due_precool_failures(&health, 101).await;
         assert!(
             !health
                 .store()
@@ -168,7 +167,6 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
         assert_eq!(record.failure_count, 0);
         assert_eq!(record.cooldown_until_ms, None);
     }
-    complete_due_precool_failures(&other_health, 202).await;
     assert!(
         !other_health
             .store()
@@ -242,7 +240,6 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     assert_eq!(second.state, "pre_cool_observation");
     assert_eq!(second.failure_count, 0);
     assert_eq!(second.cooldown_until_ms, None);
-    complete_due_precool_failures(&health, 101).await;
     assert!(
         !health
             .store()
@@ -336,6 +333,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
         health
             .store()
             .availability_for_session(&session, "primary", Some("key1"), Some("gpt-other"), 102,)
+            .expect("sibling model session availability")
             .available,
         "401 must leave another model available in the session"
     );
@@ -354,7 +352,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
         Some("key1"),
         Some("gpt-test"),
         102,
-    );
+    ).expect("session availability");
     assert!(
         !availability.available,
         "401 auth key must be blocked after one failure: {availability:?}"
@@ -421,7 +419,6 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
         assert_eq!(record.failure_count, 0);
         assert_eq!(record.cooldown_until_ms, None);
     }
-    complete_due_precool_failures(&health, 101).await;
     assert_eq!(
         observed_cooldown_until_ms(
             &health,
@@ -531,7 +528,6 @@ targets = [
         assert_eq!(record.failure_count, 0);
         assert_eq!(record.cooldown_until_ms, None);
     }
-    complete_due_precool_failures(&health, 101).await;
     for attempt in 0..2 {
         let model_available = health
             .store()

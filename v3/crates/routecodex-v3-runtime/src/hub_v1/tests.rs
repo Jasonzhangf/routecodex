@@ -4,6 +4,31 @@ use super::request_outbound_format::{
 use super::*;
 use serde_json::json;
 
+#[test]
+fn relay_protocols_preserve_typed_health_read_source() {
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3ProviderHealthRead",
+        "provider_health_read_failed",
+        "p/i/k/m: controlled health read failure",
+    );
+    let responses = project_v3_responses_relay_runtime_failure(
+        V3ResponsesRelayRuntimeError::RuntimeSource(source.clone()), None,
+    );
+    let chat = project_v3_openai_chat_relay_runtime_failure(
+        V3OpenAiChatRelayRuntimeError::RuntimeSource(source.clone()),
+    );
+    let gemini = project_v3_gemini_relay_runtime_failure(
+        V3GeminiRelayRuntimeError::RuntimeSource(source.clone()),
+    );
+    let anthropic = project_v3_anthropic_relay_runtime_failure(
+        V3AnthropicRelayRuntimeError::RuntimeSource(source.clone()),
+    );
+    for actual in [responses.diagnostic_source, chat.diagnostic_source, gemini.diagnostic_source, anthropic.diagnostic_source] {
+        assert_eq!(actual.as_ref(), Some(&source));
+    }
+}
+
 fn build_v3_openai_chat_provider_payload_from_responses_payload(
     payload: &serde_json::Value,
 ) -> Result<serde_json::Value, String> {
@@ -281,8 +306,6 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
             priority: 0,
             weight: 1,
             sse_first_frame_timeout_ms: None,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: None,
             headers: Default::default(),
             env_name: Some("V3_TEST_KEY".into()),
@@ -363,8 +386,6 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
             priority: 0,
             weight: 1,
             sse_first_frame_timeout_ms: None,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: None,
             headers: Default::default(),
             env_name: Some("V3_TEST_KEY".into()),
@@ -444,8 +465,6 @@ fn provider_req_compat_loads_selected_target_profile() {
             priority: 0,
             weight: 1,
             sse_first_frame_timeout_ms: None,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: Some("chat:minimax".into()),
             headers: Default::default(),
             env_name: Some("V3_TEST_KEY".into()),
@@ -894,8 +913,6 @@ fn v3_output_cap_test_candidate(
         priority: 0,
         weight: 1,
         sse_first_frame_timeout_ms: None,
-        initial_concurrency_budget: 8,
-        concurrency_acquire_timeout_ms: 60_000,
         compatibility_profile: None,
         headers: Default::default(),
         env_name: Some("V3_TEST_KEY".into()),

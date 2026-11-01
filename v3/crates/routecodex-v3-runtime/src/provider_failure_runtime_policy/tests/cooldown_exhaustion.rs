@@ -1,7 +1,7 @@
 use super::*;
 use crate::hub_v1::V3HubEntryProtocol;
 use crate::operation_runner::plan_execution::{
-    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
+    run_v3_plan_execution_operator_with_recovery, V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
 };
 use serde_json::json;
@@ -10,106 +10,6 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, Notify};
-
-#[tokio::test]
-async fn busy_preferred_candidate_preserves_cooled_peer_recovery() {
-    let server_id = "busy_preferred_cooled_peer_recovery";
-    let first_id = "busy_preferred_cooled_peer_first";
-    let second_id = "busy_preferred_cooled_peer_second";
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, None, first_id, second_id);
-    manifest.providers.get_mut(first_id).unwrap().concurrency =
-        Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-            max_in_flight: 1,
-            acquire_timeout_ms: 60_000,
-            stale_lease_ms: 300_000,
-        });
-    set_provider_interface_base_url(
-        &mut manifest,
-        second_id,
-        "default",
-        format!("http://{}/v1", listener.local_addr().unwrap()),
-    );
-    let second = manifest.providers.get_mut(second_id).unwrap();
-    second.auth.entries[0].env = Some("V3_BUSY_PREFERRED_COOLED_PEER_KEY".into());
-    std::env::set_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY", "test-key");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let scope = test_provider_failure_scope(server_id, server_id, "busy-recovery-session").unwrap();
-    let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("candidate expansion"),
-    };
-    health
-        .store
-        .record_provider_cooldown_failure(
-            second_id,
-            Some("key1"),
-            Some("gpt-test"),
-            "recoverable peer",
-            now_ms,
-            5_000,
-        )
-        .unwrap();
-    let preferred = V3TargetInterpreter::default()
-        .select_available(expanded.clone(), &health.store, now_ms)
-        .unwrap();
-    assert_eq!(preferred.candidate.provider_id, first_id);
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let first_key = format!("{first_id}:key1");
-    controller.ensure_initial_budget(&first_key, 1).unwrap();
-    let held = controller.try_acquire_business(&first_key).unwrap();
-    let probe_server = tokio::spawn(serve_one_responses_probe(listener));
-
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(2),
-        run_v3_plan_execution_operator_with_probes(
-            crate::execution_control::V3AttemptBudget::process_default(),
-            json!({"model":"client-responses","input":"hello"}),
-            &manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            &scope,
-            &health,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            now_ms,
-            0,
-            true,
-            Some(preferred),
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: V3HubEntryProtocol::Responses,
-            },
-        ),
-    )
-    .await
-    .expect("a busy candidate must not disable peer recovery");
-    controller.release(held.into_permit()).unwrap();
-    let Ok((_execution_planned_request, plan)) = outcome else {
-        probe_server.abort();
-        panic!("a recoverable cooled peer must be probed instead of reporting an empty pool");
-    };
-    assert_eq!(plan.selected.candidate.provider_id, second_id);
-    assert!(
-        health
-            .availability(first_id, Some("key1"), Some("gpt-test"), now_ms)
-            .available
-    );
-    assert_eq!(controller.snapshot(&first_key).unwrap().in_flight, 0);
-    probe_server.await.unwrap();
-    std::env::remove_var("V3_BUSY_PREFERRED_COOLED_PEER_KEY");
-}
 
 fn set_provider_interface_base_url(
     manifest: &mut V3Config05ManifestPublished,
@@ -135,7 +35,6 @@ fn set_provider_interface_base_url(
             .clone();
     }
 }
-
 fn all_candidate_keys(expanded: &V3Target09CandidateSetExpanded) -> BTreeSet<String> {
     expanded
         .candidates
@@ -164,32 +63,26 @@ fn put_all_candidates_in_provider_cooldown(
     }
 }
 
-fn put_auth_key_in_cooldown(
+fn put_identity_in_global_cooldown(
     health: &V3ProviderFailureRuntimeHealth,
-    failure_session_scope: &V3ProviderFailureSessionScope,
     provider_id: &str,
     auth_alias: &str,
     model_id: &str,
     now_ms: u64,
 ) {
-    health
-        .store
-        .record_provider_failure_in_session_with_policy(
-            failure_session_scope,
-            provider_id,
-            Some(auth_alias),
-            Some(model_id),
-            Some("controlled auth-key cooldown"),
-            None,
-            now_ms,
-            Some(routecodex_v3_provider_responses::V3ProviderFailurePolicy {
-                failure_threshold: 1,
-                cooldown_ms: 900_000,
-                until_restart: false,
-                ..Default::default()
-            }),
-        )
-        .expect("auth-key cooldown setup");
+    for _ in 0..10 {
+        health
+            .store
+            .record_real_provider_failure_for_interface(
+                provider_id,
+                "default",
+                auth_alias,
+                model_id,
+                Some(401),
+                now_ms,
+            )
+            .expect("real account error must contribute to identity cooldown");
+    }
 }
 
 fn acquire_rescue_probe(
@@ -390,7 +283,7 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
 
     let outcome = tokio::time::timeout(
         Duration::from_secs(2),
-        run_v3_plan_execution_operator_with_probes(
+        run_v3_plan_execution_operator_with_recovery(
             crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
@@ -401,7 +294,6 @@ async fn fresh_cooldown_only_exhaustion_runs_one_rescue_probe_and_resumes_same_r
             &BTreeSet::new(),
             20_001,
             0,
-            true,
             None,
             V3PlanExecutionModePolicy::RelayOnly {
                 entry_protocol: V3HubEntryProtocol::Responses,
@@ -478,7 +370,7 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
     let selection_scope = failure_session_scope.clone();
     let selection_health = health.clone();
     let selection = tokio::spawn(async move {
-        run_v3_plan_execution_operator_with_probes(
+        run_v3_plan_execution_operator_with_recovery(
             crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &selection_manifest,
@@ -489,7 +381,6 @@ async fn stale_rescue_probe_completion_does_not_abort_reselection_of_next_provid
             &BTreeSet::new(),
             20_001,
             0,
-            true,
             None,
             V3PlanExecutionModePolicy::RelayOnly {
                 entry_protocol: V3HubEntryProtocol::Responses,
@@ -591,7 +482,7 @@ async fn cooldown_only_exhaustion_waits_for_other_requests_successful_probe() {
         let request_local_excluded_candidates = BTreeSet::from([excluded_key.clone()]);
         let request_local_busy_candidates = BTreeSet::new();
         tokio::spawn(async move {
-            let task = run_v3_plan_execution_operator_with_probes(
+            let task = run_v3_plan_execution_operator_with_recovery(
                 crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
@@ -602,7 +493,6 @@ async fn cooldown_only_exhaustion_waits_for_other_requests_successful_probe() {
                 &request_local_busy_candidates,
                 20_001,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::RelayOnly {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -651,6 +541,7 @@ async fn cooldown_only_exhaustion_waits_for_other_requests_successful_probe() {
                 Some(&second.model_id),
                 20_001
             )
+            .unwrap()
             .available,
         "independent successful probe must still restore provider health"
     );
@@ -704,7 +595,7 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
         let request_local_excluded_candidates = BTreeSet::from([excluded_key.clone()]);
         let request_local_busy_candidates = BTreeSet::new();
         tokio::spawn(async move {
-            let task = run_v3_plan_execution_operator_with_probes(
+            let task = run_v3_plan_execution_operator_with_recovery(
                 crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
@@ -715,7 +606,6 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
                 &request_local_busy_candidates,
                 20_001,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::RelayOnly {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -764,6 +654,7 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
                 Some(&first.model_id),
                 20_001
             )
+            .unwrap()
             .available
     );
     assert!(
@@ -774,12 +665,13 @@ async fn cooldown_only_exhaustion_preserves_independent_failed_and_successful_pr
                 Some(&second.model_id),
                 20_001
             )
+            .unwrap()
             .available
     );
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_failure() {
+async fn cooldown_only_exhaustion_recovers_after_independent_probe_failure() {
     let server_id = "cooldown_only_exhaustion_due_retry";
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -816,10 +708,6 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
     };
     put_all_candidates_in_provider_cooldown(&health, &expanded);
     let second = expanded.candidates[1].clone();
-    let mut expanded = expanded;
-    for candidate in &mut expanded.candidates {
-        candidate.concurrency_acquire_timeout_ms = 200;
-    }
     let second_permit = acquire_rescue_probe(
         &health,
         &second.provider_id,
@@ -831,7 +719,7 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
         let health = health.clone();
         let failure_session_scope = failure_session_scope.clone();
         async move {
-            run_v3_plan_execution_operator_with_probes(
+            run_v3_plan_execution_operator_with_recovery(
                 crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id)
                     .unwrap(),
                 json!({"model":"client-responses","input":"hello"}),
@@ -843,7 +731,6 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
                 &BTreeSet::new(),
                 20_001,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::RelayOnly {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -862,13 +749,10 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
         .complete_provider_cooldown_probe_failure_with_permit(&second_permit, 20_001)
         .expect("first rescue probe failure");
 
-    let selection = tokio::time::timeout(Duration::from_secs(7), selection)
-        .await
-        .expect("the exhausted request must already be complete")
-        .expect("selection task must not panic");
+    tokio::time::sleep(Duration::from_millis(250)).await;
     assert!(
-        matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "future scheduled recovery must not revive this request"
+        !selection.is_finished(),
+        "a failed probe and elapsed budget must not end recoverable pool waiting"
     );
     assert!(
         health
@@ -888,12 +772,30 @@ async fn cooldown_only_exhaustion_waits_until_budget_after_independent_probe_fai
         tokio::time::timeout(Duration::from_millis(50), listener.accept())
             .await
             .is_err(),
-        "exhausted request must not send the future recovery probe"
+        "the waiting request must not hammer the provider before its next probe"
+    );
+    health
+        .store
+        .record_provider_key_success_for_interface(
+            &second.provider_id,
+            &second.interface_id,
+            &second.auth_alias,
+            &second.model_id,
+            20_002,
+        )
+        .expect("matching success restores the independently cooled identity");
+    let outcome = tokio::time::timeout(Duration::from_secs(3), selection)
+        .await
+        .expect("a matching recovery must wake selection")
+        .expect("selection task must not panic");
+    assert!(
+        outcome.is_ok(),
+        "the accepted request must resume after recovery"
     );
 }
 
 #[tokio::test]
-async fn cooldown_only_exhaustion_terminates_after_request_residence_budget() {
+async fn cooldown_only_exhaustion_recovers_after_request_residence_budget() {
     let server_id = "cooldown_only_exhaustion_rescue_deadline";
     let manifest = global_pool_alive_manifest_with_rescue_timeout(server_id, Some(150));
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -919,37 +821,48 @@ async fn cooldown_only_exhaustion_terminates_after_request_residence_budget() {
         Err(_) => panic!("expanded candidates failed"),
     };
     put_all_candidates_in_provider_cooldown(&health, &expanded);
-    let mut expanded = expanded;
-    for candidate in &mut expanded.candidates {
-        candidate.concurrency_acquire_timeout_ms = 2000;
-    }
-    let started = tokio::time::Instant::now();
-    let selection = tokio::time::timeout(
-        Duration::from_secs(2),
-        run_v3_plan_execution_operator_with_probes(
-            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
-            json!({"model":"client-responses","input":"hello"}),
-            &manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            &failure_session_scope,
-            &health,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            20_001,
-            0,
-            true,
-            None,
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: V3HubEntryProtocol::Responses,
-            },
-        ),
-    )
-    .await
-    .expect("cooldown recovery must respect the original residence budget independently of candidate acquisition");
-    assert!(started.elapsed() >= Duration::from_millis(150));
+    let recovered = expanded.candidates[0].clone();
+    let excluded = BTreeSet::new();
+    let busy = BTreeSet::new();
+    let selection = run_v3_plan_execution_operator_with_recovery(
+        crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
+        json!({"model":"client-responses","input":"hello"}),
+        &manifest,
+        V3PlanExecutionTargetSource::Expanded(expanded),
+        &failure_session_scope,
+        &health,
+        &excluded,
+        &busy,
+        20_001,
+        0,
+        None,
+        V3PlanExecutionModePolicy::RelayOnly {
+            entry_protocol: V3HubEntryProtocol::Responses,
+        },
+    );
+    tokio::pin!(selection);
     assert!(
-        matches!(selection, Err(V3PlanExecutionStop::Exhausted { .. })),
-        "failed recovery must exhaust only after its original request residence budget"
+        tokio::time::timeout(Duration::from_millis(400), &mut selection)
+            .await
+            .is_err(),
+        "the original residence deadline must not end recoverable pool waiting"
+    );
+    health
+        .store
+        .record_provider_key_success_for_interface(
+            &recovered.provider_id,
+            &recovered.interface_id,
+            &recovered.auth_alias,
+            &recovered.model_id,
+            20_002,
+        )
+        .expect("matching business success restores the candidate");
+    let outcome = tokio::time::timeout(Duration::from_secs(2), &mut selection)
+        .await
+        .expect("the matching recovery must wake selection");
+    assert!(
+        outcome.is_ok(),
+        "the request must resume when its candidate recovers"
     );
 }
 
@@ -984,7 +897,7 @@ async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_
     let started = tokio::time::Instant::now();
     let selection = tokio::time::timeout(
         Duration::from_secs(2),
-        run_v3_plan_execution_operator_with_probes(
+        run_v3_plan_execution_operator_with_recovery(
             attempt_budget.clone(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
@@ -995,7 +908,6 @@ async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_
             &BTreeSet::new(),
             20_001,
             0,
-            true,
             None,
             V3PlanExecutionModePolicy::RelayOnly {
                 entry_protocol: V3HubEntryProtocol::Responses,
@@ -1047,7 +959,7 @@ async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_
     let cancel_excluded = all_candidate_keys(&cancel_expanded);
     let busy = BTreeSet::new();
     let waiting = tokio::spawn(async move {
-        run_v3_plan_execution_operator_with_probes(
+        run_v3_plan_execution_operator_with_recovery(
             cancel_budget,
             json!({"model":"client-responses","input":"hello"}),
             &cancel_manifest,
@@ -1058,7 +970,6 @@ async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_
             &busy,
             20_001,
             0,
-            true,
             None,
             V3PlanExecutionModePolicy::RelayOnly {
                 entry_protocol: V3HubEntryProtocol::Responses,
@@ -1082,7 +993,7 @@ async fn request_local_exclusion_without_cooldown_probe_success_waits_residence_
 }
 
 #[tokio::test]
-async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
+async fn identity_cooldown_exhaustion_preserves_independent_probe_recovery() {
     let server_id = "auth_key_cooldown_with_provider_probe";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -1105,14 +1016,7 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
         Err(_) => panic!("expanded candidates failed"),
     };
     for provider_id in ["first", "second"] {
-        put_auth_key_in_cooldown(
-            &health,
-            &failure_session_scope,
-            provider_id,
-            "key1",
-            "gpt-test",
-            20_001,
-        );
+        put_identity_in_global_cooldown(&health, provider_id, "key1", "gpt-test", 20_001);
     }
     let first_permit = health
         .store
@@ -1130,7 +1034,7 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
         let health = health.clone();
         let failure_session_scope = failure_session_scope.clone();
         async move {
-            run_v3_plan_execution_operator_with_probes(
+            run_v3_plan_execution_operator_with_recovery(
                 crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
@@ -1141,7 +1045,6 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
                 &BTreeSet::new(),
                 25_001,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::RelayOnly {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -1195,12 +1098,13 @@ async fn auth_key_cooldown_exhaustion_preserves_independent_probe_recovery() {
     assert!(
         health
             .availability("first", Some("key1"), Some("gpt-test"), retry_deadline_ms)
+            .unwrap()
             .available
     );
 }
 
 #[tokio::test]
-async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe() {
+async fn identity_cooldown_exhaustion_waits_for_other_requests_successful_probe() {
     let server_id = "auth_key_cooldown_with_successful_provider_probe";
     let manifest = global_pool_alive_manifest(server_id);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -1226,14 +1130,7 @@ async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe(
         Err(_) => panic!("expanded candidates failed"),
     };
     for provider_id in ["first", "second"] {
-        put_auth_key_in_cooldown(
-            &health,
-            &failure_session_scope,
-            provider_id,
-            "key1",
-            "gpt-test",
-            20_001,
-        );
+        put_identity_in_global_cooldown(&health, provider_id, "key1", "gpt-test", 20_001);
     }
     let first_permit = health
         .store
@@ -1251,7 +1148,7 @@ async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe(
         let health = health.clone();
         let failure_session_scope = failure_session_scope.clone();
         async move {
-            run_v3_plan_execution_operator_with_probes(
+            run_v3_plan_execution_operator_with_recovery(
                 crate::execution_control::V3AttemptBudget::process_default(),
                 json!({"model":"client-responses","input":"hello"}),
                 &manifest,
@@ -1262,7 +1159,6 @@ async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe(
                 &BTreeSet::new(),
                 25_001,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::RelayOnly {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -1291,6 +1187,7 @@ async fn auth_key_cooldown_exhaustion_waits_for_other_requests_successful_probe(
     assert!(
         health
             .availability("first", Some("key1"), Some("gpt-test"), 25_001)
+            .unwrap()
             .available
     );
 }
@@ -1454,7 +1351,7 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
 
     let selection = tokio::time::timeout(
         Duration::from_millis(500),
-        run_v3_plan_execution_operator_with_probes(
+        run_v3_plan_execution_operator_with_recovery(
             crate::execution_control::V3AttemptBudget::process_default(),
             json!({"model":"client-responses","input":"hello"}),
             &manifest,
@@ -1465,7 +1362,6 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             &BTreeSet::new(),
             20_001,
             0,
-            true,
             None,
             V3PlanExecutionModePolicy::RelayOnly {
                 entry_protocol: V3HubEntryProtocol::Responses,
@@ -1487,431 +1383,9 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             !health
                 .store
                 .availability(provider_id, Some("key1"), Some("gpt-test"), 20_001)
+                .unwrap()
                 .available,
             "skipping a probe in flight must preserve the preceding candidate cooldown"
         );
     }
-}
-
-#[tokio::test]
-async fn later_tier_selection_does_not_wait_for_probe_transport_admission() {
-    let server_id = "later_tier_probe_transport_busy";
-    let first_provider = "later_tier_busy_first";
-    let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, None, first_provider, "second");
-    set_provider_interface_base_url(
-        &mut manifest,
-        first_provider,
-        "default",
-        "http://127.0.0.1:1/v1".to_string(),
-    );
-    manifest
-        .providers
-        .get_mut(first_provider)
-        .expect("first provider")
-        .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-        max_in_flight: 1,
-        acquire_timeout_ms: 60_000,
-        stale_lease_ms: 300_000,
-    });
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let failure_session_scope = test_provider_failure_scope(
-        server_id,
-        server_id,
-        "later-tier-probe-transport-busy-session",
-    )
-    .expect("failure session scope");
-    let body = json!({"model":"client-responses","input":"hello"});
-    let mut expanded =
-        match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-            manifest: &manifest,
-            server_id,
-            failure_session_scope: &failure_session_scope,
-            entry_kind: "responses",
-            endpoint_path: "/v1/responses",
-            body: &body,
-            request_local_excluded_candidates: &BTreeSet::new(),
-            provider_health: &health,
-            now_ms: 20_001,
-            deterministic_sample: 0,
-        }) {
-            Ok(expanded) => expanded,
-            Err(_) => panic!("expanded candidates"),
-        };
-    let first = expanded
-        .candidates
-        .iter_mut()
-        .find(|candidate| candidate.provider_id == first_provider)
-        .expect("first candidate");
-    let initial_pool_id = expanded
-        .route
-        .target_plan
-        .first()
-        .expect("initial target plan")
-        .pool_id
-        .clone();
-    first.pool_ids = vec![initial_pool_id];
-    let second = expanded
-        .candidates
-        .iter_mut()
-        .find(|candidate| candidate.provider_id == "second")
-        .expect("second candidate");
-    second.pool_ids = vec!["fallback".to_string()];
-    let target_kind = expanded
-        .route
-        .target_plan
-        .first()
-        .expect("initial target plan")
-        .target_kind
-        .clone();
-    expanded.route.target_plan.push(
-        routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
-            tier_index: 1,
-            pool_id: "fallback".to_string(),
-            target_index: 0,
-            target_kind,
-            target_id: None,
-            interface: None,
-            priority: 1,
-            weight: 1,
-            session_sticky: false,
-            direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
-        },
-    );
-    health
-        .store
-        .record_provider_cooldown_failure(
-            first_provider,
-            Some("key1"),
-            Some("gpt-test"),
-            "preceding tier is cooled",
-            20_000,
-            100_000,
-        )
-        .expect("first provider cooldown");
-
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let first_key = format!("{first_provider}:key1");
-    controller
-        .ensure_initial_budget(&first_key, 1)
-        .expect("first provider concurrency budget");
-    let active_business_lease = controller
-        .try_acquire_business(&first_key)
-        .expect("first provider busy lease");
-
-    let selection = tokio::time::timeout(
-        Duration::from_millis(500),
-        run_v3_plan_execution_operator_with_probes(
-            crate::execution_control::V3AttemptBudget::process_default(),
-            json!({"model":"client-responses","input":"hello"}),
-            &manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            &failure_session_scope,
-            &health,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            20_001,
-            0,
-            true,
-            None,
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: V3HubEntryProtocol::Responses,
-            },
-        ),
-    )
-    .await
-    .expect("a busy probe transport must not block later-tier selection");
-    let Ok((_execution_planned_request, plan)) = selection else {
-        panic!("the available later tier must remain selectable");
-    };
-    assert_eq!(plan.selected.candidate.provider_id, "second");
-    assert!(
-        !health
-            .store
-            .availability(first_provider, Some("key1"), Some("gpt-test"), 20_001)
-            .available,
-        "skipping a capacity-blocked probe must preserve provider cooldown"
-    );
-    controller
-        .release(active_business_lease.into_permit())
-        .expect("release first provider busy lease");
-}
-
-#[tokio::test]
-async fn all_busy_async_admission_preserves_provider_concurrency_busy_source() {
-    let server_id = "async_all_busy_typed_source";
-    let first_id = "async_all_busy_first";
-    let second_id = "async_all_busy_second";
-    let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, Some(150), first_id, second_id);
-    for id in [first_id, second_id] {
-        manifest.providers.get_mut(id).unwrap().concurrency =
-            Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-                max_in_flight: 1,
-                acquire_timeout_ms: 150,
-                stale_lease_ms: 300_000,
-            });
-    }
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let scope =
-        test_provider_failure_scope(server_id, server_id, "async-all-busy-session").unwrap();
-    let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("candidate expansion"),
-    };
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let mut held = Vec::new();
-    for id in [first_id, second_id] {
-        let key = format!("{id}:key1");
-        controller.ensure_initial_budget(&key, 1).unwrap();
-        held.push(controller.try_acquire_business(&key).unwrap());
-    }
-    let selection = tokio::time::timeout(
-        Duration::from_millis(500),
-        run_v3_plan_execution_operator_with_probes(
-            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
-            json!({"model":"client-responses","input":"hello"}),
-            &manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            &scope,
-            &health,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            now_ms,
-            0,
-            false,
-            None,
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: V3HubEntryProtocol::Responses,
-            },
-        ),
-    )
-    .await
-    .expect("all-busy async admission must finish after its declared wait budget");
-    for lease in held {
-        controller.release(lease.into_permit()).unwrap();
-    }
-    let Err(V3PlanExecutionStop::Exhausted { source, .. }) = selection else {
-        panic!("expected async all-busy exhaustion");
-    };
-    let source = source.expect("pure all-busy async admission must carry a typed source");
-    assert_eq!(source.source_kind, V3ErrorSourceKind::TargetPoolExhausted);
-    assert_eq!(source.code, "provider_concurrency_busy");
-}
-
-#[tokio::test]
-async fn mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted() {
-    let server_id = "async_mixed_typed_source";
-    let first_id = "async_mixed_first";
-    let second_id = "async_mixed_second";
-    let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, Some(150), first_id, second_id);
-    for id in [first_id, second_id] {
-        manifest.providers.get_mut(id).unwrap().concurrency =
-            Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-                max_in_flight: 1,
-                acquire_timeout_ms: 150,
-                stale_lease_ms: 300_000,
-            });
-    }
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let scope = test_provider_failure_scope(server_id, server_id, "async-mixed-session").unwrap();
-    let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
-    let expanded = match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-        manifest: &manifest,
-        server_id,
-        failure_session_scope: &scope,
-        entry_kind: "responses",
-        endpoint_path: "/v1/responses",
-        body: &json!({"model":"client-responses","input":"hello"}),
-        request_local_excluded_candidates: &BTreeSet::new(),
-        provider_health: &health,
-        now_ms,
-        deterministic_sample: 0,
-    }) {
-        Ok(expanded) => expanded,
-        Err(_) => panic!("candidate expansion"),
-    };
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let first_key = format!("{first_id}:key1");
-    controller.ensure_initial_budget(&first_key, 1).unwrap();
-    let held = controller.try_acquire_business(&first_key).unwrap();
-    let second_candidate_key = expanded
-        .candidates
-        .iter()
-        .find(|candidate| candidate.provider_id == second_id)
-        .map(v3_relay_provider_candidate_key)
-        .expect("second candidate key");
-    let excluded = BTreeSet::from([second_candidate_key]);
-    let started = tokio::time::Instant::now();
-    let selection = tokio::time::timeout(
-        Duration::from_millis(500),
-        run_v3_plan_execution_operator_with_probes(
-            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, server_id).unwrap(),
-            json!({"model":"client-responses","input":"hello"}),
-            &manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            &scope,
-            &health,
-            &excluded,
-            &BTreeSet::new(),
-            now_ms,
-            0,
-            false,
-            None,
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: V3HubEntryProtocol::Responses,
-            },
-        ),
-    )
-    .await
-    .expect("mixed async admission must finish after its bounded capacity wait");
-    controller.release(held.into_permit()).unwrap();
-    assert!(started.elapsed() >= Duration::from_millis(150));
-    let Err(V3PlanExecutionStop::Exhausted { source, .. }) = selection else {
-        panic!("expected async mixed exhaustion");
-    };
-    assert!(
-        source.is_none(),
-        "mixed busy plus non-busy exclusion must stay selected_target_exhausted"
-    );
-}
-
-#[tokio::test]
-async fn busy_preferred_candidate_reselects_later_tier_without_capacity_wait() {
-    let server_id = "pinned_busy_candidate_reselect";
-    let first_provider = "pinned_busy_first";
-    let mut manifest =
-        global_pool_alive_manifest_with_provider_names(server_id, None, first_provider, "second");
-    manifest
-        .providers
-        .get_mut(first_provider)
-        .expect("first provider")
-        .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-        max_in_flight: 1,
-        acquire_timeout_ms: 60_000,
-        stale_lease_ms: 300_000,
-    });
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let scope = test_provider_failure_scope(server_id, server_id, "pinned-busy-session")
-        .expect("failure session scope");
-    let body = json!({"model":"client-responses","input":"hello"});
-    let mut expanded =
-        match build_v3_relay_target_candidates(&V3RelayProviderTargetResolutionInput {
-            manifest: &manifest,
-            server_id,
-            failure_session_scope: &scope,
-            entry_kind: "responses",
-            endpoint_path: "/v1/responses",
-            body: &body,
-            request_local_excluded_candidates: &BTreeSet::new(),
-            provider_health: &health,
-            now_ms: 20_001,
-            deterministic_sample: 0,
-        }) {
-            Ok(expanded) => expanded,
-            Err(_) => panic!("expanded candidates"),
-        };
-    let first = expanded
-        .candidates
-        .iter_mut()
-        .find(|candidate| candidate.provider_id == first_provider)
-        .expect("first candidate");
-    let initial_pool_id = expanded
-        .route
-        .target_plan
-        .first()
-        .expect("initial target plan")
-        .pool_id
-        .clone();
-    first.pool_ids = vec![initial_pool_id];
-    let second = expanded
-        .candidates
-        .iter_mut()
-        .find(|candidate| candidate.provider_id == "second")
-        .expect("second candidate");
-    second.pool_ids = vec!["fallback".to_string()];
-    let target_kind = expanded
-        .route
-        .target_plan
-        .first()
-        .expect("initial target plan")
-        .target_kind
-        .clone();
-    expanded.route.target_plan.push(
-        routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
-            tier_index: 1,
-            pool_id: "fallback".to_string(),
-            target_index: 0,
-            target_kind,
-            target_id: None,
-            interface: None,
-            priority: 1,
-            weight: 1,
-            session_sticky: false,
-            direct_provider_model: Some(("second".to_string(), "gpt-test".to_string())),
-        },
-    );
-    let preferred = V3TargetInterpreter::default()
-        .select_available(expanded.clone(), &health.store, 20_001)
-        .expect("first tier selected");
-    assert_eq!(preferred.candidate.provider_id, first_provider);
-
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let first_key = format!("{first_provider}:key1");
-    controller
-        .ensure_initial_budget(&first_key, 1)
-        .expect("first provider concurrency budget");
-    let active_business_lease = controller
-        .try_acquire_business(&first_key)
-        .expect("first provider busy lease");
-
-    let selected = tokio::time::timeout(
-        std::time::Duration::from_millis(500),
-        run_v3_plan_execution_operator_with_probes(
-            crate::execution_control::V3AttemptBudget::process_default(),
-            json!({"model":"client-responses","input":"hello"}),
-            &manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            &scope,
-            &health,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            20_001,
-            0,
-            false,
-            Some(preferred),
-            V3PlanExecutionModePolicy::RelayOnly {
-                entry_protocol: V3HubEntryProtocol::Responses,
-            },
-        ),
-    )
-    .await
-    .expect("busy preferred admission must not wait for capacity");
-    let Ok((_execution_planned_request, plan)) = selected else {
-        panic!("a full preferred provider must select the available later tier");
-    };
-    assert_eq!(plan.selected.candidate.provider_id, "second");
-    assert_eq!(controller.snapshot(&first_key).unwrap().in_flight, 1);
-    assert!(
-        health
-            .availability(first_provider, Some("key1"), Some("gpt-test"), 20_001)
-            .available
-    );
-    drop(plan);
-    controller
-        .release(active_business_lease.into_permit())
-        .expect("release first provider busy lease");
 }

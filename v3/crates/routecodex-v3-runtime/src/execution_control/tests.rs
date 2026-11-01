@@ -4,6 +4,44 @@ use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_aut
 use std::sync::{Arc, Mutex};
 
 #[test]
+fn request_candidate_scan_tracks_complete_identities_and_clears() {
+    let budget =
+        V3AttemptBudget::new_isolated(test_limits(8, 32, 64), Arc::new(AtomicUsize::new(0)));
+    budget
+        .record_request_candidate_attempt("provider/interface/key/model".into(), 0)
+        .unwrap();
+    budget
+        .record_request_candidate_attempt("provider/interface/key/model".into(), 0)
+        .unwrap();
+    budget
+        .record_request_candidate_attempt("provider/interface/other/model".into(), 0)
+        .unwrap();
+    assert_eq!(budget.request_candidate_attempts().unwrap().len(), 2);
+    budget.clear_request_candidate_scan();
+    assert!(budget.request_candidate_attempts().unwrap().is_empty());
+}
+
+#[test]
+fn recovery_clears_only_the_matched_failed_identity() {
+    let budget =
+        V3AttemptBudget::new_isolated(test_limits(8, 32, 64), Arc::new(AtomicUsize::new(0)));
+    budget.record_request_candidate_attempt("p/default/k1/m".into(), 3).unwrap();
+    budget.record_request_candidate_attempt("p/default/k2/m".into(), 7).unwrap();
+    budget.clear_recovered_request_candidates(&BTreeSet::from(["p/default/k1/m".into()])).unwrap();
+    assert_eq!(budget.request_candidate_recovery_revisions().unwrap(), BTreeMap::from([("p/default/k2/m".into(), 7)]));
+}
+
+#[test]
+fn unsent_transport_release_does_not_mark_a_candidate_attempted() {
+    let budget =
+        V3AttemptBudget::new_isolated(test_limits(8, 32, 64), Arc::new(AtomicUsize::new(0)));
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    budget.release_unsent_transport_attempt();
+    assert_eq!(budget.transport_attempts(), 0);
+    assert!(budget.request_candidate_attempts().unwrap().is_empty());
+}
+
+#[test]
 fn target_recovery_backoff_starts_at_declared_one_second() {
     let budget =
         V3AttemptBudget::new_isolated(test_limits(8, 16, 32), Arc::new(AtomicUsize::new(0)));
@@ -50,8 +88,363 @@ fn target_recovery_ladder_and_notification_wakes_keep_original_due_time() {
     );
     assert_eq!(
         budget.current_target_recovery_deadline(budget.residence_deadline()),
-        None
+        Some(budget.residence_deadline() + Duration::from_secs(1))
     );
+}
+
+#[test]
+fn materialization_slots_replace_and_release_only_after_old_value_drops() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 16, 32), process.clone());
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let mut slots = V3MaterializationSlots::new(context);
+    let initial = slots.prepare_replace(0usize, 5).unwrap();
+    slots.finish_replace(initial).unwrap();
+    assert!(
+        slots.prepare_replace(0, 4).is_err(),
+        "old and newly copied replacement coexist before mutation"
+    );
+    assert_eq!(process.load(Ordering::Acquire), 5);
+    let smaller = slots.prepare_replace(0, 2).unwrap();
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        7,
+        "old and new retained subtrees are both charged before replacement"
+    );
+    slots.finish_replace(smaller).unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 2);
+    slots.grow(0, 4).unwrap();
+    assert!(slots.prepare_replace(1, 3).is_err());
+    assert_eq!(process.load(Ordering::Acquire), 6);
+    for _ in 0..100 {
+        let replacement = slots.prepare_replace(0, 1).unwrap();
+        slots.finish_replace(replacement).unwrap();
+        slots.grow(0, 1).unwrap();
+    }
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        2,
+        "replaced values do not accumulate wire-traffic charges"
+    );
+    let pending = slots.prepare_field_replace(0, 1, 3).unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 5);
+    slots.finish_replace(pending).unwrap();
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        4,
+        "unchanged fields are neither copied nor charged twice"
+    );
+    let abandoned = slots.prepare_replace(0, 1).unwrap();
+    drop(abandoned);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        5,
+        "failed mutation keeps its pending copy reserved until reducer destruction"
+    );
+    drop(slots);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn materialization_leases_share_attempt_limit_and_transfer_without_readmission() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 16, 32), process.clone());
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let mut raw = context.reserve(5).unwrap();
+    let reducer = context.reserve(3).unwrap();
+    assert!(context.reserve(1).is_err());
+    let transferred = raw.split_off(2).unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 8);
+    assert!(raw.split_off(4).is_err());
+    drop(raw);
+    assert_eq!(process.load(Ordering::Acquire), 5);
+    drop(transferred);
+    drop(reducer);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn materialization_failed_request_or_process_reservation_rolls_back_attempt() {
+    for (request_limit, process_limit) in [(5, 32), (32, 5)] {
+        let process = Arc::new(AtomicUsize::new(0));
+        let budget = V3AttemptBudget::new_isolated(
+            test_limits(8, request_limit, process_limit),
+            process.clone(),
+        );
+        let context = V3AttemptMaterializationContext::new(budget.clone());
+        let first = context.reserve(4).unwrap();
+        assert!(context.reserve(2).is_err());
+        assert_eq!(context.inner.resident_bytes.load(Ordering::Acquire), 4);
+        assert_eq!(process.load(Ordering::Acquire), 4);
+        drop(first);
+        let recovered = context.reserve(5).unwrap();
+        drop(recovered);
+        assert_eq!(budget.request_resident_bytes(), 0);
+        assert_eq!(process.load(Ordering::Acquire), 0);
+    }
+}
+
+#[test]
+fn materialization_releases_discarded_input_and_replaced_state() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 16, 32), process.clone());
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let mut state = context.reserve(3).unwrap();
+    for _ in 0..100 {
+        let comment = context.reserve(5).unwrap();
+        drop(comment);
+    }
+    state.grow(4).unwrap();
+    assert!(state.grow(2).is_err());
+    assert!(state.shrink_to(8).is_err());
+    state.shrink_to(2).unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 2);
+    drop(state);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[tokio::test]
+async fn materialization_projection_shares_attempt_capacity_and_keeps_sealed_lease() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 32, 64), process.clone());
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let canonical = context.reserve(5).unwrap();
+    let mut projected = V3CommittedClientSseBuilder::with_materialization_context(context).unwrap();
+    assert!(
+        projected.push(vec![1; 4]).is_err(),
+        "canonical and encoded frames share one attempt ceiling"
+    );
+    projected.push(vec![1; 3]).unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 8);
+    projected.mark_last_frame_as_terminal().unwrap();
+    let mut sealed = projected.seal_after_validated_terminal().unwrap();
+    drop(canonical);
+    assert_eq!(process.load(Ordering::Acquire), 3);
+    assert_eq!(sealed.next().await.unwrap(), vec![1; 3]);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        3,
+        "the sealed replay still owns retained frames"
+    );
+    drop(sealed);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+    assert_eq!(budget.request_resident_bytes(), 0);
+}
+
+#[test]
+fn materialization_shared_sealed_frames_keep_reservation_after_stream_drop() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 16, 32), process.clone());
+    let mut builder = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    builder.push(vec![1; 5]).unwrap();
+    builder.mark_last_frame_as_terminal().unwrap();
+    let stream = builder.seal_after_validated_terminal().unwrap();
+    let retained = stream.sealed_frames();
+    drop(stream);
+    assert_eq!(retained.as_slice(), &[vec![1; 5]]);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        5,
+        "retained frame allocation outlives its replay stream"
+    );
+    drop(retained);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+    assert_eq!(budget.request_resident_bytes(), 0);
+}
+
+#[tokio::test]
+async fn materialization_adopts_prefix_without_double_charge_or_accounting_gap() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process.clone());
+    let mut prefix = V3AttemptPrefixBuffer::new(budget.clone()).unwrap();
+    prefix.push(vec![1; 5]).unwrap();
+    let mut holder = V3RetainedPrefixReservation::default();
+    let mut replay = prefix
+        .replay_retained(Box::pin(futures_util::stream::empty()), &mut holder)
+        .unwrap();
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let lease = context.adopt_prefix(&mut holder).unwrap();
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        5,
+        "adoption never reserves the same raw allocation twice"
+    );
+    assert!(holder.reservation.is_none());
+    let raw = replay.next().await.unwrap().unwrap();
+    assert!(replay.next().await.is_none());
+    drop(replay);
+    drop(holder);
+    assert_eq!(context.inner.resident_bytes.load(Ordering::Acquire), 5);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        5,
+        "EOF does not release raw chunks retained by the consumer"
+    );
+    drop(raw);
+    drop(lease);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn materialization_prefix_admission_failure_preserves_original_owner() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 32, 64), process.clone());
+    let mut prefix = V3AttemptPrefixBuffer::new(budget.clone()).unwrap();
+    prefix.push(vec![1; 5]).unwrap();
+    let mut holder = V3RetainedPrefixReservation::default();
+    let replay = prefix
+        .replay_retained(Box::pin(futures_util::stream::empty()), &mut holder)
+        .unwrap();
+    let context = V3AttemptMaterializationContext::new(budget);
+    let reducer = context.reserve(4).unwrap();
+    assert!(context.adopt_prefix(&mut holder).is_err());
+    assert_eq!(holder.reservation.as_ref().unwrap().bytes, 5);
+    assert_eq!(context.inner.resident_bytes.load(Ordering::Acquire), 4);
+    assert_eq!(process.load(Ordering::Acquire), 9);
+    drop(replay);
+    drop(holder);
+    drop(reducer);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[tokio::test]
+async fn materialization_json_projection_admits_encoded_bytes_before_retention() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(96, 128, 256), process.clone());
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let canonical = context.reserve(70).unwrap();
+    let mut builder = V3CommittedClientSseBuilder::with_materialization_context(context).unwrap();
+    assert!(builder
+        .push_json_event(
+            Some("response.delta"),
+            &serde_json::json!({"text":"too large"})
+        )
+        .is_err());
+    assert_eq!(process.load(Ordering::Acquire), 70);
+    assert!(builder.frames.is_empty());
+    drop(canonical);
+    let payload = serde_json::json!({"text":"a\n\"雪"});
+    let expected = format!("event: response.delta\ndata: {payload}\n\n").into_bytes();
+    builder
+        .push_json_event(Some("response.delta"), &payload)
+        .unwrap();
+    assert_eq!(process.load(Ordering::Acquire), expected.len());
+    builder.mark_last_frame_as_terminal().unwrap();
+    let mut stream = builder.seal_after_validated_terminal().unwrap();
+    assert_eq!(stream.next().await.unwrap(), expected);
+    drop(stream);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[tokio::test]
+async fn materialization_raw_chunks_keep_independent_leases_across_polls() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 16, 32), process.clone());
+    let mut prefix = V3AttemptPrefixBuffer::new(budget.clone()).unwrap();
+    prefix.push(vec![1; 5]).unwrap();
+    let tail = Box::pin(futures_util::stream::iter(vec![
+        Ok(vec![2; 3]),
+        Ok(vec![3; 1]),
+    ]));
+    let mut holder = V3RetainedPrefixReservation::default();
+    let source = prefix.replay_retained(tail, &mut holder).unwrap();
+    let context = V3AttemptMaterializationContext::new(budget.clone());
+    let mut stream = V3MaterializationInputStream::new(source, context, &mut holder).unwrap();
+    let first = stream.next().await.unwrap().ok().unwrap();
+    let second = stream.next().await.unwrap().ok().unwrap();
+    assert_eq!(first.bytes, vec![1; 5]);
+    assert_eq!(second.bytes, vec![2; 3]);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        8,
+        "polling next does not release a retained previous chunk"
+    );
+    assert!(matches!(
+        stream.next().await.unwrap(),
+        Err(V3MaterializationInputError::LocalStore(_))
+    ));
+    drop(stream);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        8,
+        "cancelling input does not release chunks still held by its consumer"
+    );
+    drop(first);
+    drop(second);
+    assert_eq!(budget.request_resident_bytes(), 0);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+}
+
+#[tokio::test]
+async fn raw_prefix_reservation_survives_yield_and_releases_on_cancel() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process.clone());
+    let mut prefix = V3AttemptPrefixBuffer::new(budget.clone()).unwrap();
+    prefix.push(vec![1; 3]).unwrap();
+    prefix.push(vec![2; 4]).unwrap();
+    assert_eq!(process.load(Ordering::Acquire), 7);
+    let mut replay = prefix.replay(Box::pin(futures_util::stream::empty()));
+    let first = replay.next().await.unwrap().unwrap();
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        7,
+        "yielded raw bytes remain owned by the consumer"
+    );
+    drop(first);
+    let second = replay.next().await.unwrap().unwrap();
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        4,
+        "completed preceding chunk releases exactly once"
+    );
+    drop(second);
+    drop(replay);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+    assert_eq!(budget.request_resident_bytes(), 0);
+}
+
+#[test]
+fn raw_prefix_failed_capacity_reservation_does_not_leak() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process.clone());
+    let mut prefix = V3AttemptPrefixBuffer::new(budget.clone()).unwrap();
+    prefix.push(vec![1; 5]).unwrap();
+    assert!(matches!(
+        prefix.push(vec![2; 4]),
+        Err(V3AttemptStoreError::LocalResourceExhausted(_))
+    ));
+    assert_eq!(process.load(Ordering::Acquire), 5);
+    drop(prefix);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+    assert_eq!(budget.request_resident_bytes(), 0);
+}
+
+#[tokio::test]
+async fn raw_prefix_retained_collector_keeps_reservation_after_replay_eof() {
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), process.clone());
+    let mut prefix = V3AttemptPrefixBuffer::new(budget.clone()).unwrap();
+    prefix.push(vec![1; 5]).unwrap();
+    let mut retained = V3RetainedPrefixReservation::default();
+    let mut replay = prefix
+        .replay_retained(Box::pin(futures_util::stream::empty()), &mut retained)
+        .unwrap();
+    let chunk = replay.next().await.unwrap().unwrap();
+    assert!(replay.next().await.is_none());
+    drop(replay);
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        5,
+        "the raw collector still retains the chunk after stream EOF"
+    );
+    drop(chunk);
+    drop(retained);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+    assert_eq!(budget.request_resident_bytes(), 0);
 }
 
 fn test_limits(
@@ -60,13 +453,58 @@ fn test_limits(
     process_max_bytes: usize,
 ) -> V3AttemptStoreLimits {
     V3AttemptStoreLimits {
-        request_max_attempts: 3,
         attempt_max_bytes,
         attempt_max_frames: 3,
         request_max_bytes,
         process_max_bytes,
         residence_timeout: Duration::from_secs(60),
     }
+}
+
+#[tokio::test]
+async fn transport_attempt_admission_continues_without_legacy_ceiling() {
+    let mut limits = test_limits(8, 16, 32);
+    limits.residence_timeout = Duration::from_millis(30);
+    let budget = V3AttemptBudget::new_isolated(limits, Arc::new(AtomicUsize::new(0)));
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
+    assert_eq!(budget.transport_attempts(), 2);
+}
+
+#[tokio::test]
+async fn issue9bb26d4_semantic_storage_preserves_capacity_and_original_admission_deadline() {
+    let mut limits = test_limits(4, 4, 4);
+    limits.residence_timeout = Duration::from_millis(30);
+    let process = Arc::new(AtomicUsize::new(0));
+    let budget = V3AttemptBudget::new_isolated(limits, process.clone());
+    let original_deadline = budget.residence_deadline();
+    let mut attempt = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
+    attempt.push(vec![1, 2]).unwrap();
+    attempt.observe_semantic_output();
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert_eq!(budget.residence_deadline(), original_deadline);
+    attempt.push(vec![3, 4]).unwrap();
+    assert!(
+        matches!(
+            attempt.push(vec![5]),
+            Err(V3AttemptStoreError::LocalResourceExhausted(_))
+        ),
+        "semantic output must not relax the byte limit"
+    );
+    assert_eq!(process.load(Ordering::Acquire), 4);
+    attempt.mark_last_frame_as_terminal().unwrap();
+    let replay = attempt.seal_after_validated_terminal().unwrap();
+    assert_eq!(
+        process.load(Ordering::Acquire),
+        4,
+        "replay owns the retained bytes"
+    );
+    drop(replay);
+    assert_eq!(process.load(Ordering::Acquire), 0);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    assert_eq!(budget.residence_deadline(), original_deadline);
+    assert_eq!(budget.attempt_deadline(), None);
+    assert!(!budget.active_stream_has_semantic_progress());
 }
 
 #[test]
@@ -102,9 +540,7 @@ fn direct_dsml_complete_rewrite_keeps_budget_and_terminal_reservation() {
 #[test]
 fn unsent_capacity_rejection_releases_only_pending_attempt() {
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::new(AtomicUsize::new(0)));
-    // One actual HTTP429 keeps its wire sequence, but not a failure allowance.
     assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
-    budget.record_rate_limited_attempt();
     for _ in 0..10 {
         assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
         budget.release_unsent_transport_attempt();
@@ -113,57 +549,35 @@ fn unsent_capacity_rejection_releases_only_pending_attempt() {
     assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
     assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
     assert_eq!(budget.admit_transport_attempt().unwrap(), 4);
-    assert!(budget.admit_transport_attempt().is_err());
     assert_eq!(budget.transport_attempts(), 4);
 }
 
 #[test]
-fn attempt_budget_counts_all_transport_attempts_without_reset() {
+fn attempt_budget_counts_all_transport_attempts_past_legacy_ceiling() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::clone(&process_bytes));
 
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
-    assert!(matches!(
-        budget.admit_transport_attempt(),
-        Err(V3AttemptStoreError::TransportAttemptsExhausted(_))
-    ));
-    assert_eq!(budget.transport_attempts(), 3);
+    for expected in 1..=12 {
+        assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
+    }
+    assert_eq!(budget.transport_attempts(), 12);
     assert_eq!(process_bytes.load(Ordering::Acquire), 0);
 }
 
 #[test]
-fn issue44cc3af_429_wait_does_not_consume_failure_slots_or_reset_attempt_sequence() {
+fn begin_refill_opens_a_new_scan_without_reusing_prior_attempt_count() {
     let budget = V3AttemptBudget::new_isolated(test_limits(8, 8, 8), Arc::new(AtomicUsize::new(0)));
     assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
-    budget.record_rate_limited_attempt();
     assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
-    budget.record_rate_limited_attempt();
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 3);
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 4);
-    assert_eq!(budget.admit_transport_attempt().unwrap(), 5);
-    assert!(
-        budget.admit_transport_attempt().is_err(),
-        "non-429 failures remain bounded"
-    );
-    assert_eq!(budget.transport_attempts(), 5);
-}
-
-#[test]
-fn attempt_budget_preserves_configured_hard_limit() {
-    let process_bytes = Arc::new(AtomicUsize::new(0));
-    let mut limits = test_limits(8, 8, 8);
-    limits.request_max_attempts = 5;
-    let budget = V3AttemptBudget::new_isolated(limits, process_bytes);
-    for expected in 1..=5 {
-        assert_eq!(budget.admit_transport_attempt().unwrap(), expected);
-    }
-    assert!(matches!(
-        budget.admit_transport_attempt(),
-        Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
-            if message.contains("limit 5")
-    ));
+    budget
+        .record_request_candidate_attempt("provider/interface/key/model".into(), 0)
+        .unwrap();
+    let control = V3RequestExecutionControl {
+        attempt_budget: budget.clone(),
+    };
+    control.begin_refill_execution();
+    assert_eq!(budget.transport_attempts(), 0);
+    assert!(budget.request_candidate_attempts().unwrap().is_empty());
 }
 
 #[test]

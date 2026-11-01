@@ -112,14 +112,19 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
         body,
         Arc::clone(&served),
     ));
-    health
-        .run_exhaustion_rescue_probes(&manifest, &expanded, 20_001)
-        .await
-        .expect("exhaustion rescue probes must not fail");
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let scheduler = health
+        .aggregate_provider_probe_lifecycle(Arc::new(manifest.clone()), shutdown_rx)
+        .expect("background probe scheduler must register");
+    let scheduler = tokio::spawn(scheduler);
     tokio::time::timeout(Duration::from_secs(2), probe_server)
         .await
         .expect("responses probe terminal case must finish its probe server")
         .expect("provider probe task must not panic");
+    shutdown_tx
+        .send(())
+        .expect("background probe scheduler shutdown");
+    scheduler.await.expect("background probe scheduler task");
     assert!(
         served.load(Ordering::SeqCst) > 0,
         "the responses probe terminal case must exercise the real probe transport"
@@ -138,6 +143,7 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
         1,
         20_001,
     )
+    .unwrap()
     .available
 }
 

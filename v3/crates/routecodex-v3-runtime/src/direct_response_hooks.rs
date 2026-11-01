@@ -249,9 +249,14 @@ pub struct V3DirectResponseCompatContext {
     /// forward projection emitted. Never crosses a request boundary.
     pub namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     pub(crate) runtime_timing: V3RuntimeTimingState,
+    pub(crate) attempt_budget: Option<crate::execution_control::V3AttemptBudget>,
 }
 
 impl V3DirectResponseCompatContext {
+    pub(crate) fn with_attempt_budget(mut self, budget: crate::execution_control::V3AttemptBudget) -> Self {
+        self.attempt_budget = Some(budget);
+        self
+    }
     pub(crate) fn with_runtime_timing(mut self, runtime_timing: V3RuntimeTimingState) -> Self {
         self.runtime_timing = runtime_timing;
         self

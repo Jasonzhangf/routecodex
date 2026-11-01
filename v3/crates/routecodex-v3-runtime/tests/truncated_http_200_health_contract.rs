@@ -251,6 +251,7 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         !provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
+            .expect("failed identity availability")
             .available,
         "the exact failed identity must be cooled"
     );
@@ -258,6 +259,7 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         provider_health
             .store()
             .availability("limited", Some("key1"), Some("other-model"), now)
+            .expect("sibling model availability")
             .available,
         "another model under the same provider and key must stay routable"
     );
@@ -265,6 +267,7 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         provider_health
             .store()
             .availability("limited", Some("other-key"), Some("gpt-5.5"), now)
+            .expect("sibling key availability")
             .available,
         "another key under the same provider and model must stay routable"
     );
@@ -272,6 +275,7 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         provider_health
             .store()
             .availability("minimax", Some("key1"), Some("MiniMax-M3"), now)
+            .expect("secondary provider availability")
             .available,
         "the untried secondary provider must stay routable"
     );
@@ -334,6 +338,7 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
         provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
+            .expect("last candidate availability")
             .available,
         "a last-candidate truncated HTTP 200 body must stay health-neutral"
     );
@@ -391,6 +396,7 @@ async fn complete_http_502_is_health_neutral_when_it_is_the_last_candidate() {
         provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+            .expect("last candidate availability")
             .available,
         "a complete upstream HTTP 502 must not cool the last candidate"
     );

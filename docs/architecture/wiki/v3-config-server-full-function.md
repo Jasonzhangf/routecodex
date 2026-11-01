@@ -26,7 +26,7 @@ flowchart LR
 ## Config declarations
 
 - Unique IO owner: `V3ConfigStore`.
-- Manifest declarations: listeners, provider protocol/auth/model/alias/capability/health/concurrency, forwarders, route pools, typed pool match, Debug/Error, Hub hook IDs, execution modes, transports, invocation sources, continuation owners, full isolation scope.
+- Manifest declarations: listeners, provider protocol/auth/model/alias/capability/health, forwarders, route pools, typed pool match, Debug/Error, Hub hook IDs, execution modes, transports, invocation sources, continuation owners, full isolation scope.
 - Forbidden manifest truth: selected route, expanded target, selected provider, resolved secret, request-specific execution or continuation decision.
 - Fail-fast: unknown fields/IDs/protocols/hooks/capabilities, duplicate or ambiguous aliases, invalid references/cycles/matches/capability combinations, empty default pools.
 

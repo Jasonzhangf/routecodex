@@ -1445,7 +1445,9 @@ async fn responses_relay_anthropic_provider_sse_preserves_thinking_cache_control
 // reasoning block that omits its own native payload is a real malformed
 // business response: the runtime must surface a typed internal error and
 // must not fabricate a client payload for it.
-struct AnthropicProviderSseMalformedReasoningTransport;
+struct AnthropicProviderSseMalformedReasoningTransport {
+    attempts: Mutex<usize>,
+}
 
 #[async_trait]
 impl ResponsesTransport for AnthropicProviderSseMalformedReasoningTransport {
@@ -1453,6 +1455,18 @@ impl ResponsesTransport for AnthropicProviderSseMalformedReasoningTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let attempt = {
+            let mut attempts = self.attempts.lock().unwrap();
+            *attempts += 1;
+            *attempts
+        };
+        if attempt > 1 {
+            return Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(), request.provider_id(), 200,
+                vec![V3ProviderResponseHeader { name: "content-type".into(), value: b"application/json".to_vec() }],
+                serde_json::to_vec(&json!({"id":"msg_recovered","type":"message","role":"assistant","model":"MiniMax-M3","content":[{"type":"text","text":"recovered after malformed reasoning"}],"usage":{"input_tokens":7,"output_tokens":3},"stop_reason":"end_turn"})).unwrap(),
+            ));
+        }
         let stream = futures_util::stream::iter([
             Ok(br#"event: message_start
 data: {"type":"message_start","message":{"id":"msg_sse_bad","type":"message","role":"assistant","model":"MiniMax-M3","content":[]}}
@@ -1494,8 +1508,7 @@ data: {"type":"message_stop"}
 #[tokio::test]
 async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_typed_error() {
     let mut manifest = manifest();
-    // The single failed identity cannot be retried and cannot close the
-    // request before its original declared recovery budget.
+    // The failed attempt must retain its typed evidence when a later scan succeeds.
     manifest
         .servers
         .get_mut("gateway_priority_5555")
@@ -1505,36 +1518,43 @@ async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_
         .unwrap()
         .attempt_store
         .residence_timeout_ms = 1000;
-    let output = execute_v3_responses_relay_runtime(
-        &manifest,
-        V3ResponsesRelayRuntimeInput {
-            server_id: "gateway_priority_5555".into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-responses-anthropic-sse-malformed-reasoning".into(),
-            payload: json!({
-                "model":"MiniMax-M3",
-                "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
-                "stream":false
-            }),
-        },
-        &AnthropicProviderSseMalformedReasoningTransport,
+    let transport = AnthropicProviderSseMalformedReasoningTransport {
+        attempts: Mutex::new(0),
+    };
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(8),
+        execute_v3_responses_relay_runtime(
+            &manifest,
+            V3ResponsesRelayRuntimeInput {
+                server_id: "gateway_priority_5555".into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-responses-anthropic-sse-malformed-reasoning".into(),
+                payload: json!({
+                    "model":"MiniMax-M3",
+                    "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
+                    "stream":false
+                }),
+            },
+            &transport,
+        ),
     )
     .await
+    .expect("request must recover after the malformed attempt")
     .unwrap();
 
-    // The runtime keeps the failure in the typed internal Error chain; the
-    // server turns a populated error chain into a no-response transport break,
-    // so no provider error payload reaches the client.
-    assert!(
-        output.error_chain.is_some(),
-        "a reasoning block missing its native payload must stay a typed internal error: {output:?}"
-    );
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 200);
+    let V3ResponsesRelayClientBody::Json(body) = &output.client_body else {
+        panic!("expected recovered JSON response");
+    };
+    assert!(body
+        .to_string()
+        .contains("recovered after malformed reasoning"));
+    assert_eq!(*transport.attempts.lock().unwrap(), 2);
     let observability = output.observability.as_ref().expect("observability");
     let failure = observability
         .provider_failure_events

@@ -82,6 +82,12 @@
       "textContains": ".fallback(path_not_found)"
     },
     {
+      "ruleId": "fallback-keyword",
+      "pathContains": "v3/crates/routecodex-v3-virtual-router/src/lib.rs",
+      "textContains": "for fallback in fallbacks {",
+      "reason": "User-declared ordered route tiers select tools and default only after earlier pools are unavailable."
+    },
+    {
       "ruleId": "degrade-keyword",
       "pathContains": "v4/crates/routecodex-v4-provider/src/lib.rs",
       "textContains": "Degraded,"

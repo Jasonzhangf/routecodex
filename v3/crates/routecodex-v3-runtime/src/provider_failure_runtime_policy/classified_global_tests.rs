@@ -43,6 +43,7 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
+            .expect("early 429 availability")
             .available,
         "early 429 must leave health routable"
     );
@@ -55,6 +56,7 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_001)
+            .expect("business success availability")
             .available,
         "business success preserves health availability"
     );
@@ -74,6 +76,7 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
+            .expect("fresh episode availability")
             .available,
         "a fresh early episode must remain health-neutral"
     );
@@ -87,6 +90,7 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
                 Some("gpt-test"),
                 20_000 + 60_001,
             )
+            .expect("post window availability")
             .available,
         "time alone cannot upgrade the episode"
     );
@@ -105,12 +109,14 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         !recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 140_000,)
+            .expect("new 429 availability")
             .available
     );
     assert!(
         recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 140_000,)
+            .expect("sibling key availability")
             .available
     );
 
@@ -143,6 +149,7 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         !unrecoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000,)
+            .expect("401 availability")
             .available,
         "401 must be blocked after its first provider failure"
     );
@@ -163,7 +170,8 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         Some("key1"),
         Some("gpt-test"),
         10_001,
-    );
+    )
+    .expect("second 401 availability");
     assert!(
         !second_401.available,
         "401 must remain blocked while cooldown is active: {second_401:?}"
@@ -189,6 +197,7 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         !payment_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
+            .expect("402 availability")
             .available,
         "402 must reach global health and cool after its first failure"
     );
@@ -238,8 +247,9 @@ fn early_http_429_does_not_enter_global_cooldown() {
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 0)
         .expect("initial health projection");
 
-    // Repeated actual429 responses inside the window stay health-neutral.
-    for attempt in 0..6 {
+    // The first two actual 429 responses do not cool; the third cools only
+    // the observed identity, even when the route pool has other candidates.
+    for attempt in 0..3 {
         let now_ms = 10_000 + attempt as u64;
         health
             .record_provider_failure_record_with_policy(
@@ -263,26 +273,27 @@ fn early_http_429_does_not_enter_global_cooldown() {
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
             .expect("health projection");
         let available = projection.available;
-        assert!(
-            available,
-            "429 must not cool provider health; attempt={attempt}"
-        );
+        assert_eq!(available, attempt < 2, "429 threshold; attempt={attempt}");
     }
     assert!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(u64::MAX)
+            .provider_cooldown_probe_keys_due(20_001)
             .expect("probe keys")
             .is_empty(),
-        "an early429 must not create a health recovery probe"
+        "the cooldown probe must not be due before 10 seconds"
     );
-    // The passage of time without a new provider response cannot cool health.
-    let projection = health
+    assert!(health
         .store()
-        .scheduling_projection("first", "key1", "gpt-test", 100, 1, 10_000 + 5 + 60_001)
-        .expect("post-window projection");
+        .provider_cooldown_probe_keys_due(20_002)
+        .expect("due probe keys")
+        .iter()
+        .any(|(provider, key, model)| provider == "first" && key.as_deref() == Some("key1") && model.as_deref() == Some("gpt-test")));
     assert!(
-        projection.available,
-        "an unchanged early episode remains routable"
+        health
+            .availability("first", Some("key2"), Some("gpt-test"), 10_002)
+            .expect("untried key availability")
+            .available,
+        "an untried key remains eligible"
     );
 }

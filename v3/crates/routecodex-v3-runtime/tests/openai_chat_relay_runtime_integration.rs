@@ -564,7 +564,8 @@ async fn client_disconnect_is_typed_terminal_and_does_not_mutate_health_or_actio
         Some("controlled"),
         Some("chat-wire-model"),
         u64::MAX,
-    );
+    )
+    .expect("client disconnect availability");
     assert!(availability.available);
     assert!(availability.blocked_scopes.is_empty());
 }
@@ -582,7 +583,8 @@ async fn partial_client_disconnect_is_health_neutral_and_never_reselects() {
         Some(secondary.as_str()),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("secondary availability");
     assert!(
         secondary_availability.available,
         "the second candidate must be eligible before the disconnect"
@@ -649,7 +651,8 @@ async fn partial_client_disconnect_is_health_neutral_and_never_reselects() {
         Some(primary.as_str()),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("client disconnect availability");
     assert!(
         availability.available && availability.blocked_scopes.is_empty(),
         "client disconnect must not cool the provider: {:?}",
@@ -727,7 +730,8 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
         Some(primary.as_str()),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("primary availability");
     assert!(
         !primary_availability.available,
         "an untyped disconnect after partial content must cool the failed primary"
@@ -737,7 +741,8 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
         Some(secondary.as_str()),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("secondary availability");
     assert!(
         secondary_availability.available,
         "the successful secondary must remain eligible"
@@ -2517,7 +2522,8 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         Some(&primary),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("seeded availability");
     assert!(
         !seeded.available,
         "the fixture must start with the exact provider identity cooled: {seeded:?}"
@@ -2573,7 +2579,8 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         Some(&primary),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("post probe availability");
     assert!(
         !post_probe_availability.available,
         "the failed recovery probe must keep the exact provider identity cooled: {post_probe_availability:?}"
@@ -2654,7 +2661,8 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         Some(&secondary),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("secondary availability");
     assert!(
         secondary_availability.available && secondary_availability.blocked_scopes.is_empty(),
         "the final eligible failure must not mutate sibling health: {secondary_availability:?}"
@@ -2728,7 +2736,8 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         Some(&primary),
         Some("chat-wire-model"),
         probe_now_ms(),
-    );
+    )
+    .expect("restored availability");
     assert!(
         restored.available && restored.blocked_scopes.is_empty(),
         "the authenticated 2xx probe must restore the exact provider identity: {restored:?}"
@@ -2895,7 +2904,8 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
     let availability =
         provider_health
             .store()
-            .availability(scope, Some(scope), Some("chat-wire-model"), u64::MAX);
+            .availability(scope, Some(scope), Some("chat-wire-model"), u64::MAX)
+            .expect("probe success availability");
     assert!(
         availability.available && availability.blocked_scopes.is_empty(),
         "successful probe must clear the exact provider cooldown: {availability:?}"
@@ -3041,7 +3051,7 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
+async fn active_recovery_sse_does_not_block_a_second_recovery_request() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_active_recovery";
     const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
@@ -3128,10 +3138,15 @@ data: [DONE]
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    let independent = tokio::time::timeout(Duration::from_secs(5), waiter)
+        .await
+        .expect("a separate request must not wait for the first provider EOF")
+        .expect("independent request task panicked")
+        .expect("independent request failed");
+    assert_eq!(independent.status, 200);
     assert!(
-        !waiter.is_finished(),
-        "active recovery permit expired by wall clock before terminal success"
+        !first.is_finished(),
+        "the first provider attempt must remain buffered until its own EOF"
     );
 
     drop(terminal_sender);
@@ -3141,7 +3156,7 @@ data: [DONE]
         .expect("first recovery task panicked")
         .expect("first recovery action failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
+        first.node_trace.contains(&"V3TargetLocalReselected"),
         "the first request must enter Error05 recovery"
     );
     let first_stream = match first.client_body {
@@ -3155,16 +3170,10 @@ data: [DONE]
         .map(|frame| String::from_utf8(frame).unwrap())
         .collect::<String>();
     assert!(first_text.contains("done"), "{first_text}");
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("clean EOF did not release the queued recovery action")
-        .expect("queued recovery task panicked")
-        .expect("queued recovery action failed");
-    assert_eq!(released.status, 200);
     assert!(
-        released
+        independent
             .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
+            .contains(&"V3TargetLocalReselected"),
         "the competing request must also enter Error05 recovery"
     );
 }
@@ -4081,7 +4090,8 @@ data: {"type":"message_stop"}
     let availability =
         provider_health
             .store()
-            .availability("mm", Some("key1"), Some("MiniMax-M3"), u64::MAX);
+            .availability("mm", Some("key1"), Some("MiniMax-M3"), u64::MAX)
+            .expect("missing done availability");
     assert!(
         availability.available && availability.blocked_scopes.is_empty(),
         "missing provider [DONE] must not record provider-health failure: {availability:?}"

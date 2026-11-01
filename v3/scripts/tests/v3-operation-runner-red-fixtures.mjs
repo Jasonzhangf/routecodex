@@ -555,6 +555,19 @@ const mutations = [
     expect: /node error_err02_classified typed resources mismatch/u,
   },
   {
+    name: 'err04-cannot-read-provider-action-gate',
+    mutate(tmp) {
+      const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';
+      const file = path.join(tmp, rel);
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = parsed.nodes.find((item) => item.id === 'error_err04_target_exhaustion');
+      if (!node) throw new Error('missing error_err04_target_exhaustion node');
+      node.resources.reads.push('v3.error.provider_action_gate');
+      fs.writeFileSync(file, JSON.stringify(parsed, null, 2));
+    },
+    expect: /node error_err04_target_exhaustion typed resources mismatch.*extra reads: v3\.error\.provider_action_gate/u,
+  },
+  {
     name: 'error-graph-missing-classification',
     mutate(tmp) {
       const rel = 'docs/architecture/dagpipe/v3.operation_runner.error.graph.json';

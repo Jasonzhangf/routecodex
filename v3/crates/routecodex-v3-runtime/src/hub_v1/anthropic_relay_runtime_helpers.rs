@@ -168,6 +168,7 @@ pub(crate) fn project_v3_anthropic_relay_runtime_failure_with_trace(
         _ => None,
     };
     let source = match error {
+        V3AnthropicRelayRuntimeError::RuntimeSource(source) => Ok(source),
         V3AnthropicRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(

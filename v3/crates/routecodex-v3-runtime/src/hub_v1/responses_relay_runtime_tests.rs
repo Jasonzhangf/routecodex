@@ -1,5 +1,4 @@
 use super::*;
-use crate::execution_control::V3AttemptStoreError;
 use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
@@ -180,7 +179,6 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -275,7 +273,6 @@ async fn target_protocol_unmapped_field_recovers_through_next_provider() {
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -298,7 +295,7 @@ async fn target_protocol_unmapped_field_recovers_through_next_provider() {
 }
 
 #[tokio::test]
-async fn execution_control_payload_architecture_responses_relay_handoff_does_not_reset_attempt_budget(
+async fn execution_control_handoff_preserves_sequence_without_legacy_attempt_ceiling(
 ) {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
@@ -318,27 +315,28 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .as_mut()
         .unwrap()
         .attempt_store
-        .residence_timeout_ms = 300;
+        .residence_timeout_ms = 60_000;
     let request_execution_control =
         crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
             .expect("request execution control");
     request_execution_control
         .attempt_budget()
+        .record_request_candidate_attempt("direct/handoff/key/model".into(), 0)
+        .expect("Direct request scan marker");
+    request_execution_control
+        .attempt_budget()
         .admit_transport_attempt()
         .expect("Direct attempt before Relay handoff");
-    let rejection = request_execution_control
+    let second_sequence = request_execution_control
         .attempt_budget()
-        .admit_transport_attempt();
-    assert!(
-        matches!(&rejection, Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
-        if message.contains("limit 1")),
-        "the original attempt ceiling applies before handoff: {rejection:?}"
-    );
+        .admit_transport_attempt()
+        .expect("legacy request_max_attempts must not gate business dispatch");
+    assert_eq!(second_sequence, 2);
     let transport = RecordingChatTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
 
-    let error = execute_v3_responses_relay_runtime_inner(
+    let output = execute_v3_responses_relay_runtime_inner(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "test".to_string(),
@@ -358,7 +356,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -370,28 +367,27 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         },
     )
     .await
-    .expect_err("the configured attempt ceiling must reject the exhausted handoff");
+    .expect("the Relay handoff must continue past the legacy attempt ceiling");
 
-    assert!(matches!(
-        error,
-        V3ResponsesRelayRuntimeError::ExecutionControl(message)
-            if message.contains("transport attempt limit 1 exhausted")
-    ));
+    assert_eq!(output.status, 200);
     assert_eq!(
         transport.provider_ids.lock().expect("provider ids").len(),
-        0,
-        "the configured ceiling must prevent an additional transport attempt"
+        1,
+        "the handoff must perform one real provider attempt"
     );
     assert_eq!(
         request_execution_control.transport_attempts(),
-        1,
-        "the handoff must retain the first attempt and reject the second"
+        3,
+        "the handoff must retain both prior reservations and the provider attempt"
     );
-    let rejection = request_execution_control
-        .attempt_budget()
-        .admit_transport_attempt();
-    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
-        "after pending reaches the original residence deadline it takes precedence over the exhausted attempt ceiling: {rejection:?}");
+    assert!(
+        request_execution_control
+            .attempt_budget()
+            .request_candidate_attempts()
+            .unwrap()
+            .contains("direct/handoff/key/model"),
+        "Direct and Relay must share one request-local candidate scan"
+    );
 }
 
 #[test]
@@ -1634,7 +1630,6 @@ async fn execute_committed_first_round(
         transport,
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -1663,7 +1658,6 @@ async fn execute_committed_follow_up_round(
         transport,
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -1754,7 +1748,6 @@ async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_sec
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,

@@ -3,6 +3,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn relay_local_capacity_keeps_response_lane_without_upstream_error() {
+        let output = project_v3_openai_chat_relay_runtime_failure(
+            V3OpenAiChatRelayRuntimeError::ExecutionControlResponse(
+                "local retained response capacity".into(),
+            ),
+        );
+        let source = output
+            .diagnostic_source
+            .expect("local failure must retain its source");
+        assert!(source.external_error.is_none());
+        assert_eq!(
+            source
+                .internal_error
+                .expect("local response capacity needs response identity")
+                .node_id,
+            "V3ExecutionAttemptPayloadStore"
+        );
+        assert!(output.provider_failure_attempts.is_empty());
+    }
+
+    #[test]
     fn settlement_tail_frame_after_done_is_ignored() {
         assert!(is_v3_openai_chat_settlement_tail_frame(
             r#"{"choices":[],"cost":"0"}"#
@@ -312,7 +333,9 @@ mod tests {
             "client disconnect mid-stream must surface as a stream error"
         );
         let availability =
-            provider_health.availability("test", Some("key"), Some("model"), u64::MAX);
+            provider_health
+                .availability("test", Some("key"), Some("model"), u64::MAX)
+                .expect("test health availability must be readable");
         assert!(
             availability.available && availability.blocked_scopes.is_empty(),
             "client disconnect must not write provider cooldown/health: {:?}",
@@ -333,7 +356,6 @@ mod tests {
             model_id: "model".to_string(),
             recorded: false,
             response_control: V3RuntimeStreamObservation::default(),
-            _provider_action_permit: None,
         }
     }
 
@@ -431,29 +453,52 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .expect("test manifest compiles")
     }
 
-    struct ExecutionControlRejectingTransport {
+    struct ExecutionControlSequenceTransport {
         sends: std::sync::atomic::AtomicUsize,
     }
 
     #[async_trait::async_trait]
-    impl ResponsesTransport for ExecutionControlRejectingTransport {
+    impl ResponsesTransport for ExecutionControlSequenceTransport {
         async fn send(
             &self,
-            _request: V3Transport13ResponsesHttpRequest,
+            request: V3Transport13ResponsesHttpRequest,
         ) -> Result<routecodex_v3_provider_responses::V3ProviderResp14Raw, V3ProviderError>
         {
             self.sends.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-            panic!("shared request attempt budget must reject before transport.send")
+            Ok(routecodex_v3_provider_responses::V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![routecodex_v3_provider_responses::V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                serde_json::to_vec(&json!({
+                    "id":"resp-shared-openai-chat-budget",
+                    "status":"completed",
+                    "output":[{"type":"message","role":"assistant","content":[
+                        {"type":"output_text","text":"handoff completed"}
+                    ]}]
+                }))
+                .unwrap(),
+            ))
         }
     }
 
     #[tokio::test]
-    async fn execution_control_payload_architecture_openai_chat_relay_handoff_does_not_reset_attempt_budget(
+    async fn execution_control_openai_chat_handoff_preserves_sequence_without_legacy_attempt_ceiling(
     ) {
         std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
         let mut manifest = test_relay_manifest();
-        manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-            .attempt_store.residence_timeout_ms = 300;
+        manifest
+            .servers
+            .get_mut("test")
+            .unwrap()
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .residence_timeout_ms = 60_000;
         let request_execution_control =
             crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
                 .expect("request execution control");
@@ -461,10 +506,14 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .attempt_budget()
             .admit_transport_attempt()
             .expect("Direct attempt before Relay handoff");
-        assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
-            Err(crate::execution_control::V3AttemptStoreError::TransportAttemptsExhausted(message))
-                if message.contains("limit 1")));
-        let transport = ExecutionControlRejectingTransport {
+        assert_eq!(
+            request_execution_control
+                .attempt_budget()
+                .admit_transport_attempt()
+                .expect("legacy request_max_attempts must not gate business dispatch"),
+            2
+        );
+        let transport = ExecutionControlSequenceTransport {
             sends: std::sync::atomic::AtomicUsize::new(0),
         };
         let failure_session_scope = V3ProviderFailureSessionScope::new(
@@ -494,7 +543,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
                 &transport,
                 V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
                 0,
-                true,
                 None,
                 None,
             )
@@ -503,7 +551,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .expect("cross-protocol Direct producer returns the full handoff");
         handoff.request_execution_control = request_execution_control.clone();
 
-        let execution = execute_v3_openai_chat_relay_runtime_inner(
+        let output = execute_v3_openai_chat_relay_runtime_inner(
             &manifest,
             V3OpenAiChatRelayRuntimeInput {
                 server_id: "test".to_string(),
@@ -520,24 +568,20 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             V3RelayProviderFailureRetryPolicy::default(),
             V3HubExecutionMode::Relay,
             Some(handoff),
-        );
-        tokio::pin!(execution);
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), &mut execution).await.is_err(),
-            "exhausted shared budget must stay pending inside the original residence");
-        let error = tokio::time::timeout(std::time::Duration::from_secs(3), execution)
-        .await.expect("the original short test residence must end this request")
-        .expect_err("Relay must reject the next transport attempt from the shared budget");
+        )
+        .await
+        .expect("the Relay handoff must continue past the legacy attempt ceiling");
 
-        assert!(
-            matches!(error, V3OpenAiChatRelayRuntimeError::Target(ref message)
-            if message.contains("request provider transport attempt limit 1 exhausted"))
-        );
+        assert_eq!(output.status, 200);
         assert_eq!(
             transport.sends.load(std::sync::atomic::Ordering::Acquire),
-            0
+            2,
+            "the Direct producer and Relay consumer each perform one transport send"
         );
-        assert_eq!(request_execution_control.transport_attempts(), 1);
-        assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
-            Err(crate::execution_control::V3AttemptStoreError::ResidenceDeadlineExceeded(_))));
+        assert_eq!(
+            request_execution_control.transport_attempts(),
+            1,
+            "the active Relay execution owns its request-local transport sequence"
+        );
     }
 }

@@ -134,7 +134,7 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
         _drop_context: &crate::projection_drop_log::V3ProjectionDropContext,
     ) -> crate::shared::V3DirectSourceResult<V3Provider12ResponsesWirePayload> {
         let candidate = &policy.target.candidate;
-        let wire_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
+        let mut wire_body = crate::selected_provider_model_binding::bind_v3_selected_provider_model(
             policy.request_body.clone(),
             candidate,
         )
@@ -149,6 +149,15 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
             )
             .map(|(_, source)| source)
         })?;
+        crate::hub_v1::project_selected_provider_hosted_search(
+            &mut wire_body,
+            &candidate.model_capabilities,
+        );
+        crate::hub_v1::project_selected_provider_images(
+            &mut wire_body,
+            &candidate.model_capabilities,
+            false,
+        );
         let wire_body = apply_gemini_request_key_hook(wire_body, request_key_catalog)?;
         let profile = crate::hub_v1::V3ProviderCompatProfileId::from_config(
             candidate.compatibility_profile.as_deref(),
@@ -206,8 +215,6 @@ impl V3DirectProtocolCodec for V3GeminiDirectCodec {
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
             request_timeout_ms: candidate.request_timeout_ms,
             sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
-            initial_concurrency_budget: candidate.initial_concurrency_budget,
-            concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
         };
         build_v3_provider_12_responses_wire_payload(policy.request_id.clone(), target, wire_body)
             .map(|wire| {
@@ -464,8 +471,6 @@ mod tests {
                     reasoning_effort: None,
                     request_timeout_ms: 300_000,
                     sse_first_frame_timeout_ms: None,
-                    initial_concurrency_budget: 8,
-                    concurrency_acquire_timeout_ms: 60_000,
                     compatibility_profile: None,
                     headers: Default::default(),
                     env_name: None,

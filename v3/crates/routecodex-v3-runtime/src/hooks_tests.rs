@@ -90,8 +90,6 @@ fn direct_policy_with_models(
                 priority: 0,
                 weight: 1,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
                 compatibility_profile: None,
                 headers: Default::default(),
                 env_name: Some("TEST_KEY".to_string()),
@@ -398,6 +396,24 @@ fn direct_responses_projection_preserves_current_image_for_selected_target() {
 }
 
 #[test]
+fn direct_responses_text_only_target_replaces_image_and_preserves_text() {
+    let mut policy = direct_policy_with_models("client", "canonical", "wire");
+    policy.target.candidate.model_capabilities = vec!["text".into()];
+    policy.request_body = json!({
+        "model": "client",
+        "input": [{"role":"user","content":[
+            {"type":"input_text","text":"keep this"},
+            {"type":"input_image","image_url":"data:image/png;base64,AAAA"}
+        ]}]
+    });
+    let catalog = default_v3_direct_request_key_hook_catalog();
+    let wire = responses_direct_request_projection_hook_with_key_catalog(&policy, &catalog)
+        .expect("text-only target remains usable");
+    assert_eq!(wire.body()["input"][0]["content"][0]["text"], "keep this");
+    assert_eq!(wire.body()["input"][0]["content"][1], json!({"type":"input_text","text":"[Image]"}));
+}
+
+#[test]
 fn direct_request_key_catalog_effect_reaches_chat_provider_wire_body() {
     let base = direct_policy_with_models(
         "client-route-alias",
@@ -669,6 +685,7 @@ async fn malformed_json_response_is_explicit_error() {
                 custom_tool_function_binding: None,
                 namespace_tool_identities: Default::default(),
                 runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
+                attempt_budget: None,
             },
         )
         .await;
@@ -897,22 +914,7 @@ fn oauth_credential_error_branch_preserves_internal_runtime_identity() {
 }
 
 #[test]
-fn concurrency_and_client_disconnect_branches_preserve_source_kind() {
-    let concurrency = provider_error_source_for_test(
-        "V3Target10ConcreteProviderSelected",
-        V3ProviderError::ConcurrencyBusy {
-            request_id: "req-concurrency".to_string(),
-            provider_id: "provider-a".to_string(),
-        },
-    );
-    assert_eq!(
-        concurrency.source_kind,
-        V3ErrorSourceKind::TargetPoolExhausted
-    );
-    assert_eq!(concurrency.code, "provider_concurrency_busy");
-    assert!(concurrency.internal_error.is_none());
-    assert!(concurrency.external_error.is_none());
-
+fn client_disconnect_branch_preserves_source_kind() {
     let disconnect = provider_error_source_for_test(
         "V3Transport13ResponsesHttpRequest",
         V3ProviderError::ClientDisconnect {

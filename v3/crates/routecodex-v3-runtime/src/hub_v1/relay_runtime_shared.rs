@@ -6,7 +6,7 @@
 //! （server_routing_group / provider_target / handle_provider_failure /
 //! provider_*_failure / failure_error_type / provider_failure_message / error_output）。
 //!
-//! 错误统一以 `String` 表达，调用方（协议 runtime）负责 map_err 到自身错误类型；
+//! 错误保留 typed 来源，调用方（协议 runtime）负责 map_err 到自身错误类型；
 //! 统一失败结构 [`V3RelayProviderFailure`] 替代各协议 `V3*RelayProviderFailure` 副本。
 
 use crate::hub_v1::{
@@ -48,6 +48,8 @@ pub enum V3RelayCoreError {
     StaticRegistry(String),
     EndpointPath(String),
     Target(String),
+    RuntimeSource(routecodex_v3_error::V3Error01SourceRaised),
+    ExecutionControlResponse(crate::execution_control::V3AttemptStoreError),
     ResponseGovernance(super::V3HubRelayResponseError),
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
 }
@@ -58,6 +60,8 @@ impl fmt::Display for V3RelayCoreError {
             V3RelayCoreError::StaticRegistry(message) => write!(f, "static registry: {message}"),
             V3RelayCoreError::EndpointPath(message) => write!(f, "endpoint path: {message}"),
             V3RelayCoreError::Target(message) => write!(f, "target: {message}"),
+            V3RelayCoreError::RuntimeSource(source) => write!(f, "runtime source: {}: {}", source.code, source.message),
+            V3RelayCoreError::ExecutionControlResponse(error) => error.fmt(f),
             V3RelayCoreError::ResponseGovernance(error) => error.fmt(f),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
@@ -313,8 +317,6 @@ pub fn provider_target(
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
         request_timeout_ms: provider.request_timeout_ms,
         sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-        initial_concurrency_budget: selected.initial_concurrency_budget,
-        concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
 }
 
@@ -343,14 +345,13 @@ pub(crate) fn bind_v3_selected_business_auth_kind(
 /// provider 失败策略执行（共享版；替代各协议 `handle_provider_failure` 副本）。
 ///
 /// 返回 `Ok(Some(failure))` 表示 terminal（需投影输出）；`Ok(None)` 表示已重排
-/// （retry_selected / pending_recovery 已更新，主循环 continue）。
+/// （retry_selected 已更新，主循环 continue）。
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     mut failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
     handle_provider_failure_with_response_code(
@@ -359,7 +360,6 @@ pub async fn handle_provider_failure(
         failure,
         state,
         retry_selected,
-        pending_recovery,
         provider_failure_events,
         None,
     )
@@ -372,7 +372,6 @@ pub(crate) async fn handle_provider_failure_with_response_code(
     mut failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
@@ -407,29 +406,10 @@ pub(crate) async fn handle_provider_failure_with_response_code(
     provider_failure_events
         .push(build_v3_runtime_provider_failure_observation_from_policy_event(&result.event));
     match result.decision.action {
-        V3Error05ExecutionAction::ReevaluateTarget => {
-            *retry_selected = None;
-            *pending_recovery = None;
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::ReevaluateTarget
+        | V3Error05ExecutionAction::WaitThenReselect { .. }
+        | V3Error05ExecutionAction::WaitThenRetrySame { .. } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录/lane 可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {

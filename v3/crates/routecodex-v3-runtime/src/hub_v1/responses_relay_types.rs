@@ -297,6 +297,7 @@ pub enum V3RuntimeSemanticTerminal {
 #[derive(Debug, Clone, Default)]
 struct V3RuntimeStreamControlState {
     semantic_terminal: Option<V3RuntimeSemanticTerminal>,
+    semantic_output_started: bool,
     provider_business_content: bool,
     client_disconnect: bool,
     /// Attempt-local typed Error handoff, physically separate from snapshots.
@@ -398,7 +399,6 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) retry_selected:
         &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pub(crate) pending_recovery: &'state mut Option<V3Error05RecoveryAdmissionWitness>,
     pub(crate) provider_failure_events: &'state mut Vec<V3RuntimeProviderFailureObservation>,
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
     pub(crate) selected_observability: &'state V3RuntimeObservability,
@@ -406,6 +406,19 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
 }
 
 impl V3RuntimeStreamObservation {
+    pub(crate) fn record_semantic_output_started(&self, started: bool) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.semantic_output_started |= started)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn has_semantic_output_started(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|control| control.semantic_output_started)
+            .map_err(|error| error.to_string())
+    }
     #[cfg(test)]
     pub(crate) fn poison_diagnostics_for_test(&self) {
         let inner = self.inner.clone();
@@ -925,10 +938,6 @@ impl V3LiveSnapProviderSnapshotRecorder {
             | V3ProviderError::ClientDisconnect {
                 request_id,
                 provider_id,
-            }
-            | V3ProviderError::ConcurrencyBusy {
-                request_id,
-                provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
             V3ProviderError::ProviderModelBindingMismatch {
                 request_id,
@@ -1220,6 +1229,8 @@ pub enum V3ResponsesRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Responses Relay target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Responses Relay typed runtime source: {0:?}")]
+    RuntimeSource(routecodex_v3_error::V3Error01SourceRaised),
     #[error("V3 Responses Relay provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 Responses Relay provider contract failed: {0}")]
@@ -1244,6 +1255,8 @@ pub enum V3ResponsesRelayRuntimeError {
     ExecutionControl(String),
     #[error("V3 Responses Relay response execution control failed: {0}")]
     ExecutionControlResponse(String),
+    #[error("V3 Responses Relay local response store failed: {0}")]
+    LocalResponseStore(crate::execution_control::V3AttemptStoreError),
     #[error("V3 Responses Relay provider semantic failure {code} status {status}: {message}")]
     ProviderResponseSemanticFailure {
         status: u16,

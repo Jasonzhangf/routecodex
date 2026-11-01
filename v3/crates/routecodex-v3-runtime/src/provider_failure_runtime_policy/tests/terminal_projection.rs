@@ -16,6 +16,7 @@ async fn transient_terminal_projection_releases_action_admission() {
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             scope,
             scope,
@@ -118,6 +119,7 @@ targets = [
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
             .expect("test failure session scope"),
         provider_health: &health,
@@ -218,6 +220,7 @@ targets = [
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
             .expect("test failure session scope"),
         provider_health: &health,

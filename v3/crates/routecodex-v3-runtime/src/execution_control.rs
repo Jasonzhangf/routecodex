@@ -1,7 +1,9 @@
 use futures_util::Stream;
+use futures_util::StreamExt;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -59,7 +61,6 @@ impl std::ops::Deref for V3SseAttemptFrame {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct V3AttemptStoreLimits {
-    pub(crate) request_max_attempts: usize,
     pub(crate) attempt_max_bytes: usize,
     pub(crate) attempt_max_frames: usize,
     pub(crate) request_max_bytes: usize,
@@ -70,7 +71,6 @@ pub(crate) struct V3AttemptStoreLimits {
 impl Default for V3AttemptStoreLimits {
     fn default() -> Self {
         Self {
-            request_max_attempts: 8,
             attempt_max_bytes: V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES,
             attempt_max_frames: V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES,
             request_max_bytes: V3_COMMITTED_SSE_REQUEST_MAX_BYTES,
@@ -107,6 +107,13 @@ impl fmt::Display for V3AttemptStoreError {
 #[derive(Clone)]
 pub(crate) struct V3AttemptBudget {
     inner: Arc<V3AttemptBudgetInner>,
+    completed_semantic_storage: bool,
+}
+
+impl fmt::Debug for V3AttemptBudget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("V3AttemptBudget(<opaque>)")
+    }
 }
 
 /// Opaque request-local execution control carried across protocol handoffs.
@@ -169,6 +176,7 @@ impl V3RequestExecutionControl {
             .inner
             .transport_attempts
             .store(0, Ordering::Release);
+        self.attempt_budget.clear_request_candidate_scan();
     }
 
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
@@ -210,12 +218,29 @@ impl V3RequestExecutionControl {
 struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
     transport_attempts: AtomicUsize,
-    rate_limited_attempts: AtomicUsize,
+    request_candidate_scan: Mutex<BTreeMap<String, u64>>,
     target_recovery_cursor: Mutex<V3TargetRecoveryCursor>,
     refill_used: AtomicU32,
+    // Runtime executes one provider attempt at a time. Progress belongs to
+    // that active attempt; a new admission clears it before checking the
+    // original request deadline. It never extends recovery/acquisition time.
+    active_stream_progress: AtomicBool,
     request_resident_bytes: AtomicUsize,
     process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
+    attempt_deadline: Mutex<Option<Instant>>,
+}
+
+pub(crate) async fn with_optional_attempt_deadline<F: std::future::Future>(
+    deadline: Option<Instant>,
+    future: F,
+) -> Result<F::Output, tokio::time::error::Elapsed> {
+    match deadline {
+        Some(deadline) => {
+            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), future).await
+        }
+        None => Ok(future.await),
+    }
 }
 
 #[derive(Default)]
@@ -260,7 +285,6 @@ impl V3AttemptBudget {
                 ))
             })?;
         let limits = V3AttemptStoreLimits {
-            request_max_attempts: policy.request_max_attempts,
             attempt_max_bytes: policy.attempt_max_bytes,
             attempt_max_frames: policy.attempt_max_frames,
             request_max_bytes: policy.request_max_bytes,
@@ -283,19 +307,30 @@ impl V3AttemptBudget {
     }
 
     fn new(limits: V3AttemptStoreLimits, process_resident_bytes: V3ProcessResidentBytes) -> Self {
+        let deadline = Instant::now() + limits.residence_timeout;
         Self {
             inner: Arc::new(V3AttemptBudgetInner {
                 limits,
-                // Zero means no Target10 candidate plan has been installed;
-                // admission then uses the configured request ceiling.
                 transport_attempts: AtomicUsize::new(0),
-                rate_limited_attempts: AtomicUsize::new(0),
+            request_candidate_scan: Mutex::new(BTreeMap::new()),
                 target_recovery_cursor: Mutex::new(V3TargetRecoveryCursor::default()),
                 refill_used: AtomicU32::new(0),
+                active_stream_progress: AtomicBool::new(false),
                 request_resident_bytes: AtomicUsize::new(0),
                 process_resident_bytes,
-                deadline: Instant::now() + limits.residence_timeout,
+                deadline,
+                attempt_deadline: Mutex::new(Some(deadline)),
             }),
+            completed_semantic_storage: false,
+        }
+    }
+
+    /// Grant storage for a completed semantic attempt without changing the
+    /// request's acquisition, probe or transport-attempt deadline.
+    pub(crate) fn for_completed_semantic_storage(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            completed_semantic_storage: true,
         }
     }
 
@@ -310,8 +345,21 @@ impl V3AttemptBudget {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn test_with_residence_timeout(residence_timeout: Duration) -> Self {
+        let limits = V3AttemptStoreLimits {
+            residence_timeout,
+            ..V3AttemptStoreLimits::default()
+        };
+        Self::new_isolated(limits, Arc::new(AtomicUsize::new(0)))
+    }
+
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
-        if Instant::now() >= self.inner.deadline {
+        if !self.active_stream_has_semantic_progress()
+            && self
+                .attempt_deadline()
+                .is_some_and(|deadline| Instant::now() >= deadline)
+        {
             return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
                 "provider SSE attempt exceeded the request residence deadline".to_string(),
             ));
@@ -323,14 +371,29 @@ impl V3AttemptBudget {
         self.inner.deadline
     }
 
+    pub(crate) fn attempt_deadline(&self) -> Option<Instant> {
+        *self
+            .inner
+            .attempt_deadline
+            .lock()
+            .expect("attempt deadline lock poisoned")
+    }
+
+    pub(crate) fn mark_active_stream_semantic_progress(&self) {
+        self.inner
+            .active_stream_progress
+            .store(true, Ordering::Release);
+    }
+
+    pub(crate) fn active_stream_has_semantic_progress(&self) -> bool {
+        self.inner.active_stream_progress.load(Ordering::Acquire)
+    }
+
     pub(crate) fn target_recovery_started(&self) -> tokio::time::Instant {
         tokio::time::Instant::from_std(self.inner.deadline - self.inner.limits.residence_timeout)
     }
 
     pub(crate) fn current_target_recovery_deadline(&self, now: Instant) -> Option<Instant> {
-        if now >= self.inner.deadline {
-            return None;
-        }
         let mut cursor = self
             .inner
             .target_recovery_cursor
@@ -340,8 +403,8 @@ impl V3AttemptBudget {
             .wait_ms(cursor.step_index);
         let due_at = *cursor
             .step_due_at
-            .get_or_insert_with(|| (now + Duration::from_millis(wait_ms)).min(self.inner.deadline));
-        Some(due_at.min(self.inner.deadline))
+            .get_or_insert_with(|| now + Duration::from_millis(wait_ms));
+        Some(due_at)
     }
 
     pub(crate) fn advance_target_recovery_step_if_due(&self, now: Instant) {
@@ -357,30 +420,84 @@ impl V3AttemptBudget {
     }
 
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
-        self.ensure_resident()?;
-        let limit = self.inner.limits.request_max_attempts;
+        self.inner
+            .active_stream_progress
+            .store(false, Ordering::Release);
+        *self
+            .inner
+            .attempt_deadline
+            .lock()
+            .expect("attempt deadline lock poisoned") =
+            (Instant::now() < self.inner.deadline).then_some(self.inner.deadline);
         self.inner
             .transport_attempts
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                // A received 429 consumed a real attempt (keep its sequence),
-                // but its recovery is bounded by the request residence deadline,
-                // not the non-rate-limit candidate-failure count.
-                let rate_limited = self.inner.rate_limited_attempts.load(Ordering::Acquire);
-                (current.saturating_sub(rate_limited) < limit).then_some(current + 1)
+                current.checked_add(1)
             })
             .map(|previous| previous + 1)
             .map_err(|_| {
-                V3AttemptStoreError::TransportAttemptsExhausted(format!(
-                    "request provider transport attempt limit {} exhausted",
-                    limit
+                V3AttemptStoreError::InvalidAttemptState(
+                    "transport attempt counter overflow".into(),
+                )
+            })
+    }
+
+    pub(crate) fn record_request_candidate_attempt(
+        &self,
+        candidate_key: String,
+        recovery_revision: u64,
+    ) -> Result<(), V3AttemptStoreError> {
+        self.inner
+            .request_candidate_scan
+            .lock()
+            .map_err(|error| {
+                V3AttemptStoreError::InvalidAttemptState(format!(
+                    "request candidate scan lock poisoned: {error}"
+                ))
+            })?
+            .insert(candidate_key, recovery_revision);
+        Ok(())
+    }
+
+    pub(crate) fn request_candidate_attempts(
+        &self,
+    ) -> Result<BTreeSet<String>, V3AttemptStoreError> {
+        self.inner
+            .request_candidate_scan
+            .lock()
+            .map(|attempted| attempted.keys().cloned().collect())
+            .map_err(|error| {
+                V3AttemptStoreError::InvalidAttemptState(format!(
+                    "request candidate scan lock poisoned: {error}"
                 ))
             })
     }
 
-    pub(crate) fn record_rate_limited_attempt(&self) {
+    pub(crate) fn request_candidate_recovery_revisions(
+        &self,
+    ) -> Result<BTreeMap<String, u64>, V3AttemptStoreError> {
+        self.inner.request_candidate_scan.lock().map(|attempted| attempted.clone()).map_err(|error| {
+            V3AttemptStoreError::InvalidAttemptState(format!("request candidate scan lock poisoned: {error}"))
+        })
+    }
+
+    pub(crate) fn clear_recovered_request_candidates(
+        &self,
+        recovered: &BTreeSet<String>,
+    ) -> Result<(), V3AttemptStoreError> {
+        let mut attempted = self.inner.request_candidate_scan.lock().map_err(|error| {
+            V3AttemptStoreError::InvalidAttemptState(format!("request candidate scan lock poisoned: {error}"))
+        })?;
+        attempted.retain(|key, _| !recovered.contains(key));
+        Ok(())
+    }
+
+    pub(crate) fn clear_request_candidate_scan(&self) {
         self.inner
-            .rate_limited_attempts
-            .fetch_add(1, Ordering::AcqRel);
+            .request_candidate_scan
+            .lock()
+            .expect("request candidate scan lock should not be poisoned")
+            .clear();
     }
 
     /// Settle the pending admission when transport reports no wire send.
@@ -394,8 +511,10 @@ impl V3AttemptBudget {
         self.inner.transport_attempts.load(Ordering::Acquire)
     }
 
-    fn reserve(&self, bytes: usize) -> Result<(), V3AttemptStoreError> {
-        self.ensure_resident()?;
+    fn reserve(&self, bytes: usize, semantic_started: bool) -> Result<(), V3AttemptStoreError> {
+        if !semantic_started {
+            self.ensure_resident()?;
+        }
         reserve_bounded(
             self.inner.process_resident_bytes.counter(),
             bytes,
@@ -457,11 +576,426 @@ fn reserve_bounded(
 struct V3AttemptReservation {
     budget: V3AttemptBudget,
     bytes: usize,
+    semantic_started: bool,
+}
+
+/// One resident-payload account for an active attempt. Decoder, reducer and
+/// projection owners hold separate leases against the same declared ceiling.
+/// This counts retained payload bytes, not allocator overhead or wire traffic.
+#[derive(Clone)]
+pub(crate) struct V3AttemptMaterializationContext {
+    inner: Arc<V3AttemptMaterializationAccount>,
+}
+
+struct V3AttemptMaterializationAccount {
+    budget: V3AttemptBudget,
+    resident_bytes: AtomicUsize,
+    semantic_started: AtomicBool,
+}
+
+/// Moves and splits transfer admission. A cloned payload needs a new lease.
+pub(crate) struct V3MaterializationLease {
+    context: V3AttemptMaterializationContext,
+    bytes: usize,
+}
+
+/// Separate retained subtrees can be replaced without retaining a cumulative
+/// charge for the old value. Keys are supplied by the owning reducer.
+pub(crate) struct V3MaterializationSlots<K: Ord> {
+    context: V3AttemptMaterializationContext,
+    leases: std::collections::BTreeMap<K, V3MaterializationLease>,
+    pending: std::collections::BTreeMap<K, V3MaterializationLease>,
+}
+
+pub(crate) struct V3MaterializationReplacement<K> {
+    key: K,
+    replaced_field_bytes: Option<usize>,
+}
+
+impl<K: Ord + Clone> V3MaterializationSlots<K> {
+    pub(crate) fn new(context: V3AttemptMaterializationContext) -> Self {
+        Self {
+            context,
+            leases: std::collections::BTreeMap::new(),
+            pending: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn lease(&mut self, key: K) -> Result<&mut V3MaterializationLease, V3AttemptStoreError> {
+        match self.leases.entry(key) {
+            std::collections::btree_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                Ok(entry.insert(self.context.reserve(0)?))
+            }
+        }
+    }
+
+    pub(crate) fn grow(&mut self, key: K, bytes: usize) -> Result<(), V3AttemptStoreError> {
+        self.lease(key)?.grow(bytes)
+    }
+
+    pub(crate) fn prepare_replace(
+        &mut self,
+        key: K,
+        retained_bytes: usize,
+    ) -> Result<V3MaterializationReplacement<K>, V3AttemptStoreError> {
+        // The incoming copy and old subtree coexist until the reducer replaces
+        // its value. Keep this admission here even if that mutation fails.
+        let lease = self.context.reserve(retained_bytes)?;
+        self.pending.insert(key.clone(), lease);
+        Ok(V3MaterializationReplacement {
+            key,
+            replaced_field_bytes: None,
+        })
+    }
+
+    pub(crate) fn prepare_field_replace(
+        &mut self,
+        key: K,
+        old_bytes: usize,
+        new_bytes: usize,
+    ) -> Result<V3MaterializationReplacement<K>, V3AttemptStoreError> {
+        let lease = self.context.reserve(new_bytes)?;
+        self.pending.insert(key.clone(), lease);
+        Ok(V3MaterializationReplacement {
+            key,
+            replaced_field_bytes: Some(old_bytes),
+        })
+    }
+
+    /// The reducer calls this only after dropping/replacing the old subtree.
+    /// If mutation fails, its old and incoming copy remain charged until the
+    /// failed attempt and its leases drop together.
+    pub(crate) fn finish_replace(
+        &mut self,
+        replacement: V3MaterializationReplacement<K>,
+    ) -> Result<(), V3AttemptStoreError> {
+        let mut incoming = self.pending.remove(&replacement.key).ok_or_else(|| {
+            V3AttemptStoreError::InvalidAttemptState(
+                "materialization replacement has no pending reservation".to_owned(),
+            )
+        })?;
+        if let Some(old_bytes) = replacement.replaced_field_bytes {
+            let retained = self.lease(replacement.key)?;
+            let remaining = retained.bytes.checked_sub(old_bytes).ok_or_else(|| {
+                V3AttemptStoreError::InvalidAttemptState(
+                    "replaced field exceeds its retained subtree reservation".into(),
+                )
+            })?;
+            retained.shrink_to(remaining)?;
+            // Both leases already belong to this slots context. Move ownership
+            // without releasing or admitting the still-retained new field.
+            retained.bytes += std::mem::take(&mut incoming.bytes);
+        } else {
+            self.leases.insert(replacement.key, incoming);
+        }
+        Ok(())
+    }
+}
+
+/// String values retain their text bytes; structured tool values retain their
+/// complete JSON representation. This is payload accounting, not allocator RSS.
+pub(crate) fn materialization_value_bytes(
+    value: &serde_json::Value,
+) -> Result<usize, V3AttemptStoreError> {
+    if let Some(text) = value.as_str() {
+        return Ok(text.len());
+    }
+    materialization_serialized_bytes(value)
+}
+
+pub(crate) fn materialization_serialized_bytes<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<usize, V3AttemptStoreError> {
+    let mut counter = V3EncodedFrameSize(0);
+    serde_json::to_writer(&mut counter, value).map_err(|error| {
+        V3AttemptStoreError::InvalidAttemptState(format!("cannot measure retained value: {error}"))
+    })?;
+    Ok(counter.0)
+}
+
+impl V3AttemptMaterializationContext {
+    pub(crate) fn new(budget: V3AttemptBudget) -> Self {
+        let semantic_started = budget.completed_semantic_storage;
+        Self {
+            inner: Arc::new(V3AttemptMaterializationAccount {
+                budget,
+                resident_bytes: AtomicUsize::new(0),
+                semantic_started: AtomicBool::new(semantic_started),
+            }),
+        }
+    }
+
+    pub(crate) fn reserve(
+        &self,
+        bytes: usize,
+    ) -> Result<V3MaterializationLease, V3AttemptStoreError> {
+        self.admit(bytes)?;
+        Ok(V3MaterializationLease {
+            context: self.clone(),
+            bytes,
+        })
+    }
+
+    /// Adopt already admitted prefix storage without releasing/reacquiring its
+    /// request/process reservation. The original holder is emptied only after
+    /// the attempt-local admission succeeds.
+    pub(crate) fn adopt_prefix(
+        &self,
+        prefix: &mut V3RetainedPrefixReservation,
+    ) -> Result<V3MaterializationLease, V3AttemptStoreError> {
+        let Some(existing) = prefix.reservation.as_mut() else {
+            return self.reserve(0);
+        };
+        if !Arc::ptr_eq(&existing.budget.inner, &self.inner.budget.inner) {
+            return Err(V3AttemptStoreError::InvalidAttemptState(
+                "raw prefix belongs to another request budget".into(),
+            ));
+        }
+        reserve_bounded(
+            &self.inner.resident_bytes,
+            existing.bytes,
+            self.inner.budget.inner.limits.attempt_max_bytes,
+            "attempt retained materialization byte limit",
+        )?;
+        let bytes = std::mem::take(&mut existing.bytes);
+        prefix.reservation.take();
+        Ok(V3MaterializationLease {
+            context: self.clone(),
+            bytes,
+        })
+    }
+
+    fn admit(&self, bytes: usize) -> Result<(), V3AttemptStoreError> {
+        reserve_bounded(
+            &self.inner.resident_bytes,
+            bytes,
+            self.inner.budget.inner.limits.attempt_max_bytes,
+            "attempt retained materialization byte limit",
+        )?;
+        if let Err(error) = self
+            .inner
+            .budget
+            .reserve(bytes, self.inner.semantic_started.load(Ordering::Acquire))
+        {
+            self.inner.resident_bytes.fetch_sub(bytes, Ordering::AcqRel);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn release(&self, bytes: usize) {
+        self.inner.budget.release(bytes);
+        self.inner.resident_bytes.fetch_sub(bytes, Ordering::AcqRel);
+    }
+}
+
+impl V3MaterializationLease {
+    /// Call before retaining a delta or constructing an independent copy.
+    pub(crate) fn grow(&mut self, bytes: usize) -> Result<(), V3AttemptStoreError> {
+        let next = self.bytes.checked_add(bytes).ok_or_else(|| {
+            V3AttemptStoreError::LocalResourceExhausted("materialization lease overflow".into())
+        })?;
+        self.context.admit(bytes)?;
+        self.bytes = next;
+        Ok(())
+    }
+
+    /// Call only after the corresponding retained allocation has been dropped.
+    pub(crate) fn shrink_to(&mut self, bytes: usize) -> Result<(), V3AttemptStoreError> {
+        let released = self.bytes.checked_sub(bytes).ok_or_else(|| {
+            V3AttemptStoreError::InvalidAttemptState("cannot grow a lease by shrinking it".into())
+        })?;
+        self.context.release(released);
+        self.bytes = bytes;
+        Ok(())
+    }
+
+    pub(crate) fn split_off(&mut self, bytes: usize) -> Result<Self, V3AttemptStoreError> {
+        let remaining = self.bytes.checked_sub(bytes).ok_or_else(|| {
+            V3AttemptStoreError::InvalidAttemptState(
+                "cannot transfer unreserved materialization bytes".into(),
+            )
+        })?;
+        self.bytes = remaining;
+        Ok(Self {
+            context: self.context.clone(),
+            bytes,
+        })
+    }
+}
+
+impl Drop for V3MaterializationLease {
+    fn drop(&mut self) {
+        self.context.release(self.bytes);
+    }
+}
+
+pub(crate) enum V3MaterializationInputError {
+    Provider(routecodex_v3_provider_responses::V3ProviderError),
+    LocalStore(V3AttemptStoreError),
+}
+
+/// The raw allocation is dropped before its lease. Decoder/reducer consumers
+/// keep this carrier until processing completes, independent of stream polls.
+pub(crate) struct V3LeasedProviderChunk {
+    pub(crate) bytes: Vec<u8>,
+    _lease: V3MaterializationLease,
+}
+
+pub(crate) struct V3MaterializationInputStream {
+    source: routecodex_v3_provider_responses::V3ProviderSseStream,
+    context: V3AttemptMaterializationContext,
+    prefix: V3MaterializationLease,
+    stopped: bool,
+}
+
+impl V3MaterializationInputStream {
+    pub(crate) fn new(
+        source: routecodex_v3_provider_responses::V3ProviderSseStream,
+        context: V3AttemptMaterializationContext,
+        prefix: &mut V3RetainedPrefixReservation,
+    ) -> Result<Self, V3AttemptStoreError> {
+        let lease = context.adopt_prefix(prefix)?;
+        Ok(Self {
+            source,
+            context,
+            prefix: lease,
+            stopped: false,
+        })
+    }
+}
+
+impl Stream for V3MaterializationInputStream {
+    type Item = Result<V3LeasedProviderChunk, V3MaterializationInputError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.stopped {
+            return Poll::Ready(None);
+        }
+        let chunk = match self.source.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => chunk,
+            Poll::Ready(Some(Err(error))) => {
+                self.stopped = true;
+                return Poll::Ready(Some(Err(V3MaterializationInputError::Provider(error))));
+            }
+            Poll::Ready(None) => {
+                self.stopped = true;
+                return Poll::Ready(None);
+            }
+            Poll::Pending => return Poll::Pending,
+        };
+        let lease = if self.prefix.bytes != 0 {
+            self.prefix.split_off(chunk.len())
+        } else {
+            self.context.reserve(chunk.len())
+        };
+        match lease {
+            Ok(lease) => Poll::Ready(Some(Ok(V3LeasedProviderChunk {
+                bytes: chunk,
+                _lease: lease,
+            }))),
+            Err(error) => {
+                self.stopped = true;
+                Poll::Ready(Some(Err(V3MaterializationInputError::LocalStore(error))))
+            }
+        }
+    }
+}
+
+/// The initial semantic guard retains raw chunks before protocol decoding.
+/// This store owns their reservation independently of business payloads.
+pub(crate) struct V3AttemptPrefixBuffer {
+    chunks: VecDeque<Vec<u8>>,
+    reservation: V3AttemptReservation,
+}
+
+/// A collector that retains raw chunks keeps this control resource beside
+/// those chunks, including after the replay stream reaches EOF.
+#[derive(Default)]
+pub(crate) struct V3RetainedPrefixReservation {
+    reservation: Option<V3AttemptReservation>,
+}
+
+impl V3AttemptPrefixBuffer {
+    pub(crate) fn new(budget: V3AttemptBudget) -> Result<Self, V3AttemptStoreError> {
+        budget.ensure_resident()?;
+        Ok(Self {
+            chunks: VecDeque::new(),
+            reservation: V3AttemptReservation {
+                budget,
+                bytes: 0,
+                semantic_started: false,
+            },
+        })
+    }
+
+    pub(crate) fn push(&mut self, chunk: Vec<u8>) -> Result<(), V3AttemptStoreError> {
+        let limits = self.reservation.budget.inner.limits;
+        if self
+            .reservation
+            .bytes
+            .checked_add(chunk.len())
+            .is_none_or(|bytes| bytes > limits.attempt_max_bytes)
+        {
+            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
+                "provider SSE raw prefix exceeded the attempt byte limit ({})",
+                limits.attempt_max_bytes
+            )));
+        }
+        self.reservation.reserve(chunk.len())?;
+        self.chunks.push_back(chunk);
+        Ok(())
+    }
+
+    pub(crate) fn last(&self) -> &[u8] {
+        self.chunks
+            .back()
+            .expect("a reserved prefix chunk was appended")
+    }
+
+    pub(crate) fn replay_retained(
+        self,
+        tail: routecodex_v3_provider_responses::V3ProviderSseStream,
+        retained: &mut V3RetainedPrefixReservation,
+    ) -> Result<routecodex_v3_provider_responses::V3ProviderSseStream, V3AttemptStoreError> {
+        if retained.reservation.is_some() {
+            return Err(V3AttemptStoreError::InvalidAttemptState(
+                "raw prefix reservation already belongs to a retained attempt".to_string(),
+            ));
+        }
+        let Self {
+            chunks,
+            reservation,
+        } = self;
+        retained.reservation = Some(reservation);
+        Ok(Box::pin(
+            futures_util::stream::iter(chunks.into_iter().map(Ok)).chain(tail),
+        ))
+    }
+
+    /// Consumers decode the yielded chunk before requesting the next chunk.
+    /// Keep that raw chunk charged through its consumer's poll, then release
+    /// it at the next poll. Cancellation drops all remaining reservations.
+    pub(crate) fn replay(
+        self,
+        tail: routecodex_v3_provider_responses::V3ProviderSseStream,
+    ) -> routecodex_v3_provider_responses::V3ProviderSseStream {
+        let prefix =
+            futures_util::stream::unfold((self, 0usize), |(mut store, previous)| async move {
+                store.reservation.bytes -= previous;
+                store.reservation.budget.release(previous);
+                let chunk = store.chunks.pop_front()?;
+                let bytes = chunk.len();
+                Some((Ok(chunk), (store, bytes)))
+            });
+        Box::pin(prefix.chain(tail))
+    }
 }
 
 impl V3AttemptReservation {
     fn reserve(&mut self, bytes: usize) -> Result<(), V3AttemptStoreError> {
-        self.budget.reserve(bytes)?;
+        self.budget.reserve(bytes, self.semantic_started)?;
         self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
             self.budget.release(bytes);
             V3AttemptStoreError::LocalResourceExhausted(
@@ -496,7 +1030,7 @@ pub struct V3CommittedClientSseStream {
     /// the replay iterator instead of copied. Chat Process governance reads it
     /// to decide bounded refill from the governed result; the client stream
     /// keeps replaying exactly the same frames.
-    sealed_frames: Option<std::sync::Arc<Vec<Vec<u8>>>>,
+    sealed_frames: Option<Arc<V3SealedClientSseFrames>>,
 }
 
 /// Runtime-issued proof that one provider attempt reached a protocol-valid
@@ -534,10 +1068,24 @@ impl V3AttemptSuccessReceipt {
     }
 }
 
+/// Shared immutable storage owns its admission until the last reader drops.
+/// In particular, a retained governance/refill view may outlive replay.
+pub(crate) struct V3SealedClientSseFrames {
+    frames: Vec<Vec<u8>>,
+    _reservation: Option<V3MaterializationLease>,
+}
+
+impl std::ops::Deref for V3SealedClientSseFrames {
+    type Target = Vec<Vec<u8>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.frames
+    }
+}
+
 struct V3ReservedCommittedSseReplay {
-    frames: std::sync::Arc<Vec<Vec<u8>>>,
+    frames: Arc<V3SealedClientSseFrames>,
     next: usize,
-    _reservation: V3AttemptReservation,
 }
 
 impl Stream for V3ReservedCommittedSseReplay {
@@ -608,10 +1156,13 @@ impl V3CommittedClientSseStream {
     /// the client, so the intermediate refill decision cannot read the
     /// delivered remainder and call it the complete result. This accessor
     /// exposes the whole committed attempt that the seal validated.
-    pub(crate) fn sealed_frames(&self) -> std::sync::Arc<Vec<Vec<u8>>> {
-        self.sealed_frames
-            .clone()
-            .unwrap_or_else(|| std::sync::Arc::new(Vec::new()))
+    pub(crate) fn sealed_frames(&self) -> Arc<V3SealedClientSseFrames> {
+        self.sealed_frames.clone().unwrap_or_else(|| {
+            Arc::new(V3SealedClientSseFrames {
+                frames: Vec::new(),
+                _reservation: None,
+            })
+        })
     }
 }
 
@@ -675,7 +1226,7 @@ pub(crate) struct V3CommittedClientSseBuilder {
     byte_len: usize,
     terminal_frame_index: Option<usize>,
     limits: V3AttemptStoreLimits,
-    reservation: V3AttemptReservation,
+    reservation: V3MaterializationLease,
     /// Frames already handed to the client channel after the first business
     /// frame committed the attempt. Zero means the attempt is still fully
     /// buffered, which is the only state that may run a whole-attempt rewrite.
@@ -756,6 +1307,24 @@ impl V3CommittedClientFrameSink {
     }
 }
 
+struct V3EncodedFrameSize(usize);
+
+impl std::io::Write for V3EncodedFrameSize {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.checked_add(bytes.len()).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "encoded SSE frame length overflow",
+            )
+        })?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl V3CommittedClientSseBuilder {
     #[cfg(test)]
     pub(crate) fn new() -> Self {
@@ -764,22 +1333,110 @@ impl V3CommittedClientSseBuilder {
     }
 
     pub(crate) fn with_budget(budget: V3AttemptBudget) -> Result<Self, V3AttemptStoreError> {
-        budget.ensure_resident()?;
+        Self::with_materialization_context(V3AttemptMaterializationContext::new(budget))
+    }
+
+    pub(crate) fn with_materialization_context(
+        context: V3AttemptMaterializationContext,
+    ) -> Result<Self, V3AttemptStoreError> {
+        let budget = &context.inner.budget;
+        if !budget.completed_semantic_storage {
+            budget.ensure_resident()?;
+        }
         let limits = budget.inner.limits;
         Ok(Self {
             frames: Vec::new(),
             byte_len: 0,
             terminal_frame_index: None,
             limits,
-            reservation: V3AttemptReservation { budget, bytes: 0 },
+            reservation: context.reserve(0)?,
             flushed_frames: 0,
             client_sink: None,
             flush_held: false,
         })
     }
 
+    /// The protocol owner has observed real business content for this attempt.
+    /// This does not extend the request's acquisition or retry deadline.
+    pub(crate) fn observe_semantic_output(&mut self) {
+        self.reservation
+            .context
+            .inner
+            .semantic_started
+            .store(true, Ordering::Release);
+    }
+
+    fn ensure_attempt_resident(&self) -> Result<(), V3AttemptStoreError> {
+        if self
+            .reservation
+            .context
+            .inner
+            .semantic_started
+            .load(Ordering::Acquire)
+        {
+            Ok(())
+        } else {
+            self.reservation.context.inner.budget.ensure_resident()
+        }
+    }
+
     pub(crate) fn push(&mut self, frame: Vec<u8>) -> Result<(), V3AttemptStoreError> {
-        if frame.is_empty() {
+        self.admit_frame_bytes(frame.len())?;
+        self.frames.push(frame);
+        self.flush_client_frames();
+        Ok(())
+    }
+
+    /// Admit encoded frame storage before allocating it. The counting pass
+    /// walks only this outgoing value, never the accumulated attempt.
+    pub(crate) fn push_json_event(
+        &mut self,
+        event: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Result<(), V3AttemptStoreError> {
+        let mut counter = V3EncodedFrameSize(0);
+        serde_json::to_writer(&mut counter, payload).map_err(|error| {
+            V3AttemptStoreError::InvalidAttemptState(format!(
+                "cannot measure client SSE JSON: {error}"
+            ))
+        })?;
+        let event_bytes = match event {
+            Some(name) => name.len().checked_add(8),
+            None => Some(0),
+        };
+        let bytes = event_bytes
+            .and_then(|prefix| prefix.checked_add(8))
+            .and_then(|prefix| prefix.checked_add(counter.0))
+            .ok_or_else(|| {
+                V3AttemptStoreError::LocalResourceExhausted(
+                    "client SSE frame length overflow".into(),
+                )
+            })?;
+        let previous_bytes = self.byte_len;
+        self.admit_frame_bytes(bytes)?;
+        let mut frame = Vec::with_capacity(bytes);
+        if let Some(name) = event {
+            frame.extend_from_slice(b"event: ");
+            frame.extend_from_slice(name.as_bytes());
+            frame.push(b'\n');
+        }
+        frame.extend_from_slice(b"data: ");
+        if let Err(error) = serde_json::to_writer(&mut frame, payload) {
+            drop(frame);
+            self.reservation.shrink_to(previous_bytes)?;
+            self.byte_len = previous_bytes;
+            return Err(V3AttemptStoreError::InvalidAttemptState(format!(
+                "cannot encode client SSE JSON: {error}"
+            )));
+        }
+        frame.extend_from_slice(b"\n\n");
+        self.frames.push(frame);
+        self.flush_client_frames();
+        Ok(())
+    }
+
+    fn admit_frame_bytes(&mut self, bytes: usize) -> Result<(), V3AttemptStoreError> {
+        if bytes == 0 {
             return Err(V3AttemptStoreError::InvalidAttemptState(
                 "provider response event codec produced an empty frame".to_string(),
             ));
@@ -790,7 +1447,7 @@ impl V3CommittedClientSseBuilder {
                 self.limits.attempt_max_frames
             )));
         }
-        let byte_len = self.byte_len.checked_add(frame.len()).ok_or_else(|| {
+        let byte_len = self.byte_len.checked_add(bytes).ok_or_else(|| {
             V3AttemptStoreError::LocalResourceExhausted(
                 "provider SSE attempt byte count overflowed".to_string(),
             )
@@ -801,10 +1458,8 @@ impl V3CommittedClientSseBuilder {
                 self.limits.attempt_max_bytes
             )));
         }
-        self.reservation.reserve(frame.len())?;
+        self.reservation.grow(bytes)?;
         self.byte_len = byte_len;
-        self.frames.push(frame);
-        self.flush_client_frames();
         Ok(())
     }
 
@@ -865,7 +1520,7 @@ impl V3CommittedClientSseBuilder {
     }
 
     pub(crate) fn mark_last_frame_as_terminal(&mut self) -> Result<(), V3AttemptStoreError> {
-        self.reservation.budget.ensure_resident()?;
+        self.ensure_attempt_resident()?;
         let terminal_frame_index = self.frames.len().checked_sub(1).ok_or_else(|| {
             V3AttemptStoreError::InvalidAttemptState(
                 "committed SSE terminal cannot precede every frame".to_string(),
@@ -904,10 +1559,7 @@ impl V3CommittedClientSseBuilder {
                 "committed SSE frame rewrite must not increase byte count".to_string(),
             ));
         }
-        self.reservation
-            .budget
-            .release(old_bytes.saturating_sub(new_bytes));
-        self.reservation.bytes = new_bytes;
+        self.reservation.shrink_to(new_bytes)?;
         self.byte_len = new_bytes;
         self.frames = rewritten;
         Ok(())
@@ -984,11 +1636,10 @@ impl V3CommittedClientSseBuilder {
         }
         if bytes > self.byte_len {
             self.reservation
-                .reserve(bytes - self.byte_len)
+                .grow(bytes - self.byte_len)
                 .map_err(E::from)?;
         } else {
-            self.reservation.budget.release(self.byte_len - bytes);
-            self.reservation.bytes = bytes;
+            self.reservation.shrink_to(bytes).map_err(E::from)?;
         }
         self.byte_len = bytes;
         self.frames = frames;
@@ -1007,7 +1658,7 @@ impl V3CommittedClientSseBuilder {
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {
-        self.reservation.budget.ensure_resident()?;
+        self.ensure_attempt_resident()?;
         if self.frames.is_empty() {
             return Err(V3AttemptStoreError::InvalidAttemptState(
                 "provider response event codec produced an empty stream".to_string(),
@@ -1025,13 +1676,15 @@ impl V3CommittedClientSseBuilder {
         // already handed to the client.
         let relative_terminal_frame_index =
             terminal_frame_index.saturating_sub(self.flushed_frames);
-        let sealed_frames = std::sync::Arc::new(self.frames);
+        let sealed_frames = Arc::new(V3SealedClientSseFrames {
+            frames: self.frames,
+            _reservation: Some(self.reservation),
+        });
         let replay_frames = std::sync::Arc::clone(&sealed_frames);
         Ok(V3CommittedClientSseStream {
             inner: Box::pin(V3ReservedCommittedSseReplay {
                 frames: replay_frames,
                 next: self.flushed_frames,
-                _reservation: self.reservation,
             }),
             next_frame_index: 0,
             terminal_frame_index: relative_terminal_frame_index,

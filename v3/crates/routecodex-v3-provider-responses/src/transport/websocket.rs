@@ -4,12 +4,48 @@
 
 use super::*;
 
-pub(super) async fn acquire_connection_slot(
+pub(super) struct WebSocketAttemptSlot<T> {
+    slot: OwnedMutexGuard<Option<T>>,
+    clean: bool,
+}
+
+impl<T> WebSocketAttemptSlot<T> {
+    fn new(slot: OwnedMutexGuard<Option<T>>) -> Self {
+        Self { slot, clean: false }
+    }
+
+    pub(super) fn mark_clean(&mut self) {
+        self.clean = true;
+    }
+}
+
+impl<T> std::ops::Deref for WebSocketAttemptSlot<T> {
+    type Target = Option<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.slot
+    }
+}
+
+impl<T> std::ops::DerefMut for WebSocketAttemptSlot<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.slot
+    }
+}
+
+impl<T> Drop for WebSocketAttemptSlot<T> {
+    fn drop(&mut self) {
+        if !self.clean {
+            *self.slot = None;
+        }
+    }
+}
+
+pub(super) fn acquire_connection_slot(
     sessions: &Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
     request: &mut V3Transport13ResponsesRequest,
     handoff: &crate::transport_handoff::V3ProviderTransportAttemptBroker,
     attempt_key: Option<&crate::transport_handoff::V3ProviderTransportAttemptKey>,
-) -> Result<Option<OwnedMutexGuard<Option<ResponsesWebSocket>>>, V3ProviderError> {
+) -> Result<Option<WebSocketAttemptSlot<ResponsesWebSocket>>, V3ProviderError> {
     let V3Transport13ResponsesRequestKind::WebSocketV2 {
         request_id,
         provider_id,
@@ -32,74 +68,20 @@ pub(super) async fn acquire_connection_slot(
         error
     };
     let session_key = websocket_session_key(provider_id, canonical_model_id, &auth.alias, url);
-    let session = {
-        let mut sessions = sessions.lock().await;
-        sessions
+    let session = match sessions.try_lock() {
+        Ok(mut sessions) => sessions
             .entry(session_key)
             .or_insert_with(|| Arc::new(Mutex::new(None)))
-            .clone()
+            .clone(),
+        Err(_) => Arc::new(Mutex::new(None)),
     };
     ensure_not_cancelled(request_id, provider_id, cancellation.as_ref()).map_err(mark_failed)?;
     if let Ok(connection) = session.clone().try_lock_owned() {
-        return Ok(Some(connection));
+        return Ok(Some(WebSocketAttemptSlot::new(connection)));
     }
-    let request_id = request_id.clone();
-    let provider_id = provider_id.clone();
-    let cancellation = cancellation.clone();
-    // Only an actual session wait releases an already granted capacity lease.
-    request.release_pre_acquired_admission();
-    let lock = session.lock_owned();
-    match cancellation.clone() {
-        Some(cancellation) => {
-            tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => Err(V3ProviderError::ClientDisconnect {
-                    request_id: request_id.to_string(),
-                    provider_id: provider_id.to_string(),
-                }),
-                connection = lock => Ok(Some(connection)),
-            }
-        }
-        None => Ok(Some(lock.await)),
-    }
-    .map_err(mark_failed)
-}
-
-pub(super) async fn acquire_admission_and_connection_slot(
-    sessions: &Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
-    request: &mut V3Transport13ResponsesRequest,
-    handoff: &crate::transport_handoff::V3ProviderTransportAttemptBroker,
-    attempt_key: Option<&crate::transport_handoff::V3ProviderTransportAttemptKey>,
-    controller: V3AdaptiveConcurrencyController,
-    provider_key: String,
-) -> Result<
-    (
-        V3AdaptiveConcurrencyPermitGuard,
-        bool,
-        Option<OwnedMutexGuard<Option<ResponsesWebSocket>>>,
-    ),
-    V3ProviderError,
-> {
-    let connection_slot = acquire_connection_slot(sessions, request, handoff, attempt_key).await?;
-    let admission = super::take_or_acquire_provider_admission_scoped(
-        request.pre_acquired_admission.take(),
-        controller.clone(),
-        provider_key.clone(),
-        request.identity_scope.as_ref(),
-    );
-    if admission.is_err() {
-        if let Some(attempt_key) = attempt_key {
-            let _ = handoff.transition(attempt_key, V3ProviderTransportAttemptState::Failed);
-        }
-    }
-    let lease = admission.map_err(|error| {
-        super::provider_admission_error(error, request.request_id(), request.provider_id())
-    })?;
-    let was_probe = lease.is_probe();
-    let permit_guard =
-        V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), lease.into_permit());
-
-    Ok((permit_guard, was_probe, connection_slot))
+    Ok(Some(WebSocketAttemptSlot::new(
+        Arc::new(Mutex::new(None)).try_lock_owned().expect("new connection slot is unlocked"),
+    )))
 }
 
 fn websocket_session_key(
@@ -279,7 +261,7 @@ fn websocket_output_index(
 }
 
 struct WebSocketSseState {
-    connection: OwnedMutexGuard<Option<ResponsesWebSocket>>,
+    connection: WebSocketAttemptSlot<ResponsesWebSocket>,
     request_id: String,
     provider_id: String,
     cancellation: Option<V3ProviderCancellation>,
@@ -287,16 +269,8 @@ struct WebSocketSseState {
     finished: bool,
 }
 
-impl Drop for WebSocketSseState {
-    fn drop(&mut self) {
-        if !self.finished {
-            *self.connection = None;
-        }
-    }
-}
-
 pub(super) fn websocket_sse_stream(
-    connection: OwnedMutexGuard<Option<ResponsesWebSocket>>,
+    connection: WebSocketAttemptSlot<ResponsesWebSocket>,
     request_id: String,
     provider_id: String,
     cancellation: Option<V3ProviderCancellation>,
@@ -314,6 +288,7 @@ pub(super) fn websocket_sse_stream(
             if state.emit_done {
                 state.emit_done = false;
                 state.finished = true;
+                state.connection.mark_clean();
                 return Some((Ok(b"data: [DONE]\n\n".to_vec()), state));
             }
             if state.finished {
@@ -576,5 +551,171 @@ pub(super) fn websocket_protocol_error(
         request_id: request_id.to_string(),
         provider_id: provider_id.to_string(),
         reason: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod websocket_attempt_slot_tests {
+    use super::WebSocketAttemptSlot;
+    use futures_util::poll;
+    use std::future::pending;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::task::Poll;
+    use tokio::sync::{oneshot, Mutex};
+
+    struct Value(Arc<AtomicUsize>);
+
+    impl Drop for Value {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn fixture() -> (Arc<Mutex<Option<Value>>>, Arc<AtomicUsize>) {
+        let drops = Arc::new(AtomicUsize::new(0));
+        (Arc::new(Mutex::new(Some(Value(drops.clone())))), drops)
+    }
+
+    fn assert_discarded(slot: &Arc<Mutex<Option<Value>>>, drops: &AtomicUsize) {
+        let next = slot.clone().try_lock_owned().expect("slot must unlock");
+        assert!(next.is_none(), "unfinished value must be removed before unlock");
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn websocket_attempt_slot_future_drop_discards_before_unlock() {
+        let (slot, drops) = fixture();
+        let owner = WebSocketAttemptSlot::new(slot.clone().lock_owned().await);
+        let mut future = Box::pin(async move {
+            let _owner = owner;
+            pending::<()>().await;
+        });
+        assert!(matches!(poll!(future.as_mut()), Poll::Pending));
+        assert!(slot.clone().try_lock_owned().is_err());
+        drop(future);
+        assert_discarded(&slot, &drops);
+    }
+
+    #[tokio::test]
+    async fn websocket_attempt_slot_timeout_discards_before_unlock() {
+        let (slot, drops) = fixture();
+        let owner = WebSocketAttemptSlot::new(slot.clone().lock_owned().await);
+        let result = tokio::time::timeout(std::time::Duration::from_millis(1), async move {
+            let _owner = owner;
+            pending::<()>().await;
+        })
+        .await;
+        assert!(result.is_err());
+        assert_discarded(&slot, &drops);
+    }
+
+    #[tokio::test]
+    async fn websocket_attempt_slot_abort_discards_and_clean_retains() {
+        let (slot, drops) = fixture();
+        let owned_slot = slot.clone();
+        let (entered, ready) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _owner = WebSocketAttemptSlot::new(owned_slot.lock_owned().await);
+            let _ = entered.send(());
+            pending::<()>().await;
+        });
+        ready.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert_discarded(&slot, &drops);
+
+        let (clean_slot, clean_drops) = fixture();
+        let mut owner = WebSocketAttemptSlot::new(clean_slot.clone().lock_owned().await);
+        owner.mark_clean();
+        drop(owner);
+        assert!(clean_slot.clone().try_lock_owned().unwrap().is_some());
+        assert_eq!(clean_drops.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn websocket_attempt_slot_transfer_is_not_clean_completion() {
+        let (slot, drops) = fixture();
+        let owner = WebSocketAttemptSlot::new(slot.clone().lock_owned().await);
+        let stream_owner = Some(owner);
+        assert!(slot.clone().try_lock_owned().is_err());
+        drop(stream_owner);
+        assert_discarded(&slot, &drops);
+    }
+}
+
+// In-memory only: exercises the real `acquire_connection_slot` owner without
+// sockets, listeners, provider calls, or any transport. Two requests that
+// share the same provider/model/auth-alias/url must not serialize on a single
+// connection slot: request B must obtain its own slot while request A still
+// holds the shared slot.
+#[cfg(test)]
+mod websocket_slot_independence_tests {
+    use super::acquire_connection_slot;
+    use crate::transport::{
+        v3_transport_13_request, SharedResponsesWebSocket, V3Transport13ResponsesRequest,
+        V3Transport13ResponsesRequestKind,
+    };
+    use crate::transport_handoff::V3ProviderTransportAttemptBroker;
+    use crate::wire::{
+        V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ResponsesStreamIntent,
+    };
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn shared_websocket_request(request_id: &str) -> V3Transport13ResponsesRequest {
+        v3_transport_13_request(V3Transport13ResponsesRequestKind::WebSocketV2 {
+            request_id: request_id.to_string(),
+            provider_id: "slot-provider".to_string(),
+            canonical_model_id: "slot-model".to_string(),
+            url: "wss://slot.example.invalid/v1/responses".to_string(),
+            auth: V3ProviderAuthHandle {
+                alias: "slot-auth".to_string(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("slot-secret".to_string()),
+            },
+            stream_intent: V3ResponsesStreamIntent::Sse,
+            event: serde_json::json!({"type": "response.create"}),
+            cancellation: None,
+            compatibility_profile: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn request_does_not_wait_for_shared_session_map() {
+        let sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>> =
+            Arc::new(Mutex::new(BTreeMap::new()));
+        let held_map = sessions.lock().await;
+        let broker = V3ProviderTransportAttemptBroker::default();
+        let mut request = shared_websocket_request("held-map-request");
+        let acquired = acquire_connection_slot(&sessions, &mut request, &broker, None);
+        drop(held_map);
+        assert!(matches!(acquired, Ok(Some(_))), "request must not wait on the shared session map");
+    }
+
+    #[tokio::test]
+    async fn second_request_obtains_its_own_slot_without_waiting_for_held_slot() {
+        let sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>> =
+            Arc::new(Mutex::new(BTreeMap::new()));
+        let broker = V3ProviderTransportAttemptBroker::default();
+
+        let mut request_a = shared_websocket_request("slot-request-a");
+        let mut request_b = shared_websocket_request("slot-request-b");
+
+        // Request A acquires and holds the shared connection slot for the whole
+        // test body.
+        let _held_slot_a = acquire_connection_slot(&sessions, &mut request_a, &broker, None)
+            .expect("request A must acquire its connection slot")
+            .expect("request A is a WebSocket request");
+
+        // Request B asks for the same provider/model/auth-alias/url. It must
+        // obtain its own slot immediately instead of waiting for A to release.
+        let acquired_b = acquire_connection_slot(&sessions, &mut request_b, &broker, None);
+
+        let _slot_b = acquired_b
+            .expect("request B must acquire its connection slot")
+            .expect("request B is a WebSocket request");
     }
 }

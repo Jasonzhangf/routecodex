@@ -99,7 +99,7 @@ pub(crate) fn direct_external_error(
 }
 
 /// Direct SSE 首语义帧与帧间超时：provider 返回 200 后挂起时 fail-fast。
-/// 未配置时使用 30s compatibility default；慢 provider 可显式覆盖该预算。
+/// 未配置时使用 60s 默认值；provider 可显式覆盖该预算。
 /// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），
 /// 不在 server/SSE 层裸造错误帧。
 fn v3_direct_sse_default_timeout() -> std::time::Duration {
@@ -240,6 +240,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
         tool_thinking_enabled,
         toolreason_client_projection,
         None,
+        None,
     )
     .await
 }
@@ -317,6 +318,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     observation_session_id: Option<&str>,
+    attempt_budget: Option<crate::execution_control::V3AttemptBudget>,
 ) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     project_provider_raw_to_client_payload_inner(
         raw,
@@ -325,6 +327,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
         toolreason_client_projection,
         observation_session_id,
         false,
+        attempt_budget,
     )
     .await
 }
@@ -335,6 +338,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_for_complete_response
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     observation_session_id: Option<&str>,
+    attempt_budget: Option<crate::execution_control::V3AttemptBudget>,
 ) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     project_provider_raw_to_client_payload_inner(
         raw,
@@ -343,6 +347,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_for_complete_response
         toolreason_client_projection,
         observation_session_id,
         true,
+        attempt_budget,
     )
     .await
 }
@@ -385,6 +390,7 @@ async fn project_provider_raw_to_client_payload_inner(
     toolreason_client_projection: bool,
     observation_session_id: Option<&str>,
     complete_response_hook_pending: bool,
+    attempt_budget: Option<crate::execution_control::V3AttemptBudget>,
 ) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     let provider_id = raw.provider_id().to_string();
     let request_id = raw.request_id().to_string();
@@ -468,6 +474,7 @@ async fn project_provider_raw_to_client_payload_inner(
                     compat_plan.provider_protocol,
                     tool_thinking_enabled,
                     toolreason_client_projection,
+                    attempt_budget,
                 )
                 .await?;
                 (V3ProviderAttemptBody::Sse(stream), stream_observation)
@@ -588,6 +595,7 @@ async fn process_direct_sse_stream(
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
+    attempt_budget: Option<crate::execution_control::V3AttemptBudget>,
 ) -> Result<
     (
         V3ProviderAttemptSseStream,
@@ -608,6 +616,7 @@ async fn process_direct_sse_stream(
         sse_first_frame_timeout_ms,
         compatibility_profile,
         provider_protocol,
+        attempt_budget,
     )
     .await?;
     let usage_observation = V3RuntimeStreamObservation::default();
@@ -638,29 +647,33 @@ async fn guard_initial_direct_sse_provider_failure(
     sse_first_frame_timeout_ms: Option<u64>,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    attempt_budget: Option<crate::execution_control::V3AttemptBudget>,
 ) -> V3DirectSourceResult<V3ProviderSseStream> {
     let first_event_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
         .unwrap_or_else(v3_direct_sse_default_timeout);
-    guard_initial_direct_sse_provider_failure_with_timeout(
+    guard_initial_direct_sse_provider_failure_with_budget_and_timeout(
         provider_id,
         stream,
         first_event_timeout,
         compatibility_profile,
         provider_protocol,
+        attempt_budget.unwrap_or_else(crate::execution_control::V3AttemptBudget::process_default),
     )
     .await
 }
 
-async fn guard_initial_direct_sse_provider_failure_with_timeout(
+async fn guard_initial_direct_sse_provider_failure_with_budget_and_timeout(
     provider_id: &str,
     mut stream: V3ProviderSseStream,
     first_event_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    attempt_budget: crate::execution_control::V3AttemptBudget,
 ) -> V3DirectSourceResult<V3ProviderSseStream> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
-    let mut buffered = Vec::<Vec<u8>>::new();
+    let mut buffered = crate::execution_control::V3AttemptPrefixBuffer::new(attempt_budget)
+        .map_err(direct_raw_prefix_store_error)?;
     // This is a deadline for the first semantic event, not a per-chunk idle
     // timer. Transport keepalives must preserve the client connection, but
     // must not extend a provider stream that never produces a semantic frame.
@@ -715,8 +728,9 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
             ));
         };
         let chunk = next.map_err(provider_body_source)?;
+        buffered.push(chunk).map_err(direct_raw_prefix_store_error)?;
         let frames = decoder
-            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk))
+            .push(build_v3_sse_transport_in_01_raw_chunk(buffered.last()))
             .map_err(|error| sse_transport_source(provider_id, error))?;
         let mut should_start_client_stream = false;
         for frame in frames {
@@ -730,12 +744,34 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                 should_start_client_stream = true;
             }
         }
-        buffered.push(chunk);
         if should_start_client_stream {
-            let replay = stream::iter(buffered.into_iter().map(Ok)).chain(stream);
-            return Ok(Box::pin(replay));
+            return Ok(buffered.replay(stream));
         }
     }
+}
+
+fn direct_raw_prefix_store_error(error: crate::execution_control::V3AttemptStoreError) -> V3DirectSourceError {
+    direct_internal_error(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ExecutionAttemptPayloadStore",
+        "direct_sse_raw_prefix_budget",
+        error.to_string(),
+        V3InternalErrorCode::V3ExecutionResponsePayloadStore,
+    )
+}
+
+#[cfg(test)]
+async fn guard_initial_direct_sse_provider_failure_with_timeout(
+    provider_id: &str,
+    stream: V3ProviderSseStream,
+    first_event_timeout: std::time::Duration,
+    compatibility_profile: Option<&str>,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+) -> V3DirectSourceResult<V3ProviderSseStream> {
+    guard_initial_direct_sse_provider_failure_with_budget_and_timeout(
+        provider_id, stream, first_event_timeout, compatibility_profile, provider_protocol,
+        crate::execution_control::V3AttemptBudget::process_default(),
+    ).await
 }
 
 fn direct_sse_frame_provider_failure_source(
@@ -955,6 +991,7 @@ fn observed_sse_client_stream_with_protocol(
         provider_id: String,
         done: bool,
         terminal_observed: bool,
+        semantic_started: bool,
         semantic_deadline: tokio::time::Instant,
         compatibility_profile: Option<String>,
         tool_thinking_enabled: bool,
@@ -977,6 +1014,7 @@ fn observed_sse_client_stream_with_protocol(
             provider_id,
             done: false,
             terminal_observed: false,
+            semantic_started: false,
             semantic_deadline: tokio::time::Instant::now() + frame_interval_timeout,
             compatibility_profile: compatibility_profile.map(ToOwned::to_owned),
             tool_thinking_enabled,
@@ -996,9 +1034,12 @@ fn observed_sse_client_stream_with_protocol(
             if state.done {
                 return None;
             }
-            let next = match tokio::time::timeout_at(state.semantic_deadline, state.stream.next())
-                .await
-            {
+            let polled = if state.semantic_started && !state.terminal_observed {
+                Ok(state.stream.next().await)
+            } else {
+                tokio::time::timeout_at(state.semantic_deadline, state.stream.next()).await
+            };
+            let next = match polled {
                 Ok(next) => next,
                 Err(_) if state.terminal_observed => {
                     if state.tool_thinking_enabled {
@@ -1101,8 +1142,7 @@ fn observed_sse_client_stream_with_protocol(
                                     tokio::time::Instant::now() + frame_interval_timeout;
                             }
                             if semantic && !terminal {
-                                state.semantic_deadline =
-                                    tokio::time::Instant::now() + frame_interval_timeout;
+                                state.semantic_started = true;
                             }
                             Ok(chunk)
                         }
@@ -1630,6 +1670,17 @@ mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
 
+    #[test]
+    fn raw_prefix_capacity_keeps_internal_response_identity() {
+        let source = direct_raw_prefix_store_error(
+            crate::execution_control::V3AttemptStoreError::LocalResourceExhausted("raw prefix capacity".into())
+        ).expect("Error01 must preserve an ordinary internal source");
+        assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
+        assert!(source.external_error.is_none(), "local capacity has no upstream error status");
+        let internal = source.internal_error.expect("response capacity must retain its typed internal response identity");
+        assert_eq!(internal.node_id, "V3ExecutionAttemptPayloadStore");
+    }
+
     fn expect_ordinary_source<T>(result: V3DirectSourceResult<T>) -> V3Error01SourceRaised {
         match result {
             Err(Ok(source)) => source,
@@ -2024,7 +2075,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_times_out_after_provider_stalls_between_frames() {
+    async fn direct_sse_projection_keeps_active_semantic_stream_open_between_frames() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let mut stream = observed_sse_client_stream_with_timeout(
@@ -2044,17 +2095,16 @@ mod tests {
             .expect("first frame")
             .expect("valid first frame");
         assert!(std::str::from_utf8(&first).unwrap().contains("early"));
-        let error = expect_ordinary_source(
-            stream
-                .next()
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(60), stream.next())
                 .await
-                .expect("mid-stream stall must become an explicit error"),
+                .is_err(),
+            "a frame interval must not terminate an active semantic stream"
         );
-        assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
     }
 
     #[tokio::test]
-    async fn direct_sse_projection_times_out_when_provider_only_sends_keepalives() {
+    async fn direct_sse_projection_keepalives_do_not_end_active_semantic_stream() {
         let first =
             b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"early\"}\n\n".to_vec();
         let keepalives = futures_util::stream::unfold((), |_| async {
@@ -2073,22 +2123,14 @@ mod tests {
             false,
         );
         assert!(stream.next().await.expect("first frame").is_ok());
-        let result = tokio::time::timeout(std::time::Duration::from_millis(100), async {
-            loop {
-                match stream.next().await {
-                    Some(Ok(_)) => continue,
-                    Some(Err(error)) => break error,
-                    None => panic!("keepalive-only provider stream ended silently"),
-                }
-            }
-        })
-        .await
-        .expect("keepalives must not suppress semantic timeout");
-        let error = match result {
-            Ok(source) => source,
-            Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
-        };
-        assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
+        for _ in 0..10 {
+            let frame = tokio::time::timeout(std::time::Duration::from_millis(20), stream.next())
+                .await
+                .expect("keepalive frame must remain available")
+                .expect("active stream must remain open")
+                .expect("transport keepalive must not become an error");
+            assert!(frame.starts_with(b":"));
+        }
     }
 
     #[tokio::test]

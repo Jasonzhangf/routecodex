@@ -26,6 +26,11 @@ edges:
   - { id: v3-inws-02, from: V3ResponsesInboundWs02CreateEventParsed, to: V3Server03HttpRequestRaw }
   - { id: v3-inws-03, from: V3Server03HttpRequestRaw, to: V3Resp15ClientPayload }
   - { id: v3-inws-04, from: V3Resp15ClientPayload, to: V3ResponsesInboundWs04ClientEventProjected }
+recovery_contract:
+  - An accepted recoverable request remains connected while Runtime waits or reselects; transport keepalives do not project provider errors or fabricate business output.
+  - Client cancellation releases the request and its resources without waiting for provider recovery.
+  - Only confirmed final provider-pool unavailability after the declared recovery path, client cancellation or disconnect, or real external transport failure permits transport termination.
+  - Provider HTTP failure status, body and headers remain in private typed evidence; terminal evidence is persisted only for the actual terminal disposition.
 verification_gates:
   - npm run test:v3-responses-inbound-websocket-proxy
   - npm run verify:v3-responses-inbound-websocket-proxy

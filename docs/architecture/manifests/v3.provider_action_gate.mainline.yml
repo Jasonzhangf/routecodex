@@ -5,7 +5,7 @@ canonical_docs:
   - docs/goals/direct-relay-cross-request-error-storm-control-plan.md
   - docs/architecture/wiki/v3-provider-action-gate.md
 entrypoint: ProviderReqCompat06ProviderCompat
-return_path: [V3ProviderActionPermitInFlight, V3ProviderActionGateTerminalCommitted, V3ProviderActionSuccessRecorded, V3ProviderActionFailureRecorded, V3ProviderActionPermitAbandoned]
+return_path: [V3RequestLocalErrorHold, V3Error06ClientProjected, V3ProviderActionSuccessRecorded, V3ProviderActionFailureRecorded]
 nodes:
   - node_id: ProviderReqCompat06ProviderCompat
     owner: routecodex-v3-runtime
@@ -15,22 +15,14 @@ nodes:
     owner: routecodex-v3-error
   - node_id: V3Error05ExecutionDecision
     owner: routecodex-v3-error
+  - node_id: V3RequestLocalErrorHold
+    owner: routecodex-v3-runtime
+  - node_id: V3ProviderHealthObservation
+    owner: routecodex-v3-runtime
   - node_id: V3Error06ClientProjected
     owner: routecodex-v3-error
   - node_id: V3Error05RecoveryWitness
     owner: routecodex-v3-error
-  - node_id: V3ProviderActionGateAdmission
-    owner: routecodex-v3-runtime
-  - node_id: V3ProviderActionGateTerminalAdmission
-    owner: routecodex-v3-runtime
-  - node_id: V3ProviderActionGateTerminalCommitted
-    owner: routecodex-v3-runtime
-  - node_id: V3ProviderActionPermitInFlight
-    owner: routecodex-v3-runtime
-  - node_id: V3ProviderActionPermitAbandonRequested
-    owner: routecodex-v3-runtime
-  - node_id: V3ProviderActionPermitAbandoned
-    owner: routecodex-v3-runtime
   - node_id: V3ProviderActionSuccessObserved
     owner: routecodex-v3-runtime
   - node_id: V3ProviderActionFailureObserved
@@ -67,95 +59,41 @@ edges:
     callee_symbol: handle_v3_responses_relay_provider_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - step_id: v3-provider-action-gate-03
-    from: V3Error05ExecutionDecision
+    from: V3Error01SourceRaised
     to: V3Error05RecoveryWitness
+    status: anchored
+    owner_feature_id: v3.provider_action_gate
+    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3Error05RecoveryAdmissionWitness::new
+    callee_file: v3/crates/routecodex-v3-error/src/lib.rs
+  - step_id: v3-provider-action-gate-04
+    from: V3Error05ExecutionDecision
+    to: V3RequestLocalErrorHold
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope
+    callee_symbol: hold_provider_error_return
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-04
-    from: V3Error05RecoveryWitness
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-    callee_symbol: V3ProviderActionGate::wait_for_recovery_witness
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-05
     from: V3Error05ExecutionDecision
     to: V3Error06ClientProjected
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
+    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     callee_symbol: terminal_projection_for
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
   - step_id: v3-provider-action-gate-06
-    from: V3ProviderActionGateTerminalAdmission
-    to: V3ProviderActionGateTerminalCommitted
+    from: V3Error01SourceRaised
+    to: V3ProviderHealthObservation
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3ProviderActionGate::record_failure_and_commit_terminal_projection
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-    callee_symbol: V3ProviderActionGate::commit_terminal_generation_locked
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-07
-    from: V3ProviderReqOutbound08WirePayload
-    to: V3Error05RecoveryWitness
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
-    callee_symbol: V3ProviderActionGate::try_admit_exact_rate_limit
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-08
-    from: V3Error05RecoveryWitness
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-10
-    from: V3Error05RecoveryWitness
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-11
-    from: V3Error05RecoveryWitness
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-12
-    from: V3Error05RecoveryWitness
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-13
-    from: V3Error05RecoveryWitness
-    to: V3ProviderActionGateAdmission
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    caller_symbol: run_v3_relay_provider_failure_policy_with_response_source_inner
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_real_provider_error_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-14
     from: V3Error01SourceRaised
     to: V3Error05ExecutionDecision
@@ -183,134 +121,8 @@ edges:
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_shared.rs
     callee_symbol: run_v3_relay_provider_failure_policy_with_response_source
     callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-19
-    from: V3ProviderActionGateAdmission
-    to: V3ProviderActionPermitInFlight
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ProviderActionAdmission::take_permit
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-20
-    from: V3ProviderActionGateAdmission
-    to: V3ProviderActionPermitInFlight
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3ProviderActionAdmission::take_permit
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-21
-    from: V3ProviderActionGateAdmission
-    to: V3ProviderActionPermitInFlight
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderActionAdmission::take_permit
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-22
-    from: V3ProviderActionGateAdmission
-    to: V3ProviderActionPermitInFlight
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderActionAdmission::take_permit
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-23
-    from: V3ProviderActionGateAdmission
-    to: V3ProviderActionPermitInFlight
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderActionAdmission::take_permit
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-24
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-25
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-26
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-27
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-28
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-29
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-30
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-31
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionPermitAbandonRequested
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3GeminiSseProviderOutcome::record_failure
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: V3ProviderActionPermit::drop
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-  - step_id: v3-provider-action-gate-32
-    from: V3ProviderActionPermitAbandonRequested
-    to: V3ProviderActionPermitAbandoned
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: V3ProviderActionPermit::drop
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-    callee_symbol: V3ProviderActionGate::abandon_admission
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
   - step_id: v3-provider-action-gate-33
-    from: V3ProviderActionPermitInFlight
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionSuccessObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
@@ -325,10 +137,10 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: record_v3_direct_provider_success
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-35
-    from: V3ProviderActionPermitAbandoned
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
@@ -341,30 +153,21 @@ edges:
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: run_v3_direct_provider_failure_policy
+    caller_symbol: run_v3_direct_provider_failure_policy_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
     callee_symbol: record_v3_direct_provider_failure_record
     callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
   - step_id: v3-provider-action-gate-37
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionSuccessObserved
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-38
-    from: V3ProviderActionSuccessObserved
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionSuccessRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-39
-    from: V3ProviderActionPermitInFlight
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
@@ -373,34 +176,16 @@ edges:
     callee_symbol: V3OpenAiChatSseProviderOutcome::record_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
   - step_id: v3-provider-action-gate-40
-    from: V3ProviderActionPermitAbandoned
+    from: V3ProviderActionFailureObserved
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-41
-    from: V3ProviderActionPermitInFlight
-    to: V3ProviderActionSuccessObserved
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-  - step_id: v3-provider-action-gate-42
-    from: V3ProviderActionSuccessObserved
-    to: V3ProviderActionSuccessRecorded
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-43
-    from: V3ProviderActionPermitInFlight
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
@@ -409,25 +194,25 @@ edges:
     callee_symbol: V3GeminiSseProviderOutcome::record_failure
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
   - step_id: v3-provider-action-gate-44
-    from: V3ProviderActionPermitAbandoned
+    from: V3ProviderActionFailureObserved
     to: V3ProviderActionFailureRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: V3GeminiSseProviderOutcome::record_failure
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-45
-    from: V3ProviderActionPermitInFlight
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionSuccessRecorded
     status: anchored
     owner_feature_id: v3.provider_action_gate
     caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-46
-    from: V3ProviderActionPermitInFlight
+    from: V3ProviderResponsesTerminalOrFailureObserved
     to: V3ProviderActionSuccessFinalize
     status: anchored
     owner_feature_id: v3.provider_action_gate
@@ -442,8 +227,8 @@ edges:
     owner_feature_id: v3.provider_action_gate
     caller_symbol: record_provider_success_after_response_governance
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
   - step_id: v3-provider-action-gate-48
     from: V3ProviderRespInbound01Raw
     to: V3ProviderResponsesEventCodec
@@ -476,87 +261,45 @@ edges:
     to: V3ProviderResponsesTerminalOrFailureObserved
     status: anchored
     owner_feature_id: v3.provider_action_gate
-    caller_symbol: apply_v3_typed_responses_event
+    caller_symbol: apply_v3_typed_responses_event_with_capacity
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime/responses_provider_event_codec.rs
     callee_symbol: V3ResponsesSseReducerState::apply_event
     callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_sse_tree.rs
-  - step_id: v3-provider-action-gate-52
-    from: V3ProviderReqOutbound08WirePayload
-    to: V3Error05RecoveryWitness
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-  - step_id: v3-provider-action-gate-53
-    from: V3ProviderReqOutbound08WirePayload
-    to: V3Error05RecoveryWitness
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-  - step_id: v3-provider-action-gate-54
-    from: V3ProviderReqOutbound08WirePayload
-    to: V3Error05RecoveryWitness
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-  - step_id: v3-provider-action-gate-55
-    from: V3ProviderReqOutbound08WirePayload
-    to: V3Error05RecoveryWitness
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-  - step_id: v3-provider-action-gate-56
-    from: V3ProviderReqOutbound08WirePayload
-    to: V3Error05RecoveryWitness
-    status: anchored
-    owner_feature_id: v3.provider_action_gate
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
 resources:
   - v3.error.execution_decision
   - v3.error.provider_action_gate
   - v3.provider.health_state
 request_independence:
   business_scope: request_local
-  shared_recovery_scope: listener_provider_interface_model_auth_key
+  health_scope: listener_provider_interface_model_auth_key
   session_group_admission: forbidden
   sibling_identity_delay_generation_mutation: forbidden
-  waiter_count_is_failure_evidence: false
-  precool_and_429_state_owner: existing_exact_identity_owner
-terminal_transition:
-  admission_operation: V3ProviderActionGate::record_failure_and_commit_terminal_projection
-  atomic_commit_operation: V3ProviderActionGate::commit_terminal_generation_locked
-  waiter_outcome: no_wait_terminal_commit_or_generation_superseded
-  success_release_rearms_exact_generation: true
-  next_generation_delay_ms: 5000
-admission_permit:
-  owner_type: V3ProviderActionPermit
-  acquisition_operation: V3ProviderActionWaiter::wait
-  release_operations:
-    - provider_success
-    - provider_failure
-    - V3ProviderActionGate::commit_terminal_admission
-    - V3ProviderActionGate::abandon_admission
-  wall_clock_expiry: forbidden
-  abandon_delay_ms: 5000
-  abandon_increments_failure_count: false
-  abandon_mutates_provider_health: false
-  waiter_order: fifo_ticket
-  admission_scope: exact_control_lane_only
-  fresh_request_consumes_active_recovery_lane: http_429_only
+  health_state_owner: provider_health_store
+object_flows:
+  # This lifecycle has several terminal nodes (see return_path). It is therefore
+  # NOT a single-entry/single-exit graph. SESE holds per actual flow below; each
+  # flow has exactly one entry and one exit. Do not claim whole-lifecycle SESE.
+  sese_scope: per_flow_only_whole_lifecycle_multi_terminal
+  error_disposition:
+    entry: source_failure
+    exit: internal_error_outcome
+    graph: docs/architecture/dagpipe/v3.operation_runner.error.graph.json
+    note: Existing SESE Error01-06 graph; a real HTTP 429 is one source failure and the exit stays internal.
+  request_recovery:
+    entry: failed_request_recovery_witness
+    exit: request_recovery_disposition
+    note: Request-local retry pacing, healthy alternative, or a real exact-identity cooldown wait. A fresh independent request never enters this flow.
+  fresh_request_attempt:
+    entry: fresh_independent_request
+    exit: request_attempt_disposition
+    note: Reads current typed health eligibility and sends. Never consumes another request's active recovery lane, including a request in the same session.
+error_return:
+  hold_ms: 2000
+  ownership: per_request
+  shared_admission: forbidden
+  health_recording: immediate_before_hold
+  applies_to: lawful_final_error_transport_close
+  recovery_actions_wait_for_hold: false
 downstream_projection:
   owner_crate: routecodex-v3-error
   source_operation: terminal_projection_for

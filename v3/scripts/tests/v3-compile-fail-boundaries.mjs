@@ -104,7 +104,7 @@ for (const fixture of [
     );
     writeFileSync(
       join(sourceDir, 'main.rs'),
-      'use routecodex_v3_provider_responses::V3ProviderHealthStore;\nfn main() { let store = V3ProviderHealthStore::default(); let _ = store.update_concurrency_state("provider", 1, 2); }\n',
+      'use routecodex_v3_provider_responses::V3ProviderHealthStore;\nfn main() { let store = V3ProviderHealthStore::default(); let _ = &store.state; }\n',
     );
     const result = spawnSync(
       'cargo',
@@ -117,7 +117,7 @@ for (const fixture of [
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) {
       fail('Target compile-fail fixture unexpectedly imported Provider health mutation store');
-    } else if (!/method `update_concurrency_state` is private|private method/.test(diagnostic)) {
+    } else if (!/field `state` of struct `V3ProviderHealthStore` is private/.test(diagnostic)) {
       fail(`Target health compile-fail fixture failed for wrong reason: ${diagnostic.slice(-600)}`);
     }
   } finally {

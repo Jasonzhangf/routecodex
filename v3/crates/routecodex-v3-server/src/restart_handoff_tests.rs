@@ -332,7 +332,6 @@ fn test_front_socket(write_tx: mpsc::Sender<V3FrontWriteCommand>) -> V3StableFro
     let (close_tx, _close_rx) = oneshot::channel();
     V3StableFrontSocket {
         write_tx,
-        pending_activity: Arc::new(Mutex::new(Vec::new())),
         observation: V3ClientTransportObservation::new(None, V3FrontConnectionIdentity(0), 0),
         close_tx: Arc::new(Mutex::new(Some(close_tx))),
         closeout_state: V3FrontTransportCloseoutState::new(),
@@ -340,8 +339,7 @@ fn test_front_socket(write_tx: mpsc::Sender<V3FrontWriteCommand>) -> V3StableFro
 }
 
 #[tokio::test]
-async fn front_flush_snapshot_does_not_release_a_later_body_eof_or_http_tail() {
-    use crate::session_admission::V3ServerRequestActivityGate;
+async fn front_flush_preserves_a_later_http_tail() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let peer = tokio::spawn(TcpStream::connect(address));
@@ -364,12 +362,9 @@ async fn front_flush_snapshot_does_not_release_a_later_body_eof_or_http_tail() {
     assert!(tokio::time::timeout(Duration::from_millis(25), io.flush())
         .await
         .is_err());
-    let V3FrontWriteCommand::Flush(earlier, first_ack) = commands.recv().await.unwrap() else {
+    let V3FrontWriteCommand::Flush(first_ack) = commands.recv().await.unwrap() else {
         panic!("first flush");
     };
-    assert!(earlier.is_empty());
-    let gate = Arc::new(V3ServerRequestActivityGate::default());
-    socket.hold_activity_until_flush(gate.admit().await);
     io.write_all(b"0\r\n\r\n").await.unwrap();
     assert!(matches!(
         commands.recv().await.unwrap(),
@@ -379,21 +374,11 @@ async fn front_flush_snapshot_does_not_release_a_later_body_eof_or_http_tail() {
     assert!(tokio::time::timeout(Duration::from_millis(25), io.flush())
         .await
         .is_err());
-    let V3FrontWriteCommand::Flush(later, final_ack) = commands.recv().await.unwrap() else {
+    let V3FrontWriteCommand::Flush(final_ack) = commands.recv().await.unwrap() else {
         panic!("tail flush");
     };
-    assert_eq!(later.len(), 1);
-    assert!(
-        tokio::time::timeout(Duration::from_millis(25), gate.begin_maintenance())
-            .await
-            .is_err()
-    );
-    drop(later);
     final_ack.send(Ok(())).unwrap();
     io.flush().await.unwrap();
-    let _maintenance = tokio::time::timeout(Duration::from_secs(1), gate.begin_maintenance())
-        .await
-        .unwrap();
 }
 
 fn lease(now: Instant) -> V3FrontRequestLease {

@@ -1,0 +1,18 @@
+{
+  "id": "v3.provider_websocket.attempt_lifecycle",
+  "version": "1",
+  "description": "单次上游 WebSocket 尝试：取得缓存或私有槽时即绑定未完成自动处置；所有权可转入 SSE。完整 JSON 或 SSE 排空才允许缓存复用；错误、取消或 future 提前释放须先清槽再解锁，均汇入连接处置出口。",
+  "inputs": [{"id":"transport-request","schema":"Any","schema_ref":"v3.provider_websocket.arc.transport_request"}],
+  "nodes": [
+    {"id":"检查请求取消状态","operator":"routecodex.v3.provider.websocket_check_cancellation","operator_version":"1","inputs":["transport-request"],"output":{"id":"eligible-attempt","schema":"Any","schema_ref":"v3.provider_websocket.arc.eligible_attempt"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.transport_request"],"writes":[]}},
+    {"id":"取得本次连接所有权","operator":"routecodex.v3.provider.websocket_acquire_without_waiting","operator_version":"1","inputs":["eligible-attempt"],"output":{"id":"owned-connection","schema":"Any","schema_ref":"v3.provider_websocket.arc.owned_connection"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.responses_websocket_connection"],"writes":["v3.provider.responses_websocket_connection"]}},
+    {"id":"发送请求并接收响应","operator":"routecodex.v3.provider.websocket_exchange","operator_version":"1","inputs":["owned-connection"],"output":{"id":"attempt-outcome","schema":"Any","schema_ref":"v3.provider_websocket.arc.attempt_outcome"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.transport_request"],"writes":["v3.provider.responses_websocket_connection"]}},
+    {"id":"处置本次连接","operator":"routecodex.v3.provider.websocket_dispose_attempt","operator_version":"1","inputs":["attempt-outcome"],"output":{"id":"attempt-result","schema":"Any","schema_ref":"v3.provider_websocket.arc.attempt_result"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.responses_websocket_connection"],"writes":["v3.provider.responses_websocket_connection"]}}
+  ],
+  "edges": [
+    {"from":"检查请求取消状态","to":"取得本次连接所有权","arc_id":"eligible-attempt"},
+    {"from":"取得本次连接所有权","to":"发送请求并接收响应","arc_id":"owned-connection"},
+    {"from":"发送请求并接收响应","to":"处置本次连接","arc_id":"attempt-outcome"}
+  ],
+  "outputs": ["attempt-result"]
+}

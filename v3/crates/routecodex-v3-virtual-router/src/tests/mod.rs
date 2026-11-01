@@ -143,9 +143,7 @@ fn empty_signal_pool_is_skipped_and_default_stays_last_tier() {
 }
 
 #[test]
-fn empty_explicit_default_pool_fails_even_when_signal_pools_remain() {
-    // 用户规则：default 是必须存在且非空的唯一最低池。非 default 池可空，
-    // 但空 default 是配置错误，即使有其它可命中的池也要显式失败。
+fn empty_default_does_not_block_a_nonempty_primary_pool() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     manifest
@@ -160,11 +158,8 @@ fn empty_explicit_default_pool_fails_even_when_signal_pools_remain() {
     let classified = router
         .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
         .expect("classify");
-    assert_eq!(
-        router.resolve_route_pool_plan(&manifest, classified),
-        Err(V3VirtualRouterError::DefaultPoolEmpty("g".into())),
-        "an empty default pool must fail instead of falling through to another tier"
-    );
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["tools"]);
 }
 
 #[test]
@@ -269,7 +264,6 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                 },
             )]),
             responses: None,
-            concurrency: None,
             health: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             reasoning_effort: None,
@@ -327,7 +321,7 @@ fn direct_provider_model_short_circuits_pool_matching() {
 }
 
 #[test]
-fn compact_route_signal_uses_configured_independent_route_object_pool() {
+fn compact_route_uses_its_pool_then_default() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     let group = manifest.route_groups.get_mut("g").unwrap();
@@ -365,11 +359,31 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "compact");
-    assert_eq!(hit.target_plan.len(), 1);
+    assert!(hit.target_plan.iter().any(|entry| entry.pool_id == "default"));
+    manifest.route_groups.get_mut("g").unwrap().pools.get_mut("compact").unwrap().targets.clear();
+    let mut facts = matching_facts();
+    facts.route_classification = test_route("compact", &["compact", "default"]);
+    let classified = router.classify_request_with_facts(&manifest, "s", "/v1/responses/compact", facts).unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).expect("empty compact pool falls back to default");
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["default"]);
 }
 
 #[test]
-fn route_policy_pool_action_is_consumed_as_one_explicit_pool() {
+fn missing_compact_route_uses_default() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest.route_groups.get_mut("g").unwrap().compact_route_object = None;
+    let mut facts = matching_facts();
+    facts.route_classification = test_route("compact", &["compact", "default"]);
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses/compact", facts)
+        .unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["default"]);
+}
+
+#[test]
+fn route_policy_pool_action_retains_default_fallback() {
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
@@ -381,7 +395,7 @@ fn route_policy_pool_action_is_consumed_as_one_explicit_pool() {
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "tools");
-    assert_eq!(hit.target_plan.len(), 2);
+    assert!(hit.target_plan.iter().any(|entry| entry.pool_id == "default"));
 }
 
 #[test]
@@ -429,7 +443,7 @@ fn direct_unknown_model_falls_back_to_normal_pool_routing() {
 }
 
 #[test]
-fn direct_media_mismatch_fails_without_reroute() {
+fn direct_media_without_declared_vision_keeps_selected_provider() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -440,14 +454,9 @@ fn direct_media_mismatch_fails_without_reroute() {
             direct_facts("prov.model-x", BTreeSet::from(["vision".into()])),
         )
         .unwrap();
-    assert_eq!(
-        router.resolve_route_pool_plan(&manifest, classified),
-        Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
-            provider: "prov".into(),
-            model: "model-x".into(),
-            capability: "vision".into(),
-        })
-    );
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
 }
 
 #[test]
@@ -468,8 +477,77 @@ fn resolves_listener_default_and_hits_one_opaque_plan() {
 }
 
 #[test]
-fn matched_pool_is_single_pool_without_default_floor() {
-    // 红测：命中一个分类池后只交该池，不再追加 default 或其它分类池。
+fn issue08d36e9_tools_pool_falls_back_to_default() {
+    let router = V3VirtualRouter::default();
+    let manifest = manifest(V3SelectionStrategy::Priority);
+    let classified = router.classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts()).unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["tools", "default"]);
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    let pools = hit.target_plan.iter().map(|entry| entry.pool_id.as_str()).collect::<Vec<_>>();
+    assert!(pools.starts_with(&["tools", "tools"]));
+    assert!(pools.iter().skip(2).all(|pool| *pool == "default"));
+    assert!(pools.contains(&"default"));
+}
+
+#[test]
+fn issue08d36e9_search_pool_falls_back_to_default() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    let group = manifest.route_groups.get_mut("g").unwrap();
+    let mut search = group.pools["tools"].clone();
+    search.id = "search".into();
+    group.pools.insert("search".into(), search);
+    let mut facts = matching_facts();
+    facts.route_classification = test_route("search", &["search", "default"]);
+    let classified = router.classify_request_with_facts(&manifest, "s", "/v1/responses", facts).unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["search", "default"]);
+}
+
+#[test]
+fn issue08d36e9_empty_default_does_not_block_healthy_primary_pool() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest.route_groups.get_mut("g").unwrap().pools.get_mut("default").unwrap().targets.clear();
+    let classified = router.classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts()).unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).expect("the configured primary is usable");
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["tools"]);
+}
+
+#[test]
+fn issue08d36e9_empty_primary_does_not_route_through_unrelated_signal() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(&mut manifest, "multimodal", 0, vec!["multimodal"], None);
+    add_match_pool(&mut manifest, "coding", 3, vec!["coding"], None);
+    manifest.route_groups.get_mut("g").unwrap().pools.get_mut("multimodal").unwrap().targets.clear();
+    let mut facts = matching_facts();
+    facts.capabilities = BTreeSet::from(["multimodal".into(), "coding".into()]);
+    facts.route_classification = test_route("multimodal", &["multimodal", "coding", "default"]);
+    let classified = router.classify_request_with_facts(&manifest, "s", "/v1/responses", facts).unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["default"]);
+}
+
+#[test]
+fn issue08d36e9_empty_search_uses_default() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    let group = manifest.route_groups.get_mut("g").unwrap();
+    let mut search = group.pools["tools"].clone();
+    search.id = "search".into();
+    search.targets.clear();
+    group.pools.insert("search".into(), search);
+    let mut facts = matching_facts();
+    facts.route_classification = test_route("search", &["search", "default"]);
+    let classified = router.classify_request_with_facts(&manifest, "s", "/v1/responses", facts).unwrap();
+    let plan = router.resolve_route_pool_plan(&manifest, classified).unwrap();
+    assert_eq!(plan.tiers.iter().map(|tier| tier.pool_id.as_str()).collect::<Vec<_>>(), vec!["default"]);
+}
+
+#[test]
+fn matched_pool_precedes_explicit_default_fallback() {
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
@@ -485,8 +563,8 @@ fn matched_pool_is_single_pool_without_default_floor() {
         .collect::<Vec<_>>();
     assert_eq!(
         tier_ids,
-        vec!["tools"],
-        "a single matched pool must not append default or any other pool"
+        vec!["tools", "default"],
+        "default follows the matched pool"
     );
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "tools");
@@ -496,8 +574,8 @@ fn matched_pool_is_single_pool_without_default_floor() {
         .iter()
         .map(|entry| entry.target_id.as_deref())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec![Some("a"), Some("c")]);
-    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
+    assert_eq!(ids, vec![Some("a"), Some("c"), Some("a"), Some("b")]);
+    assert_eq!(hit.target_plan.iter().map(|entry| entry.pool_id.as_str()).collect::<Vec<_>>(), vec!["tools", "tools", "default", "default"]);
     assert_eq!(hit.hit_count, 1);
 }
 
@@ -788,7 +866,7 @@ fn candidate_order_hosted_websearch_precedes_multimodal() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers.len(), 2);
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
 
     assert_eq!(hit.pool_id, "web_search");
@@ -833,7 +911,7 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers.len(), 2);
     assert_eq!(plan.tiers[0].pool_id, "coding");
 
     // thinking active -> thinking wins over tools; web_search absent from
@@ -856,7 +934,7 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers.len(), 2);
     assert_eq!(plan.tiers[0].pool_id, "thinking");
 }
 
@@ -890,7 +968,7 @@ fn longcontext_candidate_selects_configured_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers.len(), 2);
     assert_eq!(plan.tiers[0].pool_id, "longcontext");
 }
 
@@ -1061,8 +1139,8 @@ fn candidate_priority_skips_absent_or_empty_pools() {
                 .iter()
                 .map(|tier| tier.pool_id.as_str())
                 .collect::<Vec<_>>(),
-            vec![*expected],
-            "first configured non-empty candidate must win"
+            vec![*expected, "default"],
+            "the matched route's declared tiers precede only the declared default floor"
         );
     }
 }
@@ -1160,7 +1238,7 @@ fn virtual_alias_and_auto_share_the_current_turn_classification_pool() {
         pool_ids(&alias),
         "the virtual alias must not hit a model-named pool that auto does not hit"
     );
-    assert_eq!(pool_ids(&alias), vec!["thinking_primary"]);
+    assert_eq!(pool_ids(&alias), vec!["thinking_primary", "default"]);
 
     // Without a configured pool for the current-turn signal both names must
     // land on the same required default pool, never on the model-named pool.
@@ -1621,7 +1699,6 @@ fn no_implicit_capability_pool_without_configured_pool() {
                 },
             )]),
             responses: None,
-            concurrency: None,
             health: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
             reasoning_effort: None,
@@ -1702,13 +1779,12 @@ fn candidate_order_selects_first_configured_non_empty_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1, "exactly one pool must be handed off");
+    assert_eq!(plan.tiers.len(), 2, "primary pool and default fallback are handed off");
     assert_eq!(plan.tiers[0].pool_id, "coding");
 }
 
 #[test]
-fn empty_configured_pool_is_skipped_for_next_candidate() {
-    // 红测：已配置但为空的高优先级池不参与命中，落到下一个候选池。
+fn empty_configured_pool_uses_declared_default_fallback() {
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     add_match_pool(&mut manifest, "multimodal", 0, vec!["multimodal"], None);
@@ -1744,7 +1820,7 @@ fn empty_configured_pool_is_skipped_for_next_candidate() {
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     assert_eq!(plan.tiers.len(), 1);
-    assert_eq!(plan.tiers[0].pool_id, "coding");
+    assert_eq!(plan.tiers[0].pool_id, "default");
 }
 
 #[test]

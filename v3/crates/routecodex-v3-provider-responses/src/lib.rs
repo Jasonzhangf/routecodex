@@ -1,4 +1,3 @@
-pub mod adaptive_concurrency;
 mod error;
 pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
@@ -9,7 +8,7 @@ pub mod probe;
 mod probe_backoff;
 mod provider_auth;
 mod provider_cooldown_probe;
-pub use provider_cooldown_probe::V3ProviderCooldownProbeKey;
+pub use provider_cooldown_probe::{V3ProviderCooldownHealthScope, V3ProviderCooldownProbeKey};
 pub mod raw_response;
 mod shared;
 pub mod transport;
@@ -49,7 +48,7 @@ pub use transport::{
     build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_from_parts_with_timeout,
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeouts,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
     build_v3_transport_13_responses_request_from_v3_provider_12,

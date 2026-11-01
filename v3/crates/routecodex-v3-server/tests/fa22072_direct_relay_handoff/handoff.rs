@@ -471,21 +471,15 @@ async fn fa22072_direct_relay_captured_plan_and_exclusions_public_consumer() {
             &manifest,
         ),
         now,
-        true,
         None,
         None,
     )
     .await;
     let mut controls = Vec::new();
     if let Some(handoff) = producer.protocol_relay_handoff {
-        if handoff.target.candidate.provider_id != "beta"
-            || handoff.expanded.candidates.len() != 3
-            || !handoff
-                .request_local_excluded_candidates
-                .contains("alpha:default:key1:alpha-wire")
+        if handoff.target.candidate.provider_id != "beta" || handoff.expanded.candidates.len() != 3
         {
-            controls
-                .push("producer did not preserve selected B, captured A/B/C and excluded A".into());
+            controls.push("producer did not preserve selected B and captured A/B/C".into());
         }
         let original_source = handoff
             .provider_failure_events
@@ -590,18 +584,12 @@ async fn raw_post_chat(port: u16, body: &Value) -> Vec<u8> {
         .unwrap();
     socket.flush().await.unwrap();
     let mut bytes = Vec::new();
-    let result = tokio::time::timeout(Duration::from_secs(3), socket.read_to_end(&mut bytes))
-        .await
-        .expect("failed request transport must close without waiting for future recovery");
-    if let Err(error) = result {
-        assert!(
-            matches!(
-                error.kind(),
-                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof
-            ),
-            "unexpected read error: {error}"
-        );
-    }
+    let result =
+        tokio::time::timeout(Duration::from_millis(500), socket.read_to_end(&mut bytes)).await;
+    assert!(
+        result.is_err(),
+        "recoverable request must remain open: {result:?}"
+    );
     bytes
 }
 
@@ -873,7 +861,6 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
             &manifest,
         ),
         now,
-        true,
         Some(&failure_sink),
         Some(&route_sink),
     )
@@ -926,9 +913,6 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
         .candidates
         .iter()
         .any(|candidate| candidate.provider_id == "beta"));
-    assert!(handoff
-        .request_local_excluded_candidates
-        .contains("alpha:default:key1:alpha-wire"));
     assert!(!handoff
         .request_local_excluded_candidates
         .contains("beta:default:key1:beta-wire"));
@@ -1021,7 +1005,7 @@ async fn fa22072_direct_relay_provider_model_pin_failure_does_not_admit_default_
     );
     assert!(
         raw.is_empty(),
-        "pinned exhaustion must close the transport without client bytes: {text}"
+        "pinned recovery must not send client bytes before a provider response: {text}"
     );
     assert!(
         !text.contains("\"error\"") && !text.contains("[DONE]") && !text.contains(KEY),

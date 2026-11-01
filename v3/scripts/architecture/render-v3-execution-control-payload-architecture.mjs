@@ -70,6 +70,11 @@ function validateContracts() {
   requireValue(manifest.budget_contract?.provider_attempt_and_client_replay_share_request_budget === true, `${manifestRel}: provider attempt and client replay must share one request budget`);
   requireValue(manifest.budget_contract?.server_budget_construction === 'forbidden', `${manifestRel}: Server budget construction must be forbidden`);
   requireValue(manifest.budget_contract?.disk_spill === 'forbidden', `${manifestRel}: initial disk spill must be forbidden`);
+  requireValue(manifest.budget_contract?.provider_stream_deadline_guard === 'required_until_first_real_semantic_output', `${manifestRel}: provider deadline must stop at first real semantic output`);
+  const residence = manifest.failure_attribution_contract?.residence_deadline;
+  requireValue(residence?.cumulative_attempt_count_reset === 'forbidden', `${manifestRel}: cumulative attempt count reset must be forbidden`);
+  requireValue(residence?.recovery_send === 'one_per_new_matching_real_recovery_fact_after_normal_admission' && residence?.recovery_send_without_new_matching_fact === 'forbidden', `${manifestRel}: recovery send requires a new matching real recovery`);
+  requireValue(residence?.original_acquisition_and_probe_budget_renewal === 'forbidden', `${manifestRel}: original acquisition and probe budgets must not be renewed`);
   requireValue(manifest.sealed_replay_body_contract?.anthropic === 'typed_non_optional', `${manifestRel}: Anthropic sealed replay body must be typed and non-optional`);
   requireValue(manifest.sealed_replay_body_contract?.server_consumption === 'exhaustive_match', `${manifestRel}: Server sealed replay consumption must be exhaustive`);
   requireValue(manifest.sealed_replay_body_contract?.option_stream_with_expect === 'forbidden', `${manifestRel}: optional sealed replay plus expect must be forbidden`);

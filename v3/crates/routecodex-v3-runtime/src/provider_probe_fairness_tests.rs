@@ -1,5 +1,5 @@
 //! Supplemental resource witness. Health changes come only from the real
-//! Direct consumer's HTTP failures; controller and manager access is read-only.
+//! Direct consumer's HTTP failures; manager access is read-only.
 use super::*;
 use crate::{
     build_v3_server_03_http_request_raw_with_purpose_and_scope,
@@ -23,6 +23,86 @@ struct Peer {
     holder_release: Semaphore,
     probe_entered: Semaphore,
     probe_release: Semaphore,
+}
+
+#[tokio::test]
+async fn cooldown_sweep_keeps_more_than_four_identities_until_observed() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (manifest, ids) = manifest("http://unused.invalid", 5555);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    for id in &ids {
+        for now in 90..100 {
+            health
+                .store
+                .record_real_provider_failure_for_interface(
+                    id,
+                    "default",
+                    "key",
+                    "recovery",
+                    Some(503),
+                    now,
+                )
+                .unwrap();
+        }
+    }
+    let expected = ids.len();
+    assert!(expected > V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY);
+    let semaphore = Arc::new(Semaphore::new(0));
+    let active = Arc::new(AtomicUsize::new(0));
+    let maximum = Arc::new(AtomicUsize::new(0));
+    let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let running = health.clone();
+    let gate = semaphore.clone();
+    let inflight = active.clone();
+    let peak = maximum.clone();
+    let task = tokio::spawn(async move {
+        running
+            .run_due_provider_health_probes(100, true, move |provider, _, _, _| {
+                let gate = gate.clone();
+                let active = inflight.clone();
+                let peak = peak.clone();
+                let sent = sent.clone();
+                async move {
+                    let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(count, Ordering::SeqCst);
+                    sent.send(provider).unwrap();
+                    gate.acquire().await.unwrap().forget();
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok(())
+                }
+            })
+            .await
+    });
+    timeout(Duration::from_secs(2), async {
+        for _ in 0..V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {
+            received.recv().await.unwrap();
+        }
+    })
+    .await
+    .expect("first probe slots did not start");
+    assert_eq!(
+        health
+            .store
+            .provider_cooldown_probe_keys_with_interface(100, true)
+            .unwrap()
+            .len(),
+        expected - V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY
+    );
+    semaphore.add_permits(expected);
+    timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        maximum.load(Ordering::SeqCst),
+        V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY
+    );
+    assert!(health
+        .store
+        .provider_cooldown_probe_keys_with_interface(100, true)
+        .unwrap()
+        .is_empty());
 }
 
 async fn serve(mut socket: TcpStream, peer: Arc<Peer>) {
@@ -54,7 +134,6 @@ async fn serve(mut socket: TcpStream, peer: Arc<Peer>) {
     }
     if marker == "ping; reply pong" {
         assert_eq!(body["model"], "recovery");
-        assert!(head.starts_with("POST /4/v1/chat/completions "));
         peer.probe_entered.add_permits(1);
         // Cancellation is observable without releasing the remote response.
         let mut byte = [0];
@@ -186,7 +265,6 @@ async fn business(
         crate::default_responses_transport(),
         health,
         v3_relay_provider_policy_now_epoch_ms().unwrap(),
-        true,
         None,
         None,
     )
@@ -226,8 +304,9 @@ async fn witness(startup: bool) {
             }
         }
     });
-    // No probe scheduler exists while the real business failures establish
-    // their holds. The subsequent qualified observations commit Store cooldown.
+    // A real business failure establishes each identity. The remaining nine
+    // typed store observations put it at the ten-error global threshold so the
+    // probe scheduler's independent fairness can be exercised.
     let failing_ids: Vec<_> = ids
         .iter()
         .filter(|id| !startup || *id == &ids[4])
@@ -235,7 +314,7 @@ async fn witness(startup: bool) {
         .collect();
     for id in &failing_ids {
         let result = timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(5),
             business(
                 manifest.clone(),
                 health.clone(),
@@ -257,14 +336,9 @@ async fn witness(startup: bool) {
             .provider_failure_events
             .last()
             .expect("real provider failure event");
-        assert_eq!(failure.health_state, "pre_cool_observation");
-        assert_eq!(
-            failure.failure_count, 0,
-            "health counters wait for the qualified observation"
-        );
         assert!(
             failure.cooldown_until_ms.is_none(),
-            "a real nonterminal failure must not commit cooldown before observation"
+            "one real failure must not immediately cool the identity"
         );
         assert!(
             health
@@ -276,31 +350,19 @@ async fn witness(startup: bool) {
                     Some("recovery"),
                     v3_relay_provider_policy_now_epoch_ms().unwrap()
                 )
+                .unwrap()
                 .available,
-            "the pre-cool hold must not write a Store cooldown"
-        );
-        let held = V3ProviderAvailabilityReader::availability_for_interface(
-            &health,
-            id,
-            "default",
-            Some("key"),
-            Some("recovery"),
-            v3_relay_provider_policy_now_epoch_ms().unwrap(),
-        );
-        assert!(!held.available, "the exact identity must be held");
-        assert!(
-            held.blocked_scopes
-                .iter()
-                .any(|scope| scope == "provider_pre_cool_observation"),
-            "the hold must be the typed pre-cool observation: {held:?}"
+            "one real failure must not write a Store cooldown"
         );
     }
-    let precool_now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
-    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(
-        &health,
-        precool_now_ms,
-    )
-    .await;
+    let observed_at = v3_relay_provider_policy_now_epoch_ms().unwrap();
+    for id in &failing_ids {
+        for _ in 0..9 {
+            health.store.record_real_provider_failure_for_interface(
+                id, "default", "key", "recovery", Some(503), observed_at,
+            ).unwrap();
+        }
+    }
     for id in &failing_ids {
         assert!(
             !health
@@ -312,8 +374,9 @@ async fn witness(startup: bool) {
                     Some("recovery"),
                     v3_relay_provider_policy_now_epoch_ms().unwrap()
                 )
+                .unwrap()
                 .available,
-            "the qualified negative observation must cool its exact identity"
+            "ten observed failures must cool the exact identity"
         );
     }
     let deadlines: Vec<_> = ids
@@ -330,10 +393,6 @@ async fn witness(startup: bool) {
                 .unwrap()
         })
         .collect();
-    let before = health
-        .store
-        .cooldown_entries(v3_relay_provider_policy_now_epoch_ms().unwrap());
-    let controller = V3AdaptiveConcurrencyController::process_shared();
     let mut holders = Vec::new();
     for id in &ids[..4] {
         holders.push(tokio::spawn(business(
@@ -348,12 +407,6 @@ async fn witness(startup: bool) {
         .unwrap()
         .unwrap()
         .forget();
-    for id in &ids[..4] {
-        assert_eq!(
-            controller.snapshot(&format!("{id}:key")).unwrap().in_flight,
-            1
-        );
-    }
     let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
     let lifecycle = if startup {
         Box::pin(
@@ -380,18 +433,19 @@ async fn witness(startup: bool) {
         );
         assert_eq!(owner.capacity.available_permits(), 4);
     }
+    let expected_probes = if startup { 1 } else { 4 };
     timeout(
         Duration::from_secs(if startup { 3 } else { 8 }),
-        peer.probe_entered.acquire(),
+        peer.probe_entered.acquire_many(expected_probes),
     )
     .await
-    .expect("free fifth identity must receive its real probe")
+    .expect("due probes must start while sibling business requests remain held")
     .unwrap()
     .forget();
     let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
     assert_eq!(startup, now_ms < *deadlines.iter().flatten().min().unwrap());
     timeout(Duration::from_secs(2), async {
-        while owner.capacity.available_permits() != 3 {
+        while owner.capacity.available_permits() != 4 - expected_probes as usize {
             tokio::task::yield_now().await;
         }
     })
@@ -400,9 +454,12 @@ async fn witness(startup: bool) {
     let due = health.store.cooldown_entries(now_ms);
     assert_eq!(
         due.iter().filter(|entry| entry.state == "probing").count(),
-        1
+        expected_probes as usize
     );
     for (index, id) in ids[..4].iter().enumerate() {
+        let probing = due.iter().any(|entry| entry.provider_id == *id
+            && entry.interface_id == "default" && entry.auth_alias.as_deref() == Some("key")
+            && entry.model_id.as_deref() == Some("recovery") && entry.state == "probing");
         assert_eq!(
             health
                 .store
@@ -413,45 +470,18 @@ async fn witness(startup: bool) {
                     Some("recovery")
                 )
                 .unwrap(),
-            deadlines[index]
-        );
-        if !startup {
-            let old = before
-                .iter()
-                .find(|entry| entry.kind == "probe" && entry.provider_id == *id)
-                .unwrap();
-            let current = due
-                .iter()
-                .find(|entry| entry.kind == "probe" && entry.provider_id == *id)
-                .unwrap();
-            assert_eq!(current.failure_count, old.failure_count);
-        }
-        assert_eq!(
-            health
-                .store
-                .scheduling_projection_for_interface(id, "default", "key", "recovery", 1, 1, now_ms)
-                .available,
-            startup
+            if probing { None } else { deadlines[index] },
+            "active probes hide their deadline until the acquisition is released"
         );
         assert!(
             health
                 .store
                 .scheduling_projection_for_interface(id, "default", "key", "sibling", 1, 1, now_ms)
+                .unwrap()
                 .available
-        );
-        assert_eq!(
-            controller.snapshot(&format!("{id}:key")).unwrap().in_flight,
-            1
         );
     }
     assert!(holders.iter().all(|holder| !holder.is_finished()));
-    assert_eq!(
-        controller
-            .snapshot(&format!("{}:key", ids[4]))
-            .unwrap()
-            .in_flight,
-        1
-    );
     shutdown.send(()).unwrap();
     timeout(Duration::from_secs(2), task)
         .await
@@ -459,13 +489,6 @@ async fn witness(startup: bool) {
         .unwrap();
     assert_eq!(owner.capacity.available_permits(), 4);
     assert!(owner.sender.is_closed());
-    assert_eq!(
-        controller
-            .snapshot(&format!("{}:key", ids[4]))
-            .unwrap()
-            .in_flight,
-        0
-    );
     assert_eq!(peer.probe_release.available_permits(), 0);
     assert!(health
         .store
@@ -494,12 +517,6 @@ async fn witness(startup: bool) {
             .unwrap()
             .error_chain
             .is_none());
-    }
-    for id in &ids {
-        assert_eq!(
-            controller.snapshot(&format!("{id}:key")).unwrap().in_flight,
-            0
-        );
     }
     eprintln!("focused fairness: startup={startup} exact deadlines unchanged; manager slots=4; terminal transports=0 acquisitions=0");
     upstream.abort();

@@ -1,7 +1,6 @@
 use super::V3ProviderCompatErrorClassification;
 use super::*;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
-use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
@@ -11,7 +10,7 @@ use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeouts,
     ReqwestResponsesTransport, ResponsesTransport, V3ProviderError, V3ProviderRequestHeader,
     V3ProviderSseStream, V3ResponsesProviderTarget, V3ResponsesStreamIntent,
     V3Transport13ResponsesHttpRequest,
@@ -122,6 +121,10 @@ pub enum V3GeminiRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 Gemini target resolution failed: {0}")]
     Target(String),
+    #[error("V3 Gemini typed runtime source: {0:?}")]
+    RuntimeSource(routecodex_v3_error::V3Error01SourceRaised),
+    #[error("V3 Gemini local response control failed: {0}")]
+    ExecutionControlResponse(String),
     #[error("V3 Gemini provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 Gemini provider contract failed: {0}")]
@@ -238,12 +241,16 @@ async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(
         )
         .await
         .map_err(|(error, _)| match error {
+            V3RelayCoreError::ExecutionControlResponse(error) => {
+                V3GeminiRelayRuntimeError::ExecutionControlResponse(error.to_string())
+            }
             V3RelayCoreError::EndpointPath(message) => {
                 V3GeminiRelayRuntimeError::EndpointPath(message)
             }
             V3RelayCoreError::ResponseGovernance(error) => {
                 V3GeminiRelayRuntimeError::Target(error.to_string())
             }
+            V3RelayCoreError::RuntimeSource(source) => V3GeminiRelayRuntimeError::RuntimeSource(source),
             V3RelayCoreError::ProviderPoolExhausted {
                 attempted_candidates,
             } => V3GeminiRelayRuntimeError::ProviderPoolExhausted {
@@ -350,7 +357,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         auth_alias: String,
         model_id: String,
         recorded: bool,
-        permit: Option<V3ProviderActionPermit>,
     ) -> V3GeminiSseProviderOutcome {
         V3GeminiSseProviderOutcome {
             response_control: V3RuntimeStreamObservation::default(),
@@ -361,7 +367,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             auth_alias,
             model_id,
             recorded,
-            _provider_action_permit: permit,
         }
     }
 
@@ -505,7 +510,7 @@ pub(crate) fn build_v3_gemini_transport_09(
             ""
         }
     );
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+    build_v3_transport_13_responses_http_request_from_parts_with_timeouts(
         request_id,
         target.provider_id,
         url_text,
@@ -514,7 +519,6 @@ pub(crate) fn build_v3_gemini_transport_09(
         body,
         Vec::new(),
         Some(Duration::from_millis(target.request_timeout_ms)),
-        target.concurrency_acquire_timeout_ms,
         sse_first_frame_timeout_ms,
     )
     .map_err(|error| V3GeminiRelayRuntimeError::Target(error.to_string()))
@@ -533,6 +537,16 @@ pub fn project_v3_gemini_relay_runtime_failure(
         V3GeminiRelayRuntimeError::ProviderPoolExhausted { .. }
     );
     let source = match error {
+        V3GeminiRelayRuntimeError::RuntimeSource(source) => Ok(source),
+        V3GeminiRelayRuntimeError::ExecutionControlResponse(message) => {
+            crate::shared::direct_internal_error(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "relay_local_response_control",
+                message,
+                routecodex_v3_error::V3InternalErrorCode::V3ExecutionResponsePayloadStore,
+            )
+        }
         V3GeminiRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(
@@ -757,7 +771,6 @@ pub(crate) struct V3GeminiSseProviderOutcome {
     auth_alias: String,
     model_id: String,
     recorded: bool,
-    _provider_action_permit: Option<V3ProviderActionPermit>,
 }
 
 impl V3GeminiSseProviderOutcome {
@@ -765,7 +778,6 @@ impl V3GeminiSseProviderOutcome {
         if self.recorded || self.response_control.has_response_governance_failure()? {
             return Ok(());
         }
-        drop(self._provider_action_permit.take());
         let source = build_v3_error_01_source_raised(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
@@ -1027,6 +1039,18 @@ pub(crate) fn gemini_model_from_endpoint_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_local_capacity_keeps_response_lane_without_upstream_error() {
+        let output = project_v3_gemini_relay_runtime_failure(
+            V3GeminiRelayRuntimeError::ExecutionControlResponse("local retained response capacity".into()),
+        );
+        let source = output.diagnostic_source.expect("local failure must retain its source");
+        assert!(source.external_error.is_none());
+        assert_eq!(source.internal_error.expect("local response capacity needs response identity").node_id,
+            "V3ExecutionAttemptPayloadStore");
+        assert!(output.provider_failure_attempts.is_empty());
+    }
 
     #[test]
     fn relay_error_operator_fault_projects_internal_599_without_client_error() {

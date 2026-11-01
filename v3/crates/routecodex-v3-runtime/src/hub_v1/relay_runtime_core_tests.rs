@@ -1,6 +1,64 @@
 use super::*;
 use futures_util::StreamExt;
 
+#[tokio::test]
+async fn anthropic_codec_handoff_preserves_prefix_without_semantic_progress() {
+    let invalid = b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"text\":\"alias\"}}\n\n".to_vec();
+    let stream: V3ProviderSseStream = Box::pin(
+        futures_util::stream::iter([Ok(invalid.clone())]).chain(futures_util::stream::pending()),
+    );
+    let budget = crate::nodes::V3AttemptBudget::test_with_residence_timeout(
+        std::time::Duration::from_millis(100),
+    );
+    let guarded = guard_relay_sse_first_frame_with_budget(
+        "request",
+        "provider",
+        V3HubProviderWireProtocol::Anthropic,
+        stream,
+        Some(1000),
+        false,
+        budget.clone(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(!guarded.semantic_progress);
+    let mut replay =
+        guarded.into_attempt_stream(&budget, "request", "provider", budget.attempt_deadline());
+    assert_eq!(replay.next().await.unwrap().unwrap(), invalid);
+    assert!(!budget.active_stream_has_semantic_progress());
+    assert!(matches!(
+        replay.next().await.unwrap(),
+        Err(V3ProviderError::Transport { .. })
+    ));
+}
+
+#[tokio::test]
+async fn issue9bb26d4_responses_relay_empty_envelope_does_not_extend_deadline() {
+    let observation = V3RuntimeStreamObservation::default();
+    let stream: V3ProviderSseStream = Box::pin(
+        futures_util::stream::iter([Ok(b"event: response.created\ndata: {}\n\n".to_vec())]).chain(
+            futures_util::stream::once(async {
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                Ok(b"data: delayed\n\n".to_vec())
+            }),
+        ),
+    );
+    let mut guarded = guard_v3_responses_sse_until_semantic(
+        "request",
+        "provider",
+        stream,
+        std::time::Instant::now() + std::time::Duration::from_millis(30),
+        std::time::Duration::from_millis(30),
+        observation,
+    );
+    assert!(guarded.next().await.unwrap().is_ok());
+    assert!(matches!(
+        guarded.next().await.unwrap(),
+        Err(V3ProviderError::Transport { .. })
+    ));
+}
+
 /// provider SSE 空流：guard 必须 fail-fast 返回 Transport 错误（进入错误链切 provider），
 /// 而不是让客户端收到 200 后流立即结束的半截响应。
 #[tokio::test]

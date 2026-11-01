@@ -168,7 +168,6 @@ enum Expect {
     Vision,
     SecondVision,
     Text,
-    Exhaustion,
 }
 
 /// The `request` fixture places images inside the current user run only when
@@ -193,13 +192,7 @@ fn expected_route(pool: PoolState, tool: bool) -> Expect {
                 Expect::Text
             }
         }
-        PoolState::MultimodalDisabled => {
-            if current_turn_image {
-                Expect::Exhaustion
-            } else {
-                Expect::Text
-            }
-        }
+        PoolState::MultimodalDisabled => Expect::Text,
     }
 }
 
@@ -295,76 +288,8 @@ fn request(path: &str, tool: bool, image_only: bool) -> Value {
 }
 
 async fn run_case(path: &str, tool: bool, pool: PoolState, protocol: &str) {
-    run_case_shape(path, tool, pool, protocol, false, None).await;
-    run_case_shape(path, tool, pool, protocol, true, None).await;
-}
-
-async fn assert_incomplete_blackbox_transport(
-    result: Result<reqwest::Response, reqwest::Error>,
-    started: std::time::Instant,
-    context: &str,
-) {
-    match result {
-        Err(error) => {
-            let elapsed = started.elapsed();
-            assert!(
-                !error.is_timeout(),
-                "{context}: an unfinished client wait is not a transport break: {error}"
-            );
-            assert!(
-                !error.is_connect(),
-                "{context}: the test listener was reachable, so connect failure is not exhaustion: {error}"
-            );
-            assert!(
-                error.status().is_none(),
-                "{context}: a client HTTP response is not a transport break: {error}"
-            );
-            assert!(
-                elapsed < Duration::from_secs(15),
-                "{context}: exhaustion must terminate before the client wait expires: {elapsed:?}"
-            );
-        }
-        Ok(mut response) => {
-            assert_eq!(
-                response.status(),
-                StatusCode::OK,
-                "{context}: exhaustion must not generate a client HTTP error"
-            );
-            let mut body = Vec::new();
-            let terminal = loop {
-                match response.chunk().await {
-                    Ok(Some(chunk)) => body.extend_from_slice(&chunk),
-                    Ok(None) => panic!(
-                        "{context}: exhaustion completed the client transport normally: {}",
-                        String::from_utf8_lossy(&body)
-                    ),
-                    Err(error) => break error,
-                }
-            };
-            let elapsed = started.elapsed();
-            assert!(
-                !terminal.is_timeout(),
-                "{context}: an unfinished client wait is not a transport break: {terminal}"
-            );
-            assert!(
-                !terminal.is_connect(),
-                "{context}: the test listener was reachable, so connect failure is not exhaustion: {terminal}"
-            );
-            assert!(
-                terminal.status().is_none(),
-                "{context}: a client HTTP response is not a transport break: {terminal}"
-            );
-            let body = String::from_utf8_lossy(&body);
-            assert!(
-                body.trim().is_empty(),
-                "{context}: exhaustion must not project a success or error payload: {body}"
-            );
-            assert!(
-                elapsed < Duration::from_secs(15),
-                "{context}: exhaustion must terminate before the client wait expires: {elapsed:?}"
-            );
-        }
-    }
+    run_case_shape(path, tool, pool, protocol, false, None, false).await;
+    run_case_shape(path, tool, pool, protocol, true, None, false).await;
 }
 
 async fn run_case_shape(
@@ -374,6 +299,7 @@ async fn run_case_shape(
     protocol: &str,
     image_only: bool,
     tool_output: Option<Value>,
+    direct: bool,
 ) {
     // These cases count upstream attempts, so the Chat Process continuation
     // must not add an extra execution.
@@ -514,6 +440,32 @@ async fn run_case_shape(
         .retain(|target| target.provider.as_deref() == Some("fallback"));
     manifest.debug.snapshots = false;
     manifest.debug.dry_run = false;
+    if direct {
+        // The relay fixture's fallback provider omits its Responses process;
+        // give it the same explicit declaration before selecting Direct.
+        let responses = manifest.providers["test"].responses.clone();
+        let interface_responses = manifest.providers["test"].interfaces["default"]
+            .responses
+            .clone();
+        let fallback = manifest.providers.get_mut("fallback").unwrap();
+        fallback.responses = responses;
+        fallback.interfaces.get_mut("default").unwrap().responses = interface_responses;
+        super::pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
+        let binding = manifest
+            .hub_v1
+            .as_mut()
+            .unwrap()
+            .entry_protocol_bindings
+            .iter_mut()
+            .find(|binding| binding.entry_protocol == "responses")
+            .unwrap();
+        binding.execution_mode = V3EntryProtocolExecutionMode::Direct;
+        binding.protocol_profile_owner = "v3.entry_protocol_registry_contract".into();
+        binding.forbidden_reentry_behavior =
+            "Responses endpoint must not fall through to relay or pending runtime.".into();
+        binding.runtime_owner_symbol = Some("execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug".into());
+        binding.runtime_owner_path = Some("v3/crates/routecodex-v3-runtime/src/kernel.rs".into());
+    }
     std::env::set_var("V3_P6_TEST_KEY", "local-image-fixture");
     let mut body = request(path, tool, image_only);
     if let Some(output) = &tool_output {
@@ -525,7 +477,6 @@ async fn run_case_shape(
             .unwrap()["output"] = output.clone();
     }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let request_started = std::time::Instant::now();
     let result = reqwest::Client::new()
         .post(format!("http://{}{path}", handle.listeners[0].addr))
         .json(&body)
@@ -544,30 +495,6 @@ async fn run_case_shape(
         }
         bodies
     };
-    if expect == Expect::Exhaustion {
-        // The selected pool's only candidate is disabled. The request must end
-        // without a fabricated success, without the provider error payload and
-        // without consulting the default pool.
-        assert_incomplete_blackbox_transport(
-            result,
-            request_started,
-            &format!("{path} tool={tool} protocol={protocol}"),
-        )
-        .await;
-        assert!(
-            drain(&mut vision_rx).is_empty(),
-            "a disabled candidate must not reach the network"
-        );
-        assert!(
-            drain(&mut second_rx).is_empty(),
-            "no second candidate may run for a disabled single candidate"
-        );
-        assert!(
-            drain(&mut text_rx).is_empty(),
-            "the default pool must not be consulted after the selected pool exhausts"
-        );
-        return;
-    }
     let result = result.unwrap_or_else(|error| {
         panic!("{path} tool={tool} pool={pool:?} protocol={protocol}: {error}")
     });
@@ -716,16 +643,145 @@ async fn run_case_shape(
     }
     let mut images = Vec::new();
     image_references(&wire, &mut images);
-    assert!(
-        !wire_text.contains("[Image]"),
-        "history and current images must reach the selected provider intact, not as placeholders: {path} tool={tool} protocol={protocol} {wire_text}"
-    );
-    for expected in [OLD, PNG, OTHER] {
+    if expect == Expect::Text {
         assert!(
-            images.iter().any(|image| image == expected),
-            "complete original image {expected} must reach the selected provider: {path} tool={tool} protocol={protocol} {wire_text}"
+            wire_text.contains("[Image]"),
+            "text-only provider must receive image placeholders: {wire_text}"
         );
+        assert!(
+            images.is_empty(),
+            "text-only provider must not receive image data: {images:?}"
+        );
+    } else {
+        assert!(
+            !wire_text.contains("[Image]"),
+            "vision provider must retain images: {wire_text}"
+        );
+        for expected in [OLD, PNG, OTHER] {
+            assert!(
+                images.iter().any(|image| image == expected),
+                "complete original image {expected} must reach the selected provider: {path} tool={tool} protocol={protocol} {wire_text}"
+            );
+        }
     }
+}
+
+#[test]
+fn unavailable_image_pool_uses_text_default_with_placeholders_direct_and_relay() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for direct in [true, false] {
+            run_case_shape(
+                "/v1/responses",
+                false,
+                PoolState::MultimodalAbsent,
+                "responses",
+                false,
+                None,
+                direct,
+            )
+            .await;
+        }
+    });
+}
+
+#[test]
+fn provider_switch_reprojects_original_image_and_hosted_search() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        let _home = TestHomeGuard::new("image-search-switch");
+        std::env::set_var("V3_P6_TEST_KEY", "local-image-fixture");
+        for direct in [true, false] {
+            let (first_url, mut first_rx, first_shutdown) =
+                start_controlled_terminal_upstream_with_body(
+                    StatusCode::BAD_GATEWAY,
+                    "application/json",
+                    br#"{"error":{"message":"controlled failure"}}"#.to_vec(),
+                )
+                .await;
+            let (second_url, mut second_rx, second_shutdown) =
+                start_controlled_terminal_upstream_with_body(
+                    StatusCode::OK, "application/json",
+                    serde_json::to_vec(&json!({"id":"resp_switch","object":"response","status":"completed","model":"wire-test","output":[{"id":"msg_switch","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"switch-ok","annotations":[]}]}]})).unwrap(),
+                ).await;
+            let mut manifest = responses_relay_provider_protocol_manifest(
+                free_port(),
+                free_port(),
+                &first_url,
+                "responses",
+                Some(&second_url),
+            );
+            manifest
+                .route_groups
+                .get_mut("default")
+                .unwrap()
+                .pools
+                .remove("client_test");
+            let fallback = manifest.providers.get_mut("fallback").unwrap();
+            fallback
+                .models
+                .get_mut("test")
+                .unwrap()
+                .capabilities
+                .extend(["vision".into(), "web_search".into()]);
+            if direct {
+                let responses = manifest.providers["test"].responses.clone();
+                let interface_responses = manifest.providers["test"].interfaces["default"]
+                    .responses
+                    .clone();
+                let fallback = manifest.providers.get_mut("fallback").unwrap();
+                fallback.responses = responses;
+                fallback.interfaces.get_mut("default").unwrap().responses = interface_responses;
+                super::pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
+                let binding = manifest
+                    .hub_v1
+                    .as_mut()
+                    .unwrap()
+                    .entry_protocol_bindings
+                    .iter_mut()
+                    .find(|binding| binding.entry_protocol == "responses")
+                    .unwrap();
+                binding.execution_mode = V3EntryProtocolExecutionMode::Direct;
+                binding.protocol_profile_owner = "v3.entry_protocol_registry_contract".into();
+                binding.runtime_owner_symbol = Some("execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug".into());
+                binding.runtime_owner_path =
+                    Some("v3/crates/routecodex-v3-runtime/src/kernel.rs".into());
+            }
+            let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+            let result = reqwest::Client::new()
+                .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+                .json(&json!({"model":"client-test","stream":false,
+                    "input":[{"role":"user","content":[{"type":"input_text","text":"keep text"},{"type":"input_image","image_url":PNG}]}],
+                    "tools":[{"type":"web_search_preview"},{"type":"function","name":"lookup","parameters":{"type":"object","properties":{}}}]}))
+                .timeout(Duration::from_secs(20)).send().await;
+            handle.shutdown().await;
+            let _ = first_shutdown.send(());
+            let _ = second_shutdown.send(());
+            let response = result.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response.text().await.unwrap().contains("switch-ok"));
+            let first = first_rx
+                .try_recv()
+                .expect("first provider must be attempted")
+                .body;
+            let second = second_rx
+                .try_recv()
+                .expect("second provider must be attempted")
+                .body;
+            assert!(first_rx.try_recv().is_err() && second_rx.try_recv().is_err());
+            assert!(first.to_string().contains("[Image]"));
+            assert!(!first.to_string().contains(PNG));
+            assert!(!first.to_string().contains("web_search_preview"));
+            assert!(
+                first.to_string().contains("lookup") && first.to_string().contains("keep text")
+            );
+            assert!(second.to_string().contains(PNG));
+            assert!(second.to_string().contains("web_search"));
+            assert!(
+                second.to_string().contains("lookup") && second.to_string().contains("keep text")
+            );
+        }
+    });
 }
 
 #[test]
@@ -771,7 +827,7 @@ fn single_multimodal_pool_recovers_within_pool_not_cross_pool() {
 }
 
 #[test]
-fn disabled_multimodal_pool_exhausts_without_default_fallback() {
+fn disabled_multimodal_pool_uses_declared_default() {
     run_blackbox_test(async {
         let _guard = TEST_LOCK.lock().await;
         for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
@@ -1528,6 +1584,7 @@ async fn responses_tool_image_sources_and_opaque_parts_survive_protocol_projecti
                     protocol,
                     false,
                     Some(output.clone()),
+                    false,
                 ))
                 .catch_unwind()
                 .await

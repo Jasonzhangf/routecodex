@@ -25,7 +25,6 @@ const copied = [
   ".github/workflows/test.yml",
   "v3/crates/routecodex-v3-server/src/lib.rs",
   "v3/crates/routecodex-v3-server/src/frame_builders.rs",
-  "v3/crates/routecodex-v3-server/src/session_admission.rs",
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   "v3/crates/routecodex-v3-config/src/lib.rs",
   "v3/crates/routecodex-v3-config/src/types.rs",
@@ -42,26 +41,22 @@ const copied = [
 const cases = [
   {
     name: "session business mutex is reintroduced",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) =>
       `${source}\nstruct V3ResponsesSessionAdmissionGate;\n`,
     diagnostic: /must not regain a session\/conversation business mutex/u,
   },
   {
-    name: "successful EOF releases activity before front flush",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
-    mutate: (source) => source.replace("front.hold_activity_until_flush(permit);", "drop(permit);"),
-    diagnostic: /Request-local activity must retain body and front-flush custody/u,
+    name: "maintenance dispatch gate is reintroduced",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    mutate: (source) => `${source}\nlet request_activity_gate = ();\n`,
+    diagnostic: /must not acquire a maintenance gate or activity permit/u,
   },
   {
-    name: "exec drain waiter is not registered before the quiescence check",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
-    mutate: (source) =>
-      source.replace(
-        "            notified.as_mut().enable();\n            if self\n                .gate",
-        "            if self\n                .gate",
-      ),
-    diagnostic: /exec drain gate must register its predicate waiter/u,
+    name: "canonical contract restores request activity gate",
+    path: "docs/architecture/wiki/v3-responses-session-admission.md",
+    mutate: (source) => `${source}\nResource: v3.front.request_activity_gate\n`,
+    diagnostic: /Canonical contracts must not restore an admission gate/u,
   },
   {
     name: "error SSE receives success keepalive",

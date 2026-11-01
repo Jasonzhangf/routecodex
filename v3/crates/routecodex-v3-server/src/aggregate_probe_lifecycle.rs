@@ -1,4 +1,4 @@
-//! Aggregate custody of the Runtime probe tasks and reversible maintenance.
+//! Aggregate custody of the Runtime probe tasks.
 //!
 //! One aggregate supervisor owns one recovery scheduler per business listener.
 //! Each listener's scheduler is registered against its own provider-health
@@ -40,8 +40,7 @@ impl ListenerProbeOwner {
         Ok((future, shutdown))
     }
 
-    /// Stop and join this port's owner. Returns an unexpected join fault so the
-    /// supervisor retains maintenance instead of resuming half-closed admission.
+    /// Stop and join this port's owner, reporting an unexpected join fault.
     async fn stop(&mut self) -> Option<String> {
         self.probe.abort();
         let join_failure = (&mut self.probe)
@@ -98,7 +97,6 @@ async fn wait_for_terminal(receiver: &mut watch::Receiver<bool>) {
 }
 
 struct Quiesce {
-    maintenance: V3ServerMaintenanceGuard,
     joined: oneshot::Sender<Result<(), String>>,
     rollback: oneshot::Receiver<()>,
 }
@@ -189,21 +187,34 @@ impl AggregateProbeLifecycle {
                         eprintln!(
                             "V3 aggregate probe owner {index} stopped unexpectedly: {error}; scheduled recovery unavailable"
                         );
-                        // Owner faults require explicit lifecycle recovery.
+                        // Report the fault to the next preparation after the
+                        // old owners have joined.
                         let command = tokio::select! {
                             biased;
                             _ = wait_for_terminal(&mut terminal_rx) => None,
                             command = receiver.recv() => command,
                         };
-                        if let Some(command) = command {
-                            let _ = command.joined.send(Err(
-                                "aggregate probe owner stopped unexpectedly; maintenance retained"
-                                    .into(),
-                            ));
-                            let _ = terminal_rx.wait_for(|value| *value).await;
-                            drop(command.maintenance);
+                        let Some(command) = command else { return };
+                        let registration = {
+                            let terminal = owner_terminal_state
+                                .lock()
+                                .expect("aggregate probe terminal lock");
+                            if *terminal {
+                                None
+                            } else {
+                                Some(ListenerProbeOwners::start(&manifest, &healths, true))
+                            }
+                        };
+                        match registration {
+                            None => return,
+                            Some(Ok(restored)) => owners = restored,
+                            Some(Err(error)) => eprintln!(
+                                "V3 aggregate probe restoration failed: {error}; scheduled recovery unavailable"
+                            ),
                         }
-                        return;
+                        let _ = command
+                            .joined
+                            .send(Err("aggregate probe owner stopped unexpectedly".into()));
                     }
                     SupervisorWake::Command(command) => {
                         // This task, rather than the preparation future, retains
@@ -214,19 +225,30 @@ impl AggregateProbeLifecycle {
                         }
                         let Some(command) = command else { return };
                         let Quiesce {
-                            maintenance,
                             joined,
                             mut rollback,
                         } = command;
                         if let Some(error) = join_failure {
-                            eprintln!(
-                                "V3 aggregate probe maintenance retained after owner failure"
-                            );
+                            let registration = {
+                                let terminal = owner_terminal_state
+                                    .lock()
+                                    .expect("aggregate probe terminal lock");
+                                if *terminal {
+                                    None
+                                } else {
+                                    Some(ListenerProbeOwners::start(&manifest, &healths, true))
+                                }
+                            };
+                            match registration {
+                                None => return,
+                                Some(Ok(restored)) => owners = restored,
+                                Some(Err(error)) => eprintln!(
+                                    "V3 aggregate probe restoration failed: {error}; scheduled recovery unavailable"
+                                ),
+                            }
                             let _ =
                                 joined.send(Err(format!("aggregate probe join failed: {error}")));
-                            let _ = terminal_rx.wait_for(|value| *value).await;
-                            drop(maintenance);
-                            return;
+                            continue;
                         }
                         let _ = joined.send(Ok(()));
                         tokio::select! {
@@ -253,16 +275,13 @@ impl AggregateProbeLifecycle {
                             Some(Ok(owners)) => owners,
                             Some(Err(error)) => {
                                 eprintln!(
-                                    "V3 aggregate probe restoration failed: {error}; maintenance retained, ordinary admission unavailable"
+                                    "V3 aggregate probe restoration failed: {error}; scheduled recovery unavailable"
                                 );
-                                let _ = terminal_rx.wait_for(|value| *value).await;
-                                drop(maintenance);
-                                return;
+                                continue;
                             }
                         };
                         // Runtime registration is synchronous and old ownership
-                        // joined. Only now may ordinary business admission resume.
-                        drop(maintenance);
+                        // has joined. Business admission is independent.
                     }
                 }
             }
@@ -275,10 +294,7 @@ impl AggregateProbeLifecycle {
         })
     }
 
-    pub(crate) async fn quiesce(
-        &self,
-        maintenance: V3ServerMaintenanceGuard,
-    ) -> Result<ProbeQuiescenceGuard, String> {
+    pub(crate) async fn quiesce(&self) -> Result<ProbeQuiescenceGuard, String> {
         let (rollback, rollback_rx) = oneshot::channel();
         let guard = ProbeQuiescenceGuard {
             _rollback: rollback,
@@ -286,12 +302,11 @@ impl AggregateProbeLifecycle {
         let (joined, joined_rx) = oneshot::channel();
         self.commands
             .send(Quiesce {
-                maintenance,
                 joined,
                 rollback: rollback_rx,
             })
             .map_err(|_| "aggregate probe lifecycle owner unavailable".to_string())?;
-        // Guard ownership and maintenance custody precede the first stop await.
+        // Rollback ownership precedes the first stop await.
         joined_rx
             .await
             .map_err(|_| "aggregate probe quiescence owner stopped".to_string())??;
@@ -436,8 +451,7 @@ mod tests {
         )
         .unwrap();
         tokio::task::yield_now().await;
-        let gate = Arc::new(V3ServerRequestActivityGate::default());
-        let result = lifecycle.quiesce(gate.begin_maintenance().await).await;
+        let result = lifecycle.quiesce().await;
         assert!(
             result.is_err(),
             "the completed owner must enter the fault branch"
@@ -450,6 +464,123 @@ mod tests {
             finished && released == 2,
             "stopped-owner exit detached its sibling: finished={finished} permits={released}"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn held_probe_join_does_not_pause_business_dispatch() {
+        struct HeldDrop {
+            entered: Option<oneshot::Sender<()>>,
+            release: std::sync::mpsc::Receiver<()>,
+        }
+        impl Drop for HeldDrop {
+            fn drop(&mut self) {
+                if let Some(entered) = self.entered.take() {
+                    let _ = entered.send(());
+                }
+                let _ = self.release.recv();
+            }
+        }
+
+        let (started_tx, started_rx) = oneshot::channel();
+        let (held_tx, held_rx) = oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let probe = tokio::spawn(async move {
+            let _held = HeldDrop {
+                entered: Some(held_tx),
+                release: release_rx,
+            };
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        started_rx.await.unwrap();
+        let lifecycle = AggregateProbeLifecycle::supervise(
+            test_manifest(),
+            Vec::new(),
+            ListenerProbeOwners {
+                owners: vec![ListenerProbeOwner {
+                    probe,
+                    shutdown: None,
+                }],
+            },
+        )
+        .unwrap();
+        let handle = Arc::new(V3ServerAggregateHandle {
+            listeners: Vec::new(),
+            probe_lifecycle: lifecycle,
+            front_transport_broker: V3FrontTransportBroker::new(1),
+            provider_health: Vec::new(),
+            observability_writers: Vec::new(),
+            codex_sample_persist_worker: None,
+        });
+        let preparing = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.prepare_exec_attempt().await })
+        };
+        let held = tokio::time::timeout(std::time::Duration::from_secs(2), held_rx).await;
+        let reached_barrier = matches!(held, Ok(Ok(())));
+        let _ = release_tx.send(());
+        let preparation = preparing.await.unwrap();
+        drop(preparation);
+        let mut handle = Arc::try_unwrap(handle).expect("preparation task released aggregate");
+        handle.probe_lifecycle.join().await;
+        assert!(reached_barrier, "probe join must reach the controlled barrier");
+    }
+
+    #[tokio::test]
+    async fn id9_join_failure_releases_admission() {
+        let failed = tokio::spawn(async { panic!("probe join failure fixture") });
+        while !failed.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        let sibling = tokio::spawn(std::future::pending::<()>());
+        let sibling_task = sibling.abort_handle();
+        let mut lifecycle = AggregateProbeLifecycle::supervise(
+            test_manifest(),
+            Vec::new(),
+            ListenerProbeOwners {
+                owners: vec![
+                    ListenerProbeOwner {
+                        probe: failed,
+                        shutdown: None,
+                    },
+                    ListenerProbeOwner {
+                        probe: sibling,
+                        shutdown: None,
+                    },
+                ],
+            },
+        )
+        .unwrap();
+        let result = lifecycle.quiesce().await;
+        let sibling_finished = sibling_task.is_finished();
+        lifecycle.join().await;
+        assert!(result.unwrap_err().contains("aggregate probe join failed"));
+        assert!(
+            sibling_finished,
+            "join failure must join siblings"
+        );
+    }
+
+    #[tokio::test]
+    async fn id9_failed_rollback_registration_releases_admission() {
+        let manifest = test_manifest();
+        let health = Arc::new(
+            V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest),
+        );
+        let mut lifecycle = AggregateProbeLifecycle::start(manifest.clone(), vec![health.clone()])
+            .expect("initial probe owner");
+        let guard = lifecycle
+            .quiesce()
+            .await
+            .expect("quiesce");
+        let (_shutdown, receiver) = oneshot::channel();
+        let competing_registration = health
+            .runtime_health()
+            .aggregate_provider_probe_lifecycle_resume(manifest, receiver)
+            .expect("registration conflict fixture");
+        drop(guard);
+        drop(competing_registration);
+        lifecycle.join().await;
     }
 
     #[tokio::test]

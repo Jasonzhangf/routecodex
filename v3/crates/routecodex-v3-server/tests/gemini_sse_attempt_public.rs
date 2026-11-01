@@ -493,6 +493,7 @@ async fn send_sse(
     client: &reqwest::Client,
     endpoint: &str,
     payload: &Value,
+    expect_recovery: bool,
 ) -> Result<(StatusCode, String), String> {
     let response = client
         .post(endpoint)
@@ -511,9 +512,17 @@ async fn send_sse(
             }
         }
     };
-    tokio::time::timeout(Duration::from_secs(15), collect)
-        .await
-        .expect("the committed SSE channel must terminate or complete");
+    let timeout = if expect_recovery {
+        Duration::from_millis(3500)
+    } else {
+        Duration::from_secs(15)
+    };
+    let outcome = tokio::time::timeout(timeout, collect).await;
+    if expect_recovery {
+        assert!(outcome.is_err(), "recoverable SSE must remain open");
+    } else {
+        outcome.expect("successful SSE channel must complete");
+    }
     Ok((status, String::from_utf8_lossy(&received).into_owned()))
 }
 
@@ -582,6 +591,7 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
         &client,
         &endpoint,
         &streaming_request("multi candidate control"),
+        false,
     )
     .await
     .unwrap_or_else(|error| panic!("multi-candidate SSE must commit a client head: {error}"));
@@ -662,7 +672,7 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
             ],
             "tools": client_tools()
         });
-        let (status, text) = send_sse(&client, &endpoint, &followup)
+        let (status, text) = send_sse(&client, &endpoint, &followup, false)
             .await
             .unwrap_or_else(|error| panic!("paired follow-up must commit a client head: {error}"));
         for capture in capture_all(&mut captures).await {
@@ -694,7 +704,14 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
     // 2. A typed late provider error after candidate 0 already terminated must
     // reach the typed Error chain before any client success commitment.
     let late_error_started = std::time::Instant::now();
-    match send_sse(&client, &endpoint, &streaming_request("late error control")).await {
+    match send_sse(
+        &client,
+        &endpoint,
+        &streaming_request("late error control"),
+        true,
+    )
+    .await
+    {
         Ok((status, text)) => {
             eprintln!("EVIDENCE_gemini_SSE_LATE_ERROR_CLIENT={text}");
             if status != StatusCode::OK {
@@ -711,9 +728,14 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
                     "no earlier candidate payload may reach the client before the late error: {text}"
                 ));
             }
+            if text.contains("late_provider_error") || text.contains("typed late provider error") {
+                violations.push(format!("provider error leaked to the client: {text}"));
+            }
         }
         Err(error) => {
-            eprintln!("EVIDENCE_gemini_SSE_LATE_ERROR_CLIENT_TERMINATED={error}");
+            violations.push(format!(
+                "late-error recovery must keep the client connected: {error}"
+            ));
         }
     }
     assert!(
@@ -725,9 +747,14 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
     }
 
     // 3. A provider content-filter terminal stays a legal business response.
-    let (status, text) = send_sse(&client, &endpoint, &streaming_request("filter control"))
-        .await
-        .unwrap_or_else(|error| panic!("filter-control SSE must commit a client head: {error}"));
+    let (status, text) = send_sse(
+        &client,
+        &endpoint,
+        &streaming_request("filter control"),
+        false,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("filter-control SSE must commit a client head: {error}"));
     for capture in capture_all(&mut captures).await {
         violations.extend(captured_violations(&capture));
     }

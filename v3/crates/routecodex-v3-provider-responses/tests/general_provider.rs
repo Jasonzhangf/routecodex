@@ -164,8 +164,6 @@ fn target_with_auth(
         provider_request_cleanup: Default::default(),
         request_timeout_ms: 300_000,
         sse_first_frame_timeout_ms: None,
-        initial_concurrency_budget: 8,
-        concurrency_acquire_timeout_ms: 60_000,
     }
 }
 
@@ -633,9 +631,7 @@ async fn rate_limited_upstream(State(state): State<Arc<RateLimitState>>) -> Resp
 }
 
 #[tokio::test]
-async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
-    use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
-
+async fn simultaneous_upstream_429s_preserve_typed_status() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let app = Router::new()
@@ -662,23 +658,6 @@ async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
         "adaptive",
         "V3_ADAPTIVE_429_KEY",
     );
-    let provider_key = format!(
-        "{}:{}",
-        provider_target.provider_id, provider_target.auth.alias
-    );
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller
-        .ensure_initial_budget(&provider_key, provider_target.initial_concurrency_budget)
-        .unwrap();
-    let baseline = controller.snapshot(&provider_key).unwrap();
-    assert_eq!(
-        baseline.hard_max_in_flight, 8,
-        "the declared static maxInFlight must remain only the hard ceiling"
-    );
-    assert_eq!(baseline.budget, 8);
-    assert_eq!(baseline.rate_limit_samples, 0);
-    assert_eq!(baseline.smoothed_budget, 8);
-
     let transport = ReqwestResponsesTransport::default();
     let mut attempts = Vec::new();
     for attempt in 0..2 {
@@ -711,29 +690,6 @@ async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
             "the provider 429 must surface as a typed HTTP status error"
         );
     }
-
-    let scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: provider_target.interface_id.clone(),
-            model_id: provider_target.canonical_model_id.clone(),
-        };
-    let snapshot = controller
-        .snapshot_for_scope(&provider_key, Some(&scope))
-        .unwrap();
-    assert_eq!(
-        snapshot.rate_limit_samples, 2,
-        "each refused attempt must contribute one 429 watermark sample"
-    );
-    assert_eq!(
-        snapshot.smoothed_budget, 1,
-        "two 429s at an in-flight watermark of two must cap the budget one slot below it"
-    );
-    assert_eq!(
-        snapshot.budget, 1,
-        "the adaptive budget must drop to the refused watermark minus one, not step down by one"
-    );
-    assert!(snapshot.saturated);
-    assert!(snapshot.in_flight == 0, "both leases must be released");
 
     std::env::remove_var("V3_ADAPTIVE_429_KEY");
     shutdown_tx.send(()).unwrap();

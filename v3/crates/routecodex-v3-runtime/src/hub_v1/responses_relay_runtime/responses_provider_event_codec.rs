@@ -85,11 +85,46 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed(
     )
 }
 
+pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_store(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+    observation: &V3RuntimeStreamObservation,
+    reducer: &mut V3ResponsesSseReducerState,
+    capacity: &mut crate::hub_v1::responses_sse_tree::V3ResponsesReducerCapacity,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    let mut hook = V3ResponsesRelayTypedSemanticHook {
+        observation,
+        catalog: compile_v3_hub_relay_response_hooks().typed_sse_catalog(),
+    };
+    observe_v3_runtime_responses_sse_semantic_frame_typed_with_capacity(
+        frame,
+        observation,
+        reducer,
+        &mut hook,
+        Some(capacity),
+    )
+}
+
 pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
     observation: &V3RuntimeStreamObservation,
     reducer: &mut V3ResponsesSseReducerState,
     hook: &mut impl V3ResponsesSseSemanticHook,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    observe_v3_runtime_responses_sse_semantic_frame_typed_with_capacity(
+        frame,
+        observation,
+        reducer,
+        hook,
+        None,
+    )
+}
+
+pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_capacity(
+    frame: &routecodex_v3_sse::SseTransportIn03ValidatedFrameStream,
+    observation: &V3RuntimeStreamObservation,
+    reducer: &mut V3ResponsesSseReducerState,
+    hook: &mut impl V3ResponsesSseSemanticHook,
+    capacity: Option<&mut crate::hub_v1::responses_sse_tree::V3ResponsesReducerCapacity>,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     if !frame.frame().raw_utf8_valid() {
         return Err(V3ResponsesRelayRuntimeError::ProviderSseTransport(
@@ -121,6 +156,24 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     if let Some(error) = extract_v3_provider_event_error(&event) {
         return Err(error);
     }
+    observation
+        .record_provider_business_content(
+            crate::hub_v1::v3_provider_event_has_deliverable_business_content(
+                V3HubProviderWireProtocol::Responses,
+                &event,
+            ),
+        )
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
+    let semantic_started = matches!(
+        crate::hub_v1::provider_sse_json_codec::classify_v3_provider_responses_json_event(&event),
+        Ok(crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+    ) || crate::hub_v1::v3_provider_event_has_deliverable_business_content(
+        V3HubProviderWireProtocol::Responses,
+        &event,
+    );
+    observation
+        .record_semantic_output_started(semantic_started)
+        .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
     if !event
         .get("type")
         .and_then(Value::as_str)
@@ -151,12 +204,20 @@ pub(super) fn observe_v3_runtime_responses_sse_semantic_frame_typed_with_hook(
     observation
         .record_provider_event_json(&projected_event)
         .map_err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec)?;
-    apply_v3_typed_responses_event(&projected_event, reducer)
+    apply_v3_typed_responses_event_with_capacity(&projected_event, reducer, capacity)
 }
 
 fn apply_v3_typed_responses_event(
     event: &Value,
     reducer: &mut V3ResponsesSseReducerState,
+) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
+    apply_v3_typed_responses_event_with_capacity(event, reducer, None)
+}
+
+fn apply_v3_typed_responses_event_with_capacity(
+    event: &Value,
+    reducer: &mut V3ResponsesSseReducerState,
+    mut capacity: Option<&mut crate::hub_v1::responses_sse_tree::V3ResponsesReducerCapacity>,
 ) -> Result<Option<Value>, V3ResponsesRelayRuntimeError> {
     if let Some(error) = extract_v3_provider_event_error(event) {
         return Err(error);
@@ -174,9 +235,20 @@ fn apply_v3_typed_responses_event(
             format!("V3 Responses Relay response event type {event_type} is unsupported"),
         ));
     }
+    let replacement = match capacity.as_deref_mut() {
+        Some(lease) => reducer
+            .admit_retained_text_mutation(event, lease)
+            .map_err(V3ResponsesRelayRuntimeError::LocalResponseStore)?,
+        None => None,
+    };
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
     })?;
+    if let (Some(lease), Some(replacement)) = (capacity, replacement) {
+        lease
+            .finish_replace(replacement)
+            .map_err(V3ResponsesRelayRuntimeError::LocalResponseStore)?;
+    }
     match reducer.terminal {
         Some(V3ResponsesSseTerminalState::Completed)
         | Some(V3ResponsesSseTerminalState::Incomplete) => {
@@ -785,5 +857,27 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
         ));
         assert!(is_supported_typed_responses_event("response.completed"));
         assert!(!is_supported_typed_responses_event("response.unknown"));
+    }
+
+    #[test]
+    fn issue9bb26d4_responses_codec_separates_reasoning_from_envelopes() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
+            &mut decoder, &observation, &mut reducer,
+        ).unwrap();
+        assert!(!observation.has_semantic_output_started().unwrap());
+        assert!(!observation.has_provider_business_content().unwrap());
+        observe_v3_runtime_responses_sse_transport_chunk_typed(
+            b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":0}\n\n",
+            &mut decoder, &observation, &mut reducer,
+        ).unwrap();
+        assert!(observation.has_semantic_output_started().unwrap());
+        assert!(
+            !observation.has_provider_business_content().unwrap(),
+            "reasoning alone cannot establish a complete deliverable answer"
+        );
     }
 }
