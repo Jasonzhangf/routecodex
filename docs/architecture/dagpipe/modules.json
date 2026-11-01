@@ -24,6 +24,11 @@
   ],
   "extensions": [
     {
+      "id": "provider-post-error-recovery",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/provider-post-error-recovery.graph.json"
+    },
+    {
       "id": "provider-listener-health",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/graphs/provider-listener-health.graph.json"

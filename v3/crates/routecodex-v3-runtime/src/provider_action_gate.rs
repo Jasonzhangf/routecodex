@@ -15,6 +15,33 @@ pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;
 pub const V3_PROVIDER_ACTION_MEDIUM_DELAY_MS: u64 = 3_000;
 pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;
 
+/// Upper bound for one recovery hold when the route offers no other identity.
+pub const V3_PROVIDER_ACTION_RECOVERY_SOLE_IDENTITY_BUDGET_MS: u64 = 60_000;
+/// Recovery hold window for a target that declares more than one distinct
+/// identity. It is a mandatory floor as well as the bound: after a real
+/// provider attempt failure the request must observe it before it continues to
+/// the next selection or attempt, even when a healthy alternative identity is
+/// already available. The hold exists to keep concurrent sessions from
+/// storming the failed identity.
+pub const V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS: u64 = 3_000;
+
+pub fn v3_provider_action_recovery_budget(candidate_count: usize) -> Duration {
+    let budget_ms = if candidate_count <= 1 {
+        V3_PROVIDER_ACTION_RECOVERY_SOLE_IDENTITY_BUDGET_MS
+    } else {
+        V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS
+    };
+    Duration::from_millis(budget_ms)
+}
+
+/// The flat multi-identity hold, when the target declares more than one
+/// distinct `provider.model.key` identity. `None` for a sole identity, whose
+/// recovery stays identity-bound (same-identity real success or its budget).
+pub fn v3_provider_action_multi_identity_hold(distinct_identity_count: usize) -> Option<Duration> {
+    (distinct_identity_count > 1)
+        .then(|| Duration::from_millis(V3_PROVIDER_ACTION_RECOVERY_ALTERNATIVE_IDENTITY_BUDGET_MS))
+}
+
 #[cfg(test)]
 #[test]
 fn issue44cc3af_rate_limit_gate_is_shared_across_sessions_only_for_rate_limits() {
@@ -237,6 +264,19 @@ pub enum V3ProviderActionRecoveryTransition {
     Superseded(V3ProviderActionRecoveryTicket),
     ReleasedBySuccess(V3ProviderActionRecoveryTicket),
     Consumed(V3ProviderActionRecoveryTicket),
+    /// The recovery hold reached its declared window. A recovery opportunity
+    /// still exists, so the caller releases the hold and issues a fresh
+    /// attempt instead of projecting a terminal outcome.
+    BudgetExpired(V3ProviderActionRecoveryTicket),
+    /// The flat multi-identity storm-avoidance hold finished its window
+    /// (`.appsdk/requirements.json`
+    /// `routecodex-last-provider-failure-terminal-policy` /
+    /// `req-20261027-single-identity-recovery`). The window is a floor, so it
+    /// completes only after consuming it in full. Unlike `BudgetExpired`, the
+    /// caller must not reselect: the replacement was already resolved before
+    /// the hold. It continues with the attempt it already selected, so the
+    /// request spends exactly one selection per attempt and never holds twice.
+    MultiIdentityHoldElapsed(V3ProviderActionRecoveryTicket),
 }
 
 #[derive(Debug)]
@@ -387,7 +427,7 @@ impl V3ProviderActionGate {
         &self,
         key: V3ProviderActionGateKey,
     ) -> Result<V3ProviderActionAdmission, String> {
-        let mut waiter = self.register_waiter(key, true, None)?;
+        let mut waiter = self.register_waiter(key, true, None, None)?;
         waiter.wait().await
     }
 
@@ -396,14 +436,43 @@ impl V3ProviderActionGate {
         witness: &V3Error05RecoveryAdmissionWitness,
         action_scope: V3ProviderActionProviderScope,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
+        self.wait_for_recovery_witness_with_budget(
+            witness,
+            action_scope,
+            v3_provider_action_recovery_budget(1),
+        )
+        .await
+    }
+
+    pub async fn wait_for_recovery_witness_with_budget(
+        &self,
+        witness: &V3Error05RecoveryAdmissionWitness,
+        action_scope: V3ProviderActionProviderScope,
+        budget: Duration,
+    ) -> Result<V3ProviderActionRecoveryTransition, String> {
         let ticket = V3ProviderActionRecoveryTicket::from_recovery_witness(witness)?;
-        self.wait_for_recovery_ticket(&ticket, action_scope).await
+        self.wait_for_recovery_ticket_with_budget(&ticket, action_scope, budget)
+            .await
     }
 
     pub async fn wait_for_recovery_ticket(
         &self,
         ticket: &V3ProviderActionRecoveryTicket,
+        action_scope: V3ProviderActionProviderScope,
+    ) -> Result<V3ProviderActionRecoveryTransition, String> {
+        self.wait_for_recovery_ticket_with_budget(
+            ticket,
+            action_scope,
+            v3_provider_action_recovery_budget(1),
+        )
+        .await
+    }
+
+    pub async fn wait_for_recovery_ticket_with_budget(
+        &self,
+        ticket: &V3ProviderActionRecoveryTicket,
         _action_scope: V3ProviderActionProviderScope,
+        budget: Duration,
     ) -> Result<V3ProviderActionRecoveryTransition, String> {
         {
             let states = self.lock_states()?;
@@ -422,9 +491,14 @@ impl V3ProviderActionGate {
                 ));
             }
         }
-        self.register_waiter(ticket.key().clone(), true, Some(ticket.generation()))?
-            .wait_recovery()
-            .await
+        self.register_waiter(
+            ticket.key().clone(),
+            true,
+            Some(ticket.generation()),
+            Some(budget),
+        )?
+        .wait_recovery()
+        .await
     }
 
     pub fn record_success(&self, key: &V3ProviderActionGateKey) -> Result<(), String> {
@@ -709,7 +783,9 @@ impl V3ProviderActionGate {
         key: V3ProviderActionGateKey,
         admit_action: bool,
         expected_generation: Option<u64>,
+        recovery_budget: Option<Duration>,
     ) -> Result<V3ProviderActionWaiter, String> {
+        let now = Instant::now();
         let (change_rx, registered_generation, ticket) = {
             let mut states = self.lock_states()?;
             let state = states
@@ -729,6 +805,7 @@ impl V3ProviderActionGate {
             admit_action,
             expected_generation,
             registered: true,
+            recovery_deadline: recovery_budget.map(|budget| now + budget),
         })
     }
 
@@ -752,6 +829,9 @@ struct V3ProviderActionWaiter {
     admit_action: bool,
     expected_generation: Option<u64>,
     registered: bool,
+    /// Declared upper bound for a recovery hold. `None` on plain admission
+    /// waits, which keep the pre-existing admission semantics.
+    recovery_deadline: Option<Instant>,
 }
 
 impl V3ProviderActionWaiter {
@@ -769,6 +849,15 @@ impl V3ProviderActionWaiter {
             V3ProviderActionRecoveryTransition::Consumed(_) => {
                 Err("provider action waiter recovery lane was already consumed".to_string())
             }
+            V3ProviderActionRecoveryTransition::BudgetExpired(_) => {
+                Err("provider action waiter recovery budget expired without admission".to_string())
+            }
+            // The flat multi-identity hold is applied by the shared recovery
+            // holder, not by a gate waiter, so a waiter never observes it.
+            V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(_) => Err(
+                "provider action waiter observed the flat multi-identity hold without admission"
+                    .to_string(),
+            ),
         }
     }
 
@@ -778,6 +867,29 @@ impl V3ProviderActionWaiter {
 
     async fn wait_transition(&mut self) -> Result<V3ProviderActionRecoveryTransition, String> {
         loop {
+            if let Some(deadline) = self.recovery_deadline {
+                if Instant::now() >= deadline {
+                    let ticket = {
+                        let mut states = self.gate.lock_states()?;
+                        match states.get_mut(&self.key) {
+                            Some(state) => {
+                                let ticket = V3ProviderActionRecoveryTicket::new(
+                                    self.key.clone(),
+                                    state.generation,
+                                )?;
+                                unregister_waiter(state, self.ticket);
+                                ticket
+                            }
+                            None => V3ProviderActionRecoveryTicket::new(
+                                self.key.clone(),
+                                self.registered_generation,
+                            )?,
+                        }
+                    };
+                    self.registered = false;
+                    return Ok(V3ProviderActionRecoveryTransition::BudgetExpired(ticket));
+                }
+            }
             let wait = {
                 let mut states = self.gate.lock_states()?;
                 let exact_has_active_admission = states
@@ -905,9 +1017,18 @@ impl V3ProviderActionWaiter {
                 })
             };
 
-            if let Some(wait) = wait {
+            let remaining_budget = self
+                .recovery_deadline
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+            let sleep_for = match (wait, remaining_budget) {
+                (Some(wait), Some(remaining)) => Some(wait.min(remaining)),
+                (Some(wait), None) => Some(wait),
+                (None, Some(remaining)) => Some(remaining),
+                (None, None) => None,
+            };
+            if let Some(sleep_for) = sleep_for {
                 tokio::select! {
-                    _ = tokio::time::sleep(wait) => {}
+                    _ = tokio::time::sleep(sleep_for) => {}
                     changed = self.change_rx.changed() => {
                         if changed.is_err() {
                             self.registered = false;

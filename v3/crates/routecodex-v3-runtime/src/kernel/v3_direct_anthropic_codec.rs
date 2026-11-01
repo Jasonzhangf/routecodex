@@ -541,6 +541,7 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
                 default_pool_member: true,
                 path: vec!["anthropic-provider".to_string()],
             },
+            distinct_identity_count: 1,
             candidate_count: 1,
             unavailable_candidates: Vec::new(),
             attempts: 1,

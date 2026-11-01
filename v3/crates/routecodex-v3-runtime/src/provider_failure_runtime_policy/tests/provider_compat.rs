@@ -379,6 +379,14 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
         result.event.next_provider_key.as_deref(),
         Some("first:default:key:sibling")
     );
+    // This fixture declares two distinct identities, so the multi-identity hold
+    // would otherwise apply. A request-local/health-neutral failure must keep
+    // its immediate reselect: no published wait means the shared handler leaves
+    // `pending_recovery` empty and the request continues at once.
+    assert_eq!(
+        result.event.wait_ms, None,
+        "health-neutral failure on a multi-identity target must not hold"
+    );
     assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));

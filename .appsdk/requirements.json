@@ -674,9 +674,36 @@
         "version": 1
       },
       "version": 25
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "发出请求其实不需要等待。唯一可能的等待就是唯一一个 provider 出现错误，那么正确的是 1 分钟等待，是否同 provider 有命中，有就直接释放请求，没有到 1 分钟也释放请求，错误进行计数。只有唯一一个 provider.model.key 才有等待选择，其余情况下出现等待就是错误的，避免风暴的等待是出错等三秒。任何主动结束请求的设计都是禁止的。",
+          "role": "user",
+          "source": "Codex conversation 01a17bd0-e0a9-70f3-80b6-0d5b8908dbfa, 2026-10-26 and 2026-10-27"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "req-20261027-single-identity-recovery",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "text": "请求发送前不得因其他请求、会话恢复队列或历史失败而等待。针对请求选定 target 中不同的完整 provider.model.key 身份计数；重复声明同一身份不增加身份数。实际 provider attempt 失败时，保留真实 typed Error 原因和上游状态，并仅对实际失败计数一次。若 target 有多个不同身份，错误发生后等待三秒再继续选择和尝试；若 target 只有一个身份，等待该监听端口内其他 session 对同一 provider.model.key 的真实业务成功，或最多等待一分钟，较早者释放本请求继续尝试。其他 provider、model、key 或监听端口的成功、探针及仅有 HTTP 响应头不能提前释放。等待本身、唤醒和取消不计为 provider 失败。\n\n不得因候选耗尽、重试次数、尝试上限、冷却、恢复等待预算或任何代理内部状态主动结束、断流或伪造成功。错误后按上述节奏恢复，等待期间保留 SSE transport keepalive，真实业务内容在可交付后按协议返回。客户端明确取消或断开及真实外部传输失败时，依照当前有效规则处理传输边界。不得向客户端返回 provider 错误、代理错误状态或 SSE error payload，模型生成的可表示无效参数仍是业务内容。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "发出请求其实不需要等待。唯一可能的等待就是唯一一个 provider 出现错误，那么正确的是 1 分钟等待，是否同 provider 有命中，有就直接释放请求，没有到 1 分钟也释放请求，错误进行计数。只有唯一一个 provider.model.key 才有等待选择，其余情况下出现等待就是错误的，避免风暴的等待是出错等三秒。任何主动结束请求的设计都是禁止的。",
+          "role": "user",
+          "source": "Codex conversation 01a17bd0-e0a9-70f3-80b6-0d5b8908dbfa, 2026-10-26 and 2026-10-27"
+        },
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "status": "active",
+        "text": "请求发送前不得因其他请求、会话恢复队列或历史失败而等待。针对请求选定 target 中不同的完整 provider.model.key 身份计数；重复声明同一身份不增加身份数。实际 provider attempt 失败时，保留真实 typed Error 原因和上游状态，并仅对实际失败计数一次。若 target 有多个不同身份，错误发生后等待三秒再继续选择和尝试；若 target 只有一个身份，等待该监听端口内其他 session 对同一 provider.model.key 的真实业务成功，或最多等待一分钟，较早者释放本请求继续尝试。其他 provider、model、key 或监听端口的成功、探针及仅有 HTTP 响应头不能提前释放。等待本身、唤醒和取消不计为 provider 失败。\n\n不得因候选耗尽、重试次数、尝试上限、冷却、恢复等待预算或任何代理内部状态主动结束、断流或伪造成功。错误后按上述节奏恢复，等待期间保留 SSE transport keepalive，真实业务内容在可交付后按协议返回。客户端明确取消或断开及真实外部传输失败时，依照当前有效规则处理传输边界。不得向客户端返回 provider 错误、代理错误状态或 SSE error payload，模型生成的可表示无效参数仍是业务内容。",
+        "version": 2
+      },
+      "version": 26
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 25
+  "version": 26
 }

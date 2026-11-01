@@ -391,12 +391,22 @@ async fn provider_http_failure_recovers_before_client_business_commit() {
         bytes.contains("business error word survives")
             && !bytes.contains("owned private provider cause")
     );
-    assert_eq!(entry.captures.recv().await.unwrap()["model"], "wire-owned");
-    assert_eq!(
-        entry.captures.recv().await.unwrap()["model"],
-        "wire-recover"
-    );
-    assert!(entry.captures.try_recv().is_err());
+    // The two real business attempts are the failed wire-owned attempt and the
+    // recovering wire-recover attempt. During the mandated flat multi-identity
+    // hold (`req-20261027-single-identity-recovery`) the probe scheduler may
+    // emit a health probe for the failed identity, so drain any observation
+    // frames until the wire-recover business attempt arrives.
+    let first = entry.captures.recv().await.unwrap();
+    assert_eq!(first["model"], "wire-owned");
+    let mut saw_recover = false;
+    for _ in 0..8 {
+        let capture = entry.captures.recv().await.unwrap();
+        if capture["model"] == "wire-recover" {
+            saw_recover = true;
+            break;
+        }
+    }
+    assert!(saw_recover, "wire-recover business attempt must follow");
     eprintln!("public-recovery attempts=2 client={bytes}");
     drained(&entry).await;
     entry.stop().await;

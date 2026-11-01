@@ -1067,6 +1067,36 @@ where
                     trace.push("V3ProviderActionGateConsumedReevaluation");
                     continue;
                 }
+                V3ProviderActionRecoveryTransition::BudgetExpired(_) => {
+                    pending_provider_action_recovery = None;
+                    retry_selected = Some(selected);
+                    trace.push("V3ProviderActionGateRecoveryBudgetExpired");
+                    continue;
+                }
+                V3ProviderActionRecoveryTransition::MultiIdentityHoldElapsed(_) => {
+                    // The flat storm-avoidance hold only paused this request. The
+                    // replacement was resolved before it, so continue with that
+                    // attempt instead of selecting again.
+                    pending_provider_action_recovery = None;
+                    drop(provider_action_permit.take());
+                    provider_action_permit_target = None;
+                    match admit_v3_selected_target_after_recovery(&selected) {
+                        V3AdmitAfterRecovery::Admitted(admission) => {
+                            selected_admission = Some(admission)
+                        }
+                        V3AdmitAfterRecovery::Busy => {
+                            let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                            failed_candidates.insert(busy_key.clone());
+                            request_local_busy_candidates.insert(busy_key);
+                            trace.push("V3ProviderActionGateRecoveryBusy");
+                            continue;
+                        }
+                        V3AdmitAfterRecovery::Failed(reason) => {
+                            return Err(V3RelayCoreError::Target(reason))
+                        }
+                    }
+                    trace.push("V3ProviderActionGateMultiIdentityHoldElapsed");
+                }
             }
         }
         let transport_attempt =

@@ -1061,6 +1061,35 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         1,
                     )
                 };
+                // Same rule as the Direct engine: after a real provider attempt
+                // failure on a target with several distinct identities, the request
+                // continues only after the flat hold owned by the shared recovery
+                // holder. "Real" means the provider attempt actually failed: an
+                // error status at or above 400. A 200 that merely failed to yield
+                // deliverable business content is a local response-processing
+                // problem, not a provider failure, so it keeps its immediate
+                // reselect. Request-local/health-neutral failures and 429 also keep
+                // their existing behavior; 429 keeps its rate-limit lane and the
+                // shared holder applies the same hold to it from the identity count.
+                // "Real" means the upstream provider actually answered with an
+                // error status. Use the real upstream HTTP status
+                // (`provider_status`), not the synthesized policy `status`: a 200
+                // that merely failed to decode into deliverable business content
+                // is a local response-processing problem and must keep its
+                // immediate reselect. A missing upstream status (transport/local
+                // failure) is also not a real provider attempt failure.
+                let real_provider_failure =
+                    matches!(provider_status, Some(s) if (400..600).contains(&s));
+                let multi_identity_hold = if real_provider_failure
+                    && !is_request_local_compat_failure
+                    && provider_status != Some(429)
+                {
+                    crate::provider_action_gate::v3_provider_action_multi_identity_hold(
+                        selected.distinct_identity_count,
+                    )
+                } else {
+                    None
+                };
                 let recovery = if is_request_local_compat_failure || status != 429 {
                     None
                 } else {
@@ -1110,6 +1139,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                                 .recovery_witness()
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
+                    } else if multi_identity_hold.is_some() {
+                        // The multi-identity hold witness names the failed
+                        // identity only; it carries no lane admission.
+                        Some(
+                            request_local_recovery()
+                                .map_err(v3_relay_provider_policy_ordinary_error)?,
+                        )
                     } else if !is_request_local_compat_failure && status != 429 {
                         None
                     } else {
@@ -1118,7 +1154,9 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
                     },
-                    !is_request_local_compat_failure && status != 429,
+                    !is_request_local_compat_failure
+                        && status != 429
+                        && multi_identity_hold.is_none(),
                 )
                 .map_err(Err)?;
                 if is_request_local_compat_failure {
@@ -1144,7 +1182,15 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                             health_record,
                             action: "switch_provider",
                             next_provider_key: Some(alternative_key),
-                            wait_ms: recovery.as_ref().map(|record| record.minimum_delay_ms),
+                            // A Some(wait_ms) is what carries `pending_recovery`
+                            // to the shared recovery holder, so the multi-identity
+                            // hold must publish its window here. The hold itself
+                            // happens once, inside `wait_for_error05_recovery`.
+                            wait_ms: multi_identity_hold
+                                .map(|hold| hold.as_millis() as u64)
+                                .or_else(|| {
+                                    recovery.as_ref().map(|record| record.minimum_delay_ms)
+                                }),
                             diagnostic_source: attempt_source.clone(),
                         },
                     ),

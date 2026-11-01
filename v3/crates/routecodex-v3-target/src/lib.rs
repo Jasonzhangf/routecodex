@@ -84,6 +84,10 @@ pub struct V3Target09CandidateSetExpanded {
 pub struct V3Target10ConcreteProviderSelected {
     pub route: V3Router07OpaqueTargetHitOnce,
     pub candidate: V3TargetCandidate,
+    /// Distinct full `provider.model.key` identities declared by the selected
+    /// target. Repeated declarations of one identity count once. This is the
+    /// authority for recovery-hold budgeting, not `candidate_count`.
+    pub distinct_identity_count: usize,
     pub candidate_count: usize,
     pub unavailable_candidates: Vec<String>,
     pub attempts: usize,
@@ -479,6 +483,24 @@ impl V3TargetInterpreter {
             .count()
     }
 
+    /// Counts distinct full `provider.model.key` identities declared by an
+    /// expanded candidate set. Repeated declarations of one identity count
+    /// once, and cooled or otherwise unavailable identities still count: the
+    /// recovery hold must know how many distinct identities the target
+    /// declares, not how many happen to be selectable right now.
+    pub fn distinct_declared_identity_count(candidates: &[V3TargetCandidate]) -> usize {
+        let mut identities = std::collections::BTreeSet::new();
+        for candidate in candidates {
+            identities.insert((
+                candidate.provider_id.clone(),
+                candidate.interface_id.clone(),
+                candidate.auth_alias.clone(),
+                candidate.model_id.clone(),
+            ));
+        }
+        identities.len().max(1)
+    }
+
     pub fn select_available_with_health<R: V3ProviderSchedulingReader>(
         &self,
         expanded: V3Target09CandidateSetExpanded,
@@ -536,6 +558,7 @@ impl V3TargetInterpreter {
         // capability and declared availability, so a window-inactive or
         // capability-mismatched sibling cannot inflate the pool size.
         let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
+        let distinct_identity_count = Self::distinct_declared_identity_count(&expanded.candidates);
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !candidate_satisfies_required_capabilities(candidate) {
                 unavailable.push(format!(
@@ -792,6 +815,7 @@ impl V3TargetInterpreter {
         Ok(V3Target10ConcreteProviderSelected {
             route,
             candidate: candidate.clone(),
+            distinct_identity_count,
             candidate_count,
             unavailable_candidates: unavailable,
             attempts: index + 1,

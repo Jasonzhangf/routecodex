@@ -481,6 +481,7 @@ mod tests {
                     default_pool_member: true,
                     path: vec!["gemini-provider".to_string()],
                 },
+                distinct_identity_count: 1,
                 candidate_count: 1,
                 unavailable_candidates: Vec::new(),
                 attempts: 0,

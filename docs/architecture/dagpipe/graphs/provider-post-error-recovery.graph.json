@@ -1,0 +1,47 @@
+{
+  "id": "v3.provider_post_error_recovery",
+  "version": "1",
+  "inputs": [
+    { "id": "failed-attempt", "schema": "Object", "schema_ref": "v3.provider_post_error_recovery.arc.failed_attempt" }
+  ],
+  "nodes": [
+    {
+      "id": "record_failed_attempt",
+      "operator": "routecodex.v3.error.record_failed_attempt",
+      "operator_version": "1",
+      "inputs": ["failed-attempt"],
+      "output": { "id": "recorded-failure", "schema": "Object", "schema_ref": "v3.provider_post_error_recovery.arc.recorded_failure" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.error.chain"], "writes": ["v3.error.chain"] }
+    },
+    {
+      "id": "classify_route_identity_count",
+      "operator": "routecodex.v3.runtime.classify_route_identity_count",
+      "operator_version": "1",
+      "inputs": ["recorded-failure"],
+      "output": { "id": "wait-policy", "schema": "Object", "schema_ref": "v3.provider_post_error_recovery.arc.wait_policy" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.error.chain", "v3.target.candidate_set"], "writes": [] }
+    },
+    {
+      "id": "wait_for_retry_or_cancellation",
+      "operator": "routecodex.v3.runtime.wait_for_retry_or_cancellation",
+      "operator_version": "1",
+      "inputs": ["wait-policy"],
+      "output": { "id": "recovery-disposition", "schema": "Object", "schema_ref": "v3.provider_post_error_recovery.arc.disposition" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.provider.health_state"], "writes": [] }
+    }
+  ],
+  "edges": [
+    { "from": "record_failed_attempt", "to": "classify_route_identity_count", "arc_id": "recorded-failure" },
+    { "from": "classify_route_identity_count", "to": "wait_for_retry_or_cancellation", "arc_id": "wait-policy" }
+  ],
+  "outputs": ["recovery-disposition"]
+}
