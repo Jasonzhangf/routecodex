@@ -6,10 +6,14 @@ use crate::hub_v1::{
     V3ProviderResponsesJsonFrameOutcome, V3RuntimeStreamObservation,
 };
 use crate::nodes::V3ProviderAttemptSseStream;
+use crate::shared_custom_tool_function_sse::{
+    apply_custom_tool_function_sse_chunk_buffered, flush_custom_tool_function_sse_buffer,
+};
 use futures_util::{stream, StreamExt};
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
-    V3Error01SourceRaised, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
+    build_v3_error_01_source_raised_internal, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3ExternalErrorKind, V3ExternalErrorLink, V3InternalErrorCode,
 };
 use routecodex_v3_provider_responses::{
     V3ProviderError, V3ProviderResp14Raw, V3ProviderResponseBody, V3ProviderSseStream,
@@ -23,7 +27,76 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub(crate) use crate::shared_direct_thinking_compat::project_v3_thinking_tag_text;
+pub(crate) type V3DirectSourceError = Result<
+    V3Error01SourceRaised,
+    crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
+>;
+
+pub(crate) type V3DirectSourceResult<T> = Result<T, V3DirectSourceError>;
+
+pub(crate) fn direct_source_error(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    source_input: crate::operation_runner::V3Err01SourceInput,
+) -> V3DirectSourceError {
+    crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+        source_kind,
+        source_stage,
+        code,
+        message,
+        source_input,
+    )
+    .map(|(_projection, source)| source)
+}
+
+pub(crate) fn direct_plain_error(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> V3DirectSourceError {
+    direct_source_error(
+        source_kind,
+        source_stage,
+        code,
+        message,
+        crate::operation_runner::V3Err01SourceInput::Plain,
+    )
+}
+
+pub(crate) fn direct_internal_error(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    internal_code: V3InternalErrorCode,
+) -> V3DirectSourceError {
+    direct_source_error(
+        source_kind,
+        source_stage,
+        code,
+        message,
+        crate::operation_runner::V3Err01SourceInput::Internal(internal_code),
+    )
+}
+
+pub(crate) fn direct_external_error(
+    source_kind: V3ErrorSourceKind,
+    source_stage: &'static str,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    external: V3ExternalErrorLink,
+) -> V3DirectSourceError {
+    direct_source_error(
+        source_kind,
+        source_stage,
+        code,
+        message,
+        crate::operation_runner::V3Err01SourceInput::External(external),
+    )
+}
 
 /// Direct SSE 首语义帧与帧间超时：provider 返回 200 后挂起时 fail-fast。
 /// 未配置时使用 30s compatibility default；慢 provider 可显式覆盖该预算。
@@ -47,23 +120,28 @@ pub(crate) fn v3_route_plan_error_source(
     stage: &'static str,
     code: &'static str,
     error: V3VirtualRouterError,
-) -> V3Error01SourceRaised {
-    match error {
-        V3VirtualRouterError::DirectModelUnknown { provider, model } => {
-            build_v3_error_01_source_raised(
-                V3ErrorSourceKind::ModelNotFound,
-                stage,
-                "direct_model_not_found",
-                format!("direct provider model {provider}.{model} is not configured"),
-            )
-        }
-        other => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::RuntimeFailure,
-            stage,
-            code,
-            other.to_string(),
-        ),
-    }
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
+    // An unlisted model name is no longer a route-plan error: the router falls
+    // back to normal classification, so every remaining route-plan failure is a
+    // real runtime failure.
+    raise_v3_runtime_failure_source(stage, code, error.to_string())
+}
+
+pub(crate) fn raise_v3_runtime_failure_source(
+    stage: &'static str,
+    code: &'static str,
+    message: impl Into<String>,
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
+    crate::provider_failure_runtime_policy::raise_v3_source_via_err01(
+        V3ErrorSourceKind::RuntimeFailure,
+        stage,
+        code,
+        message,
+        crate::operation_runner::V3Err01SourceInput::Plain,
+    )
+    .map(|(_projection, source)| source)
 }
 
 pub(crate) enum V3ProviderAttemptBody {
@@ -140,7 +218,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan(
     raw: V3ProviderResp14Raw,
     plan: &V3DirectResponseCompatPlan,
     tool_thinking_enabled: bool,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     project_provider_raw_to_client_payload_with_plan_and_projection(
         raw,
         plan,
@@ -155,7 +233,7 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
     plan: &V3DirectResponseCompatPlan,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
         raw,
         plan,
@@ -166,21 +244,138 @@ pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_project
     .await
 }
 
+/// Apply the configured provider-private response compatibility profile to a
+/// provider response payload.
+///
+/// This delegates to the single provider response compat owner
+/// (`build_provider_resp_compat_02_from_v3_provider_resp_inbound_01` ->
+/// `run_resp_inbound_stage3_compat`). The Direct path must never reimplement
+/// these rewrites; it only reaches the same owner Relay uses.
+pub(crate) fn apply_direct_provider_response_compat(
+    payload: serde_json::Value,
+    profile: &str,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    request_id: &str,
+    custom_tool_function_binding: Option<&provider_compat_core::CustomToolFunctionBinding>,
+) -> V3DirectSourceResult<serde_json::Value> {
+    apply_direct_provider_response_compat_value(
+        payload,
+        profile,
+        provider_protocol,
+        request_id,
+        custom_tool_function_binding,
+    )
+    .map_err(|error| {
+        direct_internal_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3DirectResp14ProviderCompat",
+            "direct_provider_response_compat_failed",
+            error,
+            V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared,
+        )
+    })
+}
+
+pub(crate) fn apply_direct_provider_response_compat_value(
+    payload: serde_json::Value,
+    profile: &str,
+    provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
+    request_id: &str,
+    custom_tool_function_binding: Option<&provider_compat_core::CustomToolFunctionBinding>,
+) -> Result<serde_json::Value, String> {
+    use crate::hub_v1::{
+        build_provider_resp_compat_02_from_v3_provider_resp_inbound_01,
+        build_v3_provider_resp_inbound_01_raw_with_compat_profile, V3HubEntryProtocol,
+        V3HubExecutionMode, V3HubInvocationSource, V3HubTransportIntent,
+        V3ProviderRespInbound01RawContext,
+    };
+    let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
+        payload,
+        V3ProviderRespInbound01RawContext::new(
+            match provider_protocol {
+                V3HubProviderWireProtocol::Responses => V3HubEntryProtocol::Responses,
+                V3HubProviderWireProtocol::OpenAiChat => V3HubEntryProtocol::OpenAiChat,
+                V3HubProviderWireProtocol::Anthropic => V3HubEntryProtocol::Anthropic,
+                V3HubProviderWireProtocol::Gemini => V3HubEntryProtocol::Gemini,
+            },
+            provider_protocol,
+            V3HubExecutionMode::Direct,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        )
+        .with_compatibility_profile(Some(profile))
+        .with_custom_tool_function_binding(custom_tool_function_binding.cloned()),
+    );
+    let resp02 = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)
+        .map_err(|error| format!("profile {profile} request_id {request_id}: {error}"))?;
+    Ok(resp02.raw().payload.0.as_ref().clone())
+}
+
 pub(crate) async fn project_provider_raw_to_client_payload_with_plan_and_projection_and_observation_context(
     raw: V3ProviderResp14Raw,
     plan: &V3DirectResponseCompatPlan,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     observation_session_id: Option<&str>,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     project_provider_raw_to_client_payload_inner(
         raw,
         plan,
         tool_thinking_enabled,
         toolreason_client_projection,
         observation_session_id,
+        false,
     )
     .await
+}
+
+pub(crate) async fn project_provider_raw_to_client_payload_for_complete_response_hooks(
+    raw: V3ProviderResp14Raw,
+    plan: &V3DirectResponseCompatPlan,
+    tool_thinking_enabled: bool,
+    toolreason_client_projection: bool,
+    observation_session_id: Option<&str>,
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
+    project_provider_raw_to_client_payload_inner(
+        raw,
+        plan,
+        tool_thinking_enabled,
+        toolreason_client_projection,
+        observation_session_id,
+        true,
+    )
+    .await
+}
+
+pub(crate) fn enforce_v3_provider_json_attempt_admission(
+    provider_protocol: V3HubProviderWireProtocol,
+    payload: &serde_json::Value,
+    provider_id: &str,
+    status: u16,
+) -> V3DirectSourceResult<()> {
+    if crate::hub_v1::v3_provider_json_attempt_has_deliverable_business_content(
+        provider_protocol,
+        payload,
+    ) {
+        return Ok(());
+    }
+    Err(direct_external_error(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_empty",
+        "provider returned a complete response with no deliverable business content",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(status),
+            code: Some("PROVIDER_RESPONSE_EMPTY".to_string()),
+            provider_id: Some(provider_id.to_string()),
+            upstream_request_id: None,
+            message: Some(
+                "provider returned a complete response with no deliverable business content"
+                    .to_string(),
+            ),
+        },
+    ))
 }
 
 async fn project_provider_raw_to_client_payload_inner(
@@ -189,11 +384,12 @@ async fn project_provider_raw_to_client_payload_inner(
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
     observation_session_id: Option<&str>,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+    complete_response_hook_pending: bool,
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     let provider_id = raw.provider_id().to_string();
     let request_id = raw.request_id().to_string();
     if raw.status() >= 400 {
-        return Err(build_v3_error_01_source_raised_external(
+        return Err(direct_external_error(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             format!("provider_http_{}", raw.status()),
@@ -218,11 +414,21 @@ async fn project_provider_raw_to_client_payload_inner(
     // 不按 provider_id 部署身份分支（与请求侧 wire 层同一契约）。
     let deepseek_console_go =
         compat_plan.has_block(V3DirectResponseCompatBlock::DeepseekConsoleGoResponseShape);
+    // Provider-private response compatibility (chat:* profiles) is applied by the
+    // single provider response compat owner, never reimplemented here.
+    let provider_response_compat = compat_plan
+        .has_block(V3DirectResponseCompatBlock::ProviderResponseCompat)
+        .then(|| compat_plan.provider_response_compat_profile())
+        .flatten();
     // The thinking-tag wrapper is a Responses event rewriter and requires a
     // Responses terminal event. Chat and Anthropic streams have different
     // terminal contracts; applying the wrapper there aborts the stream before
     // the protocol-specific Resp03 toolreason hook can close out observation.
-    let thinking_tags = compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
+    // The registered complete hook normalizes thinking once, after serialized
+    // tools have been harvested. Legacy raw-projection consumers keep their
+    // configured profile behavior.
+    let thinking_tags = !complete_response_hook_pending
+        && compat_plan.has_block(V3DirectResponseCompatBlock::ThinkingTags)
         && compat_plan.provider_protocol == V3HubProviderWireProtocol::Responses;
     let sse_first_frame_timeout_ms = raw.sse_first_frame_timeout_ms();
     let content_type = raw
@@ -230,7 +436,7 @@ async fn project_provider_raw_to_client_payload_inner(
         .map_err(provider_body_source)?
         .map(ToOwned::to_owned)
         .ok_or_else(|| {
-            build_v3_error_01_source_raised_external(
+            direct_external_error(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
                 "provider_content_type_missing",
@@ -257,6 +463,8 @@ async fn project_provider_raw_to_client_payload_inner(
                     sse_first_frame_timeout_ms,
                     thinking_tags,
                     deepseek_console_go,
+                    provider_response_compat,
+                    compat_plan.custom_tool_function_binding.clone(),
                     compat_plan.provider_protocol,
                     tool_thinking_enabled,
                     toolreason_client_projection,
@@ -270,7 +478,7 @@ async fn project_provider_raw_to_client_payload_inner(
         }
     } else if content_type.starts_with("application/json") {
         let V3ProviderResponseBody::Json(body_bytes) = provider_body else {
-            return Err(build_v3_error_01_source_raised_external(
+            return Err(direct_external_error(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
                 "provider_response_body_kind_mismatch",
@@ -289,7 +497,7 @@ async fn project_provider_raw_to_client_payload_inner(
         };
         let mut parsed: serde_json::Value =
             serde_json::from_slice(&body_bytes).map_err(|error| {
-                build_v3_error_01_source_raised_external(
+                direct_external_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     "provider_response_json_invalid",
@@ -310,28 +518,33 @@ async fn project_provider_raw_to_client_payload_inner(
         if deepseek_console_go {
             parsed = provider_compat_core::apply_deepseek_console_go_response_compat(parsed);
         }
-        if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
-            compat_plan.provider_protocol,
-            &parsed,
-        ) {
-            return Err(build_v3_error_01_source_raised_external(
-                V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                failure.code.clone(),
-                failure.message.clone(),
-                V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider,
-                    status: Some(status),
-                    code: Some(failure.code),
-                    provider_id: Some(provider_id),
-                    upstream_request_id: None,
-                    message: Some(failure.message),
-                },
-            ));
+        if let Some(profile) = provider_response_compat.as_deref() {
+            parsed = match apply_direct_provider_response_compat(
+                parsed,
+                profile,
+                compat_plan.provider_protocol,
+                &request_id,
+                compat_plan.custom_tool_function_binding.as_ref(),
+            ) {
+                Ok(parsed) => parsed,
+                Err(failure) => return Err(failure),
+            };
+        }
+        // Complete-attempt success acceptance for the buffered JSON body: a
+        // provider response with no deliverable business content is an internal
+        // 502 for the Error chain, never a normal empty completion. The
+        // judgment is shared with the Relay/SSE boundaries.
+        if !complete_response_hook_pending {
+            enforce_v3_provider_json_attempt_admission(
+                compat_plan.provider_protocol,
+                &parsed,
+                &provider_id,
+                status,
+            )?;
         }
         (V3ProviderAttemptBody::Json(parsed), None)
     } else {
-        return Err(build_v3_error_01_source_raised_external(
+        return Err(direct_external_error(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_content_type_unsupported",
@@ -370,6 +583,8 @@ async fn process_direct_sse_stream(
     sse_first_frame_timeout_ms: Option<u64>,
     thinking_tags: bool,
     deepseek_console_go: bool,
+    provider_response_compat: Option<&str>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -378,11 +593,15 @@ async fn process_direct_sse_stream(
         V3ProviderAttemptSseStream,
         Option<V3RuntimeStreamObservation>,
     ),
-    V3Error01SourceRaised,
+    V3DirectSourceError,
 > {
     let compatibility_profile = thinking_tags
         .then_some("responses:thinking-tags")
-        .or_else(|| deepseek_console_go.then_some("responses:deepseek-console-go"));
+        .or_else(|| deepseek_console_go.then_some("responses:deepseek-console-go"))
+        .or_else(|| {
+            provider_response_compat
+                .filter(|profile| *profile == provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE)
+        });
     let stream = guard_initial_direct_sse_provider_failure(
         provider_id,
         stream,
@@ -400,6 +619,7 @@ async fn process_direct_sse_stream(
         usage_observation.clone(),
         v3_direct_sse_frame_interval_timeout(sse_first_frame_timeout_ms),
         compatibility_profile,
+        custom_tool_function_binding,
         provider_protocol,
         // Resp03 toolreason parsing/projection has one owner: the registered
         // direct SSE typed hook applied by kernel/direct_sse_consumers.rs.
@@ -418,7 +638,7 @@ async fn guard_initial_direct_sse_provider_failure(
     sse_first_frame_timeout_ms: Option<u64>,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3ProviderSseStream> {
     let first_event_timeout = sse_first_frame_timeout_ms
         .map(std::time::Duration::from_millis)
         .unwrap_or_else(v3_direct_sse_default_timeout);
@@ -438,7 +658,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
     first_event_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-) -> Result<V3ProviderSseStream, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3ProviderSseStream> {
     let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut buffered = Vec::<Vec<u8>>::new();
     // This is a deadline for the first semantic event, not a per-chunk idle
@@ -454,7 +674,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
         let next = tokio::time::timeout_at(first_event_deadline, stream.next())
             .await
             .map_err(|_| {
-                build_v3_error_01_source_raised_external(
+                direct_external_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     "provider_response_sse_first_event_timeout",
@@ -476,7 +696,7 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
             decoder
                 .finish()
                 .map_err(|error| sse_transport_source(provider_id, error))?;
-            return Err(build_v3_error_01_source_raised_external(
+            return Err(direct_external_error(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
                 "provider_response_sse_empty",
@@ -504,7 +724,6 @@ async fn guard_initial_direct_sse_provider_failure_with_timeout(
                 provider_id,
                 frame.frame().fields(),
                 compatibility_profile,
-                should_start_client_stream,
                 provider_protocol,
             )? == DirectSseInitialFrameAction::StartClientStream
             {
@@ -523,9 +742,8 @@ fn direct_sse_frame_provider_failure_source(
     provider_id: &str,
     fields: &[SseField],
     _compatibility_profile: Option<&str>,
-    business_output_seen: bool,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-) -> Result<DirectSseInitialFrameAction, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<DirectSseInitialFrameAction> {
     let data = normalize_v3_provider_sse_json_data_for_event_name(provider_protocol, fields)
         .map_err(|message| {
             build_v3_provider_sse_json_error(
@@ -585,18 +803,9 @@ fn direct_sse_frame_provider_failure_source(
             Ok(DirectSseInitialFrameAction::ContinueBuffering)
         }
         V3ProviderResponsesJsonFrameOutcome::StartClientStream
-        | V3ProviderResponsesJsonFrameOutcome::Terminal => {
+        | V3ProviderResponsesJsonFrameOutcome::Terminal
+        | V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
             Ok(DirectSseInitialFrameAction::StartClientStream)
-        }
-        V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput if business_output_seen => {
-            Ok(DirectSseInitialFrameAction::StartClientStream)
-        }
-        V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput => {
-            Err(build_v3_provider_sse_json_error(
-                provider_id,
-                "provider_response_sse_empty",
-                "provider SSE completed before content or tool output".to_string(),
-            ))
         }
         V3ProviderResponsesJsonFrameOutcome::Failure { code, message } => Err(
             build_v3_provider_sse_json_error(provider_id, &code, message),
@@ -614,8 +823,8 @@ fn build_v3_provider_sse_json_error(
     provider_id: &str,
     code: &str,
     message: String,
-) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_external(
+) -> V3DirectSourceError {
+    direct_external_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         code,
@@ -644,6 +853,7 @@ fn observed_sse_client_stream(
         usage_observation,
         v3_direct_sse_default_timeout(),
         compatibility_profile,
+        None,
         provider_protocol,
         false,
         false,
@@ -690,6 +900,7 @@ fn observed_sse_client_stream_with_timeout_and_projection(
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
+        None,
         provider_protocol,
         tool_thinking_enabled,
         toolreason_client_projection,
@@ -704,6 +915,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -714,6 +926,7 @@ fn observed_sse_client_stream_with_timeout_and_projection_and_request_id(
         usage_observation,
         frame_interval_timeout,
         compatibility_profile,
+        custom_tool_function_binding,
         provider_protocol,
         tool_thinking_enabled,
         toolreason_client_projection,
@@ -728,6 +941,7 @@ fn observed_sse_client_stream_with_protocol(
     usage_observation: V3RuntimeStreamObservation,
     frame_interval_timeout: std::time::Duration,
     compatibility_profile: Option<&str>,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
     tool_thinking_enabled: bool,
     toolreason_client_projection: bool,
@@ -746,6 +960,7 @@ fn observed_sse_client_stream_with_protocol(
         tool_thinking_enabled: bool,
         toolreason_client_projection: bool,
         compatibility_buffer: Vec<u8>,
+        custom_tool_function_sse_state: provider_compat_core::CustomToolFunctionSseState,
         tool_thinking_buffer: Vec<u8>,
         tool_thinking_tool_names: Vec<String>,
         tool_thinking_pending_reasons: Vec<Option<String>>,
@@ -767,6 +982,9 @@ fn observed_sse_client_stream_with_protocol(
             tool_thinking_enabled,
             toolreason_client_projection,
             compatibility_buffer: Vec::new(),
+            custom_tool_function_sse_state: provider_compat_core::CustomToolFunctionSseState::new(
+                custom_tool_function_binding.unwrap_or_default(),
+            ),
             tool_thinking_buffer: Vec::new(),
             tool_thinking_tool_names: Vec::new(),
             tool_thinking_pending_reasons: Vec::new(),
@@ -798,7 +1016,7 @@ fn observed_sse_client_stream_with_protocol(
                 }
                 Err(_) => {
                     state.done = true;
-                    let error = build_v3_error_01_source_raised_external(
+                    let error = direct_external_error(
                         V3ErrorSourceKind::ProviderFailure,
                         "V3ProviderResp14Raw",
                         "provider_response_sse_inter_event_timeout",
@@ -820,22 +1038,40 @@ fn observed_sse_client_stream_with_protocol(
             };
             match next {
                 Some(Ok(chunk)) => {
+                    let custom_tool_function_profile = state.compatibility_profile.as_deref()
+                        == Some(provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE);
                     let client_chunk = if state.tool_thinking_enabled {
-                        apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
-                            &mut state.tool_thinking_buffer,
-                            &mut state.tool_thinking_tool_names,
-                            &mut state.tool_thinking_pending_reasons,
-                            &mut state.tool_thinking_reason_emitted,
-                            state.toolreason_client_projection,
-                            &chunk,
-                            state.session_id.as_deref(),
-                            state.request_id.as_deref(),
-                        )
+                        let projected =
+                            apply_toolreason_to_sse_chunk_buffered_with_state_and_request_id(
+                                &mut state.tool_thinking_buffer,
+                                &mut state.tool_thinking_tool_names,
+                                &mut state.tool_thinking_pending_reasons,
+                                &mut state.tool_thinking_reason_emitted,
+                                state.toolreason_client_projection,
+                                &chunk,
+                                state.session_id.as_deref(),
+                                state.request_id.as_deref(),
+                            );
+                        if custom_tool_function_profile {
+                            apply_custom_tool_function_sse_chunk_buffered(
+                                &mut state.compatibility_buffer,
+                                &mut state.custom_tool_function_sse_state,
+                                &projected,
+                            )
+                        } else {
+                            projected
+                        }
                     } else if state.compatibility_profile.as_deref()
                         == Some("responses:deepseek-console-go")
                     {
                         apply_deepseek_console_go_sse_chunk_buffered(
                             &mut state.compatibility_buffer,
+                            &chunk,
+                        )
+                    } else if custom_tool_function_profile {
+                        apply_custom_tool_function_sse_chunk_buffered(
+                            &mut state.compatibility_buffer,
+                            &mut state.custom_tool_function_sse_state,
                             &chunk,
                         )
                     } else if state
@@ -882,12 +1118,22 @@ fn observed_sse_client_stream_with_protocol(
                     Some((Err(provider_body_source(error)), state))
                 }
                 None => {
+                    let custom_tool_function_profile = state.compatibility_profile.as_deref()
+                        == Some(provider_compat_core::CUSTOM_TOOL_FUNCTION_PROFILE);
                     let buffered_client_chunk = if state.tool_thinking_enabled {
                         let buffered = std::mem::take(&mut state.tool_thinking_buffer);
                         if buffered.is_empty() {
-                            None
+                            if custom_tool_function_profile {
+                                flush_custom_tool_function_sse_buffer(
+                                    &mut state.compatibility_buffer,
+                                    &mut state.custom_tool_function_sse_state,
+                                    !state.decoder.remaining_bytes().is_empty(),
+                                )
+                            } else {
+                                None
+                            }
                         } else {
-                            Some(
+                            let projected =
                                 crate::hub_v1::project_v3_toolreason_sse_final_buffer_at_resp03_with_projection_and_context(
                                     &buffered,
                                     &mut state.tool_thinking_tool_names,
@@ -896,8 +1142,24 @@ fn observed_sse_client_stream_with_protocol(
                                     state.toolreason_client_projection,
                                     state.session_id.as_deref(),
                                     state.request_id.as_deref(),
-                                ),
-                            )
+                                );
+                            if custom_tool_function_profile {
+                                let mut out = apply_custom_tool_function_sse_chunk_buffered(
+                                    &mut state.compatibility_buffer,
+                                    &mut state.custom_tool_function_sse_state,
+                                    &projected,
+                                );
+                                if let Some(flushed) = flush_custom_tool_function_sse_buffer(
+                                    &mut state.compatibility_buffer,
+                                    &mut state.custom_tool_function_sse_state,
+                                    !state.decoder.remaining_bytes().is_empty(),
+                                ) {
+                                    out.extend(flushed);
+                                }
+                                Some(out)
+                            } else {
+                                Some(projected)
+                            }
                         }
                     } else if state
                         .compatibility_profile
@@ -910,6 +1172,12 @@ fn observed_sse_client_stream_with_protocol(
                         } else {
                             Some(apply_cc_sol_thinking_tags_to_sse_chunk(&buffered))
                         }
+                    } else if custom_tool_function_profile {
+                        flush_custom_tool_function_sse_buffer(
+                            &mut state.compatibility_buffer,
+                            &mut state.custom_tool_function_sse_state,
+                            !state.decoder.remaining_bytes().is_empty(),
+                        )
                     } else {
                         None
                     };
@@ -951,7 +1219,7 @@ fn observed_sse_client_stream_with_protocol(
                         Ok(()) => {
                             state.done = true;
                             Some((
-                                Err(build_v3_error_01_source_raised_external(
+                                Err(direct_external_error(
                                     V3ErrorSourceKind::ProviderFailure,
                                     "V3ProviderResp14Raw",
                                     "provider_response_sse_stream",
@@ -1148,7 +1416,7 @@ fn observe_sse_frame_chunk(
     decoder: &mut SseIncrementalDecoder,
     usage_observation: &V3RuntimeStreamObservation,
     provider_protocol: crate::hub_v1::V3HubProviderWireProtocol,
-) -> Result<(bool, bool), V3Error01SourceRaised> {
+) -> V3DirectSourceResult<(bool, bool)> {
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(|error| sse_transport_source(provider_id, error))?;
@@ -1159,7 +1427,7 @@ fn observe_sse_frame_chunk(
         observe_sse_usage_frame(provider_id, fields, usage_observation)?;
         let data = normalize_v3_provider_sse_json_data_for_event_name(provider_protocol, fields)
             .map_err(|message| {
-                build_v3_error_01_source_raised(
+                direct_plain_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     "provider_response_sse_event_invalid",
@@ -1168,7 +1436,7 @@ fn observe_sse_frame_chunk(
             })?;
         let classification =
             classify_v3_provider_sse_json_data(provider_protocol, &data).map_err(|message| {
-                build_v3_error_01_source_raised(
+                direct_plain_error(
                     V3ErrorSourceKind::ProviderFailure,
                     "V3ProviderResp14Raw",
                     "provider_response_sse_event_invalid",
@@ -1178,7 +1446,7 @@ fn observe_sse_frame_chunk(
         if let Some(V3ProviderResponsesJsonFrameOutcome::Failure { code, message }) =
             classification.as_ref()
         {
-            return Err(build_v3_error_01_source_raised(
+            return Err(direct_plain_error(
                 V3ErrorSourceKind::ProviderFailure,
                 "V3ProviderResp14Raw",
                 code.clone(),
@@ -1204,7 +1472,7 @@ fn observe_sse_usage_frame(
     provider_id: &str,
     fields: &[SseField],
     usage_observation: &V3RuntimeStreamObservation,
-) -> Result<(), V3Error01SourceRaised> {
+) -> V3DirectSourceResult<()> {
     let data = collect_v3_provider_sse_json_data(fields);
     // keepalive 文本帧不是 JSON 载荷：usage 观测直接放行，不把它打成
     // provider SSE event invalid（分类边界已在 classify 内统一忽略）。
@@ -1212,7 +1480,7 @@ fn observe_sse_usage_frame(
         return Ok(());
     }
     let Some(event) = parse_v3_provider_sse_json_data(&data).map_err(|error| {
-        build_v3_error_01_source_raised_external(
+        direct_external_error(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_sse_event_invalid",
@@ -1233,7 +1501,7 @@ fn observe_sse_usage_frame(
     usage_observation
         .record_provider_event_json(&event)
         .map_err(|error| {
-            build_v3_error_01_source_raised(
+            direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3ProviderResp14Raw",
                 "provider_response_sse_usage_observation_failed",
@@ -1242,10 +1510,10 @@ fn observe_sse_usage_frame(
         })
 }
 
-fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
+fn provider_body_source(error: V3ProviderError) -> V3DirectSourceError {
     let message = error.to_string();
     match error {
-        V3ProviderError::ClientDisconnect { provider_id, .. } => build_v3_error_01_source_raised(
+        V3ProviderError::ClientDisconnect { provider_id, .. } => direct_plain_error(
             V3ErrorSourceKind::ClientDisconnect,
             "V3ProviderResp14Raw",
             "client_disconnect",
@@ -1255,7 +1523,7 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
             provider_id,
             reason,
             ..
-        } => build_v3_error_01_source_raised_external(
+        } => direct_external_error(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_body_error",
@@ -1273,7 +1541,7 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
             provider_id,
             reason,
             ..
-        } => build_v3_error_01_source_raised_external(
+        } => direct_external_error(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_malformed_sse",
@@ -1287,12 +1555,7 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
                 message: Some(reason.clone()),
             },
         ),
-        V3ProviderError::InternalTransport {
-            request_id,
-            provider_id,
-            lane,
-            reason,
-        } => {
+        V3ProviderError::InternalTransport { lane, .. } => {
             let stage = match lane {
                 routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
                     "V3Transport13ResponsesHttpRequest"
@@ -1301,17 +1564,19 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
                     "V3ProviderResp14Raw"
                 }
             };
-            crate::hooks::build_v3_provider_error_source(
+            direct_internal_error(
+                V3ErrorSourceKind::RuntimeFailure,
                 stage,
-                V3ProviderError::InternalTransport {
-                    request_id,
-                    provider_id,
-                    lane,
-                    reason,
+                "provider_internal_transport_error",
+                message,
+                if stage == "V3Transport13ResponsesHttpRequest" {
+                    V3InternalErrorCode::V3Transport13ResponsesHttpRequest
+                } else {
+                    V3InternalErrorCode::V3ProviderResp14Raw
                 },
             )
         }
-        _ => build_v3_error_01_source_raised(
+        _ => direct_plain_error(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
             "provider_response_body_error",
@@ -1320,8 +1585,8 @@ fn provider_body_source(error: V3ProviderError) -> V3Error01SourceRaised {
     }
 }
 
-fn sse_transport_source(provider_id: &str, error: SseTransportError) -> V3Error01SourceRaised {
-    build_v3_error_01_source_raised_external(
+fn sse_transport_source(provider_id: &str, error: SseTransportError) -> V3DirectSourceError {
+    direct_external_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_sse_invalid",
@@ -1339,7 +1604,7 @@ fn sse_transport_source(provider_id: &str, error: SseTransportError) -> V3Error0
 
 pub(crate) async fn project_provider_raw_to_client_payload(
     raw: V3ProviderResp14Raw,
-) -> Result<V3ProviderResponseProjection, V3Error01SourceRaised> {
+) -> V3DirectSourceResult<V3ProviderResponseProjection> {
     let profile = raw.compatibility_profile();
     let capabilities = if profile.is_some_and(|value| {
         is_cc_sol_thinking_tags_profile(value) || value == "responses:deepseek-console-go"
@@ -1365,6 +1630,41 @@ mod tests {
     use super::*;
     use routecodex_v3_provider_responses::V3ProviderResponseHeader;
 
+    fn expect_ordinary_source<T>(result: V3DirectSourceResult<T>) -> V3Error01SourceRaised {
+        match result {
+            Err(Ok(source)) => source,
+            Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+            Ok(_) => panic!("expected an ordinary source"),
+        }
+    }
+
+    fn expect_direct_value<T>(result: V3DirectSourceResult<T>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(Ok(source)) => panic!("unexpected ordinary source: {source:?}"),
+            Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_sse_preserves_empty_successful_terminals() {
+        for (protocol, wire) in [
+            (crate::hub_v1::V3HubProviderWireProtocol::Responses,
+             b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_empty\",\"status\":\"completed\",\"output\":[]}}\n\n".as_slice()),
+            (crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+             b"data: {\"id\":\"chat_empty\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n".as_slice()),
+            (crate::hub_v1::V3HubProviderWireProtocol::Anthropic,
+             b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".as_slice()),
+        ] {
+            let source: V3ProviderSseStream = Box::pin(stream::iter([Ok(wire.to_vec())]));
+            let mut accepted = guard_initial_direct_sse_provider_failure_with_timeout(
+                "provider", source, std::time::Duration::from_secs(1), None, protocol,
+            ).await.expect("empty successful terminal must remain representable");
+            assert_eq!(accepted.next().await.unwrap().unwrap(), wire);
+            assert!(accepted.next().await.is_none());
+        }
+    }
+
     #[test]
     fn direct_sse_frame_interval_timeout_uses_provider_cold_start_budget() {
         assert_eq!(
@@ -1375,6 +1675,106 @@ mod tests {
             v3_direct_sse_frame_interval_timeout(None),
             v3_direct_sse_default_timeout()
         );
+    }
+
+    #[test]
+    fn direct_provider_response_compat_applies_chat_profile_owner() {
+        // chat:minimax response compat strips the minimax provider sentinel.
+        // The Direct path must reach the same owner Relay uses, so the sentinel
+        // must be gone after the plan-selected compat step.
+        let payload = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "message": { "role": "assistant", "content": "hello ]<]minimax[>[ world" }
+            }]
+        });
+        let compat = expect_direct_value(apply_direct_provider_response_compat(
+            payload,
+            "chat:minimax",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-minimax-compat",
+            None,
+        ));
+        assert_eq!(
+            compat["choices"][0]["message"]["content"],
+            serde_json::json!("hello  world")
+        );
+    }
+
+    #[test]
+    fn direct_provider_response_compat_harvests_glm_text_tool_call_on_json() {
+        // `chat:glm` provider response compat harvests a text tool call from
+        // the assistant message's reasoning text. Before the Direct chat flip
+        // this ran on Relay; Direct must reach the same owner or a chat-wire
+        // GLM provider silently loses its tool call on the JSON path.
+        let payload = serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "<tool_call><invoke name=\"exec_command\"><parameter name=\"cmd\">pwd</parameter></invoke></tool_call>"
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let compat = expect_direct_value(apply_direct_provider_response_compat(
+            payload,
+            "chat:glm",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-glm-harvest",
+            None,
+        ));
+        let calls = compat["choices"][0]["message"]["tool_calls"]
+            .as_array()
+            .unwrap_or_else(|| panic!("chat:glm must harvest a tool call: {compat}"));
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["function"]["name"], "exec_command");
+        assert_eq!(compat["choices"][0]["finish_reason"], "tool_calls");
+    }
+
+    #[test]
+    fn direct_provider_response_compat_glm_sse_chunk_matches_relay_contract() {
+        // The SSE compat owner runs on the projected chat chunk on both Relay
+        // (`openai_chat_relay_runtime.rs` project_sse_event_payload) and Direct.
+        // A `chat.completion.chunk` carries `delta`, not `message`, so the GLM
+        // reasoning-text harvest is a no-op on a stream chunk for both paths.
+        // Pin that shared contract so the Direct SSE placement cannot silently
+        // drift away from Relay's ordering.
+        let chunk = serde_json::json!({
+            "object": "chat.completion.chunk",
+            "choices": [{
+                "index": 0,
+                "delta": {"reasoning_content": "<tool_call><invoke name=\"exec_command\"><parameter name=\"cmd\">pwd</parameter></invoke></tool_call>"},
+                "finish_reason": null
+            }]
+        });
+        let compat = expect_direct_value(apply_direct_provider_response_compat(
+            chunk.clone(),
+            "chat:glm",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-glm-sse",
+            None,
+        ));
+        assert_eq!(
+            compat, chunk,
+            "a delta-shaped chunk must pass through unchanged, matching Relay's projected-chunk placement"
+        );
+    }
+
+    #[test]
+    fn direct_provider_response_compat_passthrough_leaves_payload_untouched() {
+        let payload = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "plain"}}]
+        });
+        let compat = expect_direct_value(apply_direct_provider_response_compat(
+            payload.clone(),
+            "chat:openai",
+            crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
+            "req-openai-compat",
+            None,
+        ));
+        assert_eq!(compat, payload);
     }
 
     #[tokio::test]
@@ -1388,6 +1788,45 @@ mod tests {
         ))
         .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn direct_json_empty_complete_response_is_provider_failure() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_empty","object":"response","status":"completed","output":[]}"#.to_vec(),
+        );
+        let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_empty");
+    }
+
+    #[tokio::test]
+    async fn direct_json_text_response_still_projects() {
+        let raw = V3ProviderResp14Raw::from_json(
+            "req",
+            "provider",
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_ok","object":"response","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}"#
+                .to_vec(),
+        );
+        let projection = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect("a text-bearing Direct JSON response must still project");
+        let V3ProviderAttemptBody::Json(body) = projection.attempt_payload.body else {
+            panic!("expected Direct JSON body");
+        };
+        assert_eq!(body["output"][0]["content"][0]["text"], "hi");
     }
     #[tokio::test]
     async fn direct_sse_response_failed_projects_provider_error_before_client_stream() {
@@ -1404,9 +1843,7 @@ mod tests {
             )])),
         );
 
-        let error = project_provider_raw_to_client_payload(raw)
-            .await
-            .unwrap_err();
+        let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.source_stage, "V3ProviderResp14Raw");
         assert_eq!(error.code, "HTTP_429");
@@ -1428,9 +1865,7 @@ mod tests {
             )])),
         );
 
-        let error = project_provider_raw_to_client_payload(raw)
-            .await
-            .unwrap_err();
+        let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.source_stage, "V3ProviderResp14Raw");
         assert_eq!(error.code, "provider_cancelled");
@@ -1452,9 +1887,7 @@ mod tests {
             )])),
         );
 
-        let error = project_provider_raw_to_client_payload(raw)
-            .await
-            .unwrap_err();
+        let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "insufficient_quota");
         assert!(error.message.contains("quota stopped after created"));
@@ -1480,9 +1913,7 @@ mod tests {
             ])),
         );
 
-        let error = project_provider_raw_to_client_payload(raw)
-            .await
-            .expect_err("empty lifecycle frames must not commit Resp15 before provider failure");
+        let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_failed");
     }
@@ -1502,9 +1933,7 @@ mod tests {
             )])),
         );
 
-        let error = project_provider_raw_to_client_payload(raw)
-            .await
-            .expect_err("empty lifecycle frames followed by EOF must fail before Resp15 commit");
+        let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_empty");
     }
@@ -1583,11 +2012,12 @@ mod tests {
         );
 
         assert!(stream.next().await.expect("first frame").is_ok());
-        let error = stream
-            .next()
-            .await
-            .expect("missing terminal must emit an explicit error")
-            .expect_err("missing terminal must not become silent EOF");
+        let error = expect_ordinary_source(
+            stream
+                .next()
+                .await
+                .expect("missing terminal must emit an explicit error"),
+        );
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_stream");
         assert!(error.message.contains("without a terminal semantic event"));
@@ -1614,11 +2044,12 @@ mod tests {
             .expect("first frame")
             .expect("valid first frame");
         assert!(std::str::from_utf8(&first).unwrap().contains("early"));
-        let error = stream
-            .next()
-            .await
-            .expect("mid-stream stall must become an explicit error")
-            .expect_err("mid-stream stall must not become silent EOF");
+        let error = expect_ordinary_source(
+            stream
+                .next()
+                .await
+                .expect("mid-stream stall must become an explicit error"),
+        );
         assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
     }
 
@@ -1653,23 +2084,28 @@ mod tests {
         })
         .await
         .expect("keepalives must not suppress semantic timeout");
-        assert_eq!(result.code, "provider_response_sse_inter_event_timeout");
+        let error = match result {
+            Ok(source) => source,
+            Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+        };
+        assert_eq!(error.code, "provider_response_sse_inter_event_timeout");
     }
 
     #[tokio::test]
     async fn provider_http_429_keeps_external_identity_and_status() {
-        let result = project_provider_raw_to_client_payload(V3ProviderResp14Raw::from_json(
-            "req",
-            "test-provider",
-            429,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            br#"{"error":{"code":"rate_limit"}}"#.to_vec(),
-        ))
-        .await
-        .unwrap_err();
+        let result = expect_ordinary_source(
+            project_provider_raw_to_client_payload(V3ProviderResp14Raw::from_json(
+                "req",
+                "test-provider",
+                429,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                br#"{"error":{"code":"rate_limit"}}"#.to_vec(),
+            ))
+            .await,
+        );
         assert_eq!(result.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert!(result.internal_error.is_none());
         let external = result.external_error.expect("external provider error");
@@ -1680,18 +2116,19 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_provider_json_keeps_external_identity() {
-        let result = project_provider_raw_to_client_payload(V3ProviderResp14Raw::from_json(
-            "req",
-            "test-provider",
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            b"not-json".to_vec(),
-        ))
-        .await
-        .unwrap_err();
+        let result = expect_ordinary_source(
+            project_provider_raw_to_client_payload(V3ProviderResp14Raw::from_json(
+                "req",
+                "test-provider",
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                b"not-json".to_vec(),
+            ))
+            .await,
+        );
         assert_eq!(result.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert!(result.internal_error.is_none());
         let external = result.external_error.expect("external provider error");
@@ -1752,9 +2189,7 @@ mod tests {
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
         )
         .await;
-        let Err(error) = result else {
-            panic!("hung provider SSE first frame must time out");
-        };
+        let error = expect_ordinary_source(result);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(
             error.code, "provider_response_sse_first_event_timeout",
@@ -1789,9 +2224,7 @@ mod tests {
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
         )
         .await;
-        let Err(error) = result else {
-            panic!("keepalive-only provider must hit the semantic first-event deadline");
-        };
+        let error = expect_ordinary_source(result);
         assert_eq!(error.code, "provider_response_sse_first_event_timeout");
     }
 
@@ -1836,9 +2269,7 @@ mod tests {
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
         )
         .await;
-        let Err(error) = result else {
-            panic!("malformed Responses event must fail before client commit");
-        };
+        let error = expect_ordinary_source(result);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_event_invalid");
         assert!(!error.message.is_empty());
@@ -1877,9 +2308,7 @@ mod tests {
             crate::hub_v1::V3HubProviderWireProtocol::Responses,
         )
         .await;
-        let Err(error) = result else {
-            panic!("untyped cc-sol Responses frame must fail before client commit");
-        };
+        let error = expect_ordinary_source(result);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_event_invalid");
     }
@@ -1930,11 +2359,12 @@ mod tests {
             panic!("post-first-frame provider failure must remain on the live SSE stream");
         };
         assert!(stream.next().await.expect("first frame").is_ok());
-        let error = stream
-            .next()
-            .await
-            .expect("provider failure must not become silent EOF")
-            .expect_err("provider failure must remain typed after client admission");
+        let error = expect_ordinary_source(
+            stream
+                .next()
+                .await
+                .expect("provider failure must not become silent EOF"),
+        );
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_body_error");
     }

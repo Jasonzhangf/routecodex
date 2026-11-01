@@ -1,5 +1,6 @@
 // feature_id: v3.admin_api
 pub mod dashboard;
+pub mod deploy;
 pub mod observability;
 pub mod providers;
 pub mod reload;
@@ -16,6 +17,11 @@ pub fn build_router(state: AppState) -> Router {
         .merge(observability::routes())
         .merge(routes::routes())
         .merge(providers::routes())
+        .merge(crate::provider_onboarding::routes())
+        .merge(crate::provider_models::routes())
+        .merge(crate::provider_probe::routes())
+        .merge(crate::provider_patrol::routes())
+        .merge(deploy::routes())
         .merge(reload::routes())
         .route("/styles.css", get(static_serve))
         .route("/vendor/ambient.css", get(static_serve))
@@ -25,15 +31,31 @@ pub fn build_router(state: AppState) -> Router {
         .route("/app/shell.js", get(static_serve))
         .route("/app/charts.js", get(static_serve))
         .route("/app/drawer.js", get(static_serve))
+        .route("/app/form.js", get(static_serve))
+        .route("/app/probe.js", get(static_serve))
         .route("/app/views/dashboard.js", get(static_serve))
         .route("/app/views/usage.js", get(static_serve))
         .route("/app/views/providers.js", get(static_serve))
+        .route("/app/views/provider-models.js", get(static_serve))
+        .route("/app/views/provider-model-api.js", get(static_serve))
+        .route(
+            "/app/views/provider-model-capabilities.js",
+            get(static_serve),
+        )
+        .route("/app/views/provider-model-dialog.js", get(static_serve))
+        .route("/app/views/provider-model-picker.js", get(static_serve))
         .route("/app/views/routes.js", get(static_serve))
+        .route("/app/views/deploy.js", get(static_serve))
         .route("/index.html", get(static_serve))
         .route("/routes.html", get(static_serve))
         .route("/providers.html", get(static_serve))
         .route("/requests.html", get(static_serve))
+        .route("/deploy.html", get(static_serve))
         .route("/", get(static_serve))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::require_admin,
+        ))
         .with_state(state)
 }
 
@@ -56,6 +78,7 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
         "routes.html" => (crate::STATIC_ROUTES_HTML, "text/html; charset=utf-8"),
         "providers.html" => (crate::STATIC_PROVIDERS_HTML, "text/html; charset=utf-8"),
         "requests.html" => (crate::STATIC_REQUESTS_HTML, "text/html; charset=utf-8"),
+        "deploy.html" => (crate::STATIC_DEPLOY_HTML, "text/html; charset=utf-8"),
         "app.js" => (crate::STATIC_APP_JS, "text/javascript; charset=utf-8"),
         "app.embedded.txt" => (crate::STATIC_APP_JS, "text/javascript; charset=utf-8"),
         "styles.css" => (crate::STATIC_STYLE_CSS, "text/css; charset=utf-8"),
@@ -70,6 +93,8 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
             crate::STATIC_APP_DRAWER_JS,
             "text/javascript; charset=utf-8",
         ),
+        "app/form.js" => (crate::STATIC_APP_FORM_JS, "text/javascript; charset=utf-8"),
+        "app/probe.js" => (crate::STATIC_APP_PROBE_JS, "text/javascript; charset=utf-8"),
         "app/views/dashboard.js" => (
             crate::STATIC_VIEW_DASHBOARD_JS,
             "text/javascript; charset=utf-8",
@@ -82,8 +107,32 @@ async fn static_serve(State(state): State<AppState>, uri: axum::http::Uri) -> Re
             crate::STATIC_VIEW_PROVIDERS_JS,
             "text/javascript; charset=utf-8",
         ),
+        "app/views/provider-models.js" => (
+            crate::STATIC_VIEW_PROVIDER_MODELS_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/provider-model-api.js" => (
+            crate::STATIC_VIEW_PROVIDER_MODEL_API_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/provider-model-capabilities.js" => (
+            crate::STATIC_VIEW_PROVIDER_MODEL_CAPABILITIES_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/provider-model-dialog.js" => (
+            crate::STATIC_VIEW_PROVIDER_MODEL_DIALOG_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/provider-model-picker.js" => (
+            crate::STATIC_VIEW_PROVIDER_MODEL_PICKER_JS,
+            "text/javascript; charset=utf-8",
+        ),
         "app/views/routes.js" => (
             crate::STATIC_VIEW_ROUTES_JS,
+            "text/javascript; charset=utf-8",
+        ),
+        "app/views/deploy.js" => (
+            crate::STATIC_VIEW_DEPLOY_JS,
             "text/javascript; charset=utf-8",
         ),
         _ => {

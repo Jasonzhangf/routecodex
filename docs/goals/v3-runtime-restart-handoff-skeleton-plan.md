@@ -1,5 +1,14 @@
 # V3 Runtime Restart Handoff Skeleton
 
+This plan follows `routecodex-managed-restart-live-continuity` v2. A managed
+restart switches generations immediately. Lossless transfer of every in-flight
+socket, TLS state, future or response is no longer a delivery requirement.
+Affected clients detect interruption and decide whether to retry; RCC must not
+resend the request or fabricate completion to hide the interruption.
+An old response that can still use its valid original binding and connection
+must not be rejected only because the generation changed. Closed connections
+are not promised recovery.
+
 ## Contract
 
 The V3 proxy owns two independent lifecycles: the client Front connection and
@@ -31,55 +40,56 @@ tool-call/tool-result objects.
 The Front owns the accepted client connection, keepalive, client frame
 sequence, absolute/idle deadlines, and exactly-once client closeout. The
 Transport Broker owns provider transport identity, provider frame sequence, and
-provider-attempt handoff. Both Direct and Relay use this skeleton; only their
+provider-attempt lifetime. Both Direct and Relay use this skeleton; only their
 protocol codecs and semantic projectors differ.
 
 One persistent HTTP/1.1 connection may carry multiple sequential requests.
-Connection identity is stable, but closeout phase and the registered protocol
-terminal are request-scoped: accepting the next request must atomically clear
-the previous response-started phase and closeout frame. A restart before the
-new response headers therefore emits the generic HTTP 503 terminal; it must
-never inherit a completed Chat/Responses SSE phase from the preceding request.
+Connection identity is stable, but response-started phase and closeout control
+are request-scoped: accepting the next request must atomically clear the
+previous response phase. A restart before the new response headers terminates
+the transport without an HTTP response or error bytes. It must never inherit
+a completed Chat/Responses SSE phase from the preceding request.
 
-Every lease is keyed by `request_id`, `pipeline_id`, `server_id`, `port`,
-`session_scope`, and `generation`. A restart exports a typed checkpoint through
-the lifecycle control plane. The checkpoint contains remaining deadlines,
-frame counters, semantic commit, and closeout state. Restore must subtract the
-time spent outside the process and allocate a new generation. It must not infer
-identity from payload, logs, or session alone.
+Keep the typed request, listener, session and generation bindings needed for
+request-local cancellation and closeout. Do not reconstruct them from payload,
+logs or session alone. Checkpoint metadata does not prove a socket or provider
+attempt survived restart and is not a prerequisite for switching generations.
+Any retained recovery path must preserve send uncertainty; it cannot infer
+`NotSent` or replay permission from missing data.
 
 ## Error contract
 
-Provider transport and response-shape failures enter Error01 through Error05
-before Error06 can close the client response. RouteCodex request-stage internal
-failures project as 598; response-stage internal failures project as 599;
-external provider HTTP identity remains external. No provider retry, switch,
-decode failure, malformed terminal, or illegal EOF may directly close the
-client stream or become a silent EOF. If aggregate exec replacement interrupts
-an accepted request before response headers, the Front owner must emit one
-explicit HTTP 503 terminal with `server_restart_in_progress`; an unstarted
-request and an already-started response must not receive that pre-header frame.
+Provider transport and response-shape failures enter the typed Error chain.
+Request-stage 598, response-stage 599 and external provider status describe
+internal causes only. They never authorize a client error status or payload.
+Recovery remains internal while an eligible candidate exists. On exhaustion
+or exec replacement, the Front terminates transport without an HTTP error,
+JSON envelope, protocol error event or fabricated successful terminal. A
+response whose headers have started remains observably incomplete; it must
+not receive a second response or inherit another request's framing state.
 
 ## Required gates
 
 - red/green tests for admission, Direct, Relay, SSE framing and semantic trees;
 - duplicate/out-of-order frames, terminal exactly once, timeout, disconnect and
   scope mismatch tests;
-- checkpoint export/restore tests proving generation and deadline monotonicity;
+- request-scoped generation, cancellation and detectable restart interruption;
 - provider A/B/C evidence using one request id and raw request, provider-bound
   request, raw response, and client projection;
 - `cargo check --locked`, affected crate tests, workspace/build gates;
-- canonical global install and `routecodex restart`, then `/health` on 7777,
-  4444 and 10000;
+- canonical install and one formal `rccv3 restart`, then health checks on the
+  actual configured listeners;
 - live Direct JSON/SSE, Relay Responses/Chat/Anthropic, provider malformed SSE,
   provider 502/503, transport timeout, disconnect, and restart replay;
-- DSH Review only after all preceding evidence is current.
+- one independent milestone review through the actual host workflow after
+  applicable author acceptance; reuse unchanged valid evidence.
 
 ## Current implementation boundary
 
-The typed Front lease and lifecycle checkpoint file are implemented in
-`routecodex-v3-server` and `routecodex-v3-lifecycle`. The remaining work is to
-bind the lease to the actual HTTP client socket and provider transport broker,
-cover all entry protocols and continuation paths, and prove cross-exec
-reattach online. A checkpoint file alone is not evidence that an existing
-client socket has been reattached.
+The earlier checkpoint/lease implementation is historical source evidence.
+The lifecycle owner must classify retained callers under the current restart
+contract before removing code. Current acceptance proves immediate managed
+restart, detectable interruption, request-local closeout and subsequent
+requests through the real entry. Cross-exec reattachment is not a remaining
+delivery prerequisite. This document correction does not claim a code change
+or a completed runtime acceptance.

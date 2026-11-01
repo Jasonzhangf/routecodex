@@ -36,6 +36,8 @@
     "scripts/architecture/verify-no-fallback-diff.mjs",
     "tests/",
     "scripts/tests/",
+    "v3/crates/routecodex-v3-lifecycle/src/hooks_sidecar/tests.rs",
+    "v3/crates/routecodex-v3-runtime/src/provider_probe_fairness_tests.rs",
     "v3/build-contracts/",
     "v4/protected/history/"
   ],
@@ -108,10 +110,6 @@
       "ruleId": "fallback-keyword",
       "pathContains": "src/types/debug-types.ts",
       "textContains": "degraded"
-    },
-    {
-      "ruleId": "fallback-keyword",
-      "pathContains": "scripts/verify-servertool-rust-only.mjs"
     },
     {
       "ruleId": "fallback-keyword",
@@ -913,11 +911,6 @@
     {
       "ruleId": "catch-return-or-continue",
       "pathContains": "scripts/monitor/memory-guard.mjs",
-      "textContains": ""
-    },
-    {
-      "ruleId": "catch-return-or-continue",
-      "pathContains": "scripts/ci/check-file-line-limit.mjs",
       "textContains": ""
     },
     {

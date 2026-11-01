@@ -46,7 +46,6 @@ fn published_manifest() -> V3Config05ManifestPublished {
                 order,
                 allowed_resources: vec!["metadata_center".to_string()],
                 forbidden_resources: vec![],
-                profile: None,
             });
             order += 1;
         }
@@ -104,17 +103,17 @@ fn published_manifest() -> V3Config05ManifestPublished {
                 V3EntryProtocolBindingManifest {
                     entry_protocol: "openai_chat".to_string(),
                     endpoint_patterns: vec!["/v1/chat/completions".to_string()],
-                    execution_mode: V3EntryProtocolExecutionMode::Relay,
+                    execution_mode: V3EntryProtocolExecutionMode::Direct,
                     protocol_profile_owner: "v3.entry_protocol_registry_contract".to_string(),
                     implemented: true,
                     forbidden_reentry_behavior:
                         "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime."
                             .to_string(),
                     runtime_owner_symbol: Some(
-                        "execute_v3_openai_chat_relay_runtime_with_default_transport".to_string(),
+                        "execute_v3_openai_chat_direct_server_outcome".to_string(),
                     ),
                     runtime_owner_path: Some(
-                        "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs"
+                        "v3/crates/routecodex-v3-server/src/executors.rs"
                             .to_string(),
                     ),
                     pending_owner_symbol: None,
@@ -152,6 +151,7 @@ fn published_manifest() -> V3Config05ManifestPublished {
         debug: V3DebugManifest {
             log_console: false,
             log_file: None,
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,
@@ -164,7 +164,6 @@ fn published_manifest() -> V3Config05ManifestPublished {
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
         memory_raw_capture: Default::default(),
     }

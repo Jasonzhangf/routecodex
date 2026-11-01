@@ -116,6 +116,44 @@ fn route_view_roundtrip_preserves_pool_semantics() {
     assert_eq!(repool.targets[0].key.as_deref(), Some("key1"));
 }
 
+#[test]
+fn route_view_roundtrip_preserves_provider_interface() {
+    let mut authoring = base_authoring();
+    authoring
+        .route_groups
+        .get_mut("routecodex_v3_4444")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets[0]
+        .interface = Some("chat".to_string());
+
+    let groups = route_groups_from_authoring(&authoring);
+    assert_eq!(
+        groups[0].ports[0].pools[0].tiers[0].members[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+
+    let mut mutated = authoring.clone();
+    apply_route_group_view_to_authoring(&mut mutated, &groups[0]);
+    assert_eq!(
+        mutated
+            .route_groups
+            .get("routecodex_v3_4444")
+            .unwrap()
+            .pools
+            .get("default")
+            .unwrap()
+            .targets[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+}
+
 fn parse_authoring(raw: &str) -> V3Config02AuthoringParsed {
     routecodex_v3_config::parse_v3_config_02_authoring(raw).expect("parse authoring")
 }
@@ -166,6 +204,7 @@ fn provider_file_write_then_read_roundtrip() {
             provider_type: "openai".into(),
             base_url: "http://127.0.0.1:9999/v1".into(),
             default_model: "model-a".into(),
+            interfaces: Default::default(),
             auth: routecodex_v3_config::V2ProviderAuthConfig {
                 api_key: None,
                 env: Some("TEST_PROVIDER_KEY".into()),
@@ -179,8 +218,10 @@ fn provider_file_write_then_read_roundtrip() {
             compatibility_profile: None,
             models: Default::default(),
             v3: None,
+            local: None,
             timeout: None,
             sse_first_frame_timeout_ms: None,
+            headers: Default::default(),
         },
     };
     let path = write_provider_file(&home, "test-provider", &config).expect("write provider");
@@ -228,6 +269,7 @@ fn commit_with_backup_creates_backup_and_revision() {
                 provider: Some("p1".into()),
                 model: Some("m1".into()),
                 key: Some("key1".into()),
+                interface: None,
                 priority: 1,
                 weight: None,
             }],
@@ -305,6 +347,7 @@ fn invalid_commit_fails_without_touching_file() {
             provider: Some("ghost-provider".into()),
             model: Some("m9".into()),
             key: None,
+            interface: None,
             priority: Some(9),
             weight: None,
         });
@@ -407,4 +450,59 @@ tiers = [[{ use = "p1/m1" }]]
     assert!(saved.contains("servers"));
     assert!(!saved.contains("priority"));
     assert_eq!(store.read_user_routing().unwrap(), selection);
+}
+
+#[test]
+fn user_routing_commit_preserves_runtime_fd_limit() {
+    let home = temp_home();
+    let provider_dir = home.join("provider").join("p1");
+    fs::create_dir_all(&provider_dir).expect("provider dir");
+    fs::write(
+        provider_dir.join("config.v2.toml"),
+        r#"version = "2.0.0"
+providerId = "p1"
+[provider]
+id = "p1"
+enabled = true
+type = "openai_chat"
+baseURL = "http://127.0.0.1:9999/v1"
+defaultModel = "m1"
+[provider.auth]
+type = "apikey"
+apiKey = "test"
+[provider.models."m1"]
+supportsStreaming = true
+"#,
+    )
+    .expect("provider file");
+    let path = home.join("config.toml");
+    fs::write(
+        &path,
+        r#"version = 3
+
+[runtime]
+fd_limit = 8192
+
+[servers.routecodex_v3_4444]
+bind = "127.0.0.1"
+port = 4444
+[servers.routecodex_v3_4444.routes.default]
+tiers = [[{ use = "p1/m1" }]]
+"#,
+    )
+    .expect("user config");
+
+    let store = ConfigMgmtStore::new(&path);
+    let selection = store.read_user_routing().expect("read user routing");
+    assert_eq!(selection.runtime.fd_limit, Some(8192));
+    store
+        .commit_user_routing_with_backup(&selection, "runtime.recommit", "test")
+        .expect("commit user routing");
+
+    let saved = fs::read_to_string(&path).expect("saved user config");
+    assert!(saved.contains("fd_limit = 8192"));
+    assert_eq!(
+        store.read_user_routing().unwrap().runtime.fd_limit,
+        Some(8192)
+    );
 }

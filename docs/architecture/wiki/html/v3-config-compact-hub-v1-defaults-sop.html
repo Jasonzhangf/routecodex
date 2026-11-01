@@ -36,7 +36,7 @@
 <body data-review-surface="v3-config-compact-hub-v1-defaults-sop">
   <main>
     <header class="hero">
-      <span class="eyebrow">config compiler review · audited lock</span>
+      <span class="eyebrow">config compiler review</span>
       <h1>V3 Compact Hub V1 Defaults SOP Review</h1>
       <p>Locks compact user authoring to one Rust config compiler path. Fixed Hub endpoint, hook, resource, and execution declarations are derived before Manifest publication and cannot be rebuilt by Runtime, Server, Provider, Virtual Router, Target, or Compat.</p>
       <div class="meta-row">
@@ -104,7 +104,7 @@ flowchart TD
 
     <section class="panel">
       <h2>Review checklist</h2>
-      <ul><li>Compact TOML compiles to the closed deterministic Manifest</li><li>V2 compat uses the same default owner</li><li>No default writer exists outside routecodex-v3-config</li><li>Locked fingerprint changes require Jason manual authorization</li></ul>
+      <ul><li>Compact TOML compiles to the closed deterministic Manifest</li><li>Configured entry protocols use the same V3 config owner</li><li>No default writer exists outside routecodex-v3-config</li></ul>
     </section>
 
     <section class="panel">

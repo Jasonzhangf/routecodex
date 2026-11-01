@@ -1,0 +1,100 @@
+TAP version 13
+# Subtest: generateRccConfig writes isolated V3 config with task-owned provider references
+ok 1 - generateRccConfig writes isolated V3 config with task-owned provider references
+  ---
+  duration_ms: 15.072959
+  type: 'test'
+  ...
+# Subtest: generateRccConfig authors the runtime candidate as a real provider model
+ok 2 - generateRccConfig authors the runtime candidate as a real provider model
+  ---
+  duration_ms: 1.146208
+  type: 'test'
+  ...
+# Subtest: generateRccConfig writes a supported execution policy and receipts the written mode
+ok 3 - generateRccConfig writes a supported execution policy and receipts the written mode
+  ---
+  duration_ms: 5.240292
+  type: 'test'
+  ...
+# Subtest: captureRuntimeIdentity records the real child version and binary hash
+ok 4 - captureRuntimeIdentity records the real child version and binary hash
+  ---
+  duration_ms: 21.755666
+  type: 'test'
+  ...
+# Subtest: sendHttp preserves status, headers, raw bytes, and complete-response state
+ok 5 - sendHttp preserves status, headers, raw bytes, and complete-response state
+  ---
+  duration_ms: 8.186958
+  type: 'test'
+  ...
+# Subtest: sendHttp distinguishes empty close, incomplete response, and timeout
+ok 6 - sendHttp distinguishes empty close, incomplete response, and timeout
+  ---
+  duration_ms: 56.334125
+  type: 'test'
+  ...
+# Subtest: diagnoseExactBind reports the original bind error without changing ports
+ok 7 - diagnoseExactBind reports the original bind error without changing ports
+  ---
+  duration_ms: 0.858792
+  type: 'test'
+  ...
+# Subtest: generateRccConfig overrides an inherited 8777 admin bind with a task-owned port
+ok 8 - generateRccConfig overrides an inherited 8777 admin bind with a task-owned port
+  ---
+  duration_ms: 2.353791
+  type: 'test'
+  ...
+# Subtest: diagnoseListenerSet checks every declared address in order and preserves errno
+ok 9 - diagnoseListenerSet checks every declared address in order and preserves errno
+  ---
+  duration_ms: 0.807042
+  type: 'test'
+  ...
+# Subtest: diagnoseListenerSet reports a fully free declared set as bound and released
+ok 10 - diagnoseListenerSet reports a fully free declared set as bound and released
+  ---
+  duration_ms: 0.584625
+  type: 'test'
+  ...
+# Subtest: startRcc and stopRcc use the owned child, then wait for exit and socket closure
+ok 11 - startRcc and stopRcc use the owned child, then wait for exit and socket closure
+  ---
+  duration_ms: 1103.837875
+  type: 'test'
+  ...
+# Subtest: failed startup records the real child exit and never claims ready
+ok 12 - failed startup records the real child exit and never claims ready
+  ---
+  duration_ms: 517.937
+  type: 'test'
+  ...
+# Subtest: fake health 200 without RCC identity is rejected and remains an owned cleanup failure
+ok 13 - fake health 200 without RCC identity is rejected and remains an owned cleanup failure
+  ---
+  duration_ms: 1120.304333
+  type: 'test'
+  ...
+# Subtest: stopRcc force-kills only its owned non-terminating child and records that fact
+ok 14 - stopRcc force-kills only its owned non-terminating child and records that fact
+  ---
+  duration_ms: 872.124083
+  type: 'test'
+  ...
+# Subtest: stopRcc records a still-open declared admin listener instead of claiming full cleanup
+ok 15 - stopRcc records a still-open declared admin listener instead of claiming full cleanup
+  ---
+  duration_ms: 822.524833
+  type: 'test'
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6360.380375

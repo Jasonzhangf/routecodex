@@ -14,9 +14,12 @@ path = "src/lib.rs"
 
 [dependencies]
 axum.workspace = true
+futures-util.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-config-mgmt = { path = "../routecodex-v3-config-mgmt" }
 routecodex-v3-debug = { path = "../routecodex-v3-debug" }
+routecodex-v3-provider-responses = { path = "../routecodex-v3-provider-responses" }
+routecodex-v3-runtime = { path = "../routecodex-v3-runtime" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

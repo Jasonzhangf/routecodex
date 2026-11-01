@@ -1,0 +1,127 @@
+# Review and Delivery
+
+Apply this runtime lifecycle when runtime delivery is in scope. Documentation
+and rule edits use targeted checks; they do not invent a runtime deployment,
+Active artifact or freeze ceremony.
+
+## Authoritative requirement review packet
+
+Every design or architecture review that consumes project requirements uses
+[authoritative-review-template.md](authoritative-review-template.md). The
+dispatch must provide or clearly reference:
+
+- the project's authoritative requirement source, owner, exact read path, and
+  effective version;
+- the user original text, acceptance criteria, applicable scope, and any
+  explicit user change instruction with its prior version;
+- the exact candidate, base, review stage, allowed/forbidden paths, and current
+  stage evidence; and
+- the existing AppSDK EvidenceRecord and ReviewRecord references and the
+  backend-supplied review output schema.
+
+The executing agent fills only observed project facts and evidence references.
+It must not replace the source with a plan or author summary, edit the template
+for one task, or create an authorization. The independent reviewer reads the
+source and current version, compares the prior version when a change is
+claimed, and records each applicable item-to-design, item-to-implementation,
+and item-to-evidence mapping in the existing backend fields. Missing required
+sources, stale versions, unauthorized requirement changes, reduced acceptance,
+and candidate/scope mismatches block the review. Do not create a second review
+schema or a second requirement store.
+
+## Candidate to review
+
+```text
+candidate commit/tree/scope
+-> development whitebox
+-> exact artifact build
+-> install receipt when required
+-> restart receipt when required
+-> deployed public-entrypoint blackbox
+-> PreReviewValidationRecord
+-> appsdk verify --review-admission
+-> selected architecture review PASS
+```
+
+Review tool follows user choice; otherwise use configured default. Review is
+read-only and bound to exact candidate, scope, maps, artifact, and evidence.
+
+Required service operations come from module `deployment_operations`:
+`["install", "restart"]`, `["install"]`, `["restart"]`, or `[]`. An omitted
+field preserves the legacy install/restart requirement. The declaration is
+artifact-bound; changing it invalidates existing validation. Every supplied
+receipt is checked even when optional. Public-entrypoint blackbox and candidate,
+artifact, environment and producer identity remain required. The legacy
+`deployed_blackbox` label includes a library/CLI artifact's real consumer entry;
+mock or source-only checks cannot stand in for that artifact.
+
+Changed-scope architecture review must verify:
+
+- control/configuration truth uses declared typed control resources, error
+  chains, or project configuration sources and never business payloads,
+  metadata, debug logs, or implicit context;
+- each semantic behavior has one owner and one implementation, with no fallback
+  or temporary bypass;
+- a project-declared lifecycle skeleton preserves its owning boundaries;
+- additions passed an ablation check and common semantics use one shared
+  function;
+- missing operators, hooks, or gates fail or skip explicitly and never mock
+  success.
+
+Concrete quality, safety, contract or material structural regressions block.
+Optional simplification and design preferences are advisory. Untouched
+historical violations are reported as recommendations and do not block unless
+they affect changed scope, safety, ownership, evidence truth, or required
+delivery.
+
+Any source, test, build config, environment, artifact, scope, owner, or required
+rule change invalidates affected evidence. Refresh only affected evidence;
+revise the plan only when goal, scope, acceptance, key approach, or dependencies
+materially change. Follow the host contract for review triggers and finding
+re-checks; internal progress does not dispatch another review.
+
+## Review to mainline
+
+```text
+verify evidence freshness; reuse unchanged candidate evidence
+-> fetch latest origin/main
+-> exact integration build/test
+-> protected merge/push
+-> remote main receipt
+```
+
+Conflict returns to owner worktree. Do not resolve inside a serial merge queue
+and keep stale review evidence.
+
+EffectivenessRecord can reference pre-review candidate interventions and the
+validated blackbox when input hashes, artifact and candidate identity match
+and evidence has not expired. No mandatory rerun just because review finished.
+Environment or dependency/configuration changes require affected evidence to
+be refreshed. The full lifecycle still validates the current artifact and
+pre-review graph before accepting reused effectiveness.
+
+## Promotion and freeze
+
+```text
+RegressionReport on merged source
+-> appsdk compile
+-> publish immutable Active
+-> archive source/contracts/artifact in Protected
+-> FreezeRecord
+-> appsdk verify
+```
+
+Merge alone is not lifecycle completion. Active/Protected are immutable; use
+canonical version/open/rehydrate flows instead of manual edits or copies.
+
+## Cleanup
+
+Resource close is separate from engineering delivery. Retain an owned worktree
+with purpose recorded when needed; keep its cleanup obligation open. When
+cleanup is authorized and required delivery/retention evidence exists:
+
+1. archive required evidence;
+2. create CleanupRecord or project equivalent;
+3. remove only the owned merged worktree and branch;
+4. verify removal;
+5. release claim.

@@ -42,8 +42,9 @@ fn fail(store: &V3ProviderHealthStore, now_ms: u64) {
 fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
-    // Block was created at now_ms = 3; first probe due at 3 + 5_000.
-    let first_due = 1 + 5_000;
+    fail(&store, 2);
+    // The second consecutive failure admits cooldown and starts the ladder.
+    let first_due = 2 + 5_000;
     assert!(
         store
             .provider_cooldown_probe_keys_due(first_due - 1)
@@ -72,12 +73,12 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
             )
             .available
     );
-    store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
+    let permit = store
+        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
-        .expect("due auth-key probe must be acquirable");
+        .expect("due exact identity probe must be acquirable");
     store
-        .complete_provider_cooldown_probe_success_at("provider-a", Some("key-a"), None, first_due)
+        .complete_provider_cooldown_probe_success_with_permit(&permit, first_due)
         .unwrap();
     assert!(
         store
@@ -89,7 +90,7 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
                 first_due + 1,
             )
             .available,
-        "probe success must resurrect a globally cooled auth key"
+        "probe success must resurrect a globally cooled exact identity"
     );
 }
 
@@ -128,7 +129,7 @@ fn continuous_failure_ladder_is_isolated_per_provider_key() {
 }
 
 #[test]
-fn successful_recovery_resets_the_next_failure_to_the_five_second_step() {
+fn successful_recovery_restarts_repeat_admission_and_five_second_probe() {
     let store = V3ProviderHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
 
@@ -151,25 +152,31 @@ fn successful_recovery_resets_the_next_failure_to_the_five_second_step() {
     );
 
     store
-        .record_provider_key_success("provider-a", "key", "model", 103)
+        .complete_probe_success("provider-a", "key", "model", 103)
         .expect("successful recovery");
-
     let after_recovery = store
         .record_provider_failure_action("provider-a", "key", "model", &action, 104)
         .expect("failure after recovery");
+    assert!(!after_recovery.available);
+    assert!(after_recovery.cooldown);
+    assert_eq!(after_recovery.cooldown_until_ms, Some(5_104));
+    let after_repeat = store
+        .record_provider_failure_action("provider-a", "key", "model", &action, 105)
+        .expect("repeated failure after recovery");
     assert_eq!(
-        after_recovery.cooldown_until_ms,
-        Some(5_104),
-        "a fast recovery must not inherit the old failure-rate band"
+        after_repeat.cooldown_until_ms,
+        Some(5_105),
+        "the first recovery probe remains due after five seconds"
     );
+    // A real success resets the streak and its failure-rate window.
     assert_eq!(
         store
-            .cooldown_entries(104)
+            .cooldown_entries(105)
             .iter()
             .find(|entry| entry.provider_id == "provider-a")
             .and_then(|entry| entry.until_ms),
-        Some(5_104),
-        "a real success must reset the next business cooldown to 5s"
+        Some(10_105),
+        "second consecutive failure uses its business ladder step after the reset"
     );
 }
 
@@ -178,6 +185,7 @@ fn session_business_success_does_not_remove_pending_probe() {
     let store = V3ProviderHealthStore::default();
     let session = scope();
     fail(&store, 1);
+    fail(&store, 2);
     store
         .record_provider_success_in_session(
             &session,
@@ -202,14 +210,27 @@ fn session_business_success_does_not_remove_pending_probe() {
 }
 
 #[test]
-fn model_success_does_not_clear_auth_key_cooldown() {
+fn model_success_recovers_exact_model_without_clearing_sibling_probe() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
+    fail(&store, 2);
+    for now in [1, 2] {
+        store
+            .record_provider_failure_in_session(
+                &scope(),
+                "provider-a",
+                Some("key-a"),
+                Some("model-c"),
+                Some("provider_error"),
+                now,
+            )
+            .unwrap();
+    }
     store
         .record_provider_key_success("provider-a", "key-a", "model-a", 30_003)
         .expect("model success");
     assert!(
-        !store
+        store
             .availability_for_session(
                 &scope(),
                 "provider-a",
@@ -218,17 +239,27 @@ fn model_success_does_not_clear_auth_key_cooldown() {
                 30_004,
             )
             .available,
-        "a model-scoped success must not clear an auth-key cooldown"
+        "a failed model cannot block a sibling model"
     );
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(5_003).unwrap().len(),
-        1,
-        "the auth-key probe remains the only recovery owner"
+        store.provider_cooldown_probe_keys_due(5_003).unwrap(),
+        vec![(
+            "provider-a".into(),
+            Some("key-a".into()),
+            Some("model-c".into())
+        )],
+        "matching business success clears only model-a, not the sibling probe"
+    );
+    assert!(
+        store
+            .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 30004)
+            .unwrap()
+            .available
     );
 }
 
 #[test]
-fn model_success_resets_auth_key_consecutive_failures() {
+fn model_success_resets_exact_identity_consecutive_failures() {
     let store = V3ProviderHealthStore::default();
     let policy = routecodex_v3_provider_responses::V3ProviderFailurePolicy {
         failure_threshold: 3,
@@ -237,7 +268,8 @@ fn model_success_resets_auth_key_consecutive_failures() {
         max_probe_interval_ms: None,
         long_probe_backoff: false,
         until_restart: false,
-        cooldown_scope: V3ProviderFailureCooldownScope::AuthKey,
+        advisory_probe: false,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
     };
     for now_ms in [1, 2] {
         store
@@ -247,6 +279,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
                 Some("key-a"),
                 Some("model-a"),
                 Some("provider_error"),
+                None,
                 now_ms,
                 Some(policy),
             )
@@ -262,6 +295,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
             Some("key-a"),
             Some("model-a"),
             Some("provider_error"),
+            None,
             4,
             Some(policy),
         )
@@ -270,7 +304,7 @@ fn model_success_resets_auth_key_consecutive_failures() {
         store
             .availability_for_session(&scope(), "provider-a", Some("key-a"), Some("model-a"), 5,)
             .available,
-        "a success between failures must reset the auth-key failure streak"
+        "a success between failures must reset the exact identity failure streak"
     );
 }
 
@@ -278,7 +312,8 @@ fn model_success_resets_auth_key_consecutive_failures() {
 fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
     fail(&store, 1);
-    let mut now_ms = 1;
+    fail(&store, 2);
+    let mut now_ms = 2;
     for (index, delta) in LADDER_MS.iter().enumerate() {
         let due_at = now_ms + delta;
         assert!(
@@ -297,15 +332,12 @@ fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
             "step {index} must be due at {due_at} (delta {delta})"
         );
         now_ms = due_at;
-        assert!(
-            store
-                .acquire_provider_cooldown_probe("provider-a", Some("key-a"), None)
-                .unwrap()
-                .is_some(),
-            "probe permit missing at step {index}"
-        );
+        let permit = store
+            .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("probe permit missing at step {index}"));
         store
-            .complete_provider_cooldown_probe_failure("provider-a", Some("key-a"), None, now_ms)
+            .complete_provider_cooldown_probe_failure_with_permit(&permit, now_ms)
             .unwrap();
         assert!(
             !store
@@ -327,12 +359,14 @@ fn long_policy_probe_is_capped_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
     let action = V3ProviderFailureAction {
         class_code: "provider_http_503".to_string(),
+        failure_fingerprint: None,
         recovery: V3ProviderRecoveryKind::RecoverableCounted,
         scope: V3ProviderHealthScope::GlobalProviderKey,
         score_delta_milli: -5,
         failure_threshold: 1,
         cooldown_ms: 60 * 60_000,
         long_probe_backoff: true,
+        advisory_probe: false,
     };
     store
         .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 1)
@@ -352,13 +386,7 @@ fn long_policy_probe_is_capped_at_thirty_minutes() {
             .unwrap()
             .expect("long cadence probe permit");
         store
-            .complete_provider_cooldown_probe_failure_at_generation(
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                due_at,
-                Some(permit.expected_generation()),
-            )
+            .complete_provider_cooldown_probe_failure_with_permit(&permit, due_at)
             .unwrap();
         now_ms = due_at;
     }
@@ -402,7 +430,10 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
             .unwrap();
     }
     let mut now_ms = 3;
-    for (step, delta) in [5_000, 30_000, 120_000, 120_000].into_iter().enumerate() {
+    for (step, delta) in [5_000, 10_000, 30_000, 60_000, 120_000, 120_000, 120_000]
+        .into_iter()
+        .enumerate()
+    {
         let due_at = now_ms + delta;
         assert_eq!(
             store
@@ -413,17 +444,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
             "fast-recovery probe step {step} must be due at {delta}ms"
         );
         let permit = store
-            .acquire_provider_cooldown_probe("p", Some("a"), None)
+            .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
             .unwrap()
             .expect("fast-recovery probe permit");
         store
-            .complete_provider_cooldown_probe_failure_at_generation(
-                "p",
-                Some("a"),
-                None,
-                due_at,
-                Some(permit.expected_generation()),
-            )
+            .complete_provider_cooldown_probe_failure_with_permit(&permit, due_at)
             .unwrap();
         now_ms = due_at;
     }

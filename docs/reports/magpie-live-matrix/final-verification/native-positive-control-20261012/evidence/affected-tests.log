@@ -1,0 +1,416 @@
+TAP version 13
+# Subtest: resolvePath follows dotted keys and array indices without conflating null and missing
+ok 1 - resolvePath follows dotted keys and array indices without conflating null and missing
+  ---
+  duration_ms: 0.797625
+  type: 'test'
+  ...
+# Subtest: deepEqual is structural, ordered for arrays, and never coerces
+ok 2 - deepEqual is structural, ordered for arrays, and never coerces
+  ---
+  duration_ms: 0.104791
+  type: 'test'
+  ...
+# Subtest: provider exact and body_must subset expectations both pass
+ok 3 - provider exact and body_must subset expectations both pass
+  ---
+  duration_ms: 1.441458
+  type: 'test'
+  ...
+# Subtest: provider exact is strict and never accepts an array prefix
+ok 4 - provider exact is strict and never accepts an array prefix
+  ---
+  duration_ms: 0.260542
+  type: 'test'
+  ...
+# Subtest: wrong provider model, path, and arguments are caught
+ok 5 - wrong provider model, path, and arguments are caught
+  ---
+  duration_ms: 0.214875
+  type: 'test'
+  ...
+# Subtest: provider auth uses the protocol-native carrier and rejects empty credentials
+ok 6 - provider auth uses the protocol-native carrier and rejects empty credentials
+  ---
+  duration_ms: 0.720917
+  type: 'test'
+  ...
+# Subtest: provider forbidden rules and fake control leakage are caught
+ok 7 - provider forbidden rules and fake control leakage are caught
+  ---
+  duration_ms: 0.2825
+  type: 'test'
+  ...
+# Subtest: startup and probe captures are excluded only by explicit attempt_kind
+ok 8 - startup and probe captures are excluded only by explicit attempt_kind
+  ---
+  duration_ms: 0.171167
+  type: 'test'
+  ...
+# Subtest: strict closed rejects HTTP 500, empty HTTP 200, and any received bytes
+ok 9 - strict closed rejects HTTP 500, empty HTTP 200, and any received bytes
+  ---
+  duration_ms: 0.728
+  type: 'test'
+  ...
+# Subtest: genuine socket close with no status or bytes satisfies expected closed
+ok 10 - genuine socket close with no status or bytes satisfies expected closed
+  ---
+  duration_ms: 0.591
+  type: 'test'
+  ...
+# Subtest: completion accepts whole-body JSON and keeps missing distinct from null and zero
+ok 11 - completion accepts whole-body JSON and keeps missing distinct from null and zero
+  ---
+  duration_ms: 0.637
+  type: 'test'
+  ...
+# Subtest: ordered arrays are exact: no prefix and no reordering pass
+ok 12 - ordered arrays are exact: no prefix and no reordering pass
+  ---
+  duration_ms: 0.423416
+  type: 'test'
+  ...
+# Subtest: SSE body expectations inspect a parsed observation, not substrings of the stream
+ok 13 - SSE body expectations inspect a parsed observation, not substrings of the stream
+  ---
+  duration_ms: 0.187209
+  type: 'test'
+  ...
+# Subtest: incomplete SSE without a parsed observation cannot prove completion or body expectations
+ok 14 - incomplete SSE without a parsed observation cannot prove completion or body expectations
+  ---
+  duration_ms: 0.157334
+  type: 'test'
+  ...
+# Subtest: the protocol dependency wires parsed observation and semantic terminal
+ok 15 - the protocol dependency wires parsed observation and semantic terminal
+  ---
+  duration_ms: 0.174833
+  type: 'test'
+  ...
+# Subtest: the real protocol module wires whole-body JSON and SSE terminal detection
+ok 16 - the real protocol module wires whole-body JSON and SSE terminal detection
+  ---
+  duration_ms: 0.80975
+  type: 'test'
+  ...
+# Subtest: client forbidden fields and fake control leakage are caught
+ok 17 - client forbidden fields and fake control leakage are caught
+  ---
+  duration_ms: 0.213
+  type: 'test'
+  ...
+# Subtest: a non-2xx completed response and a wrong terminal are rejected
+ok 18 - a non-2xx completed response and a wrong terminal are rejected
+  ---
+  duration_ms: 0.228417
+  type: 'test'
+  ...
+# Subtest: assertions never mutate actual or expected inputs
+ok 19 - assertions never mutate actual or expected inputs
+  ---
+  duration_ms: 0.235334
+  type: 'test'
+  ...
+# Subtest: runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence
+ok 20 - runCase passes a single-turn case through the supplied real HTTP adapter and writes raw evidence
+  ---
+  duration_ms: 6.160417
+  type: 'test'
+  ...
+# Subtest: runCase rejects wrong request client/terminal evidence and wrong provider attempt count
+ok 21 - runCase rejects wrong request client/terminal evidence and wrong provider attempt count
+  ---
+  duration_ms: 5.108417
+  type: 'test'
+  ...
+# Subtest: runCase executes the declared echo once from the actual response and sends actual call id/output
+ok 22 - runCase executes the declared echo once from the actual response and sends actual call id/output
+  ---
+  duration_ms: 2.502292
+  type: 'test'
+  ...
+# Subtest: runCase classifies setup and missing capabilities as explicit non-product outcomes
+ok 23 - runCase classifies setup and missing capabilities as explicit non-product outcomes
+  ---
+  duration_ms: 1.257959
+  type: 'test'
+  ...
+# Subtest: protocol semantics module is import-safe and exposes the suite protocols
+ok 24 - protocol semantics module is import-safe and exposes the suite protocols
+  ---
+  duration_ms: 1.1885
+  type: 'test'
+  ...
+# Subtest: parseSse preserves ordered frames and SSE transport shapes
+    # Subtest: CRLF, LF, comments, multiline data, data-less events, and raw [DONE]
+    ok 1 - CRLF, LF, comments, multiline data, data-less events, and raw [DONE]
+      ---
+      duration_ms: 0.270791
+      type: 'test'
+      ...
+    # Subtest: multiline data joins with a newline and is parsed as one JSON object
+    ok 2 - multiline data joins with a newline and is parsed as one JSON object
+      ---
+      duration_ms: 0.06525
+      type: 'test'
+      ...
+    # Subtest: truncated data is a raw literal and is not repaired
+    ok 3 - truncated data is a raw literal and is not repaired
+      ---
+      duration_ms: 0.057458
+      type: 'test'
+      ...
+    1..3
+ok 25 - parseSse preserves ordered frames and SSE transport shapes
+  ---
+  duration_ms: 0.611083
+  type: 'test'
+  ...
+# Subtest: parseClientBody keeps JSON, SSE, malformed, and unknown content separate
+ok 26 - parseClientBody keeps JSON, SSE, malformed, and unknown content separate
+  ---
+  duration_ms: 0.251792
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal accepts valid JSON terminals for all four protocols
+ok 27 - findSemanticTerminal accepts valid JSON terminals for all four protocols
+  ---
+  duration_ms: 0.201792
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal accepts valid SSE terminals for all four protocols
+ok 28 - findSemanticTerminal accepts valid SSE terminals for all four protocols
+  ---
+  duration_ms: 0.120458
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal rejects marker text in content
+ok 29 - findSemanticTerminal rejects marker text in content
+  ---
+  duration_ms: 0.377583
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal rejects malformed and truncated observations
+ok 30 - findSemanticTerminal rejects malformed and truncated observations
+  ---
+  duration_ms: 0.194209
+  type: 'test'
+  ...
+# Subtest: findSemanticTerminal never converts provider error frames into terminals
+ok 31 - findSemanticTerminal never converts provider error frames into terminals
+  ---
+  duration_ms: 0.119709
+  type: 'test'
+  ...
+# Subtest: JSON content type selects JSON parsing and malformed JSON is not repaired
+ok 32 - JSON content type selects JSON parsing and malformed JSON is not repaired
+  ---
+  duration_ms: 0.064667
+  type: 'test'
+  ...
+# Subtest: SSE tool fragments stay ordered and are never concatenated into a synthetic terminal
+ok 33 - SSE tool fragments stay ordered and are never concatenated into a synthetic terminal
+  ---
+  duration_ms: 0.130084
+  type: 'test'
+  ...
+# Subtest: raw [DONE] alone never proves a semantic terminal
+ok 34 - raw [DONE] alone never proves a semantic terminal
+  ---
+  duration_ms: 0.110334
+  type: 'test'
+  ...
+# Subtest: unknown protocol and unknown content type have no semantic fallback
+ok 35 - unknown protocol and unknown content type have no semantic fallback
+  ---
+  duration_ms: 0.068583
+  type: 'test'
+  ...
+# Subtest: semantic observations match fixture expectations through the real assertion layer
+    # Subtest: openai_chat SSE derives text and terminal while preserving frames
+    ok 1 - openai_chat SSE derives text and terminal while preserving frames
+      ---
+      duration_ms: 1.037375
+      type: 'test'
+      ...
+    # Subtest: interleaved openai_chat tool fragments retain identity and complete arguments
+    ok 2 - interleaved openai_chat tool fragments retain identity and complete arguments
+      ---
+      duration_ms: 1.173958
+      type: 'test'
+      ...
+    # Subtest: anthropic SSE derives text and stop reason while preserving frames
+    ok 3 - anthropic SSE derives text and stop reason while preserving frames
+      ---
+      duration_ms: 0.407625
+      type: 'test'
+      ...
+    # Subtest: gemini SSE derives candidate text and finishReason
+    ok 4 - gemini SSE derives candidate text and finishReason
+      ---
+      duration_ms: 0.227333
+      type: 'test'
+      ...
+    # Subtest: responses event stream derives final item and summary keys
+    ok 5 - responses event stream derives final item and summary keys
+      ---
+      duration_ms: 0.187416
+      type: 'test'
+      ...
+    1..5
+ok 36 - semantic observations match fixture expectations through the real assertion layer
+  ---
+  duration_ms: 3.2385
+  type: 'test'
+  ...
+# Subtest: semantic observations expose response item arguments from actual events only
+ok 37 - semantic observations expose response item arguments from actual events only
+  ---
+  duration_ms: 0.423833
+  type: 'test'
+  ...
+# Subtest: responses SSE coalesces repeated function_call snapshots by call_id without duplicating the call
+ok 38 - responses SSE coalesces repeated function_call snapshots by call_id without duplicating the call
+  ---
+  duration_ms: 0.099792
+  type: 'test'
+  ...
+# Subtest: semantic observations do not invent missing terminals or complete arguments
+ok 39 - semantic observations do not invent missing terminals or complete arguments
+  ---
+  duration_ms: 0.101334
+  type: 'test'
+  ...
+# Subtest: responses SSE custom_tool_call retains exact raw input across split, structured, and interleaved items
+    # Subtest: assembled custom input preserves exact whitespace and is exposed through the real assertion layer
+    ok 1 - assembled custom input preserves exact whitespace and is exposed through the real assertion layer
+      ---
+      duration_ms: 0.198042
+      type: 'test'
+      ...
+    # Subtest: structured custom input is preserved verbatim and a complete done event replaces assembled fragments
+    ok 2 - structured custom input is preserved verbatim and a complete done event replaces assembled fragments
+      ---
+      duration_ms: 0.097833
+      type: 'test'
+      ...
+    # Subtest: interleaved custom and function items keep independent raw input, arguments, and call ordering
+    ok 3 - interleaved custom and function items keep independent raw input, arguments, and call ordering
+      ---
+      duration_ms: 0.075542
+      type: 'test'
+      ...
+    1..3
+ok 40 - responses SSE custom_tool_call retains exact raw input across split, structured, and interleaved items
+  ---
+  duration_ms: 0.5125
+  type: 'test'
+  ...
+# Subtest: anthropic SSE assembles independently split input_json_delta fragments and complete terminal forms
+    # Subtest: split partial_json fragments assemble the exact raw tool_use input and satisfy the client assertion
+    ok 1 - split partial_json fragments assemble the exact raw tool_use input and satisfy the client assertion
+      ---
+      duration_ms: 0.262875
+      type: 'test'
+      ...
+    # Subtest: complete and incomplete anthropic terminals remain recognized while raw frames stay intact
+    ok 2 - complete and incomplete anthropic terminals remain recognized while raw frames stay intact
+      ---
+      duration_ms: 0.086416
+      type: 'test'
+      ...
+    1..2
+ok 41 - anthropic SSE assembles independently split input_json_delta fragments and complete terminal forms
+  ---
+  duration_ms: 0.507834
+  type: 'test'
+  ...
+# Subtest: extractToolCalls parses streamed Responses SSE fragments into one complete echo call
+ok 42 - extractToolCalls parses streamed Responses SSE fragments into one complete echo call
+  ---
+  duration_ms: 1.621708
+  type: 'test'
+  ...
+# Subtest: extractToolCalls preserves separate streamed arguments for parallel tool indices
+ok 43 - extractToolCalls preserves separate streamed arguments for parallel tool indices
+  ---
+  duration_ms: 0.422375
+  type: 'test'
+  ...
+# Subtest: executeDeclaredEchoTool uses actual arguments and rejects undeclared/non-echo/invalid calls
+ok 44 - executeDeclaredEchoTool uses actual arguments and rejects undeclared/non-echo/invalid calls
+  ---
+  duration_ms: 0.284
+  type: 'test'
+  ...
+# Subtest: runToolFollowup executes exactly once from actual args and sends the next request
+ok 45 - runToolFollowup executes exactly once from actual args and sends the next request
+  ---
+  duration_ms: 0.316334
+  type: 'test'
+  ...
+# Subtest: runToolFollowup does not fabricate a result when no tool call is observed
+ok 46 - runToolFollowup does not fabricate a result when no tool call is observed
+  ---
+  duration_ms: 0.151792
+  type: 'test'
+  ...
+# Subtest: runToolFollowup does not execute undeclared/non-echo observed calls
+ok 47 - runToolFollowup does not execute undeclared/non-echo observed calls
+  ---
+  duration_ms: 0.07575
+  type: 'test'
+  ...
+# Subtest: runToolFollowup does not mutate fixture or client request input
+ok 48 - runToolFollowup does not mutate fixture or client request input
+  ---
+  duration_ms: 0.17775
+  type: 'test'
+  ...
+# Subtest: extractToolCalls does not use fixture expected_client as an execution source
+ok 49 - extractToolCalls does not use fixture expected_client as an execution source
+  ---
+  duration_ms: 0.04825
+  type: 'test'
+  ...
+# Subtest: namespace fixture preserves observed identity without granting execution or aliases
+ok 50 - namespace fixture preserves observed identity without granting execution or aliases
+  ---
+  duration_ms: 0.439083
+  type: 'test'
+  ...
+# Subtest: custom echo returns exact raw input and submits it without JSON wrapping
+ok 51 - custom echo returns exact raw input and submits it without JSON wrapping
+  ---
+  duration_ms: 0.569083
+  type: 'test'
+  ...
+# Subtest: omitted identity/input, malformed arguments and parallel calls never fabricate execution
+ok 52 - omitted identity/input, malformed arguments and parallel calls never fabricate execution
+  ---
+  duration_ms: 0.169417
+  type: 'test'
+  ...
+# Subtest: provider Chat wire is not a Responses client fallback and raw errors are not tools
+ok 53 - provider Chat wire is not a Responses client fallback and raw errors are not tools
+  ---
+  duration_ms: 0.184167
+  type: 'test'
+  ...
+# Subtest: send failure remains explicit and does not retry the echo execution
+ok 54 - send failure remains explicit and does not retry the echo execution
+  ---
+  duration_ms: 0.21775
+  type: 'test'
+  ...
+1..54
+# tests 67
+# suites 0
+# pass 67
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 107.736

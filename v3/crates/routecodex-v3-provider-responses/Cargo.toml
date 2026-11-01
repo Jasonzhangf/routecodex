@@ -14,6 +14,7 @@ reqwest.workspace = true
 provider-compat-core.workspace = true
 routecodex-v3-config = { path = "../routecodex-v3-config" }
 routecodex-v3-error = { path = "../routecodex-v3-error" }
+routecodex-v3-oauth = { path = "../routecodex-v3-oauth" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

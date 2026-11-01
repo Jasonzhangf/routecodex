@@ -8,13 +8,16 @@ pub(crate) struct V3FrontTransportCloseoutState {
     closed: AtomicBool,
     peer_disconnected: AtomicBool,
     peer_disconnect_notify: Notify,
+    transport_wrote: AtomicBool,
+    transport_write_notify: Notify,
 }
 
 #[derive(Debug, Default)]
 struct V3FrontTransportRequestCycle {
-    frame: Option<Vec<u8>>,
     request_started: bool,
     response_started: bool,
+    terminal_frame_suppressed: bool,
+    restart_deferred: bool,
 }
 
 impl V3FrontTransportCloseoutState {
@@ -24,15 +27,9 @@ impl V3FrontTransportCloseoutState {
             closed: AtomicBool::new(false),
             peer_disconnected: AtomicBool::new(false),
             peer_disconnect_notify: Notify::new(),
+            transport_wrote: AtomicBool::new(false),
+            transport_write_notify: Notify::new(),
         })
-    }
-
-    pub(crate) fn take_frame(&self) -> Option<Vec<u8>> {
-        self.request_cycle
-            .lock()
-            .expect("front closeout request cycle lock")
-            .frame
-            .take()
     }
 
     pub(crate) fn mark_request_started(&self) {
@@ -40,9 +37,10 @@ impl V3FrontTransportCloseoutState {
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        request_cycle.frame = None;
         request_cycle.request_started = true;
         request_cycle.response_started = false;
+        request_cycle.restart_deferred = false;
+        self.transport_wrote.store(false, Ordering::Release);
     }
 
     pub(crate) fn mark_response_started(&self) {
@@ -52,22 +50,82 @@ impl V3FrontTransportCloseoutState {
             .response_started = true;
     }
 
-    pub(crate) fn set_frame(&self, frame: Vec<u8>) {
-        self.request_cycle
-            .lock()
-            .expect("front closeout request cycle lock")
-            .frame = Some(frame);
-    }
-
-    pub(crate) fn close_for_exec_replacement(&self) {
-        self.closed.store(true, Ordering::Release);
+    /// Close this connection for an exec replacement.
+    ///
+    /// Returns `false` when the closeout is deferred because a streaming terminal
+    /// already owns the client-visible boundary and its response bytes have not
+    /// reached the client yet. Closing there signals the biased write-worker close,
+    /// which can drop the queued SSE head and turn the transport break back into the
+    /// silent zero-byte close it replaces. Only a typed deferred close is retained;
+    /// restart must never fabricate a client error response.
+    pub(crate) fn close_for_exec_replacement(&self) -> bool {
         let mut request_cycle = self
             .request_cycle
             .lock()
             .expect("front closeout request cycle lock");
-        if request_cycle.request_started && !request_cycle.response_started {
-            request_cycle.frame = Some(build_v3_restart_closeout_http_error());
+        if request_cycle.terminal_frame_suppressed && !self.transport_wrote() {
+            request_cycle.restart_deferred = true;
+            return false;
         }
+        self.closed.store(true, Ordering::Release);
+        true
+    }
+
+    /// Commit the deferred restart closeout when the streaming terminal's body failed
+    /// and its response bytes never reached the client.
+    ///
+    /// Called from the streaming terminal right before its body fails, so a restart
+    /// replacement that raced the transport break closes without an error frame.
+    /// Returns `true` when the
+    /// closeout must be signalled; response bytes that did reach the client make the
+    /// SSE transport break the client boundary and drop the deferred frame.
+    pub(crate) fn commit_deferred_restart_closeout(&self) -> bool {
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        if self.transport_wrote() || !request_cycle.restart_deferred {
+            request_cycle.restart_deferred = false;
+            return false;
+        }
+        self.closed.store(true, Ordering::Release);
+        request_cycle.restart_deferred = false;
+        true
+    }
+
+    pub(crate) fn transport_wrote(&self) -> bool {
+        self.transport_wrote.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn abort_without_response(&self) {
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        request_cycle.terminal_frame_suppressed = true;
+        self.closed.store(true, Ordering::Release);
+    }
+
+    /// Suppress a pending restart closeout frame for a terminal that owns its own
+    /// client-visible boundary.
+    ///
+    /// The streaming no-response terminal owns the incomplete SSE transfer, so a
+    /// concurrent restart replacement must not queue another client frame.
+    /// Unlike `abort_without_response` this leaves the connection open, because Hyper
+    /// still has to write the response head before the body fails.
+    ///
+    /// Returns `false` when a restart closeout already committed on this connection.
+    /// The committed transport close is the client-visible boundary then.
+    pub(crate) fn suppress_restart_closeout_frame(&self) -> bool {
+        let mut request_cycle = self
+            .request_cycle
+            .lock()
+            .expect("front closeout request cycle lock");
+        if self.closed.load(Ordering::Acquire) {
+            return false;
+        }
+        request_cycle.terminal_frame_suppressed = true;
+        true
     }
 
     pub(crate) fn close(&self) {
@@ -95,6 +153,31 @@ impl V3FrontTransportCloseoutState {
         }
     }
 
+    /// Record that the Front transport wrote response bytes to the client socket.
+    pub(crate) fn mark_transport_wrote(&self) {
+        if !self.transport_wrote.swap(true, Ordering::AcqRel) {
+            self.transport_write_notify.notify_waiters();
+        }
+    }
+
+    /// Wait until the Front transport wrote response bytes to the client socket.
+    ///
+    /// A streaming terminal uses this as its flush boundary: the transfer must not fail
+    /// before the response head and its first frame reached the transport, otherwise the
+    /// client observes a connection that closes without any bytes, which is the silent
+    /// end of stream this terminal must not produce.
+    pub(crate) async fn wait_transport_wrote(&self) {
+        let notified = self.transport_write_notify.notified();
+        tokio::pin!(notified);
+        // Register the waiter before re-reading the flag so a write landing between the
+        // check and the await cannot be lost.
+        notified.as_mut().enable();
+        if self.transport_wrote.load(Ordering::Acquire) {
+            return;
+        }
+        notified.await;
+    }
+
     pub(crate) fn signal_socket_close(&self, close_tx: &Mutex<Option<oneshot::Sender<()>>>) {
         let _ = close_tx
             .lock()
@@ -102,16 +185,4 @@ impl V3FrontTransportCloseoutState {
             .take()
             .map(|tx| tx.send(()));
     }
-}
-
-fn build_v3_restart_closeout_http_error() -> Vec<u8> {
-    let body = br#"{"error":{"type":"server_error","code":"server_restart_in_progress","message":"RouteCodex restarted before this request completed","status":503}}"#;
-    format!(
-        "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-        body.len()
-    )
-    .into_bytes()
-    .into_iter()
-    .chain(body.iter().copied())
-    .collect()
 }

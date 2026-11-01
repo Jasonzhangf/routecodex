@@ -77,7 +77,6 @@ for (const forbidden of ['event_name', 'response.event']) {
 for (const runtimeRoot of [
   'sharedmodule/llmswitch-core/src/conversion/hub',
   'sharedmodule/llmswitch-core/src/runtime',
-  'sharedmodule/llmswitch-core/src/servertool',
 ]) {
   for (const file of listFiles(runtimeRoot)) {
     const rel = path.relative(root, file).split(path.sep).join('/');

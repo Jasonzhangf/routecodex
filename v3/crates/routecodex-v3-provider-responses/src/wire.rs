@@ -1,13 +1,14 @@
 use crate::V3ProviderError;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use provider_compat_core::namespace_tools::{
-    flatten_namespace_tool_for_provider, namespace_tool_name_map,
-    push_unique_provider_function_tool,
+    push_unique_provider_function_tool, NamespaceToolIdentityRegistry,
 };
 use routecodex_v3_config::internal::is_v3_gpt_family_model;
-use routecodex_v3_config::{V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind};
+use routecodex_v3_config::{
+    V3ProviderAuthEntryManifest, V3ProviderRequestCleanupAuthoringConfig, V3ResponsesTransportKind,
+};
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Protocol name recognized by the shared namespace-tool flattener for Responses wire
 /// function shape (`{type:"function", name, description?, parameters?, strict?}`).
@@ -23,6 +24,7 @@ pub enum V3ProviderAuthSecretHandle {
         key: String,
     },
     ApiKey(String),
+    OAuth(routecodex_v3_oauth::V3OAuthDeclaration),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,9 +33,77 @@ pub struct V3ProviderAuthHandle {
     pub secret: V3ProviderAuthSecretHandle,
 }
 
+/// Convert one compiled provider auth declaration into the transport auth
+/// handle. This function only carries declarations; it never reads a token or
+/// calls OAuth refresh.
+pub fn v3_provider_auth_handle_from_manifest_entry(
+    alias: impl Into<String>,
+    entry: &V3ProviderAuthEntryManifest,
+) -> Result<V3ProviderAuthHandle, String> {
+    let secret = v3_provider_auth_secret_handle_from_declaration_fields(
+        entry.oauth_declaration.as_ref(),
+        entry.env.as_deref(),
+        entry.token_file.as_deref(),
+        entry.secret_file.as_deref(),
+        entry.secret_key.as_deref(),
+        entry.api_key.as_deref(),
+        &entry.alias,
+    )?;
+    Ok(V3ProviderAuthHandle {
+        alias: alias.into(),
+        secret,
+    })
+}
+
+pub fn v3_provider_auth_secret_handle_from_declaration_fields(
+    oauth_declaration: Option<&routecodex_v3_oauth::V3OAuthDeclaration>,
+    env: Option<&str>,
+    token_file: Option<&str>,
+    secret_file: Option<&str>,
+    secret_key: Option<&str>,
+    api_key: Option<&str>,
+    alias: &str,
+) -> Result<V3ProviderAuthSecretHandle, String> {
+    if let Some(declaration) = oauth_declaration {
+        if env.is_some()
+            || token_file.is_some()
+            || secret_file.is_some()
+            || secret_key.is_some()
+            || api_key.is_some()
+        {
+            return Err(format!(
+                "provider auth {} mixes OAuth with legacy secret handles",
+                alias
+            ));
+        }
+        return Ok(V3ProviderAuthSecretHandle::OAuth(declaration.clone()));
+    }
+
+    match (env, token_file, secret_file, secret_key, api_key) {
+        (Some(name), None, None, None, None) => {
+            Ok(V3ProviderAuthSecretHandle::Environment(name.to_string()))
+        }
+        (None, Some(path), None, None, None) => {
+            Ok(V3ProviderAuthSecretHandle::TokenFile(path.to_string()))
+        }
+        (None, None, Some(path), Some(key), None) => Ok(V3ProviderAuthSecretHandle::SecretFile {
+            path: path.to_string(),
+            key: key.to_string(),
+        }),
+        (None, None, None, None, Some(value)) => {
+            Ok(V3ProviderAuthSecretHandle::ApiKey(value.to_string()))
+        }
+        _ => Err(format!(
+            "provider auth {} must define exactly one compiled secret handle",
+            alias
+        )),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ResponsesProviderTarget {
     pub provider_id: String,
+    pub interface_id: String,
     pub provider_type: String,
     pub base_url: String,
     pub canonical_model_id: String,
@@ -41,6 +111,7 @@ pub struct V3ResponsesProviderTarget {
     /// 配置声明的 provider 兼容契约（如 opencode-go 的
     /// `responses:deepseek-console-go`）；wire 层按契约能力分支，不按部署身份分支。
     pub compatibility_profile: Option<String>,
+    pub headers: BTreeMap<String, String>,
     pub auth: V3ProviderAuthHandle,
     pub responses_transport: V3ResponsesTransportKind,
     pub websocket_v2_url: Option<String>,
@@ -50,6 +121,7 @@ pub struct V3ResponsesProviderTarget {
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
     pub sse_first_frame_timeout_ms: Option<u64>,
     pub initial_concurrency_budget: u32,
+    /// Retained for config compatibility only; business requests do not wait on concurrency.
     pub concurrency_acquire_timeout_ms: u64,
 }
 
@@ -72,9 +144,18 @@ pub struct V3Provider12ResponsesWirePayload {
     stream_intent: V3ResponsesStreamIntent,
     endpoint: V3ResponsesRequestEndpoint,
     body: Value,
+    custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    namespace_identities: HashMap<String, (String, String)>,
 }
 
 impl V3Provider12ResponsesWirePayload {
+    pub fn with_stream_intent(mut self, intent: V3ResponsesStreamIntent) -> Self {
+        self.stream_intent = intent;
+        self
+    }
+    pub fn namespace_identities(&self) -> &HashMap<String, (String, String)> {
+        &self.namespace_identities
+    }
     pub fn request_id(&self) -> &str {
         &self.request_id
     }
@@ -93,6 +174,20 @@ impl V3Provider12ResponsesWirePayload {
 
     pub fn body(&self) -> &Value {
         &self.body
+    }
+
+    pub fn custom_tool_function_binding(
+        &self,
+    ) -> Option<&provider_compat_core::CustomToolFunctionBinding> {
+        self.custom_tool_function_binding.as_ref()
+    }
+
+    pub fn with_custom_tool_function_binding(
+        mut self,
+        binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    ) -> Self {
+        self.custom_tool_function_binding = binding;
+        self
     }
 
     pub(crate) fn into_parts(
@@ -146,6 +241,38 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     current_request_body: Value,
     endpoint: V3ResponsesRequestEndpoint,
 ) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
+    build_responses_wire_payload_with_registry(
+        request_id,
+        target,
+        current_request_body,
+        endpoint,
+        None,
+    )
+}
+
+/// Package a standard request after provider compat without rebuilding source identities.
+pub fn build_v3_provider_12_responses_wire_payload_with_registry(
+    request_id: impl Into<String>,
+    target: V3ResponsesProviderTarget,
+    body: Value,
+    registry: NamespaceToolIdentityRegistry,
+) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
+    build_responses_wire_payload_with_registry(
+        request_id,
+        target,
+        body,
+        V3ResponsesRequestEndpoint::Responses,
+        Some(registry),
+    )
+}
+
+fn build_responses_wire_payload_with_registry(
+    request_id: impl Into<String>,
+    target: V3ResponsesProviderTarget,
+    current_request_body: Value,
+    endpoint: V3ResponsesRequestEndpoint,
+    standard_registry: Option<NamespaceToolIdentityRegistry>,
+) -> Result<V3Provider12ResponsesWirePayload, V3ProviderError> {
     let request_id = request_id.into();
     let stream_intent = match current_request_body
         .as_object()
@@ -167,9 +294,6 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     {
         return Err(V3ProviderError::InvalidStreamIntent { request_id });
     }
-    if let Some(field) = find_v3_routecodex_control_payload_key(&current_request_body) {
-        return Err(V3ProviderError::ControlFieldInWireBody { request_id, field });
-    }
     validate_current_responses_data_images(&request_id, &current_request_body)?;
     let actual_model = current_request_body
         .get("model")
@@ -183,11 +307,33 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             actual_model,
         });
     }
-    let mut body = expand_namespace_tools_in_responses_wire_body(
-        &request_id,
-        &target.provider_type,
-        current_request_body,
-    )?;
+    let already_projected = standard_registry.is_some();
+    let registry = match standard_registry {
+        Some(registry) => registry,
+        None => NamespaceToolIdentityRegistry::from_request(
+            &current_request_body,
+            if target.provider_type == "openai_chat" {
+                "openai-chat"
+            } else {
+                RESPONSES_WIRE_PROTOCOL_NAME
+            },
+        )
+        .map_err(|detail| V3ProviderError::NamespaceToolFlattenFailed {
+            request_id: request_id.clone(),
+            detail,
+        })?,
+    };
+    let namespace_identities = registry.restore_identities();
+    let mut body = if already_projected {
+        current_request_body
+    } else {
+        expand_namespace_tools_in_responses_wire_body(
+            &request_id,
+            &target.provider_type,
+            current_request_body,
+            &registry,
+        )?
+    };
     normalize_cc_sol_empty_tool_search_results(&mut body, &target);
     normalize_deepseek_thinking_tool_choice(&mut body, &target);
     // 请求侧 reasoning wire 兜底（非 gpt 目标，每次请求必经）：
@@ -197,7 +343,7 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
     //    provider 回传的窗口。
     // 2. DeepSeek/opencode 目标额外把 reasoning 重写为统一
     //    `content:[{type:"reasoning_text",text}]` 形态（否则上游 400
-    //    `reasoning_text must be passed back`）；该重写只在已证明需要的模型上
+    //    `reasoning_text must be passed back`）；该重写只在已证明需要的协议契约上
     //    执行，避免未经证实的其他非 gpt responses provider 被改写 reasoning 形态。
     if !is_v3_gpt_family_model(&target.canonical_model_id) {
         let deepseek_compat = target.canonical_model_id == "deepseek-v4-flash"
@@ -222,57 +368,171 @@ fn build_v3_provider_12_responses_wire_payload_for_endpoint(
             }
         }
     }
-    validate_provider_wire_tool_names(&request_id, &body)?;
+    // 独立的 provider 私契约：DeepSeek 官方 Responses（`responses:deepseek-official`）
+    // 在 thinking 模式下要求工具续接请求回传历史 reasoning 明文，否则上游 400
+    // `The reasoning_text in the thinking mode must be passed back to the API.`。
+    // 该契约按 provider 声明的 profile 门控，不能挂在 `is_v3_gpt_family_model`
+    // 分支上：路由路径的 canonical/requested 模型是客户端模型（gpt 家族），而
+    // wire_model 才是 deepseek-flash，挂错分支会让契约在真实路由上失效。
+    ensure_v3_official_deepseek_reasoning_text(&mut body, &target);
     Ok(V3Provider12ResponsesWirePayload {
+        namespace_identities,
         request_id,
         target,
         stream_intent,
         endpoint,
         body,
+        custom_tool_function_binding: None,
     })
 }
 
-/// 唯一密文剥离 hook（响应侧，direct 与 relay 共用）：
+/// 唯一密文剥离 hook（响应侧，direct 与 relay 共用，仅用于 Responses wire）：
 /// `retain_response_cipher=true`（仅 gpt 模型且路由只有单一 provider 候选时，
 /// 由调用方 VR 路由决策用 `is_v3_retain_response_cipher` 算好传入）原样保留
 /// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
-/// 其余场景递归删除 payload 中所有 Codex 密文字段，保证密文不进入客户端。
-/// 响应侧是密文治理的唯一入口；本 hook 只消费判定结果，不重复判定。
-pub fn apply_v3_response_cipher_policy(payload: &mut Value, retain_response_cipher: bool) {
-    if !retain_response_cipher {
-        strip_v3_encrypted_fields_recursive(payload);
+/// `preserve_anthropic_signature=true` 仅由 typed Anthropic provider source
+/// 派生，保留 Anthropic thinking/redacted thinking signature。其余场景递归删除
+/// 非工具业务子树中的 `encrypted_content`，保证跨 provider 密文不进入客户端。
+/// 工具调用与工具结果可能携带结构化参数或业务字段，必须完整保留。响应侧是密文
+/// 治理的唯一入口；本 hook 只消费判定结果。
+pub fn apply_v3_response_cipher_policy(
+    payload: &mut Value,
+    retain_response_cipher: bool,
+    preserve_anthropic_signature: bool,
+) {
+    if !retain_response_cipher && !preserve_anthropic_signature {
+        strip_v3_response_encrypted_fields_recursive(payload, true);
     }
 }
 
-/// 递归删除 Codex 密文字段：`encrypted_content` 值以 `rsn_` / `gAAAA` 开头
-/// （Codex 客户端本地密文）一律删除；anthropic 链的 thinking signature 载体
-/// （redacted_thinking.data / thinking.signature，值非 rsn_/gAAAA 前缀）不是
-/// Codex 密文，保留给客户端签名校验。请求侧与响应侧共用此唯一递归剥离器。
-fn strip_v3_encrypted_fields_recursive(value: &mut Value) {
+/// Chat wire（OpenAiChat/Gemini）的 reasoning 业务形状保留：只有 Codex 本地密文
+/// 形状（`rsn_` / `gAAAA` 前缀）会删除，其他 `encrypted_content` 是 provider 业务
+/// 数据，必须原样进入客户端（b878f6c 黑盒契约）。
+pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_response_cipher: bool) {
+    if !retain_response_cipher {
+        strip_v3_response_encrypted_fields_recursive(payload, false);
+    }
+}
+
+/// 响应侧递归删除 reasoning 密文字段。`strip_all=true`（Responses wire）不按密文
+/// 形状判定，删除所有非工具 `encrypted_content`；`strip_all=false`（Chat wire）
+/// 只删除 Codex 本地密文前缀。工具调用与工具结果属于业务数据，必须原样保留。
+fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bool) {
     match value {
         Value::Object(map) => {
-            strip_v3_cipher_field(map);
+            if map
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(is_v3_responses_tool_business_item)
+            {
+                return;
+            }
+            let remove = match map.get("encrypted_content") {
+                None => false,
+                Some(Value::String(cipher)) => {
+                    strip_all || cipher.starts_with("rsn_") || cipher.starts_with("gAAAA")
+                }
+                Some(_) => strip_all,
+            };
+            if remove {
+                map.remove("encrypted_content");
+            }
             for child in map.values_mut() {
-                strip_v3_encrypted_fields_recursive(child);
+                strip_v3_response_encrypted_fields_recursive(child, strip_all);
             }
         }
         Value::Array(items) => {
             for item in items {
-                strip_v3_encrypted_fields_recursive(item);
+                strip_v3_response_encrypted_fields_recursive(item, strip_all);
             }
         }
         _ => {}
     }
 }
 
-/// 单一对象的密文键剥离（请求侧 reasoning 条目与响应侧递归共用同一语义）。
-fn strip_v3_cipher_field(map: &mut Map<String, Value>) {
-    if map.get("type").and_then(Value::as_str) == Some("function_call_output") {
+fn is_v3_responses_tool_business_item(item_type: &str) -> bool {
+    matches!(
+        item_type,
+        "function_call"
+            | "function_call_output"
+            | "custom_tool_call"
+            | "custom_tool_call_output"
+            | "local_shell_call"
+            | "local_shell_call_output"
+            | "web_search_call"
+            | "file_search_call"
+            | "code_interpreter_call"
+            | "computer_call"
+            | "computer_call_output"
+            | "mcp_call"
+            | "mcp_list_tools"
+            | "mcp_approval_request"
+            | "mcp_approval_response"
+            | "tool_search_call"
+            | "tool_search_output"
+            | "apply_patch_call"
+            | "apply_patch_call_output"
+            | "image_generation_call"
+    )
+}
+
+/// DeepSeek 官方 Responses（provider 声明 profile `responses:deepseek-official`）
+/// 的 reasoning 回传契约，唯一 owner。
+///
+/// 上游在 thinking 模式下要求工具续接请求把历史 reasoning 明文带回，否则 400
+/// `The reasoning_text in the thinking mode must be passed back to the API.`
+/// （实测：HTTP 400 invalid_request_error）。官方端点接受 `summary` 与 `content`
+/// 并存，因此这里只补全明文表示，不删除 `summary`/`text`/`reasoning_content`；
+/// 已有明文 content 时保持字节不变；无任何明文时使用既有确定性占位符（上游接受
+/// 占位符，缺 `reasoning_text` 才 400）。密文对官方端点无效，统一剥离。
+///
+/// 门控只看 provider 声明的 profile：路由路径的 canonical/requested 模型是
+/// 客户端模型（gpt 家族），provider 实际模型在 `wire_model`，按模型命名判定
+/// 会让该契约在真实路由上失效。
+fn ensure_v3_official_deepseek_reasoning_text(
+    body: &mut Value,
+    target: &V3ResponsesProviderTarget,
+) {
+    if target.compatibility_profile.as_deref() != Some("responses:deepseek-official") {
         return;
     }
-    if let Some(Value::String(cipher)) = map.get("encrypted_content") {
-        if cipher.starts_with("rsn_") || cipher.starts_with("gAAAA") {
-            map.remove("encrypted_content");
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        obj.remove("encrypted_content");
+        // 明文可用性由每个 content part 的真实 `text` 判定，而不是“至少一个
+        // part 有文本”：`[{"type":"reasoning_text","text":""}]` 和缺 `text`
+        // 的 part 都会被上游拒绝（实测缺 `text` 400 missing field `text`），
+        // 只要出现一个不可回传 part 就重建为单条可用 `reasoning_text`。
+        let content_has_only_usable_text = obj
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                !items.is_empty()
+                    && items.iter().all(|item| {
+                        item.get("text")
+                            .and_then(Value::as_str)
+                            .is_some_and(|text| !text.is_empty())
+                    })
+            });
+        if !content_has_only_usable_text {
+            let plain = join_v3_reasoning_plain_text(obj);
+            let text = if plain.is_empty() {
+                "[thinking redacted]".to_string()
+            } else {
+                plain
+            };
+            obj.insert(
+                "content".to_string(),
+                json!([{"type": "reasoning_text", "text": text}]),
+            );
         }
     }
 }
@@ -636,8 +896,8 @@ fn normalize_cc_sol_empty_tool_search_results(
 
 /// Responses wire tools only support provider-native tool types; a Codex `type=namespace`
 /// container (MCP tool discovery) is not a standard Responses tool and fails strict providers.
-/// Flatten each namespace child into a plain `function` tool, preserving order and child
-/// name/description/parameters/strict, so no `namespace` container crosses the provider wire.
+/// Project each namespace child from the shared bound identity, preserving
+/// native Responses function/custom kinds and the declaration order.
 ///
 /// The expanded `function` shape follows the target provider's native tool convention:
 /// `responses` providers (OpenAI Responses standard) receive the flat form
@@ -648,46 +908,28 @@ fn expand_namespace_tools_in_responses_wire_body(
     request_id: &str,
     provider_type: &str,
     mut body: Value,
+    registry: &NamespaceToolIdentityRegistry,
 ) -> Result<Value, V3ProviderError> {
     let Some(tools) = body.get("tools").and_then(Value::as_array).cloned() else {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body);
         return Ok(body);
     };
-    let has_namespace = tools
-        .iter()
-        .any(|tool| tool.get("type").and_then(Value::as_str) == Some("namespace"));
-    if !has_namespace {
-        rewrite_namespace_qualified_call_names_from_convention(&mut body);
-    }
     let protocol = match provider_type {
         "openai_chat" => "openai-chat",
         _ => RESPONSES_WIRE_PROTOCOL_NAME,
     };
-    let mut expanded = Vec::with_capacity(tools.len());
-    let mut namespace_name_map = HashMap::new();
-    for tool in tools {
-        if let Some(mapping) = namespace_tool_name_map(&tool).map_err(|detail| {
-            V3ProviderError::NamespaceToolFlattenFailed {
-                request_id: request_id.to_string(),
-                detail,
-            }
-        })? {
-            namespace_name_map.extend(mapping);
+    let mut expanded = registry.project_tools(protocol, &tools).map_err(|detail| {
+        V3ProviderError::NamespaceToolFlattenFailed {
+            request_id: request_id.to_string(),
+            detail,
         }
-        match flatten_namespace_tool_for_provider(protocol, &tool) {
-            Ok(Some(children)) => expanded.extend(children),
-            Ok(None) => expanded.push(tool),
-            Err(detail) => {
-                return Err(V3ProviderError::NamespaceToolFlattenFailed {
-                    request_id: request_id.to_string(),
-                    detail,
-                })
-            }
-        }
-    }
+    })?;
     if provider_type == "openai_chat" {
         expanded = normalize_openai_chat_function_tools(request_id, expanded)?;
     }
+    // Only a plain declaration that collides with a declared namespace identity
+    // is renamed. Two plain declarations that share one name keep the existing
+    // dedup/conflict behavior so a genuine client-side duplicate is still
+    // reported instead of silently split.
     let mut expanded_tool_indexes = HashMap::new();
     let mut unique_expanded = Vec::with_capacity(expanded.len());
     for tool in expanded {
@@ -703,220 +945,12 @@ fn expand_namespace_tools_in_responses_wire_body(
         })?;
     }
     body["tools"] = Value::Array(unique_expanded);
-    rewrite_namespace_qualified_call_names(&mut body, &namespace_name_map);
-    // Historical inputs may carry an MCP-qualified call even when the current
-    // tool declaration is incomplete or omitted its child. Apply the same
-    // validated convention mapping as the no-tools path so strict providers
-    // never receive a dotted function name.
-    rewrite_namespace_qualified_call_names_from_convention(&mut body);
+    // Only the request declaration drives forward projection: a call, history,
+    // or `tool_choice` name is rewritten when it matches a declared namespace
+    // identity's client path. Undeclared dotted names are forwarded verbatim;
+    // there is no convention or provider-name guess.
+    registry.project_references(&mut body);
     Ok(body)
-}
-
-fn rewrite_namespace_qualified_call_names(body: &mut Value, names: &HashMap<String, String>) {
-    fn rewrite_call_object(value: &mut Value, names: &HashMap<String, String>) {
-        let Some(object) = value.as_object_mut() else {
-            return;
-        };
-        if let Some(Value::String(name)) = object.get_mut("name") {
-            if let Some(mapped) = names.get(name.as_str()) {
-                *name = mapped.clone();
-            }
-        }
-        if let Some(function) = object.get_mut("function").and_then(Value::as_object_mut) {
-            if let Some(Value::String(name)) = function.get_mut("name") {
-                if let Some(mapped) = names.get(name.as_str()) {
-                    *name = mapped.clone();
-                }
-            }
-        }
-    }
-
-    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        for item in input {
-            if matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-            ) {
-                rewrite_call_object(item, names);
-            }
-        }
-    }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages {
-            let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut)
-            else {
-                continue;
-            };
-            for tool_call in tool_calls {
-                if tool_call.get("type").and_then(Value::as_str) == Some("function") {
-                    rewrite_call_object(tool_call, names);
-                }
-            }
-        }
-    }
-}
-
-fn rewrite_namespace_qualified_call_names_from_convention(body: &mut Value) {
-    if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
-        for item in input {
-            let kind = item.get("type").and_then(Value::as_str);
-            if !matches!(
-                kind,
-                Some("function_call" | "custom_tool_call" | "tool_call" | "tool_use")
-            ) {
-                continue;
-            }
-            let Some(name) = item.get("name").and_then(Value::as_str) else {
-                continue;
-            };
-            if let Some(mapped) = map_known_provider_call_name(name) {
-                item["name"] = Value::String(mapped);
-            }
-        }
-    }
-    if let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) {
-        for message in messages {
-            if let Some(tool_calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) {
-                for tool_call in tool_calls {
-                    if tool_call.get("type").and_then(Value::as_str) != Some("function") {
-                        continue;
-                    }
-                    if let Some(function) =
-                        tool_call.get_mut("function").and_then(Value::as_object_mut)
-                    {
-                        map_call_name_from_convention(function);
-                    }
-                }
-            }
-            if let Some(content) = message.get_mut("content").and_then(Value::as_array_mut) {
-                for part in content {
-                    if matches!(
-                        part.get("type").and_then(Value::as_str),
-                        Some("tool_use" | "function_call" | "custom_tool_call")
-                    ) {
-                        map_call_name_from_convention(
-                            part.as_object_mut()
-                                .expect("matched tool call must be an object"),
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn map_call_name_from_convention(object: &mut Map<String, Value>) {
-    let Some(name) = object.get("name").and_then(Value::as_str) else {
-        return;
-    };
-    if let Some(mapped) = map_known_provider_call_name(name) {
-        object.insert("name".to_string(), Value::String(mapped));
-    }
-}
-
-fn map_known_provider_call_name(name: &str) -> Option<String> {
-    let legacy_mcp_name = name
-        .strip_prefix("functions.mcp__")
-        .map(|rest| format!("mcp__{rest}"));
-    let candidate = legacy_mcp_name.as_deref().unwrap_or(name);
-    map_known_namespace_qualified_call_name(candidate)
-        .or_else(|| map_known_internal_qualified_call_name(candidate))
-        .or(legacy_mcp_name)
-}
-
-fn map_known_internal_qualified_call_name(name: &str) -> Option<String> {
-    let (namespace, child) = name.split_once('.')?;
-    if child.is_empty()
-        || child.contains('.')
-        || !is_namespace_component(namespace)
-        || !is_namespace_component(child)
-    {
-        return None;
-    }
-    match namespace {
-        "servertool" | "mcp" | "native" | "multi_agent_v1" => Some(format!("{namespace}__{child}")),
-        _ => None,
-    }
-}
-
-fn map_known_namespace_qualified_call_name(name: &str) -> Option<String> {
-    let remainder = name.strip_prefix("mcp__")?;
-    let (namespace, child) = remainder.split_once('.')?;
-    if namespace.is_empty()
-        || child.is_empty()
-        || child.contains('.')
-        || !is_namespace_component(namespace)
-        || !is_namespace_component(child)
-    {
-        return None;
-    }
-    Some(format!("mcp__{namespace}__{child}"))
-}
-
-fn is_namespace_component(value: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-}
-
-fn validate_provider_wire_tool_names(
-    request_id: &str,
-    body: &Value,
-) -> Result<(), V3ProviderError> {
-    fn walk(request_id: &str, value: &Value, path: &str) -> Result<(), V3ProviderError> {
-        match value {
-            Value::Object(object) => {
-                let kind = object.get("type").and_then(Value::as_str);
-                if matches!(
-                    kind,
-                    Some("function_call" | "custom_tool_call" | "tool_use")
-                ) {
-                    if let Some(name) = object.get("name").and_then(Value::as_str) {
-                        if !is_provider_wire_tool_name(name) {
-                            return Err(V3ProviderError::FunctionToolShapeFailed {
-                                request_id: request_id.to_owned(),
-                                detail: format!(
-                                    "{path}.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
-                                ),
-                            });
-                        }
-                    }
-                }
-                if kind == Some("function") {
-                    if let Some(function) = object.get("function").and_then(Value::as_object) {
-                        if let Some(name) = function.get("name").and_then(Value::as_str) {
-                            if !is_provider_wire_tool_name(name) {
-                                return Err(V3ProviderError::FunctionToolShapeFailed {
-                                    request_id: request_id.to_owned(),
-                                    detail: format!(
-                                        "{path}.function.name must match ^[a-zA-Z0-9_-]+$: {name:?}"
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                }
-                for (key, child) in object {
-                    walk(request_id, child, &format!("{path}.{key}"))?;
-                }
-            }
-            Value::Array(items) => {
-                for (index, child) in items.iter().enumerate() {
-                    walk(request_id, child, &format!("{path}[{index}]"))?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    walk(request_id, body, "body")
-}
-
-fn is_provider_wire_tool_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 /// Console Go (`openai_chat`) 的 `/v1/responses` 端点使用 Chat 风格工具 serde 的变体：
@@ -1097,80 +1131,6 @@ fn invalid_data_image(
         request_id: request_id.to_string(),
         media_type: media_type.into(),
         reason: reason.into(),
-    }
-}
-
-pub const V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS: &[&str] = &[
-    "routecodex_internal",
-    "routecodexInternal",
-    "route_hint",
-    "routeHint",
-    "metadata_center",
-    "metadataCenter",
-    "__metadataCenter",
-    "debug_snapshot",
-    "debugSnapshot",
-    "provider_protocol",
-    "providerProtocol",
-    "provider_runtime",
-    "providerRuntime",
-    "resource_handle",
-    "resourceHandle",
-    "continuation_owner",
-    "continuationOwner",
-    "runtime_control",
-    "runtimeControl",
-    "request_truth",
-    "requestTruth",
-    "route_selection",
-    "routeSelection",
-    "retry_exclusion_set",
-    "retryExclusionSet",
-    "selected_target",
-    "selectedTarget",
-    "opaque_target",
-    "opaqueTarget",
-    "resume_meta",
-    "resumeMeta",
-    "servertool_state",
-    "servertoolState",
-    "error_chain",
-    "errorChain",
-    "node_trace",
-    "nodeTrace",
-    "capturedChatRequest",
-    "entryOriginRequest",
-    "requestSemantics",
-    "responsesRequestContext",
-    "__raw_request_body",
-    "__rt",
-    "__rccDryRunSerialized",
-    "request_capabilities",
-    "requestCapabilities",
-    "required_capabilities",
-    "requiredCapabilities",
-    "model_capabilities",
-    "modelCapabilities",
-    "selection_plan",
-    "selectionPlan",
-];
-
-pub fn find_v3_routecodex_control_payload_key(value: &Value) -> Option<&'static str> {
-    match value {
-        Value::Array(items) => items
-            .iter()
-            .find_map(find_v3_routecodex_control_payload_key),
-        Value::Object(object) => {
-            for &key in V3_ROUTECODEX_CONTROL_PAYLOAD_KEYS {
-                if object.contains_key(key) {
-                    return Some(key);
-                }
-            }
-            object
-                .values()
-                .find_map(find_v3_routecodex_control_payload_key)
-        }
-        _ => None,
     }
 }
 

@@ -1,5 +1,69 @@
 use super::*;
 
+#[test]
+fn responses_function_normalization_preserves_strict_presence() {
+    for nested in [false, true] {
+        for strict in [Some(json!(true)), Some(json!(false)), None] {
+            let mut function = json!({
+                "name": "acceptance_add",
+                "description": "Return the sum of the two integer arguments.",
+                "parameters": {"type": "object", "properties": {
+                    "a": {"type": "integer"}, "b": {"type": "integer"}
+                }, "required": ["a", "b"], "additionalProperties": false}
+            });
+            if let Some(value) = &strict {
+                function["strict"] = value.clone();
+            }
+            let mut expected = function.clone();
+            expected["type"] = json!("function");
+            let tool = if nested {
+                json!({"type": "function", "function": function})
+            } else {
+                expected.clone()
+            };
+            let mut payload = json!({"tools": [tool]});
+            normalize_responses_function_tools(payload.as_object_mut().unwrap());
+            assert_eq!(
+                payload["tools"][0], expected,
+                "nested={nested}, strict={strict:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn goaichat_profile_preserves_existing_hosted_extensions_and_other_protocols() {
+    let payload = json!({"tools":[
+        {"type":"web_search_20250305","name":"web_search","max_uses":7,
+            "function":{"name":"web_search","parameters":{"query":"provider-extension"}},
+            "opaque":{"preserve":true}},
+        {"type":"web_search_20990101","name":"web_search"},
+        {"type":"web_search_20250305","name":"web_search","max_uses":3},
+        {"name":"exec_command","input_schema":{"type":"object"}}
+    ],"messages":[{"role":"user","content":"opaque history"}]});
+    for protocol in ["anthropic-messages", "openai-chat", "openai-responses"] {
+        let input = ReqOutboundCompatInput {
+            payload: payload.clone(),
+            adapter_context: AdapterContext {
+                compatibility_profile: Some("anthropic:goaichat".into()),
+                provider_protocol: Some(protocol.into()),
+                ..Default::default()
+            },
+            explicit_profile: None,
+        };
+        assert_eq!(
+            run_req_outbound_stage3_compat(input.clone())
+                .unwrap()
+                .payload,
+            payload
+        );
+        assert_eq!(
+            run_resp_inbound_stage3_compat(input).unwrap().payload,
+            payload
+        );
+    }
+}
+
 fn deepseek_max_input(payload: Value, provider_protocol: &str) -> ReqOutboundCompatInput {
     ReqOutboundCompatInput {
         payload,
@@ -537,4 +601,56 @@ fn minimax_response_profile_does_not_harvest_ordinary_anthropic_wrapper_text() {
                 Some("function_call" | "custom_tool_call" | "tool_call")
             )
         }));
+}
+
+#[test]
+fn custom_tool_function_profile_dispatches_request_and_response_mapping() {
+    let request_payload = json!({
+        "model": "kimi-k3",
+        "tools": [{"type": "custom", "name": "apply_patch"}],
+        "input": [
+            {"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
+            {"type": "custom_tool_call_output", "call_id": "call_1", "output": "done"}
+        ]
+    });
+    let binding = crate::compile_custom_tool_function_binding(&request_payload);
+    let request = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload: request_payload,
+        adapter_context: AdapterContext {
+            compatibility_profile: Some(crate::CUSTOM_TOOL_FUNCTION_PROFILE.to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+    assert_eq!(
+        request.applied_profile.as_deref(),
+        Some(crate::CUSTOM_TOOL_FUNCTION_PROFILE)
+    );
+    assert_eq!(request.payload["tools"][0]["type"], "function");
+    assert_eq!(request.payload["input"][0]["type"], "function_call");
+    assert_eq!(request.payload["input"][1]["type"], "function_call_output");
+
+    let response = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+        payload: json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "routecodex_custom__6170706c795f7061746368",
+                "arguments": "{\"input\":\"patch\"}"
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some(crate::CUSTOM_TOOL_FUNCTION_PROFILE.to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            custom_tool_function_binding: Some(binding),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+    assert_eq!(response.payload["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response.payload["output"][0]["name"], "apply_patch");
+    assert_eq!(response.payload["output"][0]["input"], "patch");
 }

@@ -70,8 +70,8 @@ pub(crate) fn classify_v3_provider_compat_error(
 pub(crate) fn provider_request_payload_source(
     source_stage: &'static str,
     error: &V3ProviderCompatError,
-) -> routecodex_v3_error::V3Error01SourceRaised {
-    routecodex_v3_error::build_v3_error_01_source_raised_internal(
+) -> crate::shared::V3DirectSourceError {
+    crate::shared::direct_internal_error(
         routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
         source_stage,
         "provider_request_payload_invalid",
@@ -83,13 +83,20 @@ pub(crate) fn provider_request_payload_source(
 pub fn provider_compat_boundary_source(
     source_stage: &'static str,
     error: &V3ProviderCompatError,
-) -> routecodex_v3_error::V3Error01SourceRaised {
+) -> crate::shared::V3DirectSourceError {
     let field = extract_v3_provider_compat_boundary_field(&error.reason)
         .unwrap_or("control_like_top_level_field");
-    routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
+    let raw = routecodex_v3_error::raise_v3_provider_compat_payload_boundary_violation(
         source_stage,
         field,
         error.reason.as_str(),
+    );
+    crate::shared::direct_internal_error(
+        raw.source_kind,
+        source_stage,
+        raw.code,
+        raw.message,
+        routecodex_v3_error::V3InternalErrorCode::V3Provider12ResponsesWirePayload,
     )
 }
 
@@ -141,5 +148,57 @@ mod tests {
             error.classification(),
             V3ProviderCompatErrorClassification::Other
         );
+    }
+
+    #[test]
+    fn request_payload_source_preserves_wire_payload_identity() {
+        let profile = V3ProviderCompatProfileId::Passthrough;
+        let error = classify_v3_provider_compat_error(
+            "request",
+            &profile,
+            "Anthropic codec malformed tools[].format".to_string(),
+        );
+        let source = provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
+            .expect("compat source must execute Error01 successfully");
+
+        assert_eq!(
+            source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(source.source_stage, "ProviderReqCompat06ProviderCompat");
+        assert_eq!(source.code, "provider_request_payload_invalid");
+        let internal = source
+            .internal_error
+            .expect("wire payload internal identity");
+        assert_eq!(internal.internal_code, "500-150");
+        assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
+        assert!(source.external_error.is_none());
+    }
+
+    #[test]
+    fn boundary_source_preserves_boundary_identity_and_sdk_input() {
+        let error = V3ProviderCompatError::new_payload_boundary(
+            "response",
+            "passthrough".to_string(),
+            "ProviderCompatPayloadBoundaryViolation field=metadata value=control".to_string(),
+        );
+        let source = provider_compat_boundary_source("ProviderRespCompat02ProviderCompat", &error)
+            .expect("compat boundary source must execute Error01 successfully");
+
+        assert_eq!(
+            source.source_kind,
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure
+        );
+        assert_eq!(source.source_stage, "ProviderRespCompat02ProviderCompat");
+        assert_eq!(
+            source.code,
+            routecodex_v3_error::V3_PROVIDER_COMPAT_PAYLOAD_BOUNDARY_VIOLATION_CODE
+        );
+        let internal = source
+            .internal_error
+            .expect("wire payload internal identity");
+        assert_eq!(internal.internal_code, "500-150");
+        assert_eq!(internal.node_id, "V3Provider12ResponsesWirePayload");
+        assert!(source.external_error.is_none());
     }
 }

@@ -3,11 +3,10 @@ use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
 use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
-    v3_relay_provider_policy_now_epoch_ms, V3ProviderFailureRuntimeHealth,
-    V3RelayProviderFailureRetryPolicy,
+    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
 use futures_util::StreamExt;
-use routecodex_v3_config::{V3Config05ManifestPublished, V3WebSearchExecutionMode};
+use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3ErrorSourceKind, V3ProviderFailureSessionScope,
 };
@@ -50,6 +49,7 @@ pub struct V3OpenAiChatRelayRuntimeInput {
 }
 pub struct V3OpenAiChatRelayRuntimeOutput {
     pub status: u16,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub client_body: V3OpenAiChatRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
@@ -58,6 +58,9 @@ pub struct V3OpenAiChatRelayRuntimeOutput {
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub provider_snapshots: Option<V3RelayProviderSnapshots>,
+    pub provider_failure_attempts: Vec<V3RuntimeProviderFailureObservation>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
 }
 impl V3OpenAiChatRelayRuntimeOutput {
     pub fn into_v3_resp_15_client_payload(self) -> V3Resp15ClientPayload {
@@ -98,6 +101,11 @@ impl std::fmt::Debug for V3OpenAiChatRelayRuntimeOutput {
 }
 #[derive(Debug, thiserror::Error)]
 pub enum V3OpenAiChatRelayRuntimeError {
+    #[error("{source}")]
+    WithProviderFailureEvidence {
+        source: Box<V3OpenAiChatRelayRuntimeError>,
+        attempts: Vec<V3RuntimeProviderFailureObservation>,
+    },
     #[error(transparent)]
     Request(#[from] V3HubRelayRequestError),
     #[error(transparent)]
@@ -110,8 +118,6 @@ pub enum V3OpenAiChatRelayRuntimeError {
     Target(String),
     #[error("V3 OpenAI Chat provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 OpenAI Chat requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 OpenAI Chat provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 OpenAI Chat provider compat failed: {0}")]
@@ -120,11 +126,6 @@ pub enum V3OpenAiChatRelayRuntimeError {
     ProviderJson(#[from] serde_json::Error),
     #[error("V3 OpenAI Chat structured SSE projection failed: {0}")]
     StructuredSse(String),
-    #[error(
-        "V3 OpenAI Chat web_search Mode B intercepted a websearch call but the chat-entry response \
-         has no result projection path yet; refusing silent strip"
-    )]
-    WebSearchInterceptedUnprojected,
 }
 pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport(
     manifest: &V3Config05ManifestPublished,
@@ -164,12 +165,11 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
     .await
 }
 
-pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control(
+pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff(
     manifest: &V3Config05ManifestPublished,
     input: V3OpenAiChatRelayRuntimeInput,
     provider_health: V3ProviderFailureRuntimeHealth,
-    execution_mode: V3HubExecutionMode,
-    request_execution_control: crate::nodes::V3RequestExecutionControl,
+    handoff: crate::V3ResponsesProtocolRelayHandoff,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     execute_v3_openai_chat_relay_runtime_inner(
         manifest,
@@ -177,8 +177,8 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         crate::default_responses_transport(),
         provider_health,
         V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
-        execution_mode,
-        Some(request_execution_control),
+        V3HubExecutionMode::Relay,
+        Some(handoff),
     )
     .await
 }
@@ -241,65 +241,80 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
-    request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
     // 统一 relay 主循环骨架（大骨架）：生命周期与编排在 execute_v3_relay_runtime_core，
-    // 协议差异收敛在 V3OpenAiChatRelayCodec。
+    // 协议差异收敛在 V3OpenAiChatRelayCodec；Chat Process 有界续杯循环在骨架之上的
+    // 共享入口，策略仍只有 decide_v3_chat_process_refill 一处实现。
     let routing_group = server_routing_group(manifest, &input.server_id)
         .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?
         .to_string();
-    execute_v3_relay_runtime_core::<V3OpenAiChatRelayCodec, T>(
-        manifest,
-        &input.server_id,
-        input.failure_session_scope.clone(),
-        &input.request_id,
-        "/v1/chat/completions",
-        execution_mode,
-        input.payload,
-        transport,
-        provider_health,
-        retry_policy,
-        Vec::new(),
-        true,
-        request_execution_control,
-    )
-    .await
-    .map_err(|error| match error {
-        V3RelayCoreError::ModelNotFound(message) => {
-            V3OpenAiChatRelayRuntimeError::ModelNotFound(message)
-        }
-        // 治理层拦截（Mode B web-search）必须保留原变体：fail-fast 投影语义
-        // 由 server 端 `project_v3_openai_chat_relay_runtime_failure` 区分。
-        V3RelayCoreError::WebSearchIntercepted(_) => {
-            V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected
-        }
-        V3RelayCoreError::ProviderPoolExhausted {
-            attempted_candidates,
-        } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
-            attempted_candidates,
-        },
-        // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
-        V3RelayCoreError::Target(message)
-        | V3RelayCoreError::StaticRegistry(message)
-        | V3RelayCoreError::EndpointPath(message) => V3OpenAiChatRelayRuntimeError::Target(message),
-    })
+    let (output, _failure_events) =
+        super::relay_runtime_core::execute_v3_relay_runtime_with_chat_process_refill::<
+            V3OpenAiChatRelayCodec,
+            T,
+        >(
+            manifest,
+            &input.server_id,
+            input.failure_session_scope.clone(),
+            &input.request_id,
+            "/v1/chat/completions",
+            execution_mode,
+            input.payload,
+            transport,
+            provider_health,
+            retry_policy,
+            initial_handoff,
+        )
+        .await
+        .map_err(|(error, failure_events)| {
+            let source = match error {
+                V3RelayCoreError::ProviderPoolExhausted {
+                    attempted_candidates,
+                } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
+                    attempted_candidates,
+                },
+                V3RelayCoreError::ResponseGovernance(error) => {
+                    V3OpenAiChatRelayRuntimeError::Response(error)
+                }
+                // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
+                V3RelayCoreError::Target(message)
+                | V3RelayCoreError::StaticRegistry(message)
+                | V3RelayCoreError::EndpointPath(message) => {
+                    V3OpenAiChatRelayRuntimeError::Target(message)
+                }
+            };
+            if failure_events.is_empty() {
+                source
+            } else {
+                V3OpenAiChatRelayRuntimeError::WithProviderFailureEvidence {
+                    source: Box::new(source),
+                    attempts: failure_events,
+                }
+            }
+        })?;
+    Ok(output)
 }
 
 pub fn project_v3_openai_chat_relay_runtime_failure(
     error: V3OpenAiChatRelayRuntimeError,
 ) -> V3OpenAiChatRelayRuntimeOutput {
+    let (error, attempts) = match error {
+        V3OpenAiChatRelayRuntimeError::WithProviderFailureEvidence { source, attempts } => {
+            (*source, attempts)
+        }
+        error => (error, Vec::new()),
+    };
     let request_payload_invalid = matches!(
         &error,
         V3OpenAiChatRelayRuntimeError::ProviderCompat(error)
             if error.classification() == V3ProviderCompatErrorClassification::RequestPayloadInvalid
     );
+    let provider_pool_exhausted = matches!(
+        &error,
+        V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. }
+    );
     let source = match error {
-        V3OpenAiChatRelayRuntimeError::ModelNotFound(message) => build_v3_error_01_source_raised(
-            V3ErrorSourceKind::ModelNotFound,
-            "V3Target10ConcreteProviderSelected",
-            "direct_model_not_found",
-            message,
-        ),
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(
@@ -313,26 +328,37 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
             }
-            V3ProviderCompatErrorClassification::Other => build_v3_error_01_source_raised(
+            V3ProviderCompatErrorClassification::Other => crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",
                 "openai_chat_relay_runtime_error",
                 error.to_string(),
             ),
         },
-        error => build_v3_error_01_source_raised(
+        error => crate::shared::direct_plain_error(
             V3ErrorSourceKind::RuntimeFailure,
             "V3HubRuntime",
             "openai_chat_relay_runtime_error",
             error.to_string(),
         ),
     };
-    error_output(
-        source,
-        if request_payload_invalid { 400 } else { 500 },
-        "none",
-        Vec::new(),
-    )
+    let mut output = match source {
+        Ok(source) => error_output(
+            source,
+            if request_payload_invalid { 400 } else { 500 },
+            "none",
+            Vec::new(),
+        ),
+        Err(fault) => {
+            openai_chat_relay_failure_output::error_output_from_projection(Err(fault), Vec::new())
+        }
+    };
+    output.provider_failure_attempts = attempts;
+    if provider_pool_exhausted {
+        output.terminal_disposition =
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse);
+    }
+    output
 }
 
 fn project_json_response(
@@ -344,24 +370,13 @@ fn project_json_response(
     transport_intent: V3HubTransportIntent,
     trace: &mut Vec<&'static str>,
     compatibility_profile: Option<&str>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<&V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     expected_model_id: &str,
+    complete_provider_attempt: bool,
+    serialized_tool_context: &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext,
+    refill: Option<&mut super::relay_runtime_core::V3RelayRefillCarrier>,
 ) -> Result<Value, V3OpenAiChatRelayRuntimeError> {
-    // SSE 流式帧 / JSON 兜底：候选 Mode B 时，payload 内出现**本地** websearch
-    // function tool call 必须 fail-fast（禁止静默透传——内部工具无客户端投影）。
-    // hosted `web_search`（anthropic wire server tool，本入口出站已投影为
-    // web_search_20250305）不拦截：透传为 chat tool_calls 由客户端（opencode/
-    // reasonix）执行搜索并回传结果（标准 OpenAI 工具调用协议）。
-    if web_search_execution_mode.is_metadata_center_local_search() {
-        if let Some(call) = first_local_websearch_tool_call(&provider_value)? {
-            if call.name.eq_ignore_ascii_case("websearch") {
-                return Err(V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected);
-            }
-        }
-    }
     match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
             validate_v3_openai_chat_provider_response_payload(
@@ -393,11 +408,7 @@ fn project_json_response(
                 )));
             }
         }
-        unsupported => {
-            return Err(V3OpenAiChatRelayRuntimeError::Target(format!(
-                "OpenAI Chat relay response codec has no registered provider protocol: {unsupported:?}"
-            )));
-        }
+        V3HubProviderWireProtocol::Gemini => {}
     }
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         provider_value,
@@ -413,15 +424,25 @@ fn project_json_response(
     trace.push("V3ProviderRespInbound01Raw");
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)?;
     trace.push("ProviderRespCompat02ProviderCompat");
-    let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request(
-        compat,
-        Some(chat_request),
-    )
-    .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
+    if provider_protocol == V3HubProviderWireProtocol::Gemini {
+        request_id.ok_or_else(|| {
+            V3OpenAiChatRelayRuntimeError::Target(
+                "Gemini response normalization requires the runtime request ID".to_string(),
+            )
+        })?;
+    }
+    let resp02 =
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+            compat,
+            Some(chat_request),
+            request_id,
+        )
+        .map_err(V3OpenAiChatRelayRuntimeError::Target)?;
     trace.push("V3HubRespInbound02Normalized");
     let hooks = compile_v3_hub_relay_response_hooks();
     let mut response_profile = V3HubRelayResponseHookProfile::empty()
-        .with_web_search_execution_mode(web_search_execution_mode)
+        .with_complete_provider_attempt(complete_provider_attempt)
+        .with_serialized_tool_context(serialized_tool_context.clone())
         .with_retain_response_cipher(retain_response_cipher)
         .with_tool_thinking_enabled(tool_thinking_enabled)
         .with_toolreason_expected_model_id(expected_model_id)
@@ -436,33 +457,53 @@ fn project_json_response(
     if let Some(session_id) = session_id {
         response_profile = response_profile.with_toolreason_observation_session_id(session_id);
     }
-    if let Some(state) = web_search_center_state {
-        response_profile = response_profile.with_web_search_center_state(state.clone());
-    }
+    let has_source_summary =
+        super::resp_chat_process_03_governed::has_v3_source_explicit_nonempty_summary(
+            resp02.provider_payload(),
+        );
     let resp03 = hooks.govern(resp02, &response_profile)?;
     trace.push("V3HubRespChatProcess03Governed");
-    let (resp03, web_search_transition, _web_search_hook_outcome) = resp03.into_parts();
-    // Mode B 拦截后必须同轮投影：websearch call 已剥离，若 transition 存在
-    // 说明 Resp03 拦截了搜索调用但当前 Chat 入口尚无结果投影路径——禁止
-    // 静默剥离（fail-fast），由后续响应侧 hop/投影工程补全。
-    if web_search_transition.is_some() {
-        return Err(V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected);
-    }
-    let client_payload = if resp03
-        .provider_payload()
-        .get("output")
-        .and_then(Value::as_array)
-        .is_some()
-    {
-        project_v3_openai_chat_client_response_from_canonical(resp03.provider_payload())
-            .map_err(V3OpenAiChatRelayRuntimeError::Target)?
-    } else {
-        resp03.provider_payload().clone()
+    let resp03 = resp03.into_governed();
+    let source_terminal_reason = resp03.previous.source_terminal_reason.clone();
+    let source_terminal_completed = resp03.previous.source_terminal_completed;
+    let (accumulated_items, accumulated_usage) = match refill {
+        Some(refill) => {
+            super::relay_runtime_core::publish_v3_relay_chat_process_round(
+                &resp03,
+                has_source_summary,
+                source_terminal_completed,
+                refill,
+            );
+            (
+                Some(refill.accumulated_items.clone()),
+                refill.accumulated_usage.clone(),
+            )
+        }
+        None => (None, None),
     };
-    let resp05 = build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_client_payload(
+    let resp05 = try_build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03_with_projector(
         resp03,
-        client_payload,
-    );
+        move |mut payload| {
+            if let Some(accumulated_items) = accumulated_items.as_deref() {
+                super::resp_chat_process_03_governed::
+                    apply_v3_chat_process_refill_accumulation(
+                        &mut payload,
+                        accumulated_items,
+                        accumulated_usage.as_ref(),
+                    );
+            }
+            if payload.get("output").and_then(Value::as_array).is_some() {
+                super::openai_chat_codec::project_v3_openai_chat_client_response_with_source_terminal(
+                    &payload,
+                    source_terminal_reason.as_deref(),
+                    source_terminal_completed,
+                )
+            } else {
+                Ok(payload)
+            }
+        },
+    )
+    .map_err(|error| V3OpenAiChatRelayRuntimeError::Target(error.to_string()))?;
     trace.push("V3HubRespOutbound05ClientSemantic");
     let client = resp05.client_payload().clone();
     let _resp06 = build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05(resp05);
@@ -501,14 +542,9 @@ struct V3OpenAiChatSseState {
     seen_done: bool,
     done: bool,
     compatibility_profile: Option<String>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策算好的"保留响应密文"标记，SSE 帧级 Resp03 消费。
     retain_response_cipher: bool,
     stream_observation: V3RuntimeStreamObservation,
-    /// 治理层拒绝（web_search Mode B 无投影路径）typed 标志：这是 RouteCodex
-    /// 控制面决策，不是 provider 流错误，禁止写 provider-health。
-    governance_rejected: bool,
     tool_thinking_enabled: bool,
     tool_names: Vec<String>,
     pending_toolreasons: Vec<Option<String>>,
@@ -518,9 +554,11 @@ struct V3OpenAiChatSseState {
 }
 
 pub(crate) struct V3OpenAiChatSseProviderOutcome {
+    response_control: V3RuntimeStreamObservation,
     provider_health: V3ProviderFailureRuntimeHealth,
     failure_session_scope: V3ProviderFailureSessionScope,
     provider_id: String,
+    interface_id: String,
     auth_alias: String,
     model_id: String,
     recorded: bool,
@@ -529,7 +567,7 @@ pub(crate) struct V3OpenAiChatSseProviderOutcome {
 
 impl V3OpenAiChatSseProviderOutcome {
     async fn record_failure(&mut self, reason: &str) -> Result<(), String> {
-        if self.recorded {
+        if self.recorded || self.response_control.has_response_governance_failure()? {
             return Ok(());
         }
         drop(self._provider_action_permit.take());
@@ -540,29 +578,13 @@ impl V3OpenAiChatSseProviderOutcome {
             reason,
         );
         self.provider_health
-            .record_post_commit_provider_stream_failure_from_source(
+            .record_post_commit_provider_stream_failure_from_source_for_interface(
                 &self.failure_session_scope,
                 &self.provider_id,
+                &self.interface_id,
                 Some(&self.auth_alias),
                 Some(&self.model_id),
                 &source,
-            )?;
-        self.recorded = true;
-        Ok(())
-    }
-
-    fn record_success(&mut self) -> Result<(), String> {
-        if self.recorded {
-            return Ok(());
-        }
-        self.provider_health
-            .record_provider_success_in_failure_scope(
-                &crate::nodes::V3AttemptSuccessReceipt::from_protocol_terminal_attempt(),
-                &self.failure_session_scope,
-                &self.provider_id,
-                Some(&self.auth_alias),
-                Some(&self.model_id),
-                v3_relay_provider_policy_now_epoch_ms()?,
             )?;
         self.recorded = true;
         Ok(())
@@ -574,8 +596,6 @@ fn project_sse_stream(
     session_id: String,
     provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     stream_observation: V3RuntimeStreamObservation,
@@ -593,12 +613,9 @@ fn project_sse_stream(
         seen_done: false,
         done: false,
         compatibility_profile,
-        web_search_execution_mode,
-        web_search_center_state,
         retain_response_cipher,
         tool_thinking_enabled,
         stream_observation,
-        governance_rejected: false,
         provider_outcome,
         tool_names: Vec::new(),
         pending_toolreasons: Vec::new(),
@@ -658,13 +675,18 @@ fn project_sse_stream(
                         state.seen_done = true;
                         state.pending.push_back(Ok(b"data: [DONE]\n\n".to_vec()));
                     }
-                    return match state.provider_outcome.record_success() {
-                        Ok(()) => state.pending.pop_front().map(|item| (item, state)),
-                        Err(error) => Some((Err(error), state)),
-                    };
+                    // Provider success is committed by Runtime only after complete
+                    // governance and sealing; the codec reports protocol facts.
+                    return state.pending.pop_front().map(|item| (item, state));
                 };
                 let result = match chunk {
                     Err(error @ V3ProviderError::ClientDisconnect { .. }) => {
+                        if let Err(observation_error) =
+                            state.stream_observation.record_client_disconnect()
+                        {
+                            state.done = true;
+                            return Some((Err(observation_error), state));
+                        }
                         state.done = true;
                         return Some((Err(error.to_string()), state));
                     }
@@ -677,11 +699,6 @@ fn project_sse_stream(
                 .and_then(|frames| enqueue_sse_client_chunks(&mut state, frames));
                 if let Err(error) = result {
                     state.done = true;
-                    if state.governance_rejected {
-                        // 治理层拒绝：不记录 provider-health 失败（控制面信号
-                        // 只应反映 provider 行为，不反映 RouteCodex 治理决策）。
-                        return Some((Err(error), state));
-                    }
                     let result = state
                         .provider_outcome
                         .record_failure(&error.to_string())
@@ -814,35 +831,15 @@ fn enqueue_sse_client_chunks(
             Some(state.session_id.as_str()),
             projected_payload,
             state.compatibility_profile.as_deref(),
-            state.web_search_execution_mode,
-            state.web_search_center_state.as_ref(),
             state.retain_response_cipher,
             state.provider_outcome.model_id.as_str(),
+            &state.provider_outcome.response_control,
         )
-        .map_err(|error| match error {
-            // 治理层拒绝（web_search Mode B 无投影路径）：不是 provider 流
-            // 错误，禁止记录 provider-health 失败（会污染后续路由）；typed
-            // 标志随 state 传递，不用字符串哨兵做控制判定。
-            V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
-                state.governance_rejected = true;
-                "ROUTECODEX_GOVERNANCE_REJECTED: web_search mode B event is intercepted without a client projection"
-                    .to_string()
-            }
-            other => other.to_string(),
-        })?;
+        .map_err(|error| error.to_string())?;
         let choices = client_payload
             .get("choices")
             .and_then(Value::as_array)
             .ok_or_else(|| "OpenAI Chat SSE choices are missing".to_string())?;
-        if let Some(failure) = classify_v3_provider_terminal_admission(
-            V3HubProviderWireProtocol::OpenAiChat,
-            &client_payload,
-        ) {
-            return Err(format!(
-                "provider emitted {}: {}",
-                failure.code, failure.message
-            ));
-        }
         if state.terminal && !choices.is_empty() {
             return Err(
                 "OpenAI Chat SSE emitted a non-usage frame after terminal finish_reason".into(),
@@ -873,18 +870,18 @@ fn project_responses_sse_as_openai_chat_stream(
     session_id: String,
     stream: routecodex_v3_provider_responses::V3ProviderSseStream,
     compatibility_profile: Option<String>,
-    web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     retain_response_cipher: bool,
     tool_thinking_enabled: bool,
     stream_observation: V3RuntimeStreamObservation,
+    client_include_usage: bool,
     provider_outcome: V3OpenAiChatSseProviderOutcome,
 ) -> V3RelayProjectedSseStream {
     use futures_util::StreamExt;
     let decoder = routecodex_v3_sse::SseIncrementalDecoder::new(
         routecodex_v3_sse::SseTransportLimits::default(),
     );
-    let transducer = V3OpenAiChatResponsesSseTransducer::new();
+    let transducer =
+        V3OpenAiChatResponsesSseTransducer::new_with_usage_option(client_include_usage);
     let request_id = request_id;
     Box::pin(futures_util::stream::unfold(
         (
@@ -897,8 +894,6 @@ fn project_responses_sse_as_openai_chat_stream(
             false,
             stream_observation,
             compatibility_profile,
-            web_search_execution_mode,
-            web_search_center_state,
             retain_response_cipher,
             tool_thinking_enabled,
             provider_outcome,
@@ -913,8 +908,6 @@ fn project_responses_sse_as_openai_chat_stream(
             mut finished,
             stream_observation,
             compatibility_profile,
-            web_search_execution_mode,
-            web_search_center_state,
             retain_response_cipher,
             tool_thinking_enabled,
             mut provider_outcome,
@@ -936,8 +929,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                 finished,
                                 stream_observation,
                                 compatibility_profile,
-                                web_search_execution_mode,
-                                web_search_center_state,
                                 retain_response_cipher,
                                 tool_thinking_enabled,
                                 provider_outcome,
@@ -972,8 +963,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                     finished,
                                     stream_observation,
                                     compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
                                     retain_response_cipher,
                                     tool_thinking_enabled,
                                     provider_outcome,
@@ -989,29 +978,9 @@ fn project_responses_sse_as_openai_chat_stream(
                                 request_id: Some(request_id.as_str()),
                             },
                         );
-                        let success = provider_outcome.record_success();
-                        return match success {
-                            Ok(()) => None,
-                            Err(error) => Some((
-                                Err(error),
-                                (
-                                    provider,
-                                    decoder,
-                                    transducer,
-                                    toolreason,
-                                    pending,
-                                    done_seen,
-                                    finished,
-                                    stream_observation,
-                                    compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
-                                    retain_response_cipher,
-                                    tool_thinking_enabled,
-                                    provider_outcome,
-                                ),
-                            )),
-                        };
+                        // Provider success is committed by Runtime only after
+                        // complete governance and sealing.
+                        return None;
                     };
                     let result = (|| -> Result<(), String> {
                         let raw = match &chunk {
@@ -1082,15 +1051,6 @@ fn project_responses_sse_as_openai_chat_stream(
                             crate::hub_v1::normalize_v3_responses_function_call_arguments(
                                 &mut normalized,
                             )?;
-                            if let Some(failure) = classify_v3_provider_terminal_admission(
-                                V3HubProviderWireProtocol::Responses,
-                                &normalized,
-                            ) {
-                                return Err(format!(
-                                    "provider emitted {}: {}",
-                                    failure.code, failure.message
-                                ));
-                            }
                             let event = classify_v3_responses_sse_event(&normalized)
                                 .map(|semantic| project_v3_responses_sse_event_json(&semantic))
                                 .map_err(|error| error.to_string())?;
@@ -1110,22 +1070,16 @@ fn project_responses_sse_as_openai_chat_stream(
                                     Some(session_id.as_str()),
                                     payload,
                                     compatibility_profile.as_deref(),
-                                    web_search_execution_mode,
-                                    web_search_center_state.as_ref(),
                                     retain_response_cipher,
                                     provider_outcome.model_id.as_str(),
+                                    &provider_outcome.response_control,
                                 )
-                                .map_err(|error| {
-                                    match error {
-                                V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
-                                    "ROUTECODEX_GOVERNANCE_REJECTED".to_string()
-                                }
-                                other => other.to_string(),
-                            }
-                                })?;
+                                .map_err(|error| error.to_string())?;
                                 pending.push_back(format!("data: {governed}\n\n").into_bytes());
                             }
-                            if event_type == "response.completed" {
+                            if event_type == "response.completed"
+                                || event_type == "response.incomplete"
+                            {
                                 pending.push_back(b"data: [DONE]\n\n".to_vec());
                                 done_seen = true;
                             }
@@ -1139,31 +1093,31 @@ fn project_responses_sse_as_openai_chat_stream(
                         Ok(_) => continue,
                         Err(error) => {
                             finished = true;
-                            if error.starts_with("ROUTECODEX_GOVERNANCE_REJECTED") {
-                                return Some((
-                                    Err(error),
-                                    (
-                                        provider,
-                                        decoder,
-                                        transducer,
-                                        toolreason,
-                                        pending,
-                                        done_seen,
-                                        finished,
-                                        stream_observation,
-                                        compatibility_profile,
-                                        web_search_execution_mode,
-                                        web_search_center_state,
-                                        retain_response_cipher,
-                                        tool_thinking_enabled,
-                                        provider_outcome,
-                                    ),
-                                ));
-                            }
                             if matches!(&chunk, Err(V3ProviderError::ClientDisconnect { .. })) {
                                 // client disconnect 是健康中性事件（客户端断开导致
                                 // provider 流中止）：禁止写 provider 失败/冷却，与
                                 // project_sse_stream / gemini / direct 路径一致。
+                                if let Err(observation_error) =
+                                    stream_observation.record_client_disconnect()
+                                {
+                                    return Some((
+                                        Err(observation_error),
+                                        (
+                                            provider,
+                                            decoder,
+                                            transducer,
+                                            toolreason,
+                                            pending,
+                                            done_seen,
+                                            finished,
+                                            stream_observation,
+                                            compatibility_profile,
+                                            retain_response_cipher,
+                                            tool_thinking_enabled,
+                                            provider_outcome,
+                                        ),
+                                    ));
+                                }
                                 return Some((
                                     Err(error),
                                     (
@@ -1176,8 +1130,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                         finished,
                                         stream_observation,
                                         compatibility_profile,
-                                        web_search_execution_mode,
-                                        web_search_center_state,
                                         retain_response_cipher,
                                         tool_thinking_enabled,
                                         provider_outcome,
@@ -1197,8 +1149,6 @@ fn project_responses_sse_as_openai_chat_stream(
                                     finished,
                                     stream_observation,
                                     compatibility_profile,
-                                    web_search_execution_mode,
-                                    web_search_center_state,
                                     retain_response_cipher,
                                     tool_thinking_enabled,
                                     provider_outcome,
@@ -1223,7 +1173,8 @@ fn openai_chat_sse_payload_has_terminal_finish_reason(payload: &Value) -> Result
     for choice in choices {
         if choice
             .get("finish_reason")
-            .is_some_and(|value| !value.is_null())
+            .and_then(Value::as_str)
+            .is_some_and(|reason| !reason.trim().is_empty())
         {
             terminal = true;
         }
@@ -1253,9 +1204,14 @@ fn openai_chat_provider_http_failure(
     };
     V3RelayProviderFailure {
         status,
+        provider_status: Some(status),
+        provider_body_read_failure: None,
         client_response: body,
         source_stage: "V3ProviderReqOutbound09TransportRequest",
         terminal_projection: None,
+        terminal_disposition: None,
+        error_operator_fault: None,
+        failed_attempt_evidence: None,
         error_type_fn: extract_error_type_style,
         error_message_fn: extract_message_type_style,
     }
@@ -1287,28 +1243,13 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         manifest: &V3Config05ManifestPublished,
         server_id: &str,
         payload: &Value,
-    ) -> Result<V3HubServertoolRequestProfile, V3RelayCoreError> {
-        // Mode B 判定用请求声明的 model 的编译期 mode（Req04 在 route 之前）。
-        let model = payload
-            .get("model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        let request_web_search_execution_mode = match model {
-            Some(model) => resolve_web_search_mode_and_backend(manifest, model).0,
-            None => routecodex_v3_config::V3WebSearchExecutionMode::None,
-        };
+    ) -> Result<V3HubRequestHookProfile, V3RelayCoreError> {
+        let _ = (manifest, payload);
         let tool_thinking_enabled = v3_tool_thinking_enabled_for_server(manifest, server_id);
-        if request_web_search_execution_mode.is_metadata_center_local_search()
-            || tool_thinking_enabled
-        {
-            Ok(
-                V3HubServertoolRequestProfile::enabled(["servertool.request"])
-                    .with_web_search_execution_mode(request_web_search_execution_mode)
-                    .with_tool_thinking_enabled(tool_thinking_enabled),
-            )
+        if tool_thinking_enabled {
+            Ok(V3HubRequestHookProfile::enabled().with_tool_thinking_enabled(true))
         } else {
-            Ok(V3HubServertoolRequestProfile::disabled())
+            Ok(V3HubRequestHookProfile::disabled())
         }
     }
 
@@ -1331,9 +1272,15 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         // 默认共享版是 gemini/responses 的 error.code 风格）。
         V3RelayProviderFailure {
             status: 502,
+            // Request-construction failure: no upstream HTTP response exists.
+            provider_status: None,
+            provider_body_read_failure: None,
             client_response: json!({"error":{"type":error_type,"message":error.to_string()}}),
             source_stage,
             terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: None,
+            failed_attempt_evidence: None,
             error_type_fn: extract_error_type_style,
             error_message_fn: extract_message_type_style,
         }
@@ -1349,31 +1296,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             .map_err(|error| V3RelayCoreError::Target(error.to_string()))
     }
 
-    fn routing_payload(
-        standardized: &std::sync::Arc<Value>,
-        _requested_model: &str,
-    ) -> Result<std::sync::Arc<Value>, V3RelayCoreError> {
-        // openai_chat 的 VR body 就是 canonical payload 本身（无 model 注入）。
-        Ok(std::sync::Arc::clone(standardized))
-    }
-
-    fn build_transport_request(
-        request_id: &str,
-        target: V3ResponsesProviderTarget,
-        _transport_intent: V3HubTransportIntent,
-        body: Value,
-        _provider_header_overrides: Vec<V3ProviderRequestHeader>,
-    ) -> Result<V3Transport13ResponsesHttpRequest, V3RelayCoreError> {
-        // wire protocol 从 target.provider_type 推断（与 selected candidate 推断一致）。
-        let wire_protocol =
-            provider_wire_protocol_for_provider_type(&target.provider_id, &target.provider_type)
-                .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-        let wire = build_v3_provider_12_responses_wire_payload(request_id, target, body)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))?;
-        build_v3_provider_transport_request_for_protocol(wire_protocol, wire)
-            .map_err(|error| V3RelayCoreError::Target(error.to_string()))
-    }
-
     fn project_json_response(
         request_id: &str,
         session_id: &str,
@@ -1383,11 +1305,11 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         transport_intent: V3HubTransportIntent,
         trace: &mut Vec<&'static str>,
         compatibility_profile: Option<&str>,
-        web_search_execution_mode: V3WebSearchExecutionMode,
-        web_search_state: Option<&V3WebSearchCenterState>,
         retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         expected_model_id: &str,
+        namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+        refill: &mut super::relay_runtime_core::V3RelayRefillCarrier,
     ) -> Result<Value, V3RelayCoreError> {
         project_json_response(
             Some(request_id),
@@ -1398,17 +1320,21 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             transport_intent,
             trace,
             compatibility_profile,
-            web_search_execution_mode,
-            web_search_state,
             retain_response_cipher,
             tool_thinking_enabled,
             expected_model_id,
+            true,
+            &super::resp_chat_process_03_governed::V3HubRelaySerializedToolContext::from_registry(
+                namespace_registry,
+            ),
+            Some(refill),
         )
         .map_err(|error| match error {
-            V3OpenAiChatRelayRuntimeError::WebSearchInterceptedUnprojected => {
-                V3RelayCoreError::WebSearchIntercepted(
-                    "openai_chat web-search intercepted but no projection path".to_string(),
-                )
+            V3OpenAiChatRelayRuntimeError::Response(error) => {
+                V3RelayCoreError::ResponseGovernance(error)
+            }
+            V3OpenAiChatRelayRuntimeError::Response(error) => {
+                V3RelayCoreError::ResponseGovernance(error)
             }
             other => V3RelayCoreError::Target(other.to_string()),
         })
@@ -1418,15 +1344,18 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         provider_health: &V3ProviderFailureRuntimeHealth,
         failure_session_scope: &V3ProviderFailureSessionScope,
         provider_id: String,
+        interface_id: String,
         auth_alias: String,
         model_id: String,
         recorded: bool,
         permit: Option<V3ProviderActionPermit>,
     ) -> V3OpenAiChatSseProviderOutcome {
         V3OpenAiChatSseProviderOutcome {
+            response_control: V3RuntimeStreamObservation::default(),
             provider_health: provider_health.clone(),
             failure_session_scope: failure_session_scope.clone(),
             provider_id,
+            interface_id,
             auth_alias,
             model_id,
             recorded,
@@ -1439,22 +1368,33 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         provider: V3ProviderSseStream,
         provider_wire_protocol: V3HubProviderWireProtocol,
         compatibility_profile: Option<String>,
-        web_search_execution_mode: V3WebSearchExecutionMode,
-        web_search_state: Option<V3WebSearchCenterState>,
         _retain_response_cipher: bool,
         tool_thinking_enabled: bool,
         stream_observation: V3RuntimeStreamObservation,
-        outcome: V3OpenAiChatSseProviderOutcome,
+        client_include_usage: bool,
+        mut outcome: V3OpenAiChatSseProviderOutcome,
     ) -> Result<V3OpenAiChatClientStream, V3RelayCoreError> {
+        outcome.response_control = stream_observation.clone();
         let session_id = outcome.failure_session_scope.session_id().to_owned();
+        if provider_wire_protocol == V3HubProviderWireProtocol::Gemini {
+            return Ok(project_gemini_sse_as_openai_chat_stream(
+                request_id.to_owned(),
+                session_id,
+                provider,
+                compatibility_profile,
+                _retain_response_cipher,
+                tool_thinking_enabled,
+                stream_observation,
+                client_include_usage,
+                outcome,
+            ));
+        }
         if provider_wire_protocol == V3HubProviderWireProtocol::Anthropic {
             return Ok(project_anthropic_sse_as_openai_chat_stream(
                 request_id.to_owned(),
                 session_id.clone(),
                 provider,
                 compatibility_profile,
-                web_search_execution_mode,
-                web_search_state,
                 _retain_response_cipher,
                 tool_thinking_enabled,
                 stream_observation.clone(),
@@ -1471,25 +1411,19 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
                 session_id.clone(),
                 provider,
                 compatibility_profile,
-                web_search_execution_mode,
-                web_search_state,
                 _retain_response_cipher,
                 tool_thinking_enabled,
                 stream_observation.clone(),
+                client_include_usage,
                 outcome,
             ));
         }
-        // OpenAiChat wire SSE：流式帧逐帧走 project_sse_event_payload 拦截
-        // （first_local_websearch_tool_call 检测本地 websearch function tool call，
-        // 命中才 fail-fast 转 ROUTECODEX_GOVERNANCE_REJECTED，不记 provider 失败；
-        // 非 websearch 帧正常透传——Mode B 模型的纯文本流不被误伤）。
+        // OpenAiChat wire SSE: stream each frame through shared projection.
         Ok(project_sse_stream(
             request_id.to_owned(),
             session_id,
             provider,
             compatibility_profile,
-            web_search_execution_mode,
-            web_search_state,
             _retain_response_cipher,
             tool_thinking_enabled,
             stream_observation,
@@ -1505,11 +1439,15 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
+            terminal_disposition: None,
             client_body: V3OpenAiChatRelayClientBody::Json(client_response),
             node_trace: trace,
             error_chain: None,
             error_class: None,
             error_detail: None,
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
+            diagnostic_cause: None,
             observability: Some(observability),
             stream_observation: None,
             provider_snapshots: Some(provider_snapshots),
@@ -1525,11 +1463,15 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     ) -> V3OpenAiChatRelayRuntimeOutput {
         V3OpenAiChatRelayRuntimeOutput {
             status: 200,
+            terminal_disposition: None,
             client_body: V3OpenAiChatRelayClientBody::Sse(sse),
             node_trace: trace,
             error_chain: None,
             error_class: None,
             error_detail: None,
+            provider_failure_attempts: Vec::new(),
+            diagnostic_source: None,
+            diagnostic_cause: None,
             observability: Some(observability),
             stream_observation: Some(stream_observation),
             provider_snapshots: Some(provider_snapshots),
@@ -1539,8 +1481,9 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
     fn assemble_failure_output(
         failure: V3RelayProviderFailure,
         trace: Vec<&'static str>,
+        provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     ) -> V3OpenAiChatRelayRuntimeOutput {
-        provider_failure_output(failure, trace)
+        provider_failure_output(failure, trace, provider_failure_events)
     }
 }
 

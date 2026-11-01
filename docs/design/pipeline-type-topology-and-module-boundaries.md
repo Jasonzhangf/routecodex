@@ -185,7 +185,7 @@ ServerReqInbound01ClientRaw
   2. Direct（responses 入口）：`build_v3_req_04_standardized_responses_from_v3_server_03`（`previous_response_id` 提取后对 body 执行一次）；
   3. Direct（openai_chat 入口）：`build_v3_chat_req_04_standardized_from_v3_server_03`（chat 直通标准化后对 body 执行一次，与 responses direct 对齐）；
   4. Route facts builder（诊断/dry-run/测试入口）：`build_v3_router_request_facts_for_entry` 对 body 做幂等清理后再判定（与 live 路径 cleaned payload 保持一致，禁止 dry-run/tests 与真实路由发散）。
-- 当前轮判定与 Virtual Router `extract_active_turn_signals` 对齐：最后一个 `role=="user"`（responses 无 role 时按 `input_text`/`text`/`output_text` 类型判定；gemini 按 `role=="user"` content）；`function_call_output`/tool 结果不是 user carrier，不得把真实当前轮误判为历史。
+- 图片保留边界（2026-10-06，用户修订）：仅清理最后一条真实图片载体之前的图片；最后一条消息或工具结果中的全部图片保留。后续纯文本 user 消息、assistant 消息及时间提醒均不改变图片边界。该规则不需要推断真实 user turn 与合成提醒的来源。归一化后的保留图片产生 typed image route fact；更早图片的 `[Image]` 占位不产生图片事实。原生消息字符串及明确 text/input_text/output_text part 始终按文字处理；仅工具输出允许编码图片 JSON 或裸图片引用。
 - 生命周期：Resp04 save 仍全量占位，ReqInbound 只按历史边界归一化；Req04 restore 对残留历史图片再次按唯一 owner 归一化；最终 ProviderReqCompat06 读取 selected target capability，只有非 multimodal/vision target 才做会话保持投影。当前轮图片在 multimodal target 上不清洗；非 multimodal target 的整个图片语义只转为占位符，不改变 turn/tool/continuation 顺序。
 
 ### 3.3 HubReqChatProcess03Governed

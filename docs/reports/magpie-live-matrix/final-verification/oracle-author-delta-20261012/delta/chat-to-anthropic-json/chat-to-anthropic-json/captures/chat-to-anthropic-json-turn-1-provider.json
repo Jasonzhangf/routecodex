@@ -1,0 +1,83 @@
+{
+  "case_id": "chat-to-anthropic-json",
+  "turn": 1,
+  "turn_id": null,
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "chat-to-anthropic-json",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "anthropic",
+      "method": "POST",
+      "path": "/v1/messages",
+      "query": "?beta=true",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer fake-loopback-token",
+        "x-api-key": "fake-loopback-token",
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24,fallback-credit-2026-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "x-app": "cli",
+        "user-agent": "claude-cli/2.1.220 (external, sdk-cli)",
+        "x-stainless-lang": "js",
+        "x-stainless-package-version": "0.94.0",
+        "x-stainless-runtime": "node",
+        "x-stainless-retry-count": "0",
+        "x-stainless-timeout": "300",
+        "content-type": "application/json",
+        "host": "127.0.0.1:65112",
+        "content-length": "150"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"max_tokens\":64,\"messages\":[{\"content\":[{\"text\":\"hello\",\"type\":\"text\"}],\"role\":\"user\"}],\"model\":\"anthropic-model\",\"stream\":false,\"system\":\"be brief\"}",
+      "body": {
+        "max_tokens": 64,
+        "messages": [
+          {
+            "content": [
+              {
+                "text": "hello",
+                "type": "text"
+              }
+            ],
+            "role": "user"
+          }
+        ],
+        "model": "anthropic-model",
+        "stream": false,
+        "system": "be brief"
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791833320320,
+      "response_script": {
+        "protocol": "anthropic",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "id": "msg_chat_to_anthropic_json",
+          "type": "message",
+          "role": "assistant",
+          "stop_reason": "end_turn",
+          "content": [
+            {
+              "type": "text",
+              "text": "ok"
+            }
+          ],
+          "usage": {
+            "input_tokens": 7,
+            "output_tokens": 2
+          }
+        }
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "business_attempts": 1,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

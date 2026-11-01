@@ -33,16 +33,7 @@ fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
 
 #[test]
 fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{"role": "user", "content": "patch"}],
-        "tools": [{
-            "type": "custom",
-            "name": "apply_patch",
-            "description": "Apply a patch",
-            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
-        }]
-    });
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "user", "content": "patch"}], "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply a patch", "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire must wrap custom apply_patch as a function schema");
@@ -63,21 +54,33 @@ fn responses_wire_wraps_apply_patch_custom_tool_with_toolreason_schema() {
 
 #[test]
 fn responses_wire_normalizes_system_text_parts_to_input_text() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{
-            "role": "system",
-            "content": [{"type": "text", "text": "system guidance"}]
-        }, {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "assistant output"}]
-        }]
-    });
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "system", "content": [{"type": "text", "text": "system guidance"}]}, {"role": "assistant", "content": [{"type": "text", "text": "assistant output", "opaque": {"keep": true}}]}]});
 
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire must normalize system content parts");
     assert_eq!(request["input"][0]["content"][0]["type"], "input_text");
-    assert_eq!(request["input"][1]["content"][0]["type"], "text");
+    assert_eq!(
+        request["input"][1]["content"][0],
+        json!({"type":"output_text","text":"assistant output","opaque":{"keep":true}})
+    );
+}
+
+#[test]
+fn responses_openai_chat_field_parity_assistant_text_representations() {
+    for content in [
+        json!(" preserved assistant text \n"),
+        json!([{"type":"text","text":" preserved assistant text \n"}]),
+        json!([{"type":"output_text","text":" preserved assistant text \n"}]),
+    ] {
+        let payload =
+            json!({"model":"gpt-test","messages":[{"role":"assistant","content":content}]});
+        let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .expect("assistant text must be representable in Responses");
+        assert_eq!(
+            request["input"][0]["content"],
+            json!([{"type":"output_text","text":" preserved assistant text \n"}])
+        );
+    }
 }
 
 #[test]
@@ -85,14 +88,7 @@ fn responses_openai_chat_field_parity_responses_wire_generates_collision_resista
     let repeated_prefix = "call_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv";
     let payload = json!({
         "model": "gpt-test",
-        "messages": [{
-            "role": "assistant",
-            "content": null,
-            "tool_calls": [
-                {"id": format!("{repeated_prefix}_left"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}},
-                {"id": format!("{repeated_prefix}_right"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}
-            ]
-        }]
+        "messages": [{"role": "assistant", "content": null, "tool_calls": [{"id": format!("{repeated_prefix}_left"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}, {"id": format!("{repeated_prefix}_right"), "type": "function", "function": {"name": "exec_command", "arguments": "{}"}}]}]
     });
     let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
         .expect("Responses wire projection must succeed");
@@ -279,35 +275,46 @@ fn openai_chat_wire_passes_through_same_protocol_thinking_field() {
 }
 
 #[test]
-fn responses_openai_chat_field_parity_include_is_rejected_from_chat_wire() {
+fn responses_openai_chat_field_parity_include_is_preserved_opaquely_in_chat_wire() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "hello"}],
         "include": ["reasoning.encrypted_content"]
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("OpenAI Chat wire projection must reject unmapped Responses include");
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("Responses include remains opaque business data in Chat wire");
 
-    assert!(error.contains("UnmappedOutboundFields"), "{error}");
-    assert!(error.contains("target_protocol=openai_chat"), "{error}");
-    assert!(error.contains("$.include"), "{error}");
+    assert_eq!(wire["include"], payload["include"]);
 }
 
 #[test]
-fn outbound_projection_rejects_control_fields_with_precise_path() {
+fn outbound_projection_preserves_business_fields_with_control_names() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": [{"type":"text", "text":"hello", "_debug": true}]}],
         "metadata_center": {"route": "internal"}
     });
 
-    let error = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect_err("control fields must fail before provider send");
+    let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("business spelling cannot establish control provenance");
+    assert_eq!(wire["metadata_center"], payload["metadata_center"]);
+    assert_eq!(wire["messages"], payload["messages"]);
+}
 
-    assert!(error.contains("ControlFieldLeak"), "{error}");
-    assert!(error.contains("$.metadata_center"), "{error}");
-    assert!(error.contains("$.messages[0].content[0]._debug"), "{error}");
+#[test]
+fn outbound_projection_preserves_tool_search_output_underscore_schema_names() {
+    let content = "[{\"type\":\"namespace\",\"name\":\"mcp\",\"tools\":[{\"type\":\"function\",\"name\":\"_patch_page\",\"parameters\":{\"$defs\":{\"_ReplaceBlock\":{\"type\":\"object\"}},\"properties\":{\"replace_block\":{\"$ref\":\"#/$defs/_ReplaceBlock\"}}}}]}]";
+    let payload = json!({"model":"gpt-test","messages":[{"role":"tool","tool_call_id":"call_search","content":content}]});
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("tool-search JSON Schema underscore names are business data");
+    let outbound_content = request["messages"][0]["content"]
+        .as_str()
+        .expect("tool output remains stringified");
+    assert!(
+        outbound_content.contains("_ReplaceBlock"),
+        "{outbound_content}"
+    );
 }
 
 #[test]
@@ -423,63 +430,6 @@ fn openai_chat_wire_maps_responses_text_json_schema_to_chat_response_format() {
 }
 
 #[test]
-fn openai_chat_wire_projects_responses_web_search_tool_to_options() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{"role": "user", "content": "search"}],
-        "tools": [
-            {
-                "type": "function",
-                "name": "read_file",
-                "description": "Read one file",
-                "parameters": {"type":"object","properties":{}}
-            },
-            {
-                "type": "web_search_preview",
-                "search_context_size": "medium",
-                "user_location": {
-                    "type": "approximate",
-                    "country": "CN",
-                    "city": "Shanghai"
-                }
-            },
-            {
-                "type": "tool_search",
-                "execution": "client",
-                "description": "Search deferred tools",
-                "parameters": {
-                    "type":"object",
-                    "properties":{"query":{"type":"string"}},
-                    "required":["query"],
-                    "additionalProperties":false
-                }
-            }
-        ]
-    });
-
-    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
-        .expect("Responses web search must project to Chat web_search_options");
-
-    assert_eq!(request["tools"].as_array().map(Vec::len), Some(2));
-    assert_eq!(request["tools"][0]["function"]["name"], json!("read_file"));
-    assert_eq!(
-        request["tools"][1]["function"]["name"],
-        json!("tool_search")
-    );
-    assert_eq!(
-        request["web_search_options"],
-        json!({
-            "search_context_size":"medium",
-            "user_location": {
-                "type":"approximate",
-                "country":"CN",
-                "city":"Shanghai"
-            }
-        })
-    );
-}
-
-#[test]
 fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
     let payload = json!({
         "model": "gpt-test",
@@ -517,12 +467,26 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
 
     let tools = request["tools"].as_array().expect("Chat tools array");
     assert_eq!(tools.len(), 3);
-    assert_eq!(tools[0]["function"]["name"], "exec_command");
-    assert_eq!(tools[1]["type"], "function");
-    assert_eq!(tools[1]["function"]["name"], "apply_patch");
-    assert_eq!(tools[1]["function"]["description"], "Apply a patch");
+    let exec = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "exec_command")
+        .unwrap();
+    let patch = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "apply_patch")
+        .unwrap();
+    let search = tools
+        .iter()
+        .find(|tool| tool["function"]["name"] == "tool_search")
+        .unwrap();
+    assert!(tools.iter().all(|tool| tool["type"] == "function"));
+    for (tool, source) in [(exec, &payload["tools"][0]), (search, &payload["tools"][2])] {
+        assert_eq!(tool["function"]["description"], source["description"]);
+        assert_eq!(tool["function"]["parameters"], source["parameters"]);
+    }
+    assert_eq!(patch["function"]["description"], "Apply a patch");
     assert_eq!(
-        tools[1]["function"]["parameters"],
+        patch["function"]["parameters"],
         json!({
             "type":"object",
             "properties":{
@@ -532,8 +496,7 @@ fn openai_chat_wire_projects_complete_codex_tool_declaration_matrix() {
             "additionalProperties":false
         })
     );
-    assert!(tools[1].get("custom").is_none(), "{tools:?}");
-    assert_eq!(tools[2]["function"]["name"], "tool_search");
+    assert!(patch.get("custom").is_none(), "{tools:?}");
     assert_eq!(
         request["web_search_options"]["search_context_size"],
         "medium"
@@ -615,16 +578,7 @@ fn openai_chat_wire_rejects_unknown_web_search_content_type() {
 
 #[test]
 fn openai_chat_wire_flattens_custom_grammar_to_function_tool() {
-    let payload = json!({
-        "model": "gpt-test",
-        "messages": [{"role": "user", "content": "patch"}],
-        "tools": [{
-            "type": "custom",
-            "name": "apply_patch",
-            "description": "Apply a patch",
-            "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}
-        }]
-    });
+    let payload = json!({"model": "gpt-test", "messages": [{"role": "user", "content": "patch"}], "tools": [{"type": "custom", "name": "apply_patch", "description": "Apply a patch", "format": {"type":"grammar","syntax":"lark","definition":"start: patch"}}]});
 
     let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
         .expect("custom grammar must flatten to the legal OpenAI Chat function tool shape");
@@ -943,6 +897,20 @@ fn anthropic_wire_consumes_chat_store_false_without_projecting_it() {
 }
 
 #[test]
+fn anthropic_wire_preserves_service_tier_request_field() {
+    let payload = json!({
+        "model": "claude-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "service_tier": "priority"
+    });
+
+    let request =
+        project_outbound_payload_for_target_protocol(&payload, V3OutboundTargetProtocol::Anthropic)
+            .expect("service_tier is a registered target-specific Anthropic request field");
+    assert_eq!(request["service_tier"], "priority");
+}
+
+#[test]
 fn anthropic_wire_rejects_chat_store_true_without_silent_semantic_loss() {
     let payload = json!({
         "model": "claude-test",
@@ -1040,6 +1008,74 @@ fn responses_wire_preserves_compacted_assistant_reasoning_without_tool_calls() {
             }]
         })
     );
+    assert!(
+        request["input"][1].get("text").is_none(),
+        "legacy scalar reasoning_content has no Responses top-level text field: {request}"
+    );
+}
+
+#[test]
+fn responses_wire_keeps_ordered_reasoning_text_without_fabricating_summary() {
+    let payload = json!({
+        "model": "gpt-test",
+        "messages": [
+            {"role": "user", "content": "continue"},
+            {
+                "role": "assistant",
+                "content": "answer",
+                "routecodex_chat_extension": {
+                    "responses_reasoning_items": [
+                        {
+                            "id": "rsn_text_only",
+                            "text": "  ordered plaintext  ",
+                            "encrypted_content": "cipher"
+                        },
+                        {
+                            "id": "rsn_empty_summary",
+                            "text": "second plaintext",
+                            "summary": []
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+
+    let request = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("ordered Responses reasoning text must project");
+    let input = request["input"]
+        .as_array()
+        .expect("Responses wire input array");
+    assert_eq!(
+        input[1],
+        json!({
+            "type": "reasoning",
+            "text": "  ordered plaintext  ",
+            "id": "rsn_text_only",
+            "encrypted_content": "cipher"
+        })
+    );
+    assert!(
+        input[1].get("summary").is_none(),
+        "absent summary must not be fabricated from ordered top-level text: {request}"
+    );
+    assert_eq!(
+        input[2],
+        json!({
+            "type": "reasoning",
+            "text": "second plaintext",
+            "id": "rsn_empty_summary"
+        })
+    );
+    assert!(
+        input[2].get("summary").is_none(),
+        "empty summary must not be fabricated from ordered top-level text: {request}"
+    );
+    assert_eq!(input[3]["role"], json!("assistant"));
+    assert_eq!(
+        input[3]["content"],
+        json!([{"type": "output_text", "text": "answer"}])
+    );
 }
 
 #[test]
@@ -1127,7 +1163,7 @@ fn openai_responses_wire_rebuilds_registered_reasoning_fields_only() {
 }
 
 #[test]
-fn openai_responses_wire_rejects_non_responses_reasoning_extensions() {
+fn openai_responses_wire_drops_non_responses_reasoning_extensions() {
     for field in [
         "reasoning_budget_tokens",
         "reasoning_include_thoughts",
@@ -1142,24 +1178,26 @@ fn openai_responses_wire_rejects_non_responses_reasoning_extensions() {
             .as_object_mut()
             .unwrap()
             .insert(field.to_string(), json!(2048));
-        let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-            .expect_err("non-Responses reasoning semantic must be unmapped");
-        assert!(error.contains(field), "{error}");
+        let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+            .unwrap_or_else(|error| {
+                panic!("non-Responses reasoning semantic {field} must drop, not fail: {error}")
+            });
+        assert!(wire.get(field).is_none(), "{field} must be dropped: {wire}");
     }
 }
 
 #[test]
-fn anthropic_thinking_chat_fields_are_unmapped_for_responses_wire() {
+fn anthropic_thinking_chat_fields_are_dropped_for_responses_wire() {
     let payload = json!({
         "model": "gpt-test",
         "messages": [{"role": "user", "content": "reasoning"}],
         "reasoning_thinking_mode": "enabled",
         "reasoning_budget_tokens": 1024
     });
-    let error = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
-        .expect_err("Anthropic thinking mode and numeric budget have no Responses field");
-    assert!(error.contains("reasoning_thinking_mode"), "{error}");
-    assert!(error.contains("reasoning_budget_tokens"), "{error}");
+    let wire = build_v3_openai_responses_standard_request_from_chat_canonical(&payload)
+        .expect("Anthropic thinking mode and numeric budget have no Responses field: drop them");
+    assert!(wire.get("reasoning_thinking_mode").is_none(), "{wire}");
+    assert!(wire.get("reasoning_budget_tokens").is_none(), "{wire}");
 }
 
 #[test]
@@ -1308,70 +1346,6 @@ fn gemini_wire_rejects_malformed_stream_transport_intent() {
 }
 
 #[test]
-fn openai_chat_wire_projects_local_websearch_tool_for_metadata_center_local_search() {
-    let payload = json!({
-        "model": "local-model",
-        "messages": [{"role": "user", "content": "search"}],
-        "tools": [
-            {
-                "type": "function",
-                "name": "read_file",
-                "description": "Read one file",
-                "parameters": {"type":"object","properties":{}}
-            },
-            {
-                "type": "web_search",
-                "external_web_access": true,
-                "search_content_types": ["text"],
-                "search_context_size": "medium"
-            }
-        ]
-    });
-    let request = build_v3_openai_chat_standard_request_for_selected_web_search_mode(
-        &payload,
-        V3WebSearchExecutionMode::MetadataCenterLocalSearch,
-        true,
-    )
-    .expect("Mode B local websearch projection must compile");
-    let tools = request["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 2, "ordinary tools must remain unchanged");
-    assert_eq!(tools[0]["function"]["name"], "read_file");
-    assert_eq!(tools[0]["function"]["parameters"]["type"], "object");
-    assert_eq!(tools[1]["type"], "function");
-    assert_eq!(
-        tools[1]["function"]["name"], "websearch",
-        "Mode B must use the single local tool name websearch"
-    );
-    assert_eq!(
-        tools[1]["function"]["parameters"]["required"][0], "query",
-        "local websearch must require the query argument"
-    );
-    let description = tools[1]["function"]["description"]
-        .as_str()
-        .expect("websearch tool description");
-    assert_eq!(
-        description, "Search the web for up-to-date information.",
-        "websearch description must match the standard web_search tool description: {description}"
-    );
-    let query_description = tools[1]["function"]["parameters"]["properties"]["query"]
-        ["description"]
-        .as_str()
-        .expect("websearch query description");
-    assert!(
-        query_description.contains("concise query"),
-        "websearch query description must guide the search query: {query_description}"
-    );
-    assert!(
-        !description.contains("RouteCodex") && !description.contains("ServerTool"),
-        "websearch description must not leak internal RouteCodex implementation: {description}"
-    );
-    assert!(
-        request.get("web_search_options").is_none(),
-        "Mode B must not emit hosted web_search_options"
-    );
-}
-
-#[test]
 fn openai_chat_wire_keeps_hosted_options_for_gpt_with_capability() {
     // gpt 系列模型 + provider 具备 web_search 能力：保留标准 hosted
     // web_search_options 投影（与 HEAD 行为一致）。
@@ -1515,10 +1489,8 @@ fn openai_chat_wire_accepts_standard_text_image_search_content_types() {
 }
 
 #[test]
-fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
-    // 非 gpt 模型（deepseek/plain-model 等）即使未配 Mode B（None）：标准
-    // web_search 声明统一替换为内部 websearch 工具（不区分 provider、不依赖
-    // provider 原生搜索能力——搜索由 RouteCodex 本地 hop 执行）。
+fn openai_chat_wire_removes_websearch_for_non_gpt_without_capability() {
+    // 无 hosted 能力且未配本地搜索时，default 目标只保留普通函数工具。
     let payload = json!({
         "model": "deepseek-v4-flash",
         "messages": [{"role": "user", "content": "search"}],
@@ -1536,30 +1508,14 @@ fn openai_chat_wire_projects_local_websearch_for_non_gpt_without_mode() {
         V3WebSearchExecutionMode::None,
         false,
     )
-    .expect("non-gpt provider must project the local websearch tool");
+    .expect("default provider must keep ordinary tools");
     assert!(
         request.get("web_search_options").is_none(),
         "non-gpt provider must not receive hosted web_search_options"
     );
     let tools = request["tools"].as_array().expect("tools retained");
-    let websearch = tools
-        .iter()
-        .find(|tool| {
-            tool.get("function")
-                .and_then(|f| f.get("name"))
-                .and_then(Value::as_str)
-                == Some("websearch")
-        })
-        .expect("non-gpt provider must receive the local websearch tool");
-    assert_eq!(
-        websearch["function"]["description"],
-        "Search the web for up-to-date information."
-    );
-    assert_eq!(
-        tools.len(),
-        2,
-        "read_file + local websearch must both remain"
-    );
+    assert_eq!(tools.len(), 1, "only read_file must remain");
+    assert_eq!(tools[0]["function"]["name"], "read_file");
 }
 
 #[test]
@@ -1591,6 +1547,20 @@ fn continuation_history_prefix_renders_byte_identical_across_requests() {
 }
 
 #[test]
+fn openai_chat_wire_leaves_normal_history_without_synthetic_followup() {
+    let payload = json!({
+        "model": "deepseek-v4-flash",
+        "messages": [
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"}
+        ]
+    });
+    let request = build_v3_openai_chat_standard_request_from_chat_canonical(&payload)
+        .expect("OpenAI Chat wire build");
+    assert_eq!(request["messages"].as_array().unwrap().len(), 2);
+}
+
+#[test]
 fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
     let reasoning =
         "1. The user asks to reply with exactly CONTINUE_B. No other content is needed.";
@@ -1609,4 +1579,42 @@ fn continuation_assistant_reasoning_round_trips_to_wire_reasoning_content() {
         "client-echoed assistant reasoning must pass to wire reasoning_content untouched"
     );
     assert_eq!(request["messages"][1]["content"], "CONTINUE_A");
+}
+
+include!("request_outbound_gemini_canonical_consumer_tests.rs");
+#[test]
+fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residuals() {
+    for responses_request in [None, Some(json!({"store":false}))] {
+        let mut source = json!({"model":"chat-model","messages":[
+            {"role":"system","content":"governed guidance"},{"role":"user","content":"hello"}
+        ],"routecodex_chat_extension":{
+            "anthropic_request":{"system":[
+                {"type":"text","text":"old guidance","cache_control":{"type":"ephemeral"}},
+                {"type":"future_system_part","payload":{"keep":[1,2]}}
+            ],"extra":{"keep":true}},"future_namespace":{"value":7}
+        }});
+        if let Some(value) = responses_request {
+            source["routecodex_chat_extension"]["responses_request"] = value;
+        }
+        let original = source.clone();
+        let wire = build_v3_openai_chat_standard_request_from_chat_canonical(&source)
+            .expect("known system mapping must not reject retained business extensions");
+        assert_eq!(wire["messages"], source["messages"]);
+        assert_eq!(
+            wire["routecodex_chat_extension"]["future_namespace"],
+            json!({"value":7})
+        );
+        let residual = &wire["routecodex_chat_extension"]["anthropic_request"];
+        assert!(residual["system"][0].get("text").is_none());
+        assert_eq!(
+            residual["system"][0]["cache_control"],
+            json!({"type":"ephemeral"})
+        );
+        assert_eq!(
+            residual["system"][1],
+            original["routecodex_chat_extension"]["anthropic_request"]["system"][1]
+        );
+        assert_eq!(residual["extra"], json!({"keep":true}));
+        assert_eq!(source, original);
+    }
 }

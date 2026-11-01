@@ -3,15 +3,22 @@
 Canonical implementation plan:
 `docs/goals/direct-relay-cross-request-error-storm-control-plan.md`.
 
+Each request retains its own cancellation, attempts, exclusions and original
+deadline. A real session is never a business action lock. Distinct complete
+provider/interface/model/key identities cannot change each other's action delay,
+generation, permit or terminal disposition. Waiter count is not a new failure.
+Only the declared exact429 and health observation owners coordinate recovery
+within their listener. Normal provider capacity limits remain effective.
+
 ```mermaid
 flowchart TD
   Compat[ProviderReqCompat06ProviderCompat]
   Wire[V3ProviderReqOutbound08WirePayload]
   E01[V3Error01SourceRaised]
   E05[V3Error05ExecutionDecision]
+  E06[V3Error06ClientProjected]
   Witness[V3Error05RecoveryWitness]
   Gate[V3ProviderActionGateAdmission]
-  Retry[V3ExecutionRetryOrReselect]
   TerminalAdmission[V3ProviderActionGateTerminalAdmission]
   TerminalCommit[V3ProviderActionGateTerminalCommitted]
   Permit[V3ProviderActionPermitInFlight]
@@ -33,9 +40,9 @@ flowchart TD
   Wire -->|v3-provider-action-gate-02| E05
   E05 -->|v3-provider-action-gate-03| Witness
   Witness -->|v3-provider-action-gate-04| Gate
-  E05 -->|v3-provider-action-gate-05| TerminalAdmission
+  E05 -->|v3-provider-action-gate-05| E06
   TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit
-  Gate -->|v3-provider-action-gate-07| Retry
+  Wire -->|v3-provider-action-gate-07| Witness
   Witness -->|v3-provider-action-gate-08| Gate
   Witness -->|v3-provider-action-gate-10| Gate
   Witness -->|v3-provider-action-gate-11| Gate
@@ -77,13 +84,19 @@ flowchart TD
   ProviderCodec -->|v3-provider-action-gate-49| ProviderOutcome
   ProviderRaw -->|v3-provider-action-gate-50| ProviderCodec
   ProviderCodec -->|v3-provider-action-gate-51| ProviderOutcome
+  Wire -->|v3-provider-action-gate-52| Witness
+  Wire -->|v3-provider-action-gate-53| Witness
+  Wire -->|v3-provider-action-gate-54| Witness
+  Wire -->|v3-provider-action-gate-55| Witness
+  Wire -->|v3-provider-action-gate-56| Witness
   Success -->|reset scoped failure state| Gate
   Terminal -->|advance sustained generation| Gate
   Gate -->|typed terminal wake, no provider send| Reevaluate
 ```
 
 The gate is a process-local control side channel keyed by server, routing group,
-provider runtime identity, and normalized error family. It does not enter request,
+session, provider runtime identity, and normalized error family. Received HTTP 429
+uses an exact-identity lane shared across sessions and listeners. It does not enter request,
 response, metadata, continuation, snapshot, or persistent provider-health truth.
 
 Review locks:
@@ -117,16 +130,20 @@ Review locks:
   wrapped as provider success.
 - Streaming success is recorded only after protocol terminal evidence and clean EOF.
   For provider Responses SSE, only `response.completed` is semantic terminal truth;
-  `response.done` is a client projection event and `[DONE]` is transport-only.
+  Responses 协议没有 `response.done` 事件，`[DONE]` 是 Chat Completions 的终止符，
+  不得出现在 Responses 客户端边界。
   Malformed events, premature EOF, provider stream errors, `response.failed`, and
   post-terminal parse failures record provider failure and leave the next action gated.
 - Terminal exhaustion is not success: old waiters re-evaluate selection/Error05, and
   the next provider action remains serialized behind a new five-second generation.
-  Error06 projection itself consumes the same gate admission: an isolated terminal
-  provider error waits at least one second, sustained terminal projections remain
-  five seconds apart, and a concurrent routing-group success cannot release a stale
-  provider error directly to the client.
-- A fresh request bypasses an unrelated recovery lane.
+  Terminal handling never authorizes a model-client error response; AGENTS.md's
+  mandatory all-entry no-client-error contract applies even on exhaustion. A concurrent
+  routing-group success cannot turn a stale failure into client output.
+- A fresh request reads the active exact-identity HTTP 429 lane before sending and
+  enters its typed recovery witness. It releases business capacity before waiting,
+  then reacquires it and retains the admitted action permit through the send.
+  A request residence deadline bounds gate queueing, including retry waits.
+  Unrelated identities and non-429 session-local lanes retain their isolation.
 - Client disconnect is health-neutral and does not enter this gate.
 - SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
   business-byte commit it uses the existing retry/reselect path; after commit it only
@@ -135,10 +152,9 @@ Review locks:
 - FIFO waiter tickets preserve deterministic order; cancelling one waiter removes only
   that ticket.
 - Only a typed terminal Error05 exhaustion decision may construct Error06.
-- Terminal admission waits through
-  `record_failure_and_wait_for_terminal_projection`, then
-  `commit_terminal_admission` atomically verifies the admitted generation and advances
-  the lane group.
+- Terminal Error06 projection records and commits its failure generation without
+  waiting for provider action admission. The commit advances the lane group so later
+  provider actions retain the storm-control delay.
 - Runtime does not pass that commit result as a typed witness into
   `terminal_projection_for`. The machine map therefore stops at
   `V3ProviderActionGateTerminalCommitted` and does not fabricate a

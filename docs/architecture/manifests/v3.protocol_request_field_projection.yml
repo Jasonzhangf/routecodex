@@ -56,6 +56,7 @@ payload_semantics:
   - request.tools.custom_declaration
   - request.tool_choice.named_custom
   - request.messages.tool_calls.custom
+  - request.messages.tool_result.extra_fields
 semantic_registry:
   - semantic_id: request.metadata
     chat_storage: routecodex_chat_extension.responses_request.metadata
@@ -198,6 +199,14 @@ semantic_registry:
       openai_chat: mapped_exact_native_custom
       anthropic: mapped_compatible_registered:v3.custom_tool.anthropic_string_input_wrapper.v1
       gemini: unsupported
+  - semantic_id: request.messages.tool_result.extra_fields
+    chat_storage: messages[].routecodex_chat_extension.responses_tool_output_extra_fields
+    type: opaque_business_object
+    projections:
+      responses: mapped_exact
+      openai_chat: unsupported
+      anthropic: unsupported
+      gemini: unsupported
 compatibility_registry:
   - compatibility_id: v3.custom_tool.anthropic_string_input_wrapper.v1
     status: design
@@ -303,6 +312,23 @@ compatibility_registry:
       - responses_inbound_restores_codex_integer_tool_schema_types
       - responses_inbound_does_not_rewrite_string_session_id_schema
       - responses_inbound_does_not_rewrite_same_named_user_tool_schema
+  - compatibility_id: v3.responses_relay.codex_builtin_integer_values
+    status: source_controlled
+    source_semantics:
+      - Registered Codex built-in integer tool arguments in Relay provider responses
+    target_protocol: responses
+    owner_stage: V3HubRespChatProcess03Governed
+    owner_symbol: normalize_v3_codex_integer_tool_values_at_resp03
+    rewrite: exact_registered_integer_field_integral_float_to_integer
+    semantic_delta: preserve Codex integer tool argument type when a provider emits an integral float
+    forbidden:
+      - generic_numeric_coercion
+      - user_tool_rewrite
+      - fractional_value_rewrite
+      - sse_transport_rewrite
+      - metadata_projection
+    required_tests:
+      - resp03_restores_registered_codex_integer_argument_values
 forbidden_carriers:
   - MetadataCenter
   - routing

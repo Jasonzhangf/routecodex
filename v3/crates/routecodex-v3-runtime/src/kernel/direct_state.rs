@@ -1,170 +1,109 @@
-use crate::hub_v1::{
-    V3ServerToolCenter, V3ServerToolCenterKey, V3ServerToolInstanceState, V3ServerToolName,
-};
-use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ResponsesDirectServerToolScope {
-    entry_endpoint: String,
-    session_id: String,
-    conversation_id: String,
-    port: u16,
-    routing_group: String,
+/// Facts the Direct execution hands to the bounded refill decision.
+///
+/// The tool-call list comes from the single shared structural extractor in the
+/// Chat Process owner. `has_source_summary` is captured from the raw provider
+/// attempt (JSON snapshot or raw SSE frames) before any RCC synthesis.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct V3ResponsesDirectRefillFacts {
+    pub(crate) tool_calls: Vec<crate::hub_v1::V3HubResponseToolCall>,
+    pub(crate) has_source_summary: bool,
+    pub(crate) response_completed: bool,
 }
 
-impl V3ResponsesDirectServerToolScope {
-    pub fn new(
-        endpoint: impl Into<String>,
-        session_id: impl Into<String>,
-        conversation_id: impl Into<String>,
-        port: u16,
-        routing_group: impl Into<String>,
-    ) -> Self {
-        Self {
-            entry_endpoint: endpoint.into(),
-            session_id: session_id.into(),
-            conversation_id: conversation_id.into(),
-            port,
-            routing_group: routing_group.into(),
-        }
-    }
-
-    fn has_client_session_scope(&self) -> bool {
-        let session_id = self.session_id.trim();
-        let conversation_id = self.conversation_id.trim();
-        if session_id.is_empty() || conversation_id.is_empty() {
-            return false;
-        }
-        !(session_id == conversation_id && session_id.starts_with("request:"))
-    }
-
-    pub fn web_search_hook_scope(
-        &self,
-    ) -> servertool_core::web_search_contract::WebSearchHookScope {
-        servertool_core::web_search_contract::WebSearchHookScope {
-            entry_endpoint: self.entry_endpoint.clone(),
-            session_id: self.session_id.clone(),
-            conversation_id: self.conversation_id.clone(),
-            port: self.port,
-            routing_group: self.routing_group.clone(),
-        }
-    }
+/// Internal per-execution signal used by the Direct bounded refill loop.
+///
+/// Mirrors the Relay refill signal: it carries only the Chat Process
+/// disposition and is never projected into a business payload. The Direct
+/// output struct stays unchanged so its many construction sites keep working.
+#[derive(Clone, Default)]
+pub(crate) struct V3ResponsesDirectRefillSignal {
+    value: std::sync::Arc<AtomicU8>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct V3ResponsesDirectServerToolState {
-    center: V3ServerToolCenter,
-    hooks_sidecar_socket: Option<PathBuf>,
-}
+impl V3ResponsesDirectRefillSignal {
+    const NONE: u8 = 0;
+    const DELIVER: u8 = 1;
+    const REQUEST_REFILL: u8 = 2;
 
-impl V3ResponsesDirectServerToolState {
-    pub fn with_hooks_sidecar_socket(mut self, socket_path: Option<PathBuf>) -> Self {
-        self.hooks_sidecar_socket = socket_path;
-        self
+    pub(crate) fn set(&self, disposition: crate::hub_v1::V3ChatProcessRefillDisposition) {
+        let value = match disposition {
+            crate::hub_v1::V3ChatProcessRefillDisposition::Deliver => Self::DELIVER,
+            crate::hub_v1::V3ChatProcessRefillDisposition::RequestRefill => Self::REQUEST_REFILL,
+        };
+        self.value.store(value, Ordering::Release);
     }
 
-    pub(crate) fn hooks_sidecar_socket(&self) -> Option<&std::path::Path> {
-        self.hooks_sidecar_socket.as_deref()
-    }
-
-    fn web_search_center_key(
-        scope: &V3ResponsesDirectServerToolScope,
-    ) -> V3ServerToolCenterKey {
-        V3ServerToolCenterKey {
-            tool_name: V3ServerToolName::WebSearch,
-            scope_key: format!(
-                "{:?}|{}|{}|{}|{}|{}",
-                crate::hub_v1::V3HubEntryProtocol::Responses,
-                scope.entry_endpoint,
-                scope.port,
-                scope.routing_group,
-                scope.session_id,
-                scope.conversation_id
-            ),
+    pub(crate) fn take(&self) -> Option<crate::hub_v1::V3ChatProcessRefillDisposition> {
+        match self.value.swap(Self::NONE, Ordering::AcqRel) {
+            Self::DELIVER => Some(crate::hub_v1::V3ChatProcessRefillDisposition::Deliver),
+            Self::REQUEST_REFILL => {
+                Some(crate::hub_v1::V3ChatProcessRefillDisposition::RequestRefill)
+            }
+            _ => None,
         }
     }
 
-    pub fn web_search_load_for_scope(
+    /// Publish the one shared disposition for this Direct execution.
+    pub(crate) fn publish(
         &self,
-        scope: &V3ResponsesDirectServerToolScope,
-    ) -> Result<Option<V3WebSearchCenterState>, String> {
-        match self
-            .center
-            .load(&Self::web_search_center_key(scope))
-            .map_err(|error| error.to_string())?
-        {
-            Some(V3ServerToolInstanceState::WebSearch(state)) => Ok(Some(state)),
-            Some(_) => Err("cross-tool direct web search load rejected".to_string()),
-            None => Ok(None),
-        }
-    }
-
-    pub fn web_search_store_for_scope(
-        &self,
-        scope: &V3ResponsesDirectServerToolScope,
-        state: V3WebSearchCenterState,
-        written_by: V3ServerToolCenterWriteOrigin,
-        reason: Option<&str>,
-        request_id: Option<&str>,
-    ) -> Result<(), String> {
-        self.center
-            .store(
-                Self::web_search_center_key(scope),
-                V3ServerToolInstanceState::WebSearch(state),
-                written_by,
-                reason,
-                request_id,
-            )
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn web_search_clear_for_scope(
-        &self,
-        scope: &V3ResponsesDirectServerToolScope,
-        written_by: V3ServerToolCenterWriteOrigin,
-        reason: Option<&str>,
-        request_id: Option<&str>,
-    ) -> Result<(), String> {
-        self.center
-            .clear(
-                &Self::web_search_center_key(scope),
-                written_by,
-                reason,
-                request_id,
-            )
-            .map_err(|error| error.to_string())
-    }
-
-    pub fn len(&self) -> Result<usize, String> {
-        self.center.len().map_err(|error| error.to_string())
-    }
-
-    pub fn is_empty(&self) -> Result<bool, String> {
-        self.center.is_empty().map_err(|error| error.to_string())
+        facts: &V3ResponsesDirectRefillFacts,
+        refill_used: u32,
+    ) -> crate::hub_v1::V3ChatProcessRefillDisposition {
+        let disposition = crate::hub_v1::decide_v3_chat_process_refill(
+            &facts.tool_calls,
+            facts.has_source_summary,
+            facts.response_completed,
+            refill_used,
+            crate::hub_v1::v3_chat_process_refill_max_consecutive(),
+        );
+        self.set(disposition);
+        disposition
     }
 }
 
-pub struct V3ResponsesDirectRuntimeSharedState<'a> {
-    pub server_tool_state: &'a V3ResponsesDirectServerToolState,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum V3DirectDebugNodePublication {
+    Runtime,
+    ServerCloseout,
+}
+
+pub struct V3ResponsesDirectRuntimeSharedState {
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
+    debug_node_publication: V3DirectDebugNodePublication,
 }
 
-impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
-    pub fn new<H>(
-        server_tool_state: &'a V3ResponsesDirectServerToolState,
-        provider_health: H,
-    ) -> Self
+impl V3ResponsesDirectRuntimeSharedState {
+    pub fn new<H>(provider_health: H) -> Self
     where
         H: Into<V3ProviderFailureRuntimeHealth>,
     {
         Self {
-            server_tool_state,
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
+            client_frame_sink: None,
+            debug_node_publication: V3DirectDebugNodePublication::Runtime,
         }
+    }
+
+    /// The Server composes nested protocol outcomes before publishing their
+    /// execution nodes. Raw request/response capture remains owned by Debug.
+    pub fn defer_debug_node_publication_to_server(mut self) -> Self {
+        self.debug_node_publication = V3DirectDebugNodePublication::ServerCloseout;
+        self
+    }
+
+    pub fn with_client_frame_sink(
+        mut self,
+        sink: Option<crate::nodes::V3CommittedClientFrameSink>,
+    ) -> Self {
+        self.client_frame_sink = sink;
+        self
     }
 
     pub fn with_provider_failure_event_sink(
@@ -186,8 +125,6 @@ impl<'a> V3ResponsesDirectRuntimeSharedState<'a> {
 
 #[derive(Clone)]
 struct V3ResponsesDirectRuntimeCoreState {
-    server_tool_state: Option<Arc<V3ResponsesDirectServerToolState>>,
-    server_tool_scope: Option<V3ResponsesDirectServerToolScope>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
@@ -199,6 +136,9 @@ struct V3ResponsesDirectRuntimeCoreState {
     // when routing was preplanned.
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
+    initial_request_local_busy_candidates: BTreeSet<String>,
+    initial_route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
+    initial_route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     request_execution_control: Option<V3RequestExecutionControl>,
     // Node trace the protocol plan already executed for this request; the
@@ -206,13 +146,12 @@ struct V3ResponsesDirectRuntimeCoreState {
     initial_plan_trace: Option<Vec<&'static str>>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
+    client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
 }
 
 impl V3ResponsesDirectRuntimeCoreState {
     fn new() -> Self {
         Self {
-            server_tool_state: None,
-            server_tool_scope: None,
             now_epoch_ms: 0,
             provider_health: None,
             provider_health_neutral: false,
@@ -221,22 +160,16 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_protocol_decision: None,
             initial_expanded: None,
             initial_request_local_excluded_candidates: BTreeSet::new(),
+            initial_request_local_busy_candidates: BTreeSet::new(),
+            initial_route_policy_scope: None,
+            initial_route_policy_pending: None,
             observability_accumulator: None,
             request_execution_control: None,
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
+            client_frame_sink: None,
         }
-    }
-
-    fn with_server_tool_state(
-        mut self,
-        server_tool_state: &V3ResponsesDirectServerToolState,
-        server_tool_scope: V3ResponsesDirectServerToolScope,
-    ) -> Self {
-        self.server_tool_state = Some(Arc::new(server_tool_state.clone()));
-        self.server_tool_scope = Some(server_tool_scope);
-        self
     }
 
     fn with_provider_health(mut self, provider_health: V3ProviderFailureRuntimeHealth) -> Self {
@@ -281,6 +214,9 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.initial_expanded = Some(plan.expanded.clone());
         self.initial_request_local_excluded_candidates =
             plan.request_local_excluded_candidates.clone();
+        self.initial_request_local_busy_candidates = plan.request_local_busy_candidates.clone();
+        self.initial_route_policy_scope = plan._route_policy_scope.clone();
+        self.initial_route_policy_pending = plan._route_policy_pending.clone();
         self.initial_plan_trace = Some(plan.routing_trace_segment());
         self
     }
@@ -300,11 +236,22 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.request_execution_control = control;
         self
     }
+
+    fn with_client_frame_sink(
+        mut self,
+        sink: Option<crate::nodes::V3CommittedClientFrameSink>,
+    ) -> Self {
+        self.client_frame_sink = sink;
+        self
+    }
 }
 
 #[derive(Debug)]
 pub struct V3ResponsesDirectRuntimeOutput {
     pub client_payload: V3Resp15ClientPayload,
+    pub terminal_disposition: Option<V3ProviderTerminalDisposition>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub provider_request_snapshot: Option<serde_json::Value>,
     pub provider_response_snapshot: Option<serde_json::Value>,
     pub node_trace: Vec<&'static str>,
@@ -319,10 +266,26 @@ pub struct V3ResponsesProtocolRelayHandoff {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     pub request_local_excluded_candidates: BTreeSet<String>,
+    pub request_local_busy_candidates: BTreeSet<String>,
+    pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
     pub request_execution_control: V3RequestExecutionControl,
+}
+
+impl V3ResponsesProtocolRelayHandoff {
+    pub fn relay_runtime_seeds(&self) -> crate::V3ResponsesRelayRuntimeSeeds {
+        crate::V3ResponsesRelayRuntimeSeeds {
+            route_policy_pending: self.route_policy_pending.clone(),
+            route_policy_scope: self.route_policy_scope.clone(),
+            observability_accumulator: Some(self.observability_accumulator.clone()),
+            request_execution_control: Some(self.request_execution_control.clone()),
+            request_local_busy_candidates: self.request_local_busy_candidates.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +304,9 @@ pub struct V3ResponsesProtocolExecutionPlan {
     // consumed. This keeps Direct/Relay handoffs on one Error01-06 attempt set
     // without storing control state in the normal request payload.
     pub request_local_excluded_candidates: BTreeSet<String>,
+    pub request_local_busy_candidates: BTreeSet<String>,
+    pub _route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    pub _route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
 }
 
 impl V3ResponsesProtocolExecutionPlan {
@@ -356,21 +322,47 @@ impl V3ResponsesProtocolExecutionPlan {
             .copied()
             .collect()
     }
+
+    pub fn relay_runtime_seeds(&self) -> crate::V3ResponsesRelayRuntimeSeeds {
+        crate::V3ResponsesRelayRuntimeSeeds {
+            route_policy_pending: self._route_policy_pending.clone(),
+            route_policy_scope: self._route_policy_scope.clone(),
+            request_local_busy_candidates: self.request_local_busy_candidates.clone(),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct V3ResponsesProtocolExecutionPlanFailure {
     pub source: V3Error01SourceRaised,
     pub node_trace: Vec<&'static str>,
+    pub error_operator_fault: Option<crate::V3RelayErrorOperatorFault>,
+    pub(crate) recovery_candidates: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+}
+
+pub(crate) fn protocol_plan_operator_fault(
+    fault: crate::V3RelayErrorOperatorFault,
+    node_trace: Vec<&'static str>,
+) -> V3ResponsesProtocolExecutionPlanFailure {
+    V3ResponsesProtocolExecutionPlanFailure {
+        source: fault.policy_failure.clone(),
+        node_trace,
+        error_operator_fault: Some(fault),
+        recovery_candidates: None,
+    }
 }
 
 pub fn project_v3_protocol_execution_plan_failure(
     failure: V3ResponsesProtocolExecutionPlanFailure,
-) -> V3Error06ClientProjected {
-    V3ErrorHandlingCenter::handle(V3ErrorHandlingCenterInput {
-        source: failure.source,
-        action_scope: V3ErrorActionScope::None,
-        candidates_remaining: 0,
-        source_status: None,
-    })
+) -> Result<V3Error06ClientProjected, crate::V3RelayErrorOperatorFault> {
+    if let Some(fault) = failure.error_operator_fault {
+        return Err(fault);
+    }
+    crate::provider_failure_runtime_policy::project_v3_relay_error_source(
+        failure.source,
+        V3ErrorActionScope::None,
+        0,
+        None,
+    )
 }

@@ -18,6 +18,48 @@ fn responses_reasoning_effort_normalizes_whitespace_and_case_like_chat_side() {
 }
 
 #[test]
+fn responses_refusal_content_part_projects_into_openai_chat_message() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "refusal", "refusal": "provider declined the request"}]
+        }]
+    }))
+    .expect("provider refusal is legal business content and must project");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    let content = messages[0]["content"].as_array().expect("content parts");
+    assert_eq!(
+        content[0],
+        json!({"type": "refusal", "refusal": "provider declined the request"}),
+        "{request}"
+    );
+}
+
+#[test]
+fn responses_refusal_content_part_with_non_string_refusal_still_projects() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "refusal", "refusal": {"code": "POLICY"}}]
+        }]
+    }))
+    .expect("representable refusal payload must remain forward-compatible");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .expect("content parts");
+    assert_eq!(content[0]["type"], json!("refusal"));
+    assert_eq!(content[0]["refusal"], json!("{\"code\":\"POLICY\"}"));
+}
+
+#[test]
 fn responses_reasoning_effort_preserves_unknown_non_empty_value_for_forward_compatibility() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "deepseek-v4-flash",
@@ -92,6 +134,242 @@ fn responses_input_image_url_maps_to_openai_chat_image_url_url() {
         "OpenAI Chat provider wire must not emit bare string image_url: {request}"
     );
 }
+
+#[test]
+fn responses_text_array_preserves_multiple_empty_and_sibling_fields() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "alpha",
+                    "annotations": [{
+                        "type": "url_citation",
+                        "start_index": 0,
+                        "end_index": 5,
+                        "url": "https://example.com/alpha"
+                    }],
+                    "future_sibling": {"keep": true}
+                },
+                {"type": "input_text", "text": ""},
+                {
+                    "type": "output_text",
+                    "text": "omega",
+                    "annotations": []
+                }
+            ]
+        }]
+    }))
+    .expect("text arrays must preserve source part boundaries and sibling data");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("text array must stay an array: {request}"));
+    assert_eq!(
+        content,
+        &vec![
+            json!({
+                "type": "text",
+                "text": "alpha",
+                "annotations": [{
+                    "type": "url_citation",
+                    "start_index": 0,
+                    "end_index": 5,
+                    "url": "https://example.com/alpha"
+                }],
+                "future_sibling": {"keep": true}
+            }),
+            json!({"type": "text", "text": ""}),
+            json!({"type": "text", "text": "omega", "annotations": []})
+        ]
+    );
+}
+
+#[test]
+fn responses_scalar_input_content_stays_scalar() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": "hello"
+    }))
+    .expect("scalar Responses input must canonicalize");
+
+    assert_eq!(request["messages"][0]["content"], json!("hello"));
+}
+
+#[test]
+fn responses_singleton_text_array_stays_array() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hello"}]
+        }]
+    }))
+    .expect("singleton Responses text array must canonicalize");
+
+    assert_eq!(
+        request["messages"][0]["content"],
+        json!([{"type": "text", "text": "hello"}])
+    );
+}
+
+#[test]
+fn responses_mixed_text_image_preserves_text_siblings_and_order() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "before",
+                    "annotations": [{"type": "custom_note", "value": "keep"}],
+                    "future_sibling": "keep"
+                },
+                {
+                    "type": "input_image",
+                    "image_url": "data:image/png;base64,AAAA",
+                    "detail": "high"
+                },
+                {"type": "input_text", "text": "after"}
+            ]
+        }]
+    }))
+    .expect("mixed Responses content must preserve text/image boundaries");
+
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .unwrap_or_else(|| panic!("mixed content must stay an array: {request}"));
+    assert_eq!(
+        content,
+        &vec![
+            json!({
+                "type": "text",
+                "text": "before",
+                "annotations": [{"type": "custom_note", "value": "keep"}],
+                "future_sibling": "keep"
+            }),
+            json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/png;base64,AAAA",
+                    "detail": "high"
+                }
+            }),
+            json!({"type": "text", "text": "after"})
+        ]
+    );
+}
+
+#[test]
+fn responses_structured_or_absent_text_is_not_replaced_with_empty_text() {
+    let source = json!([
+        {"type":"input_text","text":{"nested":[1,true,null]},"tag":"structured"},
+        {"type":"input_text","tag":"absent"}
+    ]);
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "input":[{"type":"message","role":"user","content":source}]
+    }))
+    .unwrap();
+    let parts = &request["messages"][0]["content"];
+    assert_eq!(
+        parts[0]["text"],
+        serde_json::to_string(&source[0]["text"]).unwrap()
+    );
+    assert_eq!(parts[0]["tag"], "structured");
+    assert!(parts[1].get("text").is_none());
+    assert_eq!(parts[1]["tag"], "absent");
+}
+
+#[test]
+fn responses_tool_only_function_call_omits_synthetic_empty_content() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "function_call",
+            "call_id": "call_tool_only",
+            "namespace": "codex_tui",
+            "name": "send_message_to_thread",
+            "arguments": "{\"thread_id\":\"thread-1\",\"message\":\"hello\"}"
+        }]
+    }))
+    .expect("tool-only function_call must canonicalize");
+
+    let assistant = &request["messages"][0];
+    assert_eq!(assistant["role"], json!("assistant"));
+    assert!(
+        assistant.get("content").is_none(),
+        "newly synthesized tool-only assistant must omit empty content: {request}"
+    );
+    assert_eq!(assistant["tool_calls"][0]["id"], json!("call_tool_only"));
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["name"],
+        json!("codex_tui__send_message_to_thread")
+    );
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"],
+        json!("{\"thread_id\":\"thread-1\",\"message\":\"hello\"}")
+    );
+}
+
+#[test]
+fn responses_function_call_preserves_source_content_and_reasoning() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "function_call",
+            "call_id": "call_with_content",
+            "name": "lookup",
+            "arguments": "{\"q\":\"x\"}",
+            "content": [{"type": "output_text", "text": "source text"}],
+            "reasoning_content": "source reasoning"
+        }]
+    }))
+    .expect("source-provided function_call content must canonicalize");
+
+    let assistant = &request["messages"][0];
+    assert_eq!(
+        assistant["content"],
+        json!([{"type": "text", "text": "source text"}])
+    );
+    assert_eq!(assistant["reasoning_content"], json!("source reasoning"));
+    assert_eq!(
+        assistant["tool_calls"][0]["function"]["arguments"],
+        json!("{\"q\":\"x\"}")
+    );
+}
+
+#[test]
+fn responses_image_codec_preserves_future_siblings_for_duplicate_urls() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type":"input_image","image_url":"data:image/png;base64,AAAA","future_sibling":{"occurrence":1}},
+                {"type":"input_image","image_url":"data:image/png;base64,AAAA","future_sibling":{"occurrence":2}}
+            ]
+        }]
+    }))
+    .expect("Responses image siblings must project through the exported codec boundary");
+    let content = request["messages"][0]["content"]
+        .as_array()
+        .expect("projected image content");
+    assert_eq!(content.len(), 2);
+    assert_eq!(
+        content[0]["image_url"]["url"],
+        content[1]["image_url"]["url"]
+    );
+    assert_eq!(content[0]["future_sibling"], json!({"occurrence":1}));
+    assert_eq!(content[1]["future_sibling"], json!({"occurrence":2}));
+}
+
 #[test]
 fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
     let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -117,13 +395,22 @@ fn responses_web_search_current_turn_item_projects_to_canonical_tools() {
 
 #[test]
 fn responses_inbound_restores_codex_integer_tool_schema_types() {
+    for description in [
+        "Runs a command in a PTY, returning output or a session ID.",
+        "Runs a command in a PTY, returning output or a session ID for ongoing interaction.",
+    ] {
+        assert_registered_codex_integer_tool_schema_types(description);
+    }
+}
+
+fn assert_registered_codex_integer_tool_schema_types(description: &str) {
     let request = super::super::responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound_compat(&json!({
         "model": "gpt-5.5",
         "tools": [
             {
                 "type": "function",
                 "name": "exec_command",
-                "description": "Runs a command in a PTY, returning output or a session ID.",
+                "description": description,
                 "strict": false,
                 "parameters": {
                     "type": "object",
@@ -358,7 +645,10 @@ fn responses_web_search_call_projects_to_openai_chat_tool_pair_with_synthetic_id
     assert_eq!(result["type"], json!("web_search_call"));
     assert_eq!(result["status"], json!("failed"));
     assert_eq!(result["action"], arguments);
-    assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+    assert_eq!(
+        messages[2],
+        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+    );
 }
 #[test]
 fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions() {
@@ -456,7 +746,10 @@ fn responses_tool_search_call_and_output_normalize_as_adjacent_chat_extensions()
             "responses_execution": "client"
         })
     );
-    assert_eq!(messages[2], json!({"role": "user", "content": "继续"}));
+    assert_eq!(
+        messages[2],
+        json!({"role": "user", "content": [{"type": "text", "text": "继续"}]})
+    );
     assert!(
         messages.iter().all(|message| {
             message.get("type").and_then(Value::as_str) != Some("tool_search_call")
@@ -589,8 +882,8 @@ fn responses_web_search_call_normalizes_to_chat_extension_at_req_inbound() {
     );
 }
 #[test]
-fn responses_web_search_call_rejects_side_channel_before_tool_result_stringification() {
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+fn responses_web_search_call_preserves_business_names_before_tool_result_stringification() {
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "web_search_call",
@@ -599,15 +892,21 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "routeHint": "debug-control"
         }]
     }))
-    .expect_err(
-        "RouteCodex control fields must fail before provider tool-result JSON stringification",
-    );
-    assert!(
-        error.contains("side-channel field") && error.contains("routeHint"),
-        "unexpected error: {error}"
-    );
+    .expect("hosted tool business fields remain representable");
+    assert!(request.to_string().contains("debug-control"));
 
-    let error = build_v3_chat_canonical_request_from_responses_payload(&json!({
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "web_search_call",
+            "status": "failed",
+            "action": {"type": "search", "query": "RouteCodex", "routeHint": "nested-control"}
+        }]
+    }))
+    .expect("nested business fields remain representable");
+    assert!(request.to_string().contains("nested-control"));
+
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
         "model": "gpt-5.5",
         "input": [{
             "type": "web_search_call",
@@ -615,10 +914,98 @@ fn responses_web_search_call_rejects_side_channel_before_tool_result_stringifica
             "action": {"type": "search", "query": "RouteCodex", "_debug": true}
         }]
     }))
-    .expect_err("private debug fields must fail before provider tool-result JSON stringification");
+    .expect("underscore business names remain representable");
+    assert!(request.to_string().contains("_debug"));
+}
+
+#[test]
+fn responses_tool_search_output_preserves_private_named_json_schema_definitions() {
+    let tools = json!([{
+        "type": "namespace",
+        "name": "mcp__codex_apps__chatgpt_space",
+        "tools": [{
+            "type": "function",
+            "name": "_patch_page",
+            "parameters": {
+                "type": "object",
+                "$defs": {
+                    "_PatchPageChange": {
+                        "type": "object",
+                        "properties": {"block_id": {"type": "string"}}
+                    }
+                },
+                "properties": {
+                    "changes": {"items": {"$ref": "#/$defs/_PatchPageChange"}}
+                }
+            }
+        }]
+    }]);
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {"type": "tool_search_call", "call_id": "call_search", "arguments": {}},
+            {"type": "tool_search_output", "call_id": "call_search", "tools": tools}
+        ]
+    }))
+    .expect("tool search output JSON Schema names are business data, not proxy control fields");
+
+    let serialized = request["messages"][1]["content"]
+        .as_str()
+        .expect("tool search output is preserved in tool content");
+    let normalized_tools: Value = serde_json::from_str(serialized).expect("tool list JSON");
+    assert_eq!(normalized_tools, tools);
+}
+
+#[test]
+fn responses_tool_search_output_keeps_client_schema_keys_with_leading_underscore() {
+    // 线上样本：客户端 `tool_search_output` 携带 ChatGPT Space 工具目录，其中一个
+    // 工具的 JSON Schema `$defs` 名是 `_ReplaceBlock`。它属于客户端数据，不是
+    // RouteCodex 控制键；inbound canonicalization 必须原样保留，不能 400。
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "tool_search_call",
+            "call_id": "call_tool_search_1",
+            "execution": "client",
+            "status": "completed",
+            "arguments": {"query": "chatgpt space page edit", "limit": 8}
+        }, {
+            "type": "tool_search_output",
+            "id": "tso_1",
+            "call_id": "call_tool_search_1",
+            "status": "completed",
+            "execution": "client",
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__codex_apps__chatgpt_space",
+                "tools": [{
+                    "type": "function",
+                    "name": "apply_page_changes",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "changes": {"type": "array", "items": {"$ref": "#/$defs/_ReplaceBlock"}}
+                        },
+                        "$defs": {
+                            "_ReplaceBlock": {
+                                "type": "object",
+                                "properties": {"block_id": {"type": "string"}},
+                                "required": ["block_id"]
+                            }
+                        }
+                    }
+                }]
+            }]
+        }, {
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}]
+        }]
+    }))
+    .expect("client tool catalog underscore keys must pass inbound canonicalization");
+    let serialized = canonical.to_string();
     assert!(
-        error.contains("private debug field") && error.contains("_debug"),
-        "unexpected error: {error}"
+        serialized.contains("_ReplaceBlock"),
+        "client schema definition must survive canonicalization: {serialized}"
     );
 }
 
@@ -670,5 +1057,40 @@ fn responses_unknown_input_item_type_still_fails_fast() {
     assert!(
         error.contains("unsupported Responses input item type"),
         "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn responses_system_message_between_pending_tool_call_and_result_defers_to_preserve_tool_adjacency()
+{
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [{
+            "type": "function_call",
+            "name": "dummy_tool",
+            "call_id": "call_01repro400",
+            "arguments": "{}"
+        }, {
+            "type": "message",
+            "role": "system",
+            "content": [{"type": "input_text", "text": "system after pending tool call"}]
+        }, {
+            "type": "function_call_output",
+            "call_id": "call_01repro400",
+            "output": "tool output"
+        }]
+    }))
+    .expect("system message after a pending tool call must defer instead of rejecting");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 3, "{request}");
+    assert_eq!(messages[0]["role"], json!("assistant"));
+    assert_eq!(messages[0]["tool_calls"][0]["id"], json!("call_01repro400"));
+    assert_eq!(messages[1]["role"], json!("tool"));
+    assert_eq!(messages[1]["tool_call_id"], json!("call_01repro400"));
+    assert_eq!(messages[2]["role"], json!("system"));
+    assert_eq!(
+        messages[2]["content"],
+        json!([{"type": "text", "text": "system after pending tool call"}])
     );
 }

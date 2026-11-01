@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-anthropic-json/chat-to-anthropic-json/v3-protocol-live-mock-lifecycle-pZ2KO0/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-anthropic-json/chat-to-anthropic-json/v3-protocol-live-mock-lifecycle-pZ2KO0/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 65113
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 65114
+    }
+  ],
+  "admin_bind": "127.0.0.1:65114",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:65114"
+  },
+  "mode": "relay",
+  "model": "mock.anthropic-model",
+  "wire_model": "anthropic-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-anthropic",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-anthropic-json/chat-to-anthropic-json/v3-protocol-live-mock-lifecycle-pZ2KO0/provider/mock-anthropic/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-anthropic-json/chat-to-anthropic-json/provider.toml",
+      "model": "mock.anthropic-model",
+      "wire_model": "anthropic-model",
+      "sha256": "79c74596554ed040f28962ee52f6dee31ae3c0b663e81594a606615c6e4368f2"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "anthropic",
+    "wire_model": "anthropic-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-anthropic/mock.anthropic-model",
+        "provider_id": "mock-anthropic",
+        "model": "mock.anthropic-model",
+        "wire_model": "anthropic-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/chat-to-anthropic-json/chat-to-anthropic-json/v3-protocol-live-mock-lifecycle-pZ2KO0/provider/mock-anthropic/config.v2.toml",
+        "provider_sha256": "79c74596554ed040f28962ee52f6dee31ae3c0b663e81594a606615c6e4368f2",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-anthropic/mock.anthropic-model"
+  ]
+}

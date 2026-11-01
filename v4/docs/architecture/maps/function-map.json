@@ -813,9 +813,7 @@
       ],
       "required_gates": [
         "v4_node_container_l2_regression",
-        "v4_cordis_host_l3_regression",
-        "v4_parity_gate_node_container",
-        "v4_parity_gate_node_container_red"
+        "v4_cordis_host_l3_regression"
       ]
     },
     {
@@ -900,9 +898,7 @@
       ],
       "required_gates": [
         "v4_node_container_l2_regression",
-        "v4_cordis_host_l3_regression",
-        "v4_parity_gate_node_container",
-        "v4_parity_gate_node_container_red"
+        "v4_cordis_host_l3_regression"
       ]
     },
     {
@@ -1071,63 +1067,6 @@
       ]
     },
     {
-      "function_id": "v4.governance.feature_layer_batch_admission",
-      "status": "active",
-      "feature_id": "V4-LAYER-GATE-001",
-      "owner": "routecodex-v4-governance",
-      "entry_symbols": ["validateFeatureLayerBatchAdmission"],
-      "resource_ids": ["feature_layer_batch_manifest"],
-      "source_paths": ["scripts/architecture/verify-v4-feature-layer-batches.mjs"],
-      "required_gates": [
-        "v4_feature_layer_batches",
-        "v4_feature_layer_batches_self_test",
-        "v4_feature_layer_batches_boundary",
-        "v4_feature_layer_batches_red",
-        "v4_parity_gate_plane_isolation",
-        "v4_parity_gate_plane_isolation_red"
-      ]
-    },
-    {
-      "function_id": "v4.parity.product_ledger",
-      "status": "active",
-      "feature_id": "V4-PARITY-001",
-      "owner": "routecodex-v4-parity",
-      "entry_symbols": ["root"],
-      "resource_ids": ["v4.parity.product_ledger"],
-      "source_paths": ["scripts/architecture/verify-v4-product-parity-ledger.mjs"],
-      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
-    },
-    {
-      "function_id": "v4.parity.baseline_delta",
-      "status": "active",
-      "feature_id": "V4-PARITY-002",
-      "owner": "routecodex-v4-parity",
-      "entry_symbols": ["root"],
-      "resource_ids": ["v4.parity.baseline_delta"],
-      "source_paths": ["scripts/architecture/verify-v4-v3-baseline-delta.mjs"],
-      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
-    },
-    {
-      "function_id": "v4.parity.status_gate",
-      "status": "active",
-      "feature_id": "V4-PARITY-003",
-      "owner": "routecodex-v4-parity",
-      "entry_symbols": ["root"],
-      "resource_ids": ["v4.parity.status_gate"],
-      "source_paths": ["scripts/architecture/verify-v4-product-parity-status.mjs"],
-      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
-    },
-    {
-      "function_id": "v4.parity.differential_harness",
-      "status": "active",
-      "feature_id": "V4-PARITY-HARNESS-001",
-      "owner": "routecodex-v4-parity",
-      "entry_symbols": ["root"],
-      "resource_ids": ["v4.parity.differential_harness"],
-      "source_paths": ["scripts/architecture/verify-v4-product-differential.mjs"],
-      "required_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
-    }
-    ,{
       "function_id":"v4.plugin.request.responses_normalize","status":"active","feature_id":"V4-PLUGIN-001","owner":"routecodex-v4-standard-plugins","entry_symbols":["request_normalize","request_normalize_entry"],"resource_ids":["v4.plugin.request.responses_normalize"],"source_paths":["crates/routecodex-v4-standard-plugins/src/request_plugins.rs","crates/routecodex-v4-standard-plugins/src/request_normalize.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
     },{
       "function_id":"v4.plugin.request.chat_to_responses","status":"active","feature_id":"V4-PLUGIN-002","owner":"routecodex-v4-standard-plugins","entry_symbols":["chat_to_responses_entry"],"resource_ids":["v4.plugin.request.chat_to_responses"],"source_paths":["crates/routecodex-v4-standard-plugins/src/chat_to_responses.rs"],"required_gates":["v4_plugin_request_positive","v4_plugin_request_red","v4_plugin_request_boundary","v4_plugin_request_plane"]
@@ -1152,12 +1091,6 @@
     },
     {
       "function_id":"v4.runtime.response_error_port","status":"active","feature_id":"V4-RUNTIME-006","owner":"routecodex-v4-runtime","entry_symbols":["consume_response","consume_error","ResponsePortReceipt"],"resource_ids":["v4.runtime.response_error_port"],"source_paths":["crates/routecodex-v4-runtime/src/response_error_port.rs"],"required_gates":["v4_runtime_006_response_error_positive","v4_runtime_006_response_error_red","v4_runtime_006_response_error_boundary","v4_runtime_006_response_error_plane"]
-    },
-    {
-      "function_id":"v4.governance.feature_layer_gate_contract","status":"active","feature_id":"V4-GATE-001","owner":"routecodex-v4-governance","entry_symbols":["validateFeatureLayerBatchAdmission"],"resource_ids":["v4.governance.feature_layer_gate_contract"],"source_paths":["scripts/architecture/verify-v4-feature-layer-batches.mjs"],"required_gates":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"]
-    },
-    {
-      "function_id":"v4.governance.feature_layer_product_lockstep","status":"active","feature_id":"V4-LAYER-GATE-001","owner":"routecodex-v4-governance","entry_symbols":["validateSourceGreenClaims"],"resource_ids":["v4.governance.feature_layer_product_lockstep"],"source_paths":["scripts/architecture/lib/feature-layer-batch-source.mjs"],"required_gates":["v4_feature_layer_batches","v4_feature_layer_batches_self_test","v4_feature_layer_batches_boundary","v4_feature_layer_batches_red"]
     }
   ]
 }

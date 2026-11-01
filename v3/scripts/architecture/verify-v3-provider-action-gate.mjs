@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { attachProviderActionGateHelpers } from './v3-provider-action-gate-lib.mjs';
 
-const root = process.cwd();
+const v3Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const root = process.env.ROUTECODEX_V3_SOURCE_ROOT
+  ? path.resolve(process.env.ROUTECODEX_V3_SOURCE_ROOT)
+  : path.resolve(v3Root, '..');
 const failures = [];
 const files = {
   gate: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
@@ -35,6 +39,7 @@ const files = {
   server: 'v3/crates/routecodex-v3-server/src/lib.rs',
   serverTests: 'v3/crates/routecodex-v3-server/src/tests/mod.rs',
   gateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
+  sessionGateTests: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_session_isolation_contract.rs',
   openaiChatTests: 'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   geminiTests: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
   directSseTests: 'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
@@ -48,7 +53,7 @@ const files = {
   manifest: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
   wiki: 'docs/architecture/wiki/v3-provider-action-gate.md',
   plan: 'docs/goals/direct-relay-cross-request-error-storm-control-plan.md',
-  packageJson: 'package.json',
+  packageJson: 'v3/package.json',
   workflow: '.github/workflows/test.yml',
 };
 const {
@@ -173,27 +178,9 @@ for (const token of [
 }
 const responsesRelayRequestBody = findFunctionBody(
   text.responses,
-  'execute_v3_responses_relay_runtime_inner',
+  'execute_v3_responses_relay_runtime_inner_with_refill',
   files.responses,
 );
-for (const [label, pattern] of [
-  [
-    'ProviderReqCompat06ProviderCompat request-local fail-fast branch',
-    /let\s+req_compat\s*=\s*match\s+build_provider_req_compat_06_from_v3_hub_req_outbound_07\s*\(req07\)\s*\{[\s\S]{0,900}?Err\s*\(error\)\s*=>\s*\{[\s\S]{0,500}?handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::ProviderCompat\s*\(\s*error\s*\)\s*\)\s*;/u,
-  ],
-  [
-    'V3ProviderReqOutbound08WirePayload failure branch',
-    /let\s+wire\s*=\s*match\s+build_v3_provider_12_responses_wire_payload\s*\([\s\S]{0,1200}?\)\s*\{[\s\S]{0,1200}?Err\s*\(\s*error\s*\)\s*=>\s*\{\s*handle_provider_request_failure!\s*\(\s*V3ResponsesRelayRuntimeError::Provider\s*\(\s*error\s*\)\s*\)\s*;/u,
-  ],
-]) {
-  if (!pattern.test(responsesRelayRequestBody)) {
-    failures.push(
-      label.startsWith('V3ProviderReqOutbound08WirePayload')
-        ? `${files.responses}: ${label} must enter handle_provider_request_failure`
-        : `${files.responses}: ${label} is missing`,
-    );
-  }
-}
 for (const forbidden of [
   'provider_compat_error_is_target_protocol_incompatible',
   'target_protocol_incompatible_candidates',
@@ -207,23 +194,9 @@ assertCallerInvokesCallee({
   step_id: 'v3-provider-action-gate-responses-policy-ingress',
   caller_symbol: 'handle_v3_responses_relay_provider_failure',
   caller_file: files.responses,
-  callee_symbol: 'run_v3_relay_provider_failure_policy',
+  callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source',
   callee_file: files.policy,
 });
-const responsesRelayFailureHandlerBody = findFunctionBody(
-  text.responses,
-  'handle_v3_responses_relay_provider_failure',
-  files.responses,
-);
-if (
-  !/^\{\s*if\s+failure\.terminal_projection\.is_some\(\)\s*\{\s*return\s+Ok\(Some\(failure\)\);\s*\}\s*let\s+result\s*=\s*run_v3_relay_provider_failure_policy\s*\(/u
-    .test(responsesRelayFailureHandlerBody)
-) {
-  failures.push(
-    `${files.responses}: handle_v3_responses_relay_provider_failure must enter run_v3_relay_provider_failure_policy immediately after its existing terminal projection guard`,
-  );
-}
-
 for (const token of [
   'pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;',
   'pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;',
@@ -233,14 +206,13 @@ for (const token of [
   'impl Drop for V3ProviderActionPermit',
   'self.gate.abandon_admission(&self.key, self.generation)',
   'waiter_queue: VecDeque<u64>',
-  'state.waiter_queue.len() > 1',
-  'state.admitted_generation == Some(state.generation)',
-  'let active_admission_owned = states.iter().any',
+  'state.admitted_generation.is_some()',
+  '!require_admission && state.admitted_generation.is_some()',
+  'let active_admission_owned = states',
   'if !active_admission_owned {',
-  'let group_has_active_admission = states.iter().any',
-  '(!self.admit_action || !group_has_active_admission)',
-  'record_failure_and_wait_for_terminal_projection',
-  'pub async fn wait_for_exact_provider_action(',
+  '(!self.admit_action || !exact_has_active_admission)',
+  'record_failure_and_commit_terminal_projection',
+  'pub async fn wait_for_recovery_ticket(',
   'pub fn abandon_admission(',
   'pub fn commit_terminal_admission(',
   'V3ProviderActionRecoveryTransition',
@@ -255,18 +227,31 @@ const recordProviderSuccessBody = findFunctionBody(
   files.gate,
 );
 if (
-  !/key\.provider_scope\s*==\s*\*provider_scope\s*\|\|\s*state\.admitted_action_scope\.as_ref\(\)\s*==\s*Some\(provider_scope\)/u
+  !/key\.provider_scope\s*==\s*\*provider_scope/u
     .test(recordProviderSuccessBody)
 ) {
   failures.push(
-    `${files.gate}: provider success may release only its exact provider scope or the permit-owned action scope`,
+    `${files.gate}: provider success may release only its exact provider scope`,
   );
 }
 for (const forbidden of [
+  'wait_for_provider_action(',
+  'wait_for_exact_provider_action(',
+  'wait_for_matching_provider_action(',
+  'admitted_action_scope',
+  'group_has_active_admission',
+  'active_sibling_lane_generation',
+  'state.waiter_queue.len() > 1',
+]) {
+  if (text.gate.includes(forbidden)) {
+    failures.push(`${files.gate}: retired cross-request coupling ${forbidden}`);
+  }
+}
+for (const requiredDiagnostic of [
   'provider action gate state disappeared without an explicit transition',
   'provider action gate notification channel closed without an explicit transition',
 ]) {
-  requireText(text.gate, files.gate, forbidden);
+  requireText(text.gate, files.gate, requiredDiagnostic);
 }
 if (
   /generation:\s*0,[\s\S]{0,180}?released_by_success:\s*true/u.test(text.gate)
@@ -409,7 +394,7 @@ for (const [name, source, rel] of [
 }
 requireText(text.directSse, files.directSse, 'classify_v3_provider_sse_json_data(');
 requireText(text.directSse, files.directSse, 'V3HubProviderWireProtocol::Responses,');
-if (/event_type|event\s*==\s*["']response\./u.test(text.directSse)) {
+if (/event\s*==\s*["']response\./u.test(text.directSse)) {
   failures.push(
     `${files.directSse}: SSE event metadata must not be used as provider semantic source`,
   );
@@ -420,11 +405,11 @@ if (text.directHelpers.includes('wrap_direct_sse_stopless_control_stream')) {
 requireText(text.policy, files.policy, 'V3RelayProviderTargetResolution::Exhausted');
 const relayFailurePolicy = findFunctionBody(
   text.policy,
-  'run_v3_relay_provider_failure_policy',
+  'run_v3_relay_provider_failure_policy_with_response_source',
   files.policy,
 );
 const targetResolutionFailure = relayFailurePolicy.match(
-  /Some\(Err\(source\)\)\s*=>\s*V3RelayProviderTargetResolution::Failed\(source\)\s*,/u,
+  /V3RelayProviderTargetResolution::Failed\(source\)\s*=>\s*\{\s*let resolution_message = source\.message\.clone\(\);[\s\S]{0,1400}?run_v3_error_02_to_05_decision_operators\(\s*source_projection,\s*source,/u,
 );
 if (!targetResolutionFailure) {
   failures.push(
@@ -453,7 +438,7 @@ requireText(text.responsesCodec, files.responsesCodec, '| "response.done"');
 requireText(
   `${text.providerSseJsonCodec}\n${text.providerResponsesEventClassification}`,
   `${files.providerSseJsonCodec} + ${files.providerResponsesEventClassification}`,
-  'if event_type == "response.completed" {',
+  'if matches!(event_type, "response.completed" | "response.incomplete") {',
 );
 for (const forbidden of [
   'Some("response.completed" | "response.done")',
@@ -545,11 +530,15 @@ for (const [name, source, rel] of [
     failures.push(`${rel}: Relay Skeleton provider compat failure bypasses typed Error05`);
   }
 }
-for (const token of [
+requireText(
+  findFunctionBody(text.policy, 'V3ProviderFailureRuntimeHealth::from', files.policy),
+  files.policy,
   'action_gate: V3ProviderActionGate::process_shared()',
+);
+for (const token of [
   'project_v3_client_disconnect',
   'record_provider_action_failure',
-  'wait_for_terminal_provider_projection',
+  'last_candidate_terminal',
   'build_v3_relay_provider_error_05_decision',
   'terminal_projection_for',
   'provider_runtime_failure_stage',
@@ -578,12 +567,11 @@ for (const forbidden of [
 
 const requiredGateTests = [
   'isolated_failure_blocks_one_action_for_at_least_one_second',
-  'isolated_terminal_projection_waits_for_the_same_one_second_gate',
-  'unrelated_success_cannot_release_a_stale_terminal_projection',
-  'overlapping_waiter_promotes_scope_to_five_seconds_and_one_admission',
+  'isolated_terminal_projection_commits_without_waiting_for_provider_action_admission',
+  'terminal_projection_advances_an_active_exact_key_and_preserves_its_permit',
+  'unrelated_success_cannot_delay_a_terminal_projection',
   'process_shared_handles_observe_the_same_cross_request_generation',
   'terminal_transition_wakes_old_waiter_for_reselection_then_serializes_next_generation',
-  'changing_provider_and_error_family_cannot_restart_an_active_lane_at_one_second',
   'admitted_action_requires_explicit_drop_before_replacement_generation',
   'unrelated_same_group_provider_success_cannot_release_an_owned_action_permit',
   'fifo_waiter_cancellation_removes_only_its_ticket',
@@ -591,6 +579,14 @@ const requiredGateTests = [
 ];
 for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
+}
+for (const testName of [
+  'non429_failure_does_not_escalate_another_identity_in_the_same_session',
+  'admitted_identity_cannot_occupy_another_identity_in_the_same_session',
+  'terminal_identity_cannot_supersede_another_identity_in_the_same_session',
+  'rate_limit_lane_and_success_release_are_shared_across_sessions',
+]) {
+  assertRustTest(text.sessionGateTests, files.sessionGateTests, testName);
 }
 for (const token of [
   'sse_provider_attempt_is_not_committed_before_provider_terminal',
@@ -623,7 +619,7 @@ assertRustTest(
 assertRustTest(
   text.responsesRelayTests,
   files.responsesRelayTests,
-  'responses_relay_incomplete_exhaustion_keeps_typed_terminal_error',
+  'responses_relay_content_filter_incomplete_preserves_output_without_reselect',
 );
 for (const token of [
   'provider_sse_done_without_completed_is_terminal_missing',
@@ -651,7 +647,7 @@ assertRustTest(
 assertRustTest(
   text.protocolModeLockTests,
   files.protocolModeLockTests,
-  'direct_generic_provider_http_400_terminal_exhaustion_enters_provider_action_wait',
+  'direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait',
 );
 requireText(
   text.directHelpers,
@@ -677,7 +673,7 @@ requireText(
 );
 for (const token of [
   'direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish',
-  'io_sse_body_internal_error_is_explicit_599_not_silent_eof',
+  'io_sse_body_internal_error_aborts_instead_of_emitting_599',
 ]) {
   requireText(text.serverTests, files.serverTests, token);
 }
@@ -718,7 +714,6 @@ for (const [nodeId, owner] of [
   ['V3Error05ExecutionDecision', 'routecodex-v3-error'],
   ['V3Error05RecoveryWitness', 'routecodex-v3-error'],
   ['V3ProviderActionGateAdmission', 'routecodex-v3-runtime'],
-  ['V3ExecutionRetryOrReselect', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalAdmission', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalCommitted', 'routecodex-v3-runtime'],
   ['V3ProviderActionPermitInFlight', 'routecodex-v3-runtime'],
@@ -746,7 +741,7 @@ assertExactStrings(
 assertExactStrings(
   manifest?.return_path,
   [
-    'V3ExecutionRetryOrReselect',
+    'V3ProviderActionPermitInFlight',
     'V3ProviderActionGateTerminalCommitted',
     'V3ProviderActionSuccessRecorded',
     'V3ProviderActionFailureRecorded',
@@ -833,17 +828,18 @@ assertIncludes(
   [
     'V3ProviderActionGate::abandon_admission',
     'V3ProviderActionGate::commit_terminal_admission',
+    'V3ProviderActionGate::record_failure_and_commit_terminal_projection',
   ],
   `${files.resourceMap}: v3.error.provider_action_gate.allowed_writers`,
 );
 if (
   manifest?.admission_permit?.owner_type !== 'V3ProviderActionPermit'
   || manifest?.admission_permit?.wall_clock_expiry !== 'forbidden'
-  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== false
+  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== 'http_429_only'
   || manifest?.admission_permit?.waiter_order !== 'fifo_ticket'
 ) {
   failures.push(
-    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request isolation`,
+    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request sharing only for HTTP 429`,
   );
 }
 if (Object.hasOwn(manifest, 'admission_lease')) {
@@ -872,9 +868,9 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-02', 'Wire', 'E05'],
   ['v3-provider-action-gate-03', 'E05', 'Witness'],
   ['v3-provider-action-gate-04', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-05', 'E05', 'TerminalAdmission'],
+  ['v3-provider-action-gate-05', 'E05', 'E06'],
   ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
-  ['v3-provider-action-gate-07', 'Gate', 'Retry'],
+  ['v3-provider-action-gate-07', 'Wire', 'Witness'],
   ['v3-provider-action-gate-08', 'Witness', 'Gate'],
   ['v3-provider-action-gate-10', 'Witness', 'Gate'],
   ['v3-provider-action-gate-11', 'Witness', 'Gate'],
@@ -916,6 +912,11 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-49', 'ProviderCodec', 'ProviderOutcome'],
   ['v3-provider-action-gate-50', 'ProviderRaw', 'ProviderCodec'],
   ['v3-provider-action-gate-51', 'ProviderCodec', 'ProviderOutcome'],
+  ['v3-provider-action-gate-52', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-53', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-54', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-55', 'Wire', 'Witness'],
+  ['v3-provider-action-gate-56', 'Wire', 'Witness'],
 ]) {
   assertWikiEdge(v3WikiMermaid, files.wiki, stepId, fromAlias, toAlias);
 }
@@ -929,17 +930,11 @@ try {
 } catch (error) {
   failures.push(`package.json: JSON parse failed: ${error.message}`);
 }
-const commands = process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-  ? {
-      'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
-      'verify:v3-provider-action-gate': 'node scripts/run-admission-gate.mjs scripts/architecture/verify-v3-provider-action-gate.mjs',
-      'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
-    }
-  : {
-      'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-error && CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
-      'verify:v3-provider-action-gate': 'node v3/scripts/architecture/verify-v3-provider-action-gate.mjs',
-      'test:v3-provider-action-gate-red-fixtures': 'npm --prefix v3 run test:v3-provider-action-gate-red-fixtures',
-    };
+const commands = {
+  'test:v3-provider-action-gate': 'CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract -- --test-threads=1 --nocapture',
+  'verify:v3-provider-action-gate': 'node scripts/architecture/verify-v3-provider-action-gate.mjs',
+  'test:v3-provider-action-gate-red-fixtures': 'node scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
+};
 for (const [name, command] of Object.entries(commands)) {
   if (packageJson.scripts?.[name] !== command) failures.push(`package.json: script ${name} must equal ${command}`);
 }

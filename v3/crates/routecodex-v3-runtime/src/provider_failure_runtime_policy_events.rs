@@ -7,6 +7,7 @@ struct V3RelayProviderFailurePolicyEventInput {
     action: &'static str,
     next_provider_key: Option<String>,
     wait_ms: Option<u64>,
+    diagnostic_source: V3Error01SourceRaised,
 }
 
 fn build_v3_relay_provider_failure_policy_event(
@@ -15,12 +16,17 @@ fn build_v3_relay_provider_failure_policy_event(
     V3RelayProviderFailurePolicyEvent {
         candidate: input.candidate,
         status: input.status,
+        // Populated by the relay handler that owns the real upstream status; the
+        // policy event itself has no access to it.
+        provider_status: None,
         error_type: input.error_type,
         message: input.message,
         health_record: input.health_record,
         action: input.action.to_string(),
         next_provider_key: input.next_provider_key,
         wait_ms: input.wait_ms,
+        diagnostic_source: input.diagnostic_source,
+        failed_attempt_evidence: None,
     }
 }
 

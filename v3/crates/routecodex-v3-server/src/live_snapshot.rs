@@ -1,15 +1,96 @@
 use crate::*;
-use axum::body::Body;
+use axum::body::{Body, BodyDataStream, Bytes};
 use axum::http::Response;
-use futures_util::StreamExt;
+use routecodex_v3_runtime::hub_v1::{V3AnthropicRelayClientBody, V3GeminiRelayClientBody};
 use routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput;
 use serde_json::{json, Value};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 
-pub(crate) fn v3_output_has_terminal_client_error(
+pub(crate) fn start_v3_live_snapshot_session(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+) -> Result<Option<String>, Box<Response<Body>>> {
+    match state.debug.start_snapshot_session(trace_scope, "live") {
+        Ok(session_id) => Ok(Some(session_id)),
+        Err(V3DebugError::Disabled("snapshots")) => Ok(None),
+        Err(error) => Err(Box::new(foundation_output_response(
+            project_v3_debug_failure("V3SnapshotSessionStarted", error),
+        ))),
+    }
+}
+
+pub(crate) fn record_v3_live_snapshot_projection(
+    state: &V3ListenerState,
+    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
+    snapshot_session_id: Option<&str>,
     status: u16,
-    error_chain: Option<&[&'static str]>,
-) -> bool {
+    node_trace: &[&'static str],
+    phase: &'static str,
+) -> Option<Response<Body>> {
+    let session_id = snapshot_session_id?;
+    for node_id in node_trace {
+        if let Err(error) = state.debug.record_snapshot(
+            trace_scope,
+            session_id,
+            *node_id,
+            json!({
+                "node_id": node_id,
+                "phase": phase,
+                "status": status,
+                "live": true
+            }),
+        ) {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3SnapshotNodeCaptured",
+                error,
+            )));
+        }
+    }
+    if let Err(error) = state
+        .debug
+        .close_snapshot_session_keep_snapshots(trace_scope, session_id)
+    {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3SnapshotSessionClosed",
+            error,
+        )));
+    }
+    None
+}
+
+pub(crate) fn relay_error_body_for_console(body: &V3ResponsesRelayClientBody) -> Option<&Value> {
+    match body {
+        V3ResponsesRelayClientBody::Json(value) => Some(value),
+        V3ResponsesRelayClientBody::Sse(_) => None,
+    }
+}
+
+pub(crate) fn openai_chat_error_body_for_console(
+    body: &V3OpenAiChatRelayClientBody,
+) -> Option<&Value> {
+    match body {
+        V3OpenAiChatRelayClientBody::Json(value) => Some(value),
+        V3OpenAiChatRelayClientBody::Sse(_) => None,
+    }
+}
+
+pub(crate) fn gemini_error_body_for_console(body: &V3GeminiRelayClientBody) -> Option<&Value> {
+    match body {
+        V3GeminiRelayClientBody::Json(value) => Some(value),
+        V3GeminiRelayClientBody::Sse(_) => None,
+    }
+}
+
+/// `true` when a relay/direct runtime output carries a terminal client error.
+///
+/// The client status is the whole predicate: the output's Error chain is not
+/// consulted, because a terminal failure is already visible to the client as an
+/// error status, and requiring a chain here would drop error evidence for a
+/// failure the client really received. This is the contract the recovered-attempt
+/// test asserts (`recovered_provider_attempts_do_not_create_terminal_client_error_truth`).
+pub(crate) fn v3_output_has_terminal_client_error(status: u16) -> bool {
     status >= 400
 }
 
@@ -30,46 +111,44 @@ pub(crate) struct V3LiveSnapSseRecorderCore {
     raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
 }
 
-/// Recorder 持久化阶段：recorder owner 只允许在 `Initial` 与 `Terminal` 阶段
-/// 落盘 `response.json`；`MidStream` 阶段只允许追加 rawSse 缓存，
-/// 防止 committed SSE stream 在 terminal frame 内同步触发落盘而覆盖。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum V3RecorderPersistPhase {
-    Initial,
-    MidStream,
-    Terminal,
+fn persist_v3_stream_observation_provider_response(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    observation: Option<&V3RuntimeStreamObservation>,
+) -> Result<bool, String> {
+    let Some(observation) = observation else {
+        return Ok(false);
+    };
+    let snapshot = observation.snapshot()?;
+    if snapshot.provider_raw_sse.is_empty() {
+        return Ok(false);
+    }
+    let provider_payload = state.debug.project_payload_verbatim(json!({
+        "object": "routecodex.v3.provider_response_snapshot",
+        "stage": "provider-response",
+        "bodyKind": "sse",
+        "rawSse": snapshot.provider_raw_sse,
+    }));
+    persist_v3_codex_sample_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "provider-response.json",
+        &provider_payload,
+    )?;
+    Ok(true)
 }
 
 impl V3LiveSnapSseRecorderCore {
-    pub(crate) fn persist_initial(&self) -> Result<(), String> {
-        self.persist_current(None, V3RecorderPersistPhase::Initial)
-    }
-
-    pub(crate) fn append_chunk(&self, bytes: &[u8]) -> Result<(), String> {
-        self.raw_sse
-            .lock()
-            .map_err(|error| error.to_string())?
-            .append(bytes);
-        Ok(())
-    }
-
-    pub(crate) fn persist_current(
-        &self,
-        stream_error: Option<&str>,
-        phase: V3RecorderPersistPhase,
-    ) -> Result<(), String> {
+    fn persist_terminal(&self, stream_error: Option<&str>) -> Result<(), String> {
         let raw_sse = self
             .raw_sse
             .lock()
             .map_err(|error| error.to_string())?
             .rendered_text();
-        if matches!(phase, V3RecorderPersistPhase::MidStream) {
-            // Stream 帧回调期间只能追加 rawSse 缓存；不允许同步重写
-            // response.json；否则 V3ObservedCommittedSseStream 在 terminal
-            // frame 内同步触发 on_terminal，会把客户端可见 response.json
-            // 在下一帧 yield 前覆盖。
-            return Ok(());
-        }
         if self.capture_client_response {
             let mut payload = json!({
                 "object": "routecodex.v3.client_response_snapshot",
@@ -112,208 +191,400 @@ impl V3LiveSnapSseRecorderCore {
                 &payload,
             )?;
         }
-        if let Some(observation) = self.provider_observation.as_ref() {
-            let snapshot = observation.snapshot()?;
-            if !snapshot.provider_raw_sse.is_empty() {
-                let provider_payload = self.state.debug.project_payload_verbatim(json!({
-                    "object": "routecodex.v3.provider_response_snapshot",
-                    "stage": "provider-response",
-                    "bodyKind": "sse",
-                    "rawSse": snapshot.provider_raw_sse,
-                }));
-                persist_v3_codex_sample_payload(
-                    &self.state,
-                    &self.entry_protocol,
-                    &self.endpoint,
-                    &self.request_id,
-                    "provider-response.json",
-                    &provider_payload,
-                )?;
-            }
-        }
+        persist_v3_stream_observation_provider_response(
+            &self.state,
+            &self.entry_protocol,
+            &self.endpoint,
+            &self.request_id,
+            self.provider_observation.as_ref(),
+        )?;
         Ok(())
     }
 }
 
-pub(crate) struct V3LiveSnapClientResponseSseRecorder {
-    core: V3LiveSnapSseRecorderCore,
-}
-
-impl V3LiveSnapClientResponseSseRecorder {
-    pub(crate) fn new(
-        state: Arc<V3ListenerState>,
-        entry_protocol: String,
-        endpoint: String,
-        request_id: String,
-        output: &V3ResponsesRelayRuntimeOutput,
-    ) -> Self {
-        Self {
-            core: V3LiveSnapSseRecorderCore {
-                state,
-                entry_protocol,
-                endpoint,
-                request_id,
-                status: output.status,
-                node_trace: output.node_trace.clone(),
-                error_chain: output.error_chain.clone(),
-                observability: output
-                    .observability
-                    .as_ref()
-                    .map(project_v3_runtime_observability_debug),
-                finalized_response: output.finalized_response.clone(),
-                provider_observation: None,
-                capture_client_response: true,
-                source: "live_server_response_stream",
-                raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
-            },
-        }
-    }
-
-    pub(crate) fn wrap(
-        &self,
-        stream: V3ResponsesRelayClientStream,
-    ) -> V3ResponsesRelayClientStream {
-        let frame_recorder = self.core.clone();
-        let terminal_recorder = self.core.clone();
-        stream.observe(
-            move |bytes| {
-                if let Err(error) = frame_recorder.append_chunk(bytes) {
-                    eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
-                }
-            },
-            move |terminal| {
-                let disconnect = matches!(terminal, V3CommittedSseTerminal::Dropped)
-                    .then_some("client disconnected before SSE replay completed");
-                if let Err(error) =
-                    terminal_recorder.persist_current(disconnect, V3RecorderPersistPhase::Terminal)
-                {
-                    eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
-                }
-            },
-        )
-    }
-
-    pub(crate) fn persist_initial(&self) -> Result<(), String> {
-        self.core.persist_initial()
-    }
-}
-
+/// Carries a created client-response recorder to the client transport boundary.
+///
+/// The runtime response body is not the client wire once first-frame commit
+/// exists: the committed channel emits the frames the runtime already flushed and
+/// only then drains the sealed outcome body. The recorder therefore travels on the
+/// response and the transport boundary wraps the final client body.
 #[derive(Clone)]
-pub(crate) struct V3LiveSnapDirectClientResponseSseRecorder {
+pub(crate) struct V3LiveSnapPendingClientCapture {
     core: V3LiveSnapSseRecorderCore,
 }
 
-impl V3LiveSnapDirectClientResponseSseRecorder {
-    pub(crate) fn new(
-        state: Arc<V3ListenerState>,
-        entry_protocol: String,
-        endpoint: String,
-        request_id: String,
-        frame: &V3Server16HttpFrame,
-    ) -> Self {
+/// Lets the committed client channel hand a deferred recorder to the boundary.
+///
+/// The channel response exists before the runtime outcome does, so the outcome
+/// response cannot carry the recorder into that response. The channel moves the
+/// recorder into this slot when the outcome arrives; the transport boundary reads
+/// the same slot when it wraps the final client body.
+#[derive(Clone)]
+pub(crate) struct V3LiveSnapClientWireCaptureSlot {
+    core: Arc<Mutex<Option<V3LiveSnapSseRecorderCore>>>,
+}
+
+impl V3LiveSnapClientWireCaptureSlot {
+    pub(crate) fn new() -> Self {
         Self {
-            core: V3LiveSnapSseRecorderCore {
-                state,
-                entry_protocol,
-                endpoint,
-                request_id,
-                status: frame.status,
-                node_trace: frame.node_trace.clone(),
-                error_chain: Some(frame.error_chain.clone()),
-                observability: frame
-                    .observability
-                    .as_ref()
-                    .map(project_v3_runtime_observability_debug),
-                finalized_response: None,
-                provider_observation: frame.stream_observation.clone(),
-                capture_client_response: true,
-                source: "live_server_direct_response_stream",
-                raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
-            },
+            core: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub(crate) fn wrap_committed(
-        &self,
-        stream: V3CommittedClientSseStream,
-    ) -> V3CommittedClientSseStream {
-        let frame_recorder = self.core.clone();
-        let terminal_recorder = self.core.clone();
-        stream.observe(
-            move |bytes| {
-                if let Err(error) = frame_recorder.append_chunk(bytes) {
-                    eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
-                }
-            },
-            move |terminal| {
-                let disconnect = matches!(terminal, V3CommittedSseTerminal::Dropped)
-                    .then_some("client disconnected before SSE replay completed");
-                if let Err(error) =
-                    terminal_recorder.persist_current(disconnect, V3RecorderPersistPhase::Terminal)
-                {
-                    eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
-                }
-            },
-        )
+    pub(crate) fn adopt(&self, core: V3LiveSnapSseRecorderCore) {
+        if let Ok(mut slot) = self.core.lock() {
+            *slot = Some(core);
+        }
     }
 
-    pub(crate) fn wrap_live(&self, stream: V3ClientSseStream) -> V3ClientSseStream {
-        let recorder = self.core.clone();
-        Box::pin(futures_util::stream::unfold(
-            (stream, false),
-            move |(mut stream, done)| {
-                let recorder = recorder.clone();
-                async move {
-                    if done {
-                        return None;
-                    }
-                    match stream.next().await {
-                        Some(Ok(bytes)) => {
-                            if let Err(error) = recorder.append_chunk(&bytes) {
-                                return Some((
-                                    Err(raise_v3_debug_artifact_failure(format!(
-                                        "client response capture failed: {error}"
-                                    ))),
-                                    (stream, true),
-                                ));
-                            }
-                            Some((Ok(bytes), (stream, false)))
-                        }
-                        Some(Err(error)) => {
-                            if let Err(capture_error) = recorder.persist_current(
-                                Some(error.message.as_str()),
-                                V3RecorderPersistPhase::Terminal,
-                            ) {
-                                return Some((
-                                    Err(raise_v3_debug_artifact_failure(format!(
-                                        "client response finalize failed: {capture_error}"
-                                    ))),
-                                    (stream, true),
-                                ));
-                            }
-                            Some((Err(error), (stream, true)))
-                        }
-                        None => {
-                            if let Err(error) =
-                                recorder.persist_current(None, V3RecorderPersistPhase::Terminal)
-                            {
-                                return Some((
-                                    Err(raise_v3_debug_artifact_failure(format!(
-                                        "client response finalize failed: {error}"
-                                    ))),
-                                    (stream, true),
-                                ));
-                            }
-                            None
-                        }
-                    }
-                }
-            },
-        ))
+    fn take(&self) -> Option<V3LiveSnapSseRecorderCore> {
+        self.core.lock().ok().and_then(|mut slot| slot.take())
     }
 
-    pub(crate) fn persist_initial(&self) -> Result<(), String> {
-        self.core.persist_initial()
+    /// Adopt the recorder the runtime attached to its projected outcome.
+    pub(crate) fn adopt_from_response(&self, response: &mut Response<Body>) {
+        let Some(pending) = response
+            .extensions_mut()
+            .remove::<V3LiveSnapPendingClientCapture>()
+        else {
+            return;
+        };
+        self.adopt(pending.core);
+    }
+}
+
+struct V3LiveSnapClientWireBodyStream {
+    inner: Pin<Box<BodyDataStream>>,
+    /// The recorder a response owner attached directly. Its own buffer is reused,
+    /// so a poisoned recorder mutex still fails only the optional sample.
+    core: Option<V3LiveSnapSseRecorderCore>,
+    /// The recorder the committed client channel adopts when the outcome arrives.
+    slot: Option<V3LiveSnapClientWireCaptureSlot>,
+    raw_sse: Arc<Mutex<V3DebugBoundedTextCapture>>,
+    finished: bool,
+}
+
+impl V3LiveSnapClientWireBodyStream {
+    fn persist_terminal(&mut self, stream_error: Option<&str>) {
+        let core = self
+            .core
+            .take()
+            .or_else(|| self.slot.as_ref().and_then(|slot| slot.take()));
+        let Some(mut core) = core else {
+            return;
+        };
+        // The recorded wire belongs to the transport, so the terminal record must
+        // persist these exact bytes instead of the recorder's own buffer.
+        core.raw_sse = Arc::clone(&self.raw_sse);
+        if let Err(error) = core.persist_terminal(stream_error) {
+            eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
+        }
+    }
+}
+
+impl futures_util::Stream for V3LiveSnapClientWireBodyStream {
+    type Item = Result<Bytes, axum::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.as_mut().get_mut();
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(bytes))) => {
+                if let Ok(mut raw_sse) = this.raw_sse.lock() {
+                    raw_sse.append(&bytes);
+                } else {
+                    eprintln!("[v3-sse-snapshot] client response capture failed: poisoned mutex");
+                }
+                Poll::Ready(Some(Ok(bytes)))
+            }
+            Poll::Ready(Some(Err(error))) => {
+                let capture_error_text = error.to_string();
+                this.finished = true;
+                this.persist_terminal(Some(capture_error_text.as_str()));
+                Poll::Ready(Some(Err(error)))
+            }
+            Poll::Ready(None) => {
+                this.finished = true;
+                this.persist_terminal(None);
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for V3LiveSnapClientWireBodyStream {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        self.finished = true;
+        self.persist_terminal(Some("client disconnected before response stream completed"));
+    }
+}
+
+/// Carry a pending client-response recorder onto a replacement response.
+///
+/// A transport-owner response may be replaced before the client transport
+/// boundary runs, for example when a model outcome has no client payload and the
+/// transport breaks. The replacement carries the same client wire, so the recorder
+/// must move with it instead of being dropped with the replaced response.
+pub(crate) fn transfer_v3_live_client_capture(from: &mut Response<Body>, to: &mut Response<Body>) {
+    if let Some(pending) = from
+        .extensions_mut()
+        .remove::<V3LiveSnapPendingClientCapture>()
+    {
+        to.extensions_mut().insert(pending);
+    }
+}
+
+/// Wrap the final client SSE wire so the sample records exactly those bytes.
+///
+/// The transport owner has finished projecting keepalive, committed-stream, and
+/// protocol framing before this wrapper runs. A response without a recorder, and
+/// any non-SSE response, passes through unchanged, so an unsampled request pays
+/// no per-chunk cost.
+pub(crate) fn observe_v3_live_client_wire(mut response: Response<Body>) -> Response<Body> {
+    let pending = response
+        .extensions_mut()
+        .remove::<V3LiveSnapPendingClientCapture>();
+    let slot = response
+        .extensions_mut()
+        .remove::<V3LiveSnapClientWireCaptureSlot>();
+    if pending.is_none() && slot.is_none() {
+        return response;
+    }
+    let is_sse = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"));
+    if !is_sse {
+        return response;
+    }
+    let raw_sse = match pending.as_ref() {
+        Some(pending) => Arc::clone(&pending.core.raw_sse),
+        None => Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+    };
+    let (parts, body) = response.into_parts();
+    let stream = V3LiveSnapClientWireBodyStream {
+        inner: Box::pin(body.into_data_stream()),
+        core: pending.map(|pending| pending.core),
+        slot,
+        raw_sse,
+        finished: false,
+    };
+    Response::from_parts(parts, Body::from_stream(stream))
+}
+
+/// Builds the client-response sample recorder a runtime or endpoint owner
+/// attaches to its projected response.
+///
+/// The recorder travels to the transport boundary via
+/// `V3LiveSnapPendingClientCapture`, so the final body wrap records the exact
+/// client wire even when a committed client channel frames the payload.
+pub(crate) struct V3LiveSnapFinalSseResponseCapture {
+    core: V3LiveSnapSseRecorderCore,
+}
+
+impl V3LiveSnapFinalSseResponseCapture {
+    fn new(core: V3LiveSnapSseRecorderCore) -> Self {
+        Self { core }
+    }
+
+    pub(crate) fn from_direct_frame(
+        state: &Arc<V3ListenerState>,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        frame: &V3Server16HttpFrame,
+    ) -> Option<Self> {
+        if !state.debug.should_capture_snapshot_stage("client-response")
+            || !v3_codex_sample_scope_allows(state, V3EntryProtocolExecutionMode::Direct)
+        {
+            return None;
+        }
+        Some(Self::new(V3LiveSnapSseRecorderCore {
+            state: Arc::clone(state),
+            entry_protocol: entry_protocol.to_string(),
+            endpoint: endpoint.to_string(),
+            request_id: request_id.to_string(),
+            status: frame.status,
+            node_trace: frame.node_trace.clone(),
+            error_chain: Some(frame.error_chain.clone()),
+            observability: frame
+                .observability
+                .as_ref()
+                .map(project_v3_runtime_observability_debug),
+            finalized_response: None,
+            provider_observation: state
+                .debug
+                .should_capture_snapshot_stage("provider-response")
+                .then(|| frame.stream_observation.clone())
+                .flatten(),
+            capture_client_response: true,
+            source: "live_server_direct_response_stream",
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+        }))
+    }
+
+    pub(crate) fn from_openai_chat_relay(
+        state: &Arc<V3ListenerState>,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        output: &V3OpenAiChatRelayRuntimeOutput,
+    ) -> Option<Self> {
+        let capture_client_response = state.debug.should_capture_snapshot_stage("client-response");
+        let capture_provider_response = state
+            .debug
+            .should_capture_snapshot_stage("provider-response");
+        if !capture_client_response && !capture_provider_response {
+            return None;
+        }
+        Some(Self::new(V3LiveSnapSseRecorderCore {
+            state: Arc::clone(state),
+            entry_protocol: entry_protocol.to_string(),
+            endpoint: endpoint.to_string(),
+            request_id: request_id.to_string(),
+            status: output.status,
+            node_trace: output.node_trace.clone(),
+            error_chain: output.error_chain.clone(),
+            observability: output
+                .observability
+                .as_ref()
+                .map(project_v3_runtime_observability_debug),
+            finalized_response: None,
+            provider_observation: capture_provider_response
+                .then(|| output.stream_observation.clone())
+                .flatten(),
+            capture_client_response,
+            source: "live_server_openai_chat_stream",
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+        }))
+    }
+
+    pub(crate) fn from_anthropic_relay(
+        state: &Arc<V3ListenerState>,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        output: &V3AnthropicRelayRuntimeOutput,
+    ) -> Option<Self> {
+        if !state.debug.should_capture_snapshot_stage("client-response") {
+            return None;
+        }
+        Some(Self::new(V3LiveSnapSseRecorderCore {
+            state: Arc::clone(state),
+            entry_protocol: entry_protocol.to_string(),
+            endpoint: endpoint.to_string(),
+            request_id: request_id.to_string(),
+            status: output.status,
+            node_trace: output.node_trace.clone(),
+            error_chain: output.error_chain.clone(),
+            observability: output
+                .observability
+                .as_ref()
+                .map(project_v3_runtime_observability_debug),
+            finalized_response: None,
+            provider_observation: None,
+            capture_client_response: true,
+            source: "live_server_anthropic_stream",
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+        }))
+    }
+
+    pub(crate) fn from_gemini_relay(
+        state: &Arc<V3ListenerState>,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        output: &V3GeminiRelayRuntimeOutput,
+    ) -> Option<Self> {
+        let capture_client_response = state.debug.should_capture_snapshot_stage("client-response");
+        let capture_provider_response = state
+            .debug
+            .should_capture_snapshot_stage("provider-response");
+        if !capture_client_response && !capture_provider_response {
+            return None;
+        }
+        Some(Self::new(V3LiveSnapSseRecorderCore {
+            state: Arc::clone(state),
+            entry_protocol: entry_protocol.to_string(),
+            endpoint: endpoint.to_string(),
+            request_id: request_id.to_string(),
+            status: output.status,
+            node_trace: output.node_trace.clone(),
+            error_chain: output.error_chain.clone(),
+            observability: output
+                .observability
+                .as_ref()
+                .map(project_v3_runtime_observability_debug),
+            finalized_response: None,
+            provider_observation: capture_provider_response
+                .then(|| output.stream_observation.clone())
+                .flatten(),
+            capture_client_response,
+            source: "live_server_gemini_stream",
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+        }))
+    }
+
+    pub(crate) fn from_responses_relay(
+        state: &Arc<V3ListenerState>,
+        entry_protocol: &str,
+        endpoint: &str,
+        request_id: &str,
+        output: &V3ResponsesRelayRuntimeOutput,
+    ) -> Option<Self> {
+        if !state.debug.should_capture_snapshot_stage("client-response") {
+            return None;
+        }
+        Some(Self::new(V3LiveSnapSseRecorderCore {
+            state: Arc::clone(state),
+            entry_protocol: entry_protocol.to_string(),
+            endpoint: endpoint.to_string(),
+            request_id: request_id.to_string(),
+            status: output.status,
+            node_trace: output.node_trace.clone(),
+            error_chain: output.error_chain.clone(),
+            observability: output
+                .observability
+                .as_ref()
+                .map(project_v3_runtime_observability_debug),
+            finalized_response: output.finalized_response.clone(),
+            provider_observation: None,
+            capture_client_response: true,
+            source: "live_server_response_stream",
+            raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
+        }))
+    }
+
+    /// Attach the recorder so the transport boundary wraps the final client wire.
+    ///
+    /// The runtime response body is not the client wire once first-frame commit
+    /// exists, so a body wrap here would seal in the un-flushed remainder. The
+    /// recorder travels on the response instead; `observe_v3_live_client_wire`
+    /// reads it at the transport boundary and the same path still captures a
+    /// plain response that never went through a committed channel.
+    pub(crate) fn defer_into(self, mut response: Response<Body>) -> Response<Body> {
+        response
+            .extensions_mut()
+            .insert(V3LiveSnapPendingClientCapture { core: self.core });
+        response
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observe_response(self, response: Response<Body>) -> Response<Body> {
+        observe_v3_live_client_wire(self.defer_into(response))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn poison_raw_sse_capture_for_test(&self) {
+        let raw_sse = Arc::clone(&self.core.raw_sse);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = raw_sse.lock().expect("test capture lock");
+            panic!("poison V3 live snapshot capture mutex for test");
+        }));
     }
 }
 
@@ -329,10 +600,25 @@ pub(crate) fn capture_v3_live_raw_request(
     if !state.debug.should_capture_snapshot_stage("client-request") {
         return None;
     }
-    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
-        if !v3_codex_sample_scope_allows(state, execution_mode) {
-            return None;
+    let direct = execution_mode == V3EntryProtocolExecutionMode::Direct;
+    if direct && !v3_codex_sample_scope_allows(state, execution_mode) {
+        return None;
+    }
+    // Responses Direct keeps its historical no-ring-buffer path. Other Direct
+    // protocols and Relay still populate the in-memory capture when retention
+    // permits it, but disk samples no longer depend on that projection.
+    if !(direct && entry_protocol == "responses") {
+        if let Err(error) = state
+            .debug
+            .capture_raw_request(trace_scope, payload.clone())
+        {
+            return Some(foundation_output_response(project_v3_debug_failure(
+                "V3Debug02RawRequestCaptured",
+                error,
+            )));
         }
+    }
+    if v3_codex_sample_scope_allows(state, execution_mode) {
         let payload = state.debug.project_payload_verbatim(payload.clone());
         if let Err(error) = persist_v3_codex_sample_payload(
             state,
@@ -341,34 +627,6 @@ pub(crate) fn capture_v3_live_raw_request(
             request_id,
             "request.json",
             &payload,
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug02RawRequestCaptured",
-                V3DebugError::Sink(error),
-            )));
-        }
-        return None;
-    }
-    let projection = match state
-        .debug
-        .capture_raw_request(trace_scope, payload.clone())
-    {
-        Ok(projection) => projection,
-        Err(error) => {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug02RawRequestCaptured",
-                error,
-            )));
-        }
-    };
-    if let Some(projection) = projection {
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "request.json",
-            &projection.payload,
         ) {
             return Some(foundation_output_response(project_v3_debug_failure(
                 "V3Debug02RawRequestCaptured",
@@ -392,71 +650,14 @@ pub(crate) fn capture_v3_responses_relay_response(
     }
     let payload = match &output.client_body {
         V3ResponsesRelayClientBody::Json(value) => value.clone(),
-        V3ResponsesRelayClientBody::Sse(_) => {
-            let payload = json!({
-                "object": "routecodex.v3.client_response_snapshot",
-                "stage": "client-response",
-                "source": "live_server_response_stream",
-                "bodyKind": "sse",
-                "rawSse": "",
-                "stream": true,
-                "materializedResponse": output.finalized_response.clone(),
-                "status": output.status,
-                "node_trace": output.node_trace.clone(),
-                "error_chain": output.error_chain.clone(),
-                "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
-            });
-            let projection = match state
-                .debug
-                .capture_raw_response(trace_scope, payload.clone())
-            {
-                Ok(projection) => projection,
-                Err(error) => {
-                    return Some(foundation_output_response(project_v3_debug_failure(
-                        "V3Debug03RawResponseCaptured",
-                        error,
-                    )));
-                }
-            };
-            if let Some(projection) = projection {
-                if let Err(error) = persist_v3_codex_sample_payload(
-                    state,
-                    entry_protocol,
-                    endpoint,
-                    request_id,
-                    "response.json",
-                    &projection.payload,
-                ) {
-                    return Some(foundation_output_response(project_v3_debug_failure(
-                        "V3Debug03RawResponseCaptured",
-                        V3DebugError::Sink(error),
-                    )));
-                }
-            }
-            let V3ResponsesRelayClientBody::Sse(stream) = std::mem::replace(
-                &mut output.client_body,
-                V3ResponsesRelayClientBody::Json(Value::Null),
-            ) else {
-                unreachable!("matched SSE client body");
-            };
-            let recorder = V3LiveSnapClientResponseSseRecorder::new(
-                Arc::clone(state),
-                entry_protocol.to_string(),
-                endpoint.to_string(),
-                request_id.to_string(),
-                output,
-            );
-            if let Err(error) = recorder.persist_initial() {
-                return Some(foundation_output_response(project_v3_debug_failure(
-                    "V3Debug03RawResponseCaptured",
-                    V3DebugError::Sink(error),
-                )));
-            }
-            output.client_body = V3ResponsesRelayClientBody::Sse(recorder.wrap(stream));
-            return None;
-        }
+        // The final SSE body is observed after protocol and transport framing
+        // are applied, so the sample records the exact client wire.
+        V3ResponsesRelayClientBody::Sse(_) => return None,
     };
-    let projection = match state.debug.capture_raw_response(trace_scope, payload) {
+    let projection = match state
+        .debug
+        .capture_raw_response(trace_scope, payload.clone())
+    {
         Ok(projection) => projection,
         Err(error) => {
             return Some(foundation_output_response(project_v3_debug_failure(
@@ -465,20 +666,21 @@ pub(crate) fn capture_v3_responses_relay_response(
             )));
         }
     };
-    if let Some(projection) = projection {
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "response.json",
-            &projection.payload,
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                V3DebugError::Sink(error),
-            )));
-        }
+    let payload = projection
+        .map(|projection| projection.payload)
+        .unwrap_or_else(|| state.debug.project_payload_verbatim(payload));
+    if let Err(error) = persist_v3_codex_sample_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "response.json",
+        &payload,
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3Debug03RawResponseCaptured",
+            V3DebugError::Sink(error),
+        )));
     }
     None
 }
@@ -492,8 +694,7 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
     raw_request_payload: &Value,
     output: &mut V3OpenAiChatRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let force_error_evidence =
-        v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
+    let force_error_evidence = v3_output_has_terminal_client_error(output.status);
     if force_error_evidence {
         if let Err(error) = persist_v3_error_evidence_payload(
             state,
@@ -544,114 +745,52 @@ pub(crate) fn capture_v3_openai_chat_relay_response(
     }
     match &output.client_body {
         V3OpenAiChatRelayClientBody::Json(value) => {
-            let payload = state.debug.project_payload_verbatim(json!({
-                "object": "routecodex.v3.client_response_snapshot",
-                "stage": "client-response",
-                "source": "live_server_openai_chat_response",
-                "status": output.status,
-                "bodyKind": "json",
-                "rawBody": value,
-                "node_trace": output.node_trace.clone(),
-                "error_chain": output.error_chain.clone(),
-            }));
-            if let Err(error) = persist_v3_codex_sample_payload(
-                state,
-                entry_protocol,
-                endpoint,
-                request_id,
-                "response.json",
-                &payload,
-            ) {
-                return Some(foundation_output_response(project_v3_debug_failure(
-                    "V3Debug03RawResponseCaptured",
-                    V3DebugError::Sink(error),
-                )));
+            if capture_client_response {
+                let payload = state.debug.project_payload_verbatim(json!({
+                    "object": "routecodex.v3.client_response_snapshot",
+                    "stage": "client-response",
+                    "source": "live_server_openai_chat_response",
+                    "status": output.status,
+                    "bodyKind": "json",
+                    "rawBody": value,
+                    "node_trace": output.node_trace.clone(),
+                    "error_chain": output.error_chain.clone(),
+                    "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+                }));
+                if let Err(error) = persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "response.json",
+                    &payload,
+                ) {
+                    return Some(foundation_output_response(project_v3_debug_failure(
+                        "V3Debug03RawResponseCaptured",
+                        V3DebugError::Sink(error),
+                    )));
+                }
+            }
+            if capture_provider_response {
+                if let Err(error) = persist_v3_stream_observation_provider_response(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    output.stream_observation.as_ref(),
+                ) {
+                    return Some(foundation_output_response(project_v3_debug_failure(
+                        "V3DebugProviderResponseCaptured",
+                        V3DebugError::Sink(error),
+                    )));
+                }
             }
         }
-        V3OpenAiChatRelayClientBody::Sse(_) => {
-            let body = std::mem::replace(
-                &mut output.client_body,
-                V3OpenAiChatRelayClientBody::Json(Value::Null),
-            );
-            let V3OpenAiChatRelayClientBody::Sse(stream) = body else {
-                unreachable!("matched OpenAI Chat SSE client body");
-            };
-            let recorder = V3LiveSnapOpenAiChatClientResponseSseRecorder::new(
-                Arc::clone(state),
-                entry_protocol.to_string(),
-                endpoint.to_string(),
-                request_id.to_string(),
-                output,
-                capture_client_response,
-            );
-            if let Err(error) = recorder.persist_initial() {
-                return Some(foundation_output_response(project_v3_debug_failure(
-                    "V3Debug03RawResponseCaptured",
-                    V3DebugError::Sink(error),
-                )));
-            }
-            output.client_body = V3OpenAiChatRelayClientBody::Sse(recorder.wrap(stream));
-        }
+        // Captured from the final projected response body by the caller.
+        V3OpenAiChatRelayClientBody::Sse(_) => {}
     }
     let _ = trace_scope;
     None
-}
-
-#[derive(Clone)]
-pub(crate) struct V3LiveSnapOpenAiChatClientResponseSseRecorder {
-    core: V3LiveSnapSseRecorderCore,
-}
-
-impl V3LiveSnapOpenAiChatClientResponseSseRecorder {
-    pub(crate) fn new(
-        state: Arc<V3ListenerState>,
-        entry_protocol: String,
-        endpoint: String,
-        request_id: String,
-        output: &V3OpenAiChatRelayRuntimeOutput,
-        capture_client_response: bool,
-    ) -> Self {
-        Self {
-            core: V3LiveSnapSseRecorderCore {
-                state,
-                entry_protocol,
-                endpoint,
-                request_id,
-                status: output.status,
-                node_trace: output.node_trace.clone(),
-                error_chain: output.error_chain.clone(),
-                observability: None,
-                finalized_response: None,
-                provider_observation: output.stream_observation.clone(),
-                capture_client_response,
-                source: "live_server_openai_chat_stream",
-                raw_sse: Arc::new(Mutex::new(V3DebugBoundedTextCapture::new())),
-            },
-        }
-    }
-
-    pub(crate) fn wrap(&self, stream: V3OpenAiChatCommittedStream) -> V3OpenAiChatCommittedStream {
-        let frame_recorder = self.core.clone();
-        let terminal_recorder = self.core.clone();
-        stream.observe(
-            move |bytes| {
-                if let Err(error) = frame_recorder.append_chunk(bytes) {
-                    eprintln!("[v3-sse-snapshot] client response capture failed: {error}");
-                }
-            },
-            move |_terminal| {
-                if let Err(error) =
-                    terminal_recorder.persist_current(None, V3RecorderPersistPhase::Terminal)
-                {
-                    eprintln!("[v3-sse-snapshot] client response finalize failed: {error}");
-                }
-            },
-        )
-    }
-
-    pub(crate) fn persist_initial(&self) -> Result<(), String> {
-        self.core.persist_initial()
-    }
 }
 
 pub(crate) fn capture_v3_responses_relay_provider_snapshots(
@@ -661,8 +800,7 @@ pub(crate) fn capture_v3_responses_relay_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let terminal_error_evidence =
-        v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref());
+    let terminal_error_evidence = v3_output_has_terminal_client_error(output.status);
     let provider_attempt_evidence = output
         .observability
         .as_ref()
@@ -811,40 +949,282 @@ pub(crate) fn capture_v3_relay_provider_snapshots(
 }
 
 pub(crate) fn capture_v3_anthropic_relay_response(
-    state: &V3ListenerState,
+    state: &Arc<V3ListenerState>,
     entry_protocol: &str,
     endpoint: &str,
     request_id: &str,
-    output: &V3AnthropicRelayRuntimeOutput,
+    output: &mut V3AnthropicRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
     if !state.debug.should_capture_snapshot_stage("client-response") {
         return None;
     }
-    let payload = state.debug.project_payload_verbatim(json!({
-        "object": "routecodex.v3.client_response_snapshot",
-        "stage": "client-response",
-        "source": "live_server_anthropic_relay_response",
-        "status": output.status,
-        "bodyKind": "json",
-        "rawBody": output.client_response,
-        "node_trace": output.node_trace.clone(),
-        "error_chain": output.error_chain.clone(),
-        "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
-    }));
-    if let Err(error) = persist_v3_codex_sample_payload(
+    match &mut output.client_body {
+        V3AnthropicRelayClientBody::Json => {
+            let payload = state.debug.project_payload_verbatim(json!({
+                "object": "routecodex.v3.client_response_snapshot",
+                "stage": "client-response",
+                "source": "live_server_anthropic_relay_response",
+                "status": output.status,
+                "bodyKind": "json",
+                "rawBody": output.client_response,
+                "node_trace": output.node_trace.clone(),
+                "error_chain": output.error_chain.clone(),
+                "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+            }));
+            if let Err(error) = persist_v3_codex_sample_payload(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                "response.json",
+                &payload,
+            ) {
+                return Some(foundation_output_response(project_v3_debug_failure(
+                    "V3Debug03RawResponseCaptured",
+                    V3DebugError::Sink(error),
+                )));
+            }
+        }
+        // Captured from the final projected response body by the caller.
+        V3AnthropicRelayClientBody::Sse(_) => {}
+    }
+    None
+}
+
+pub(crate) fn capture_v3_gemini_relay_response(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &mut V3GeminiRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    let capture_client_response = state.debug.should_capture_snapshot_stage("client-response");
+    let capture_provider_response = state
+        .debug
+        .should_capture_snapshot_stage("provider-response");
+    if !capture_client_response && !capture_provider_response {
+        return None;
+    }
+    match &mut output.client_body {
+        V3GeminiRelayClientBody::Json(value) => {
+            if capture_client_response {
+                let payload = state.debug.project_payload_verbatim(json!({
+                    "object": "routecodex.v3.client_response_snapshot",
+                    "stage": "client-response",
+                    "source": "live_server_gemini_response",
+                    "status": output.status,
+                    "bodyKind": "json",
+                    "rawBody": value,
+                    "node_trace": output.node_trace.clone(),
+                    "error_chain": output.error_chain.clone(),
+                    "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+                }));
+                if let Err(error) = persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    "response.json",
+                    &payload,
+                ) {
+                    return Some(foundation_output_response(project_v3_debug_failure(
+                        "V3Debug03RawResponseCaptured",
+                        V3DebugError::Sink(error),
+                    )));
+                }
+            }
+            if capture_provider_response {
+                if let Err(error) = persist_v3_stream_observation_provider_response(
+                    state,
+                    entry_protocol,
+                    endpoint,
+                    request_id,
+                    output.stream_observation.as_ref(),
+                ) {
+                    return Some(foundation_output_response(project_v3_debug_failure(
+                        "V3DebugProviderResponseCaptured",
+                        V3DebugError::Sink(error),
+                    )));
+                }
+            }
+        }
+        // Captured from the final projected response body by the caller.
+        V3GeminiRelayClientBody::Sse(_) => {}
+    }
+    None
+}
+
+/// Write the provider-private evidence pair for a terminal client error.
+///
+/// Every provider terminal ends the client transport without a client payload,
+/// so a request that really failed would leave no `request.json`/`error.json`
+/// evidence on disk and no artifact reference to resolve. This is the single
+/// owner of that file pair; callers supply only the typed chain they hold.
+/// Returns a debug-failure response when the debug sink itself fails; `None`
+/// means the status is not a terminal client error.
+fn persist_v3_terminal_error_evidence_pair(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    error_evidence: Value,
+    status: u16,
+) -> Option<Response<Body>> {
+    if !v3_output_has_terminal_client_error(status) {
+        return None;
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
         state,
         entry_protocol,
         endpoint,
         request_id,
-        "response.json",
-        &payload,
+        "request.json",
+        &state
+            .debug
+            .project_payload_verbatim(raw_request_payload.clone()),
+        Some(status),
     ) {
         return Some(foundation_output_response(project_v3_debug_failure(
-            "V3Debug03RawResponseCaptured",
+            "V3DebugErrorEvidenceCaptured",
+            V3DebugError::Sink(error),
+        )));
+    }
+    if let Err(error) = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        "error.json",
+        &state.debug.project_payload_verbatim(error_evidence),
+        Some(status),
+    ) {
+        return Some(foundation_output_response(project_v3_debug_failure(
+            "V3DebugErrorEvidenceCaptured",
             V3DebugError::Sink(error),
         )));
     }
     None
+}
+
+/// Persist the error evidence for a Responses relay output that ends in a
+/// terminal client error.
+///
+/// Both the ordinary relay closeout and the provider-terminal-disposition
+/// closeout need this. A provider terminal ends the client transport without a
+/// client payload, so without an explicit call a request that really failed
+/// would leave no `request.json`/`error.json` evidence on disk and no artifact
+/// reference to resolve. Returns a debug-failure response when the debug sink
+/// itself fails; `None` means the output is not a terminal client error.
+pub(crate) fn persist_v3_responses_relay_terminal_error_evidence(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    output: &V3ResponsesRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    persist_v3_terminal_error_evidence_pair(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        raw_request_payload,
+        json!({
+            "object": "routecodex.v3.error_evidence",
+            "stage": "error",
+            "status": output.status,
+            "request_id": request_id,
+            "endpoint": endpoint,
+            "node_trace": output.node_trace.clone(),
+            "error_chain": output.error_chain.clone(),
+            "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
+        }),
+        output.status,
+    )
+}
+
+/// Persist the error evidence for a provider terminal that ends the client
+/// transport before any runtime output exists.
+///
+/// A selection-time pool exhaustion is decided while the protocol execution
+/// plan is built, so no relay/direct runtime output carries the evidence. The
+/// Error06 projection is still the real typed truth, and it has to stay on disk
+/// as provider-private evidence even though the client boundary is a transport
+/// break. Returns a debug-failure response when the debug sink itself fails;
+/// `None` means the projection is not a terminal client error.
+pub(crate) fn persist_v3_projected_terminal_error_evidence(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    raw_request_payload: &Value,
+    node_trace: &[&'static str],
+    projected: &routecodex_v3_error::V3Error06ClientProjected,
+) -> Option<Response<Body>> {
+    persist_v3_terminal_error_evidence_pair(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        raw_request_payload,
+        json!({
+            "object": "routecodex.v3.error_evidence",
+            "stage": "error",
+            "status": projected.status,
+            "request_id": request_id,
+            "endpoint": endpoint,
+            "node_trace": node_trace,
+            "error_chain": projected.chain,
+            "observability": Value::Null,
+        }),
+        projected.status,
+    )
+}
+
+/// Project the typed Error chain of a Responses relay output into the debug
+/// trace and the observability store.
+///
+/// The relay lane exposes only the chain, never the typed
+/// `V3Error06ClientProjected`, so it records the explicit "Error06 typed truth
+/// not exposed" marker instead of an empty chain that would read as "no error
+/// chain". `None` when the output carries no chain, or when the node-event sink
+/// fails and the caller must return the debug-failure response.
+pub(crate) fn project_v3_responses_relay_error_chain(
+    state: &Arc<V3ListenerState>,
+    trace_scope: &V3DebugTraceScope,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    session_id: Option<&str>,
+    request_console_project_path: Option<&str>,
+    output: &V3ResponsesRelayRuntimeOutput,
+) -> Option<Response<Body>> {
+    let error_chain = output.error_chain.as_deref()?;
+    record_and_emit_v3_error_projection(
+        state,
+        trace_scope,
+        V3ErrorProjectionConsoleInput {
+            endpoint,
+            request_id,
+            entry_protocol,
+            session_id,
+            status: output.status,
+            error_chain,
+            body: relay_error_body_for_console(&output.client_body),
+            project_path: request_console_project_path,
+            // The live-snapshot relay lane exposes only the chain; record the
+            // explicit "Error06 typed truth not exposed" marker.
+            execution_mode: output
+                .observability
+                .as_ref()
+                .map(|observability| observability.execution_mode.as_str()),
+            error06_exposed: false,
+            error_class: None,
+            health_action: None,
+            upstream_request_id: None,
+        },
+    )
 }
 
 pub(crate) fn finalize_v3_responses_relay_server_output(
@@ -861,49 +1241,17 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     raw_request_payload: &Value,
     keepalive_interval: Option<Duration>,
 ) -> Response<Body> {
-    if v3_output_has_terminal_client_error(output.status, output.error_chain.as_deref()) {
-        if let Err(error) = persist_v3_error_evidence_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "request.json",
-            &state
-                .debug
-                .project_payload_verbatim(raw_request_payload.clone()),
-            (output.status >= 400).then_some(output.status),
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3DebugErrorEvidenceCaptured",
-                V3DebugError::Sink(error),
-            ));
-        }
-        if let Err(error) = persist_v3_error_evidence_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "error.json",
-            &state
-                .debug
-                .project_payload_verbatim(json!({
-                    "object": "routecodex.v3.error_evidence",
-                    "stage": "error",
-                    "status": output.status,
-                    "request_id": request_id,
-                    "endpoint": endpoint,
-                    "node_trace": output.node_trace.clone(),
-                    "error_chain": output.error_chain.clone(),
-                "observability": output.observability.as_ref().map(project_v3_runtime_observability_debug),
-            })),
-            (output.status >= 400).then_some(output.status),
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3DebugErrorEvidenceCaptured",
-                V3DebugError::Sink(error),
-            ));
-        }
-
+    if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        raw_request_payload,
+        &output,
+    ) {
+        return response;
+    }
+    if v3_output_has_terminal_client_error(output.status) {
         // Direct provider failures can happen before the protocol handoff to
         // relay. In that case the relay snapshot carrier is absent, but the
         // direct SSE observer still owns the provider bytes already received.
@@ -957,22 +1305,6 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             }
         }
     }
-    for node_id in &output.node_trace {
-        if let Err(error) = state.debug.record_node_event(
-            trace_scope,
-            *node_id,
-            "executed",
-            output
-                .error_chain
-                .as_ref()
-                .map(|chain| json!({"error_chain": chain})),
-        ) {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3Debug01NodeEventRegistered",
-                error,
-            ));
-        }
-    }
     if let Some(response) = capture_v3_responses_relay_provider_snapshots(
         state,
         entry_protocol,
@@ -1002,23 +1334,17 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
     ) {
         return response;
     }
-    if let Some(error_chain) = output.error_chain.as_deref() {
-        if let Some(response) = record_and_emit_v3_error_projection(
-            state,
-            trace_scope,
-            V3ErrorProjectionConsoleInput {
-                endpoint,
-                request_id,
-                entry_protocol,
-                session_id: Some(&console_context.identity.session_id),
-                status: output.status,
-                error_chain,
-                body: relay_error_body_for_console(&output.client_body),
-                project_path: request_console_project_path,
-            },
-        ) {
-            return response;
-        }
+    if let Some(response) = project_v3_responses_relay_error_chain(
+        state,
+        trace_scope,
+        entry_protocol,
+        endpoint,
+        request_id,
+        Some(&console_context.identity.session_id),
+        request_console_project_path,
+        &output,
+    ) {
+        return response;
     }
     let stream_console_finalizer = match (
         output.stream_observation.clone(),
@@ -1044,7 +1370,14 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             output.stream_observation.is_none(),
         );
     }
-    responses_relay_output_response(
+    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_responses_relay(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        &output,
+    );
+    let response = responses_relay_output_response(
         output,
         stream_console_finalizer,
         keepalive_interval,
@@ -1052,7 +1385,11 @@ pub(crate) fn finalize_v3_responses_relay_server_output(
             .get("stream")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-    )
+    );
+    match client_response_capture {
+        Some(capture) => capture.defer_into(response),
+        None => response,
+    }
 }
 
 pub(crate) fn capture_v3_responses_direct_response(
@@ -1080,48 +1417,9 @@ pub(crate) fn capture_v3_responses_direct_response(
             "error_chain": frame.error_chain.clone(),
             "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
         }),
-        V3Server16Body::Sse(_) => {
-            let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
-            let V3Server16Body::Sse(stream) = body else {
-                unreachable!("matched live Direct SSE client body");
-            };
-            let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
-                Arc::clone(state),
-                entry_protocol.to_string(),
-                endpoint.to_string(),
-                request_id.to_string(),
-                frame,
-            );
-            if let Err(error) = recorder.persist_initial() {
-                return Some(foundation_output_response(project_v3_debug_failure(
-                    "V3Debug03RawResponseCaptured",
-                    V3DebugError::Sink(error),
-                )));
-            }
-            frame.body = V3Server16Body::Sse(recorder.wrap_live(stream));
-            return None;
-        }
-        V3Server16Body::CommittedSse(_) => {
-            let body = std::mem::replace(&mut frame.body, V3Server16Body::Bytes(Vec::new()));
-            let V3Server16Body::CommittedSse(stream) = body else {
-                unreachable!("matched committed Direct SSE client body");
-            };
-            let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
-                Arc::clone(state),
-                entry_protocol.to_string(),
-                endpoint.to_string(),
-                request_id.to_string(),
-                frame,
-            );
-            if let Err(error) = recorder.persist_initial() {
-                return Some(foundation_output_response(project_v3_debug_failure(
-                    "V3Debug03RawResponseCaptured",
-                    V3DebugError::Sink(error),
-                )));
-            }
-            frame.body = V3Server16Body::CommittedSse(recorder.wrap_committed(stream));
-            return None;
-        }
+        // The final projected response body is observed by the caller so
+        // `rawSse` includes transport keepalive and final framing bytes.
+        V3Server16Body::Sse(_) | V3Server16Body::CommittedSse(_) => return None,
     };
     let payload = state.debug.project_payload_verbatim(payload);
     if let Err(error) = persist_v3_codex_sample_payload(
@@ -1147,158 +1445,69 @@ pub(crate) fn capture_v3_responses_direct_provider_snapshots(
     request_id: &str,
     output: &mut V3ResponsesDirectRuntimeOutput,
 ) -> Option<V3FoundationRuntimeOutput> {
-    let stages = [
-        (
-            "provider-request",
-            "provider-request.json",
-            output.provider_request_snapshot.take(),
-        ),
-        (
-            "provider-response",
-            "provider-response.json",
-            output.provider_response_snapshot.take(),
-        ),
-    ];
-    for (stage, filename, payload) in stages {
-        if !state.debug.should_capture_snapshot_stage(stage) {
-            continue;
-        }
-        let Some(payload) = payload else {
-            continue;
-        };
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            filename,
-            &state.debug.project_payload_verbatim(payload),
-        ) {
-            return Some(project_v3_debug_failure(
-                "V3DebugProviderSnapshotCaptured",
-                V3DebugError::Sink(error),
-            ));
-        }
-    }
-    None
-}
-
-pub(crate) fn capture_v3_foundation_runtime_response(
-    state: &V3ListenerState,
-    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
-    entry_protocol: &str,
-    execution_mode: V3EntryProtocolExecutionMode,
-    endpoint: &str,
-    request_id: &str,
-    output: &V3FoundationRuntimeOutput,
-) -> Option<Response<Body>> {
-    if !state.debug.should_capture_snapshot_stage("client-response") {
+    if !v3_codex_sample_scope_allows(state, V3EntryProtocolExecutionMode::Direct) {
         return None;
     }
-    if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
-        if !v3_codex_sample_scope_allows(state, execution_mode) {
-            return None;
-        }
-        let payload = state.debug.project_payload_verbatim(output.body.clone());
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "response.json",
-            &payload,
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                V3DebugError::Sink(error),
-            )));
-        }
-        return None;
-    }
-    let projection = match state
+    if state
         .debug
-        .capture_raw_response(trace_scope, output.body.clone())
+        .should_capture_snapshot_stage("provider-request")
     {
-        Ok(projection) => projection,
-        Err(error) => {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                error,
-            )));
+        if let Some(payload) = output.provider_request_snapshot.take() {
+            if let Err(error) = persist_v3_codex_sample_payload(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                "provider-request.json",
+                &state.debug.project_payload_verbatim(payload),
+            ) {
+                return Some(project_v3_debug_failure(
+                    "V3DebugProviderSnapshotCaptured",
+                    V3DebugError::Sink(error),
+                ));
+            }
         }
-    };
-    if let Some(projection) = projection {
-        if let Err(error) = persist_v3_codex_sample_payload(
-            state,
-            entry_protocol,
-            endpoint,
-            request_id,
-            "response.json",
-            &projection.payload,
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3Debug03RawResponseCaptured",
-                V3DebugError::Sink(error),
-            )));
+    }
+    if state
+        .debug
+        .should_capture_snapshot_stage("provider-response")
+    {
+        let mut persisted = false;
+        if let Some(payload) = output.provider_response_snapshot.take() {
+            if let Err(error) = persist_v3_codex_sample_payload(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                "provider-response.json",
+                &state.debug.project_payload_verbatim(payload),
+            ) {
+                return Some(project_v3_debug_failure(
+                    "V3DebugProviderSnapshotCaptured",
+                    V3DebugError::Sink(error),
+                ));
+            }
+            persisted = true;
+        }
+        // A JSON client response can be collapsed from a provider SSE attempt.
+        // That attempt has no typed JSON carrier, so persist its buffered raw
+        // provider wire here. SSE client bodies keep their recorder-owned flush.
+        if !persisted && matches!(output.client_payload.body, V3ClientBody::Json(_)) {
+            if let Err(error) = persist_v3_stream_observation_provider_response(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                output.stream_observation.as_ref(),
+            ) {
+                return Some(project_v3_debug_failure(
+                    "V3DebugProviderResponseCaptured",
+                    V3DebugError::Sink(error),
+                ));
+            }
         }
     }
     None
-}
-
-pub(crate) fn project_v3_runtime_observability_debug(
-    observability: &V3RuntimeObservability,
-) -> Value {
-    json!({
-        "routing_group_id": observability.routing_group_id,
-        "pool_id": observability.pool_id,
-        "provider_id": observability.provider_id,
-        "provider_key": observability.provider_key,
-        "model_id": observability.model_id,
-        "wire_model": observability.wire_model,
-        "provider_type": observability.provider_type,
-        "attempts": observability.attempts,
-        "transport": observability.transport,
-        "provider_status": observability.provider_status,
-        "response_status": observability.response_status,
-        "finish_reason": observability.finish_reason,
-        "target_path": observability.target_path,
-        "unavailable_candidates": observability.unavailable_candidates,
-        "provider_failure_events": observability.provider_failure_events.iter().map(project_v3_runtime_provider_failure_event_debug).collect::<Vec<Value>>(),
-        "usage": observability.usage.as_ref().map(project_v3_runtime_usage_debug),
-    })
-}
-
-pub(crate) fn project_v3_runtime_provider_failure_event_debug(
-    event: &V3RuntimeProviderFailureObservation,
-) -> Value {
-    json!({
-        "provider_key": &event.provider_key,
-        "provider_id": &event.provider_id,
-        "auth_alias": event.auth_alias.as_ref(),
-        "model_id": &event.model_id,
-        "status": event.status,
-        "error_type": event.error_type.as_ref(),
-        "external_error_kind": event.external_error_kind.as_ref(),
-        "external_error_code": event.external_error_code.as_ref(),
-        "external_error_status": event.external_error_status,
-        "internal_code": event.internal_code.as_ref(),
-        "message": &event.message,
-        "failure_count": event.failure_count,
-        "health_state": &event.health_state,
-        "cooldown_until_ms": event.cooldown_until_ms,
-        "action": &event.action,
-        "next_provider_key": event.next_provider_key.as_ref(),
-        "wait_ms": event.wait_ms,
-    })
-}
-
-pub(crate) fn project_v3_runtime_usage_debug(usage: &V3RuntimeUsageSummary) -> Value {
-    json!({
-        "input_tokens": usage.input_tokens,
-        "output_tokens": usage.output_tokens,
-        "total_tokens": usage.total_tokens,
-        "cached_tokens": usage.cached_tokens,
-    })
 }
 
 pub(crate) fn persist_v3_codex_sample_payload(
@@ -1309,16 +1518,18 @@ pub(crate) fn persist_v3_codex_sample_payload(
     file_name: &str,
     payload: &Value,
 ) -> Result<(), String> {
-    state.codex_sample_store.persist(
-        state.server.port,
-        entry_protocol,
-        endpoint,
-        request_id,
-        file_name,
-        payload,
-        false,
-        None,
-    )
+    state
+        .codex_sample_store
+        .enqueue_persist(routecodex_v3_debug::V3CodexSamplePersistJob {
+            port: state.server.port,
+            entry_protocol: entry_protocol.to_owned(),
+            endpoint: endpoint.to_owned(),
+            request_id: request_id.to_owned(),
+            file_name: file_name.to_owned(),
+            payload: Arc::new(payload.clone()),
+            force: false,
+            status: None,
+        })
 }
 
 pub(crate) fn persist_v3_error_evidence_payload(
@@ -1330,16 +1541,18 @@ pub(crate) fn persist_v3_error_evidence_payload(
     payload: &Value,
     status: Option<u16>,
 ) -> Result<(), String> {
-    state.codex_sample_store.persist(
-        state.server.port,
-        entry_protocol,
-        endpoint,
-        request_id,
-        file_name,
-        payload,
-        true,
-        status,
-    )
+    state
+        .codex_sample_store
+        .enqueue_persist(routecodex_v3_debug::V3CodexSamplePersistJob {
+            port: state.server.port,
+            entry_protocol: entry_protocol.to_owned(),
+            endpoint: endpoint.to_owned(),
+            request_id: request_id.to_owned(),
+            file_name: file_name.to_owned(),
+            payload: Arc::new(payload.clone()),
+            force: true,
+            status,
+        })
 }
 
 pub(crate) fn v3_codex_sample_scope_allows(
@@ -1349,79 +1562,4 @@ pub(crate) fn v3_codex_sample_scope_allows(
     state.codex_sample_store.is_enabled()
         && (execution_mode != V3EntryProtocolExecutionMode::Direct
             || state.manifest.debug.snapshot_direct)
-}
-
-pub(crate) fn start_v3_live_snapshot_session(
-    state: &V3ListenerState,
-    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
-) -> Result<Option<String>, Box<Response<Body>>> {
-    match state.debug.start_snapshot_session(trace_scope, "live") {
-        Ok(session_id) => Ok(Some(session_id)),
-        Err(V3DebugError::Disabled("snapshots")) => Ok(None),
-        Err(error) => Err(Box::new(foundation_output_response(
-            project_v3_debug_failure("V3SnapshotSessionStarted", error),
-        ))),
-    }
-}
-
-pub(crate) fn record_v3_live_snapshot_projection(
-    state: &V3ListenerState,
-    trace_scope: &routecodex_v3_debug::V3DebugTraceScope,
-    snapshot_session_id: Option<&str>,
-    status: u16,
-    node_trace: &[&'static str],
-    phase: &'static str,
-) -> Option<Response<Body>> {
-    let session_id = snapshot_session_id?;
-    for node_id in node_trace {
-        if let Err(error) = state.debug.record_snapshot(
-            trace_scope,
-            session_id,
-            *node_id,
-            json!({
-                "node_id": node_id,
-                "phase": phase,
-                "status": status,
-                "live": true
-            }),
-        ) {
-            return Some(foundation_output_response(project_v3_debug_failure(
-                "V3SnapshotNodeCaptured",
-                error,
-            )));
-        }
-    }
-    if let Err(error) = state
-        .debug
-        .close_snapshot_session_keep_snapshots(trace_scope, session_id)
-    {
-        return Some(foundation_output_response(project_v3_debug_failure(
-            "V3SnapshotSessionClosed",
-            error,
-        )));
-    }
-    None
-}
-
-pub(crate) fn relay_error_body_for_console(body: &V3ResponsesRelayClientBody) -> Option<&Value> {
-    match body {
-        V3ResponsesRelayClientBody::Json(value) => Some(value),
-        V3ResponsesRelayClientBody::Sse(_) => None,
-    }
-}
-
-pub(crate) fn openai_chat_error_body_for_console(
-    body: &V3OpenAiChatRelayClientBody,
-) -> Option<&Value> {
-    match body {
-        V3OpenAiChatRelayClientBody::Json(value) => Some(value),
-        V3OpenAiChatRelayClientBody::Sse(_) => None,
-    }
-}
-
-pub(crate) fn gemini_error_body_for_console(body: &V3GeminiRelayClientBody) -> Option<&Value> {
-    match body {
-        V3GeminiRelayClientBody::Json(value) => Some(value),
-        V3GeminiRelayClientBody::Sse(_) => None,
-    }
 }

@@ -1,9 +1,15 @@
+mod aggregate_probe_lifecycle;
+mod client_sse_transport;
+mod client_transport_observation;
 mod compaction_request;
 mod console;
+mod debug_runtime_degradation;
 mod endpoint_handlers;
 mod executors;
 mod frame_builders;
+mod listener_accept;
 mod live_snapshot;
+mod live_snapshot_projections;
 mod metadata_center;
 mod models_catalog;
 mod request_id;
@@ -23,13 +29,14 @@ use endpoint_handlers::{
     format_v3_request_id_entry, format_v3_request_id_token,
     merge_v3_direct_handoff_provider_failure_events, merge_v3_protocol_plan_trace,
     merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
-    next_v3_console_request_identity, pending_endpoint_after_responses_admission,
+    next_v3_console_request_identity, pending_endpoint_after_json_parse,
     prepend_v3_protocol_plan_trace_to_responses_relay_output,
     prepend_v3_relay_handoff_trace_to_direct_frame,
 };
 pub use executors::*;
 pub(crate) use frame_builders::*;
 pub(crate) use live_snapshot::*;
+pub(crate) use live_snapshot_projections::*;
 pub(crate) use metadata_center::*;
 use request_id::{
     format_v3_tm, v3_request_id_clock_now, V3AllocatedRequestIdentity, V3RequestCounterState,
@@ -39,6 +46,10 @@ pub use restart_handoff::*;
 pub(crate) use routecodex_v3_runtime::V3RequestPurpose;
 pub(crate) use scope_metadata::*;
 use websocket::{responses_websocket_endpoint, responses_websocket_session};
+#[cfg(test)]
+pub(crate) use websocket::{
+    send_responses_websocket_error_sdk_result, take_responses_websocket_sdk_fault_diagnostics,
+};
 use webui_observability::V3WebuiObservability;
 
 use axum::body::{to_bytes, Body};
@@ -51,9 +62,12 @@ use axum::http::{
     HeaderMap, HeaderValue, Response, StatusCode,
 };
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Router;
+use client_sse_transport::accept_v3_client_sse_transport;
+use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sink;
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
+use listener_accept::{run_v3_listener_accept_loop, V3ListenerAcceptState};
 use responses_direct_server_outcome::{
     execute_responses_direct_server_outcome, V3ResponsesDirectServerOutcome,
 };
@@ -67,16 +81,11 @@ use routecodex_v3_debug::{
     V3DebugTraceScope, V3DryRunFixture, V3RedactionPolicy,
 };
 use routecodex_v3_error::{
-    is_v3_client_disconnect_source, project_v3_http_boundary_error,
-    project_v3_post_commit_sse_source, project_v3_server_invalid_request,
-    project_v3_server_runtime_failure, project_v3_server_websocket_error,
-    raise_v3_debug_artifact_failure, raise_v3_runtime_observability_contract_failure,
-    raise_v3_sse_client_disconnect, raise_v3_sse_provider_failure, raise_v3_sse_runtime_failure,
-    V3Error01SourceRaised, V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
+    is_v3_client_disconnect_source, V3Error01SourceRaised, V3ErrorSourceKind,
+    V3HttpBoundaryErrorKind, V3ProviderFailureSessionScope,
 };
 use routecodex_v3_runtime::{
-    build_v3_provider_global_probe_target, build_v3_server_03_http_request_raw,
-    build_v3_server_03_http_request_raw_with_purpose,
+    build_v3_server_03_http_request_raw, build_v3_server_03_http_request_raw_with_purpose,
     build_v3_server_03_http_request_raw_with_purpose_and_port,
     build_v3_server_03_http_request_raw_with_purpose_and_scope,
     execute_v3_anthropic_relay_dry_run_runtime_with_client_headers,
@@ -89,18 +98,19 @@ use routecodex_v3_runtime::{
     execute_v3_openai_chat_relay_runtime_with_default_transport,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health,
     execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode,
-    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_execution_mode_and_request_control,
+    execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_handoff,
     execute_v3_responses_direct_dry_run_runtime,
     execute_v3_responses_direct_dry_run_runtime_with_initial_target,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
-    execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state,
+    execute_v3_responses_relay_dry_run_orchestration_outcome,
     execute_v3_responses_relay_runtime_with_default_transport,
-    execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state,
-    plan_v3_responses_protocol_execution_with_provider_health, probe_v3_provider_global_target,
+    execute_v3_responses_relay_runtime_with_default_transport_health,
+    foundation_output_from_error_sdk_result, plan_v3_responses_protocol_execution_with_recovery,
     project_v3_anthropic_relay_runtime_failure, project_v3_debug_failure,
-    project_v3_gemini_relay_runtime_failure, project_v3_openai_chat_relay_runtime_failure,
-    project_v3_protocol_execution_plan_failure, project_v3_responses_relay_runtime_failure,
+    project_v3_gemini_relay_runtime_failure, project_v3_http_boundary_error_via_sdk,
+    project_v3_openai_chat_relay_runtime_failure, project_v3_protocol_execution_plan_failure,
+    project_v3_responses_relay_runtime_failure, project_v3_server_boundary_error_via_sdk,
     project_v3_virtual_router_dry_run, project_v3_virtual_router_status,
     register_responses_direct_hooks, V3AnthropicRelayClientHeader, V3AnthropicRelayRuntimeInput,
     V3AnthropicRelayRuntimeOutput, V3ChatDirectCodec, V3ClientBody, V3ClientSseStream,
@@ -108,17 +118,16 @@ use routecodex_v3_runtime::{
     V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3GeminiRelayClientBody,
     V3GeminiRelayRuntimeInput, V3GeminiRelayRuntimeOutput, V3HubExecutionMode,
     V3OpenAiChatClientStream, V3OpenAiChatCommittedStream, V3OpenAiChatRelayClientBody,
-    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthProbeFailure,
+    V3OpenAiChatRelayRuntimeInput, V3OpenAiChatRelayRuntimeOutput, V3ProviderHealthListenerScope,
     V3RelayProviderSnapshots, V3RequestExecutionControl, V3Resp15ClientPayload,
-    V3ResponsesDirectRuntimeSharedState, V3ResponsesDirectServerToolScope,
-    V3ResponsesDirectServerToolState, V3ResponsesProtocolExecutionPlan, V3ResponsesRelayClientBody,
-    V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
+    V3ResponsesDirectRuntimeSharedState, V3ResponsesProtocolExecutionPlan,
+    V3ResponsesRelayClientBody, V3ResponsesRelayClientStream, V3ResponsesRelayDryRunOutcome,
     V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayProviderSnapshotCapture,
     V3ResponsesRelayRuntimeError, V3ResponsesRelayRuntimeInput, V3ResponsesRelayRuntimeOutput,
-    V3ResponsesRelayServerToolScope, V3ResponsesRelayServerToolState, V3RuntimeObservability,
-    V3RuntimeObservabilityAccumulator, V3RuntimeProviderFailureEventSink,
-    V3RuntimeProviderFailureObservation, V3RuntimeRouteSelectionEventSink,
-    V3RuntimeStreamObservation, V3RuntimeTimingSummary, V3RuntimeUsageSummary,
+    V3ResponsesRelayRuntimeSeeds, V3RuntimeObservability, V3RuntimeObservabilityAccumulator,
+    V3RuntimeProviderFailureEventSink, V3RuntimeProviderFailureObservation,
+    V3RuntimeRouteSelectionEventSink, V3RuntimeStreamObservation, V3RuntimeTimingSummary,
+    V3RuntimeUsageSummary,
 };
 use routecodex_v3_sse::{
     build_v3_sse_transport_in_01_raw_chunk, build_v3_sse_transport_in_02_from_fields,
@@ -129,20 +138,19 @@ use routecodex_v3_sse::{
 };
 use serde_json::{json, Map, Value};
 use session_admission::{
-    hold_response_body_admission_permit, hold_response_body_request_activity_permit,
-    V3ResponsesSessionAdmissionGate, V3ResponsesSessionAdmissionPermit,
-    V3ResponsesSessionAdmissionScope, V3ServerRequestActivityGate,
+    hold_response_body_request_activity_permit, V3ServerMaintenanceGuard,
+    V3ServerRequestActivityGate,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
 use std::fs;
 use std::future::Future;
-use std::io;
-use std::io::Read as _;
-use std::io::Write as _;
+use std::io::{self, Read as _, Write as _};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -151,7 +159,7 @@ use tokio::sync::oneshot;
 
 // feature_id: v3.codex_sample_retention_snap_scope
 // sample persistence is owned solely by routecodex-v3-debug::V3CodexSampleStore.
-fn v3_io_error_is_eintr(error: &io::Error) -> bool {
+pub(crate) fn v3_io_error_is_eintr(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::Interrupted || error.raw_os_error() == Some(EINTR)
 }
 
@@ -181,11 +189,8 @@ struct V3ListenerState {
     sse_dump_enabled: bool,
     request_counter: Arc<Mutex<V3RequestIdCounter>>,
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
-    responses_direct_server_tool_state: Arc<V3ResponsesDirectServerToolState>,
-    responses_relay_server_tool_state: Arc<V3ResponsesRelayServerToolState>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
-    responses_session_admission: Arc<V3ResponsesSessionAdmissionGate>,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     webui_observability: V3WebuiObservability,
@@ -206,6 +211,8 @@ pub struct V3Server16HttpFrame {
     pub error_node: &'static str,
     pub error_chain: Vec<&'static str>,
     pub error_body: Option<Value>,
+    pub diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
     pub node_trace: Vec<&'static str>,
     pub observability: Option<V3RuntimeObservability>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
@@ -237,16 +244,27 @@ pub struct V3ListenerHandle {
     pub server_id: String,
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
+    accept_state: Arc<V3ListenerAcceptState>,
 }
 
 #[derive(Debug)]
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
-    probe_shutdown: Option<oneshot::Sender<()>>,
+    probe_lifecycle: aggregate_probe_lifecycle::AggregateProbeLifecycle,
     request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
-    provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
+    provider_health: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
     observability_writers: Vec<V3WebuiObservability>,
+    codex_sample_persist_worker: Option<routecodex_v3_debug::V3CodexSamplePersistHandle>,
+}
+
+#[derive(Debug)]
+pub struct V3ServerExecPreparation {
+    pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
+    pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
+    _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
+    _maintenance_guard: Option<V3ServerMaintenanceGuard>,
+    _probe_quiescence_guard: Option<aggregate_probe_lifecycle::ProbeQuiescenceGuard>,
 }
 
 pub fn build_v3_server_startup_01_listener_set_from_config_05(
@@ -264,27 +282,84 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 }
 
 impl V3ServerAggregateHandle {
+    pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
+        let maintenance_guard = self.request_activity_gate.pause_dispatch().await;
+        let probe_quiescence_guard = self.probe_lifecycle.quiesce(maintenance_guard).await?;
+        self.flush_runtime_persistence();
+        let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
+            Some(worker) => match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                worker.quiesce_for_exec(),
+            )
+            .await
+            {
+                Ok(Ok(guard)) => Some(guard),
+                Ok(Err(error)) => {
+                    return Err(format!(
+                        "codex sample persistence preparation failed: {error}"
+                    ))
+                }
+                Err(_) => {
+                    return Err(
+                        "codex sample persistence preparation timed out; worker retained".into(),
+                    )
+                }
+            },
+            None => None,
+        };
+        let codex_sample_persist_failures = codex_sample_exec_guard
+            .as_ref()
+            .map(|guard| guard.persist_failures())
+            .unwrap_or_default();
+        Ok(V3ServerExecPreparation {
+            front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
+            codex_sample_persist_failures,
+            _codex_sample_exec_guard: codex_sample_exec_guard,
+            _maintenance_guard: None,
+            _probe_quiescence_guard: Some(probe_quiescence_guard),
+        })
+    }
+
     pub fn front_transport_broker(&self) -> &V3FrontTransportBroker {
         &self.front_transport_broker
     }
 
-    pub async fn shutdown(mut self) {
+    #[doc(hidden)]
+    pub async fn wait_for_codex_sample_persistence(&self) -> Result<(), String> {
+        self.codex_sample_persist_worker
+            .as_ref()
+            .ok_or_else(|| "codex sample persist worker is not running".to_string())?
+            .wait_until_idle()
+            .await
+    }
+
+    pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
+        self.probe_lifecycle.terminate();
+        self.probe_lifecycle.join().await;
         self.flush_runtime_persistence();
-        if let Some(shutdown) = self.probe_shutdown.take() {
-            let _ = shutdown.send(());
-        }
+        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
+            Some(mut worker) => worker.shutdown().await,
+            None => Vec::new(),
+        };
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
             }
         }
+        codex_sample_persist_failures
     }
 
-    /// Stop accepting new listener work without waiting for active client
-    /// bodies. Active bodies belong to Front/Transport handoff and must be
-    /// checkpointed/reattached by the lifecycle owner; waiting here would
-    /// deadlock restart on a provider stream that is already being replaced.
-    pub async fn prepare_for_exec(mut self) -> Vec<V3RuntimeHandoffCheckpoint> {
+    /// Stop new business dispatch, wait for accepted requests to finish, then
+    /// close the remaining idle transports before exec replacement.
+    pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
+        self.probe_lifecycle.terminate();
+        let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
+        self.probe_lifecycle.join().await;
+        for listener in &mut self.listeners {
+            if let Some(shutdown) = listener.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+        }
         let checkpoints = self.front_transport_broker.freeze(Instant::now());
         // The current exec path does not transfer accepted client descriptors
         // or Hyper connection tasks. Close those transports before replacing
@@ -292,21 +367,24 @@ impl V3ServerAggregateHandle {
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
         self.flush_runtime_persistence();
-        if let Some(shutdown) = self.probe_shutdown.take() {
-            let _ = shutdown.send(());
+        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
+            Some(mut worker) => worker.shutdown().await,
+            None => Vec::new(),
+        };
+        V3ServerExecPreparation {
+            front_checkpoints: checkpoints,
+            codex_sample_persist_failures,
+            _codex_sample_exec_guard: None,
+            _maintenance_guard: Some(maintenance_guard),
+            _probe_quiescence_guard: None,
         }
-        for listener in &mut self.listeners {
-            if let Some(shutdown) = listener.shutdown.take() {
-                let _ = shutdown.send(());
-            }
-        }
-        let _ = &self.request_activity_gate;
-        checkpoints
     }
 
     fn flush_runtime_persistence(&self) {
-        if let Err(error) = self.provider_health.flush_persistence() {
-            eprintln!("V3 provider health persistence flush failed: {error}");
+        for provider_health in &self.provider_health {
+            if let Err(error) = provider_health.flush_persistence() {
+                eprintln!("V3 provider health persistence flush failed: {error}");
+            }
         }
         for observability in &self.observability_writers {
             if let Err(error) = observability.flush_persistence() {
@@ -345,6 +423,31 @@ impl V3ServerAggregateHandle {
             .iter()
             .any(|listener| listener.shutdown.is_some())
     }
+
+    /// Total `accept()` failures observed by the listener tasks.
+    ///
+    /// A listener keeps its port across a transient accept failure, so this
+    /// counter is the record that the failure happened instead of being silent.
+    pub fn listener_accept_failure_count(&self) -> u64 {
+        self.listeners
+            .iter()
+            .map(|listener| listener.accept_state.accept_failures())
+            .sum()
+    }
+
+    /// The last `accept()` failure observed by a listener task, if any.
+    pub fn listener_last_accept_error(&self) -> Option<String> {
+        self.listeners
+            .iter()
+            .filter_map(|listener| listener.accept_state.last_accept_error())
+            .next_back()
+    }
+}
+
+impl Drop for V3ServerAggregateHandle {
+    fn drop(&mut self) {
+        self.probe_lifecycle.terminate();
+    }
 }
 
 pub async fn spawn_v3_server_aggregate(
@@ -373,37 +476,52 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     admin_config_path: Option<std::path::PathBuf>,
     hooks_sidecar_socket: Option<PathBuf>,
 ) -> Result<V3ServerAggregateHandle, std::io::Error> {
-    if hooks_sidecar_socket.is_none()
-        && manifest.providers.values().any(|provider| {
-            provider.models.values().any(|model| {
-                model
-                    .web_search_execution_mode
-                    .is_metadata_center_local_search()
-            })
-        })
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "web_search metadata_center_local_search requires a hooks sidecar socket",
-        ));
-    }
+    spawn_v3_server_aggregate_with_health_dependencies(
+        manifest,
+        admin_webui,
+        admin_config_path,
+        hooks_sidecar_socket,
+        None,
+    )
+    .await
+}
+
+pub async fn spawn_v3_server_aggregate_with_health_observation_clock(
+    manifest: V3Config05ManifestPublished,
+    clock: Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
+    spawn_v3_server_aggregate_with_health_dependencies(manifest, None, None, None, Some(clock))
+        .await
+}
+
+async fn spawn_v3_server_aggregate_with_health_dependencies(
+    manifest: V3Config05ManifestPublished,
+    admin_webui: Option<V3AdminWebuiManifest>,
+    admin_config_path: Option<std::path::PathBuf>,
+    hooks_sidecar_socket: Option<PathBuf>,
+    observation_clock: Option<Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>>,
+) -> Result<V3ServerAggregateHandle, std::io::Error> {
     let sse_dump_enabled = v3_sse_dump_env_flag();
     let console_enabled = manifest.debug.log_console;
     let debug_manifest = manifest.debug.clone();
     let manifest = Arc::new(manifest);
     let preflight = build_v3_server_startup_01_listener_set_from_config_05(&manifest);
-    let debug =
-        build_v3_debug_runtime_from_manifest(&debug_manifest).map_err(std::io::Error::other)?;
-    let responses_direct_server_tool_state = Arc::new(
-        V3ResponsesDirectServerToolState::default()
-            .with_hooks_sidecar_socket(hooks_sidecar_socket.clone()),
-    );
-    let responses_relay_server_tool_state = Arc::new(
-        V3ResponsesRelayServerToolState::default().with_hooks_sidecar_socket(hooks_sidecar_socket),
-    );
-    let provider_health = Arc::new(V3ResponsesRelayProviderHealthHandle::from_manifest(
-        &manifest,
-    ));
+    let debug = build_v3_debug_runtime_degrading_optional_log_sink(&debug_manifest)?;
+    // 独立的 stage-3 投影丢弃日志 wiring：启动时确保父目录与 append-only 文件
+    // 就位。丢弃证据刻意与 debug 日志物理分离，不写入 debug runtime。
+    if let Some(projection_drop_log_file) = debug_manifest.projection_drop_log_file.as_deref() {
+        if let Err(error) =
+            routecodex_v3_runtime::projection_drop_log::ensure_v3_projection_drop_log_file(
+                projection_drop_log_file,
+            )
+        {
+            // 投影丢弃证据是 Debug 观测，不是业务真相：路径不可写时记录原因并
+            // 继续，让声明的 listener 能力保持可用。
+            eprintln!(
+                "V3 projection drop log {projection_drop_log_file} unavailable: {error}; continuing without startup preparation"
+            );
+        }
+    }
     let codex_sample_store = Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
         manifest.debug.codex_samples,
         routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
@@ -412,10 +530,15 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             && !manifest.debug.codex_samples,
     ));
     for server in &preflight.listeners {
+        // Retention tolerates per-entry housekeeping failures inside the Debug
+        // owner. The one contract-bound retention failure is the process-shared
+        // sample lock, which must stay an explicit startup error: uncoordinated
+        // retention would prune a tree another process is writing.
         codex_sample_store
             .enforce_listener_retention(server.port)
             .map_err(std::io::Error::other)?;
     }
+    let admin_config_path_for_router = admin_config_path.clone();
     let mut bound = Vec::with_capacity(preflight.listeners.len());
     for server in preflight.listeners {
         let addr: SocketAddr = format!("{}:{}", server.bind, server.port)
@@ -426,28 +549,49 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         bound.push((server, listener, bound_addr));
     }
     if let Some(admin) = admin_webui.filter(|admin| admin.enabled) {
-        let addr: SocketAddr = format!("{}:{}", admin.bind, admin.port)
-            .parse()
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-        let listener = bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await?;
-        let bound_addr = listener.local_addr()?;
-        bound.push((
-            V3ServerManifest {
-                id: "admin_webui".to_string(),
-                enabled: true,
-                bind: admin.bind,
-                port: admin.port,
-                routing_group: String::new(),
-                endpoints: Vec::new(),
-                features: BTreeMap::new(),
-                execution: None,
-                http_sse_keepalive_ms: 0,
-                expose_models: Vec::new(),
-                provider_priority_schedule: Default::default(),
-            },
-            listener,
-            bound_addr,
-        ));
+        // The admin listener is optional. Its failure must not discard business
+        // listeners that already bound, so it is isolated from the `?` path.
+        let bound_admin = if admin_config_path_for_router.is_none() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "admin_webui requires a canonical config path",
+            ))
+        } else {
+            match format!("{}:{}", admin.bind, admin.port).parse::<SocketAddr>() {
+                Ok(addr) => {
+                    match bind_v3_tcp_listener_retry_eintr(|| TcpListener::bind(addr)).await {
+                        Ok(listener) => listener
+                            .local_addr()
+                            .map(|bound_addr| (listener, bound_addr)),
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, error)),
+            }
+        };
+        match bound_admin {
+            Ok((listener, bound_addr)) => bound.push((
+                V3ServerManifest {
+                    id: "admin_webui".to_string(),
+                    enabled: true,
+                    bind: admin.bind,
+                    port: admin.port,
+                    routing_group: String::new(),
+                    endpoints: Vec::new(),
+                    features: BTreeMap::new(),
+                    execution: None,
+                    http_sse_keepalive_ms: 0,
+                    expose_models: Vec::new(),
+                    provider_priority_schedule: Default::default(),
+                },
+                listener,
+                bound_addr,
+            )),
+            Err(error) => eprintln!(
+                "V3 optional admin_webui listener {}:{} unavailable: {error}; continuing with business listeners",
+                admin.bind, admin.port
+            ),
+        }
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
@@ -455,8 +599,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     // Generation zero is reserved for an uninitialized handoff carrier. A
     // listener may accept requests as soon as it binds, so the normal startup
     // broker must already carry a valid positive runtime generation.
-    let front_transport_broker = V3FrontTransportBroker::new(1);
-    let admin_config_path_for_router = admin_config_path.clone();
+    let front_transport_broker =
+        V3FrontTransportBroker::new(1).with_client_observation(debug.clone());
     let canonical_admin_config_path = admin_config_path.clone().or_else(|| {
         std::env::var_os("HOME")
             .map(std::path::PathBuf::from)
@@ -464,6 +608,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
     });
     let mut listeners = Vec::with_capacity(bound.len());
     let mut observability_writers = Vec::with_capacity(bound.len());
+    let mut pending_listener_tasks = Vec::with_capacity(bound.len());
+    let mut provider_health_handles = Vec::with_capacity(bound.len());
     for (server, listener, addr) in bound {
         let server_id = server.id.clone();
         let app = if server_id == "admin_webui" {
@@ -473,7 +619,18 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                     "admin_webui requires a canonical config path",
                 )
             })?;
-            routecodex_v3_admin::router(routecodex_v3_admin::AppState::new(config_path))
+            // The in-process admin listener is the shipping entry for the admin
+            // surface: `[admin_webui] enabled = true` is part of the base config, and
+            // the managed lifecycle spawns this aggregate directly instead of the
+            // standalone `rccv3-admin` binary. The scheduled 定时巡检 tick loop
+            // therefore has to start here — it is the only producer of scheduled
+            // patrol runs in the default topology. `spawn_background` is idempotent
+            // per process, so a second admin surface in the same process cannot add a
+            // second scheduler over the same plan file. Advisory only: it never
+            // blocks or fails listener startup, and it is dropped with the runtime.
+            let admin_state = Arc::new(routecodex_v3_admin::AppState::new(config_path));
+            admin_state.spawn_background();
+            routecodex_v3_admin::router((*admin_state).clone())
         } else {
             let config_path = canonical_admin_config_path.as_ref().ok_or_else(|| {
                 std::io::Error::new(
@@ -489,6 +646,24 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
             let webui_observability =
                 V3WebuiObservability::load_persisted(&observability_store_path);
             observability_writers.push(webui_observability.clone());
+            // Each business listener owns its own provider health store,
+            // availability generation, failure/action state and recovery
+            // scheduler. Requests on this listener share only this handle.
+            let listener_scope = V3ProviderHealthListenerScope {
+                server_id: server.id.clone(),
+                bind: server.bind.clone(),
+                port: server.port,
+            };
+            let mut listener_health =
+                V3ResponsesRelayProviderHealthHandle::from_manifest_for_listener(
+                    &manifest,
+                    &listener_scope,
+                );
+            if let Some(clock) = observation_clock.as_ref() {
+                listener_health = listener_health.with_observation_clock(clock.clone());
+            }
+            let listener_provider_health = Arc::new(listener_health);
+            provider_health_handles.push(Arc::clone(&listener_provider_health));
             build_v3_listener_router(V3ListenerState {
                 server,
                 manifest_version: preflight.manifest_version,
@@ -498,11 +673,8 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                 sse_dump_enabled,
                 request_counter: Arc::clone(&request_counter),
                 codex_sample_store: codex_sample_store.clone(),
-                responses_direct_server_tool_state: responses_direct_server_tool_state.clone(),
-                responses_relay_server_tool_state: responses_relay_server_tool_state.clone(),
-                provider_health: provider_health.clone(),
+                provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-                responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
                 request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
                 webui_observability,
@@ -511,45 +683,35 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let connection_broker = front_transport_broker.clone();
         let app_for_serve = app.clone();
-        tokio::spawn(async move {
-            let mut shutdown_rx = shutdown_rx;
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => break,
-                    accepted = listener.accept() => {
-                        let Ok((stream, remote_addr)) = accepted else { break };
-                        let connection_identity = connection_broker.allocate_connection_identity();
-                        let service = app_for_serve.clone().into_service();
-                        let request_connection_broker = connection_broker.clone();
-                        tokio::spawn(async move {
-                            if let Err(error) = serve_v3_front_http_connection(
-                                stream,
-                                remote_addr,
-                                connection_identity,
-                                request_connection_broker,
-                                service,
-                            ).await {
-                                eprintln!("V3 Front HTTP connection failed: {error}");
-                            }
-                        });
-                    }
-                }
-            }
-        });
+        let accept_state = Arc::new(V3ListenerAcceptState::new());
+        pending_listener_tasks.push((
+            listener,
+            app_for_serve,
+            shutdown_rx,
+            connection_broker,
+            Arc::clone(&accept_state),
+        ));
         listeners.push(V3ListenerHandle {
             server_id,
             addr,
             shutdown: Some(shutdown_tx),
+            accept_state,
         });
     }
-    if console_enabled {
-        emit_v3_startup_console_line(&listeners);
-    }
     for listener in &listeners {
-        let scope = debug
-            .start_trace(&listener.server_id, "startup", "listener")
-            .map_err(std::io::Error::other)?;
-        debug
+        // Debug evidence is not business truth: a failing debug sink must not
+        // stop listener startup. The failure is announced and startup continues.
+        let scope = match debug.start_trace(&listener.server_id, "startup", "listener") {
+            Ok(scope) => scope,
+            Err(error) => {
+                eprintln!(
+                    "V3 debug listener startup trace {} unavailable: {error}",
+                    listener.server_id
+                );
+                continue;
+            }
+        };
+        let _ = debug
             .record_node_event(
                 &scope,
                 "V3ServerStartup01ListenerSetPreflight",
@@ -559,82 +721,52 @@ pub async fn spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket(
                     "address": listener.addr.to_string()
                 })),
             )
-            .map_err(std::io::Error::other)?;
+            .inspect_err(|error| {
+                eprintln!(
+                    "V3 debug listener startup event {} unavailable: {error}",
+                    listener.server_id
+                );
+            });
     }
-    let (probe_shutdown, mut probe_shutdown_rx) = oneshot::channel();
-    let probe_manifest = Arc::clone(&manifest);
-    let probe_health = Arc::clone(&provider_health).runtime_health();
-    tokio::spawn(async move {
-        let startup_manifest = Arc::clone(&probe_manifest);
-        let startup_now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_millis() as u64,
-            Err(error) => {
-                eprintln!("provider persistent startup probe clock failure: {error}");
-                return;
-            }
-        };
-        let startup_result = probe_health
-            .run_due_provider_health_probes(
-                startup_now_ms,
-                true,
-                move |provider_id, auth_alias, model_id| {
-                    let startup_manifest = Arc::clone(&startup_manifest);
-                    async move {
-                        let target = build_v3_provider_global_probe_target(
-                            &startup_manifest,
-                            &provider_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                        )
-                        .map_err(V3ProviderHealthProbeFailure::Internal)?;
-                        probe_v3_provider_global_target(target).await
-                    }
-                },
-            )
-            .await;
-        if let Err(error) = startup_result {
-            eprintln!("provider startup probe batch failed: {error}");
+    // Codex sample persistence is optional debug capture, never business truth:
+    // a persistence worker that cannot start must not stop the aggregate server.
+    // The failure is recorded and the store simply keeps no persist worker.
+    let codex_sample_persist_worker = match codex_sample_store.start_persist_worker() {
+        Ok(worker) => Some(worker),
+        Err(error) => {
+            eprintln!(
+                "V3 codex sample persistence worker unavailable: {error}; continuing without sample persistence"
+            );
+            None
         }
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-        loop {
-            tokio::select! {
-                _ = &mut probe_shutdown_rx => break,
-                _ = interval.tick() => {
-                    let now_ms = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                        Ok(duration) => duration.as_millis() as u64,
-                        Err(error) => {
-                            eprintln!("provider global probe clock failure: {error}");
-                            continue;
-                        }
-                    };
-                    let manifest_for_probe = Arc::clone(&probe_manifest);
-                    let result = probe_health.run_due_provider_health_probes(now_ms, false, move |provider_id, auth_alias, model_id| {
-                        let manifest_for_probe = Arc::clone(&manifest_for_probe);
-                        async move {
-                            let target = build_v3_provider_global_probe_target(
-                                &manifest_for_probe,
-                                &provider_id,
-                                auth_alias.as_deref(),
-                                model_id.as_deref(),
-                            )
-                            .map_err(V3ProviderHealthProbeFailure::Internal)?;
-                            probe_v3_provider_global_target(target).await
-                        }
-                    }).await;
-                    if let Err(error) = result {
-                        eprintln!("provider periodic probe batch failed: {error}");
-                    }
-                }
-            }
-        }
-    });
+    };
+    for (listener, app_for_serve, shutdown_rx, connection_broker, accept_state) in
+        pending_listener_tasks
+    {
+        tokio::spawn(run_v3_listener_accept_loop(
+            listener,
+            app_for_serve,
+            shutdown_rx,
+            connection_broker,
+            accept_state,
+        ));
+    }
+    if console_enabled {
+        emit_v3_startup_console_line(&listeners);
+    }
+    let probe_lifecycle = aggregate_probe_lifecycle::AggregateProbeLifecycle::start(
+        Arc::clone(&manifest),
+        provider_health_handles.clone(),
+    )
+    .map_err(std::io::Error::other)?;
     Ok(V3ServerAggregateHandle {
         listeners,
-        probe_shutdown: Some(probe_shutdown),
+        probe_lifecycle,
         request_activity_gate,
         front_transport_broker,
-        provider_health,
+        provider_health: provider_health_handles,
         observability_writers,
+        codex_sample_persist_worker,
     })
 }
 
@@ -643,8 +775,19 @@ pub async fn serve_v3_server_aggregate_until_shutdown(
 ) -> Result<(), std::io::Error> {
     let handle = spawn_v3_server_aggregate(manifest).await?;
     tokio::signal::ctrl_c().await?;
-    handle.shutdown().await;
-    Ok(())
+    let failures = handle.shutdown().await;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "codex sample persistence failed during server shutdown: {}",
+            failures
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )))
+    }
 }
 
 fn v3_sse_dump_env_flag() -> bool {
@@ -673,6 +816,7 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
             "/v1beta/models/:model/generateContent",
             post(pending_endpoint),
         )
+        .route("/v1beta/models/:model", post(pending_endpoint))
         .route("/_routecodex/debug/status", get(debug_status))
         .route("/_routecodex/debug/logs", get(debug_logs))
         .route("/_routecodex/debug/snapshots", get(debug_snapshots))
@@ -694,25 +838,68 @@ fn build_v3_listener_router(state: V3ListenerState) -> Router {
             get(webui_observability_endpoints::cooldown_pool)
                 .post(webui_observability_endpoints::remove_cooldown),
         )
+        .route(
+            "/_routecodex/health/cooldown-pool/add",
+            post(webui_observability_endpoints::add_cooldown),
+        )
+        .route(
+            "/_routecodex/health/cooldown-pool/probe",
+            post(webui_observability_endpoints::probe_cooldown),
+        )
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(path_not_found)
         .with_state(state)
 }
 
-async fn health(State(state): State<Arc<V3ListenerState>>) -> Json<serde_json::Value> {
+/// Build-version truth for `/health`.
+///
+/// A status probe must report an unavailable build version instead of turning a
+/// failed syscall into a panic: the handler returns the typed internal
+/// request-stage projection (598) through the server error channel.
+fn resolve_v3_health_build_version() -> Result<String, String> {
     let executable_path = std::env::current_exe()
-        .expect("V3 health requires current executable path for build_version truth");
-    let build_version = resolve_routecodex_package_version_from_executable(&executable_path)
-        .expect("V3 health requires installed package.json build_version truth");
-    Json(json!({
-        "status": "ok",
-        "version": 3,
-        "build_version": build_version,
-        "manifest_version": state.manifest_version,
-        "server_id": state.server.id,
-        "bind": state.server.bind,
-        "port": state.server.port,
-    }))
+        .map_err(|error| format!("current executable path is unavailable: {error}"))?;
+    resolve_routecodex_package_version_from_executable(&executable_path).ok_or_else(|| {
+        format!(
+            "installed package build_version is unavailable for {}",
+            executable_path.display()
+        )
+    })
+}
+
+async fn health(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
+    let build_version = match resolve_v3_health_build_version() {
+        Ok(build_version) => build_version,
+        Err(detail) => {
+            return match project_v3_server_boundary_error_via_sdk(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ServerHealth",
+                "health_build_version_unavailable",
+                detail,
+                Some(598),
+            ) {
+                Ok(projected) => json_response(projected.status, projected.body),
+                Err(fault) => foundation_output_response(foundation_output_from_error_sdk_result(
+                    "V3ServerHealth",
+                    vec!["V3ServerHealth"],
+                    None,
+                    Err(fault),
+                )),
+            };
+        }
+    };
+    json_response(
+        200,
+        json!({
+            "status": "ok",
+            "version": 3,
+            "build_version": build_version,
+            "manifest_version": state.manifest_version,
+            "server_id": state.server.id,
+            "bind": state.server.bind,
+            "port": state.server.port,
+        }),
+    )
 }
 
 async fn models_endpoint(State(state): State<Arc<V3ListenerState>>) -> Response<Body> {
@@ -735,11 +922,12 @@ async fn virtual_router_status(
             &state.server,
             "/_routecodex/diagnostics/virtual-router",
             "diagnostics",
-            project_v3_server_invalid_request(
+            project_v3_server_boundary_error_via_sdk(
+                V3ErrorSourceKind::InvalidRequest,
                 "V3Server03HttpRequestRaw",
                 "forbidden",
                 "forbidden",
-                403,
+                Some(403),
             ),
         );
     }
@@ -763,11 +951,12 @@ async fn virtual_router_status(
             &state.server,
             "/_routecodex/diagnostics/virtual-router",
             "diagnostics",
-            project_v3_server_runtime_failure(
+            project_v3_server_boundary_error_via_sdk(
+                V3ErrorSourceKind::RuntimeFailure,
                 "V3RouterDiagnostics",
                 "virtual_router_diagnostics_failed",
                 message,
-                500,
+                Some(500),
             ),
         ),
     }
@@ -783,11 +972,12 @@ async fn virtual_router_dry_run(
             &state.server,
             "/_routecodex/diagnostics/virtual-router/dry-run",
             "diagnostics",
-            project_v3_server_invalid_request(
+            project_v3_server_boundary_error_via_sdk(
+                V3ErrorSourceKind::InvalidRequest,
                 "V3Server03HttpRequestRaw",
                 "forbidden",
                 "forbidden",
-                403,
+                Some(403),
             ),
         );
     }
@@ -823,11 +1013,12 @@ async fn virtual_router_dry_run(
             &state.server,
             "/_routecodex/diagnostics/virtual-router/dry-run",
             "diagnostics",
-            project_v3_server_runtime_failure(
+            project_v3_server_boundary_error_via_sdk(
+                V3ErrorSourceKind::RuntimeFailure,
                 "V3RouterDiagnostics",
                 "virtual_router_dry_run_failed",
                 message,
-                500,
+                Some(500),
             ),
         ),
     }
@@ -840,48 +1031,23 @@ fn current_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-async fn admit_v3_responses_session_after_json_parse(
-    state: &Arc<V3ListenerState>,
-    path: &str,
-    request_headers: &HeaderMap,
-    payload: &Value,
-) -> Result<Option<V3ResponsesSessionAdmissionPermit>, Response<Body>> {
-    let (session_id, conversation_id) =
-        match responses_control_scope_headers(request_headers, Some(payload)) {
-            Ok(scope) => scope,
-            Err(message) => {
-                let request_id = match allocate_v3_console_request_id(state, path, Some(payload)) {
-                    Ok(request_id) => request_id,
-                    Err(response) => return Err(*response),
-                };
-                return Err(
-                    error_output_response_for_responses_request_with_project_path(
-                        &state.server,
-                        path,
-                        &request_id,
-                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                        request_headers,
-                        Some(payload),
-                        resolve_v3_console_project_path(request_headers, payload).as_deref(),
-                    ),
-                );
-            }
-        };
-    let permit = state
-        .responses_session_admission
-        .admit(V3ResponsesSessionAdmissionScope {
-            endpoint: path.to_string(),
-            session_id,
-            conversation_id,
-        })
-        .await;
-    Ok(permit)
-}
-
 async fn pending_endpoint(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
+    let response = pending_model_request(state.clone(), request).await;
+    commit_model_transport_outcome(&state, connection, response)
+}
+
+async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) -> Response<Body> {
+    let front_socket = request
+        .extensions()
+        .get::<restart_handoff::V3StableFrontSocket>()
+        .cloned();
     let front_connection_identity = request
         .extensions()
         .get::<V3FrontConnectionIdentity>()
@@ -905,7 +1071,11 @@ async fn pending_endpoint(
             &path,
             &request_id,
             project_http_input_error(
-                V3HttpBoundaryErrorKind::EndpointNotEnabled,
+                if path.starts_with("/v1beta/models/") {
+                    V3HttpBoundaryErrorKind::PathNotFound
+                } else {
+                    V3HttpBoundaryErrorKind::EndpointNotEnabled
+                },
                 format!("endpoint path {path} has no entry protocol binding"),
             ),
         );
@@ -958,6 +1128,26 @@ async fn pending_endpoint(
                 Ok(request_id) => request_id,
                 Err(response) => return *response,
             };
+            let projected = match projected {
+                Ok(projected) => projected,
+                Err(fault) => {
+                    persist_v3_chat_failure_evidence_sources(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &[],
+                        Some(&fault.policy_failure),
+                        fault.original_source.as_ref(),
+                    );
+                    return foundation_output_response(foundation_output_from_error_sdk_result(
+                        "V3Server03HttpRequestRaw",
+                        vec!["V3Server03HttpRequestRaw"],
+                        None,
+                        Err(fault),
+                    ));
+                }
+            };
             let execution_id = state.debug.next_execution_id(&state.server.id);
             let trace_scope =
                 match state
@@ -972,6 +1162,10 @@ async fn pending_endpoint(
                         ));
                     }
                 };
+            // Capture the typed Error06 side-channel truth before the projection
+            // is consumed by the Server16 frame builder. Forwarded verbatim.
+            let error06_error_class = projected.error_class;
+            let error06_health_action = projected.health_action.clone();
             let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
             if let Some(response) = record_and_emit_v3_error_projection(
                 &state,
@@ -991,6 +1185,13 @@ async fn pending_endpoint(
                     },
                     project_path: resolve_v3_console_project_path(&request_headers, &Value::Null)
                         .as_deref(),
+                    execution_mode: None,
+                    error06_exposed: true,
+                    error_class: Some(error06_error_class),
+                    health_action: error06_health_action.as_ref(),
+                    // V3Error06ClientProjected does not carry the Error01
+                    // external link, so this lane records "not exposed".
+                    upstream_request_id: None,
                 },
             ) {
                 return response;
@@ -1006,50 +1207,110 @@ async fn pending_endpoint(
             );
         }
     };
-    let admission_permit = if entry_protocol == "responses" {
-        match admit_v3_responses_session_after_json_parse(&state, &path, &request_headers, &payload)
-            .await
-        {
-            Ok(permit) => permit,
-            Err(response) => return response,
+    let request_activity_permit = state.request_activity_gate.admit().await;
+    // The Runtime owns full-attempt buffering, so no provider payload byte is
+    // projected before the runtime outcome exists. The Server owns the client
+    // transport: a client that requested SSE must not stay on a silent
+    // connection for longer than one keepalive interval while the runtime
+    // buffers the attempt.
+    let client_sse_channel = (v3_request_wants_sse(&request_headers, &payload)
+        || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent")))
+    .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
+    .filter(|interval| !interval.is_zero());
+    // The runtime owns the commit point: it hands over the first real business
+    // frame of a Direct SSE attempt, and the client channel emits those bytes
+    // while the provider attempt is still running. A request that never commits
+    // leaves this channel empty, so the transport behaves exactly as before.
+    let (client_frame_sink, client_frame_receiver) = match client_sse_channel {
+        Some(_) => {
+            let (sink, receiver) = routecodex_v3_runtime::V3CommittedClientFrameSink::channel();
+            (Some(sink), Some(receiver))
         }
-    } else {
-        None
+        None => (None, None),
     };
-    let request_activity_permit = state.request_activity_gate.admit();
-    let response = pending_endpoint_after_responses_admission(
-        state,
-        front_connection_identity,
-        request_headers,
-        method,
-        path,
-        started_at,
-        entry_protocol,
-        execution_mode,
-        pending_owner_symbol,
-        request_purpose,
-        payload,
-    )
-    .await;
-    let response = hold_response_body_request_activity_permit(response, request_activity_permit);
-    match admission_permit {
-        Some(permit) => hold_response_body_admission_permit(response, permit),
-        None => response,
-    }
+    let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
+        Box::pin(pending_endpoint_after_json_parse(
+            Arc::clone(&state),
+            front_connection_identity,
+            request_headers,
+            method,
+            path,
+            started_at,
+            entry_protocol,
+            execution_mode,
+            pending_owner_symbol,
+            request_purpose,
+            client_frame_sink,
+            payload,
+        ));
+    let response = match client_sse_channel {
+        Some(keepalive_interval) => {
+            let outcome_state = Arc::clone(&state);
+            // The committed channel owns the response head, so the client-response
+            // sample recorder cannot travel through the runtime outcome response.
+            // The channel hands it to this slot and the boundary reads it here.
+            let client_wire_capture = client_response_wire_capture_enabled(&state)
+                .then(V3LiveSnapClientWireCaptureSlot::new);
+            accept_v3_client_sse_transport(
+                runtime_outcome,
+                client_frame_receiver,
+                Box::new(move |outcome| {
+                    commit_model_transport_outcome(
+                        &outcome_state,
+                        front_connection_identity,
+                        outcome,
+                    )
+                }),
+                keepalive_interval,
+                client_wire_capture,
+            )
+            .await
+        }
+        None => runtime_outcome.await,
+    };
+    let response =
+        hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
+    // The client-response sample must record the wire the client receives, so the
+    // recorder wraps the final body after every transport owner has framed it.
+    observe_v3_live_client_wire(response)
+}
+
+/// Whether this request can produce a client-response sample.
+///
+/// The transport boundary wraps the final client wire only when a sample can be
+/// recorded, so an unsampled request pays no per-chunk capture cost.
+fn client_response_wire_capture_enabled(state: &V3ListenerState) -> bool {
+    state.debug.should_capture_snapshot_stage("client-response")
+        || state
+            .debug
+            .should_capture_snapshot_stage("provider-response")
 }
 
 /// v3.protocol.pending_projection：尚未实现协议绑定的客户端响应统一由
 /// foundation pending 投影出站（见 v3-resource-operation-map.yml 同名资源）。
 fn pending_binding_output_response(
+    state: &V3ListenerState,
     output: V3FoundationRuntimeOutput,
-    _entry_protocol: &str,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
     _pending_not_implemented: &str,
     _pending_owner: &str,
 ) -> Response<Body> {
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        &[],
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
     foundation_output_response(output)
 }
 
 struct V3ErrorProjectionConsoleInput<'input> {
+    execution_mode: Option<&'input str>,
     endpoint: &'input str,
     request_id: &'input str,
     entry_protocol: &'input str,
@@ -1058,9 +1319,20 @@ struct V3ErrorProjectionConsoleInput<'input> {
     error_chain: &'input [&'static str],
     body: Option<&'input Value>,
     project_path: Option<&'input str>,
+    /// `true` when this lane holds the typed `V3Error06ClientProjected`. Lanes
+    /// that only carry the chain record an explicit "not exposed" marker.
+    error06_exposed: bool,
+    /// `V3Error06ClientProjected.error_class`, forwarded verbatim.
+    error_class: Option<&'input str>,
+    /// `V3Error06ClientProjected.health_action`, forwarded verbatim.
+    health_action: Option<&'input routecodex_v3_error::V3ErrorActionPlan>,
+    /// `V3Error01SourceRaised.external_error.upstream_request_id`, when exposed.
+    upstream_request_id: Option<&'input str>,
 }
 
 /// relay 分支共享：error_chain 存在时做 console 投影（4 个 relay 分支同构样板收敛）。
+/// The relay lanes expose only the chain, so they record the honest
+/// "Error06 typed truth not exposed on this lane" marker.
 fn emit_relay_error_chain_if_any(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
@@ -1086,6 +1358,11 @@ fn emit_relay_error_chain_if_any(
             error_chain,
             body,
             project_path: request_console_project_path,
+            execution_mode: Some("relay"),
+            error06_exposed: false,
+            error_class: None,
+            health_action: None,
+            upstream_request_id: None,
         },
     )
 }
@@ -1129,6 +1406,14 @@ fn record_and_emit_v3_error_projection(
         input.session_id,
         input.status,
         input.body,
+        webui_observability::V3ObsErrorProjection {
+            execution_mode: input.execution_mode,
+            exposed: input.error06_exposed,
+            error_class: input.error_class,
+            error_chain: input.error_chain,
+            health_action: input.health_action,
+            upstream_request_id: input.upstream_request_id,
+        },
     ) {
         let line = format_v3_console_timed_content(
             "[webui-observability]",
@@ -1184,12 +1469,105 @@ fn get_failure_session_scope(
     if let Some(scope) = build_v3_provider_failure_session_scope_for_request(server, headers)? {
         return Ok(scope);
     }
-    V3ProviderFailureSessionScope::new(
+    Ok(V3ProviderFailureSessionScope::new(
         &server.id,
         &server.routing_group,
         format!("request-local-{request_id}"),
-    )
+    )?
+    .as_request_local())
 }
 
+/// Record private Chat Relay failure evidence through the shared serializer.
+pub(crate) fn persist_v3_chat_failure_evidence(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &V3OpenAiChatRelayRuntimeOutput,
+) {
+    let attempts = match output.observability.as_ref() {
+        Some(observation) => &observation.provider_failure_events,
+        None => &output.provider_failure_attempts,
+    };
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
+
+pub(crate) fn persist_v3_anthropic_relay_failure_evidence(
+    state: &Arc<V3ListenerState>,
+    endpoint: &str,
+    request_id: &str,
+    output: &routecodex_v3_runtime::V3AnthropicRelayRuntimeOutput,
+) {
+    let attempts = output
+        .observability
+        .as_ref()
+        .map_or(output.provider_failure_attempts.as_slice(), |observation| {
+            observation.provider_failure_events.as_slice()
+        });
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "anthropic",
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
+
+pub(crate) fn persist_v3_gemini_relay_failure_evidence(
+    state: &Arc<V3ListenerState>,
+    endpoint: &str,
+    request_id: &str,
+    output: &routecodex_v3_runtime::V3GeminiRelayRuntimeOutput,
+) {
+    let attempts = output
+        .observability
+        .as_ref()
+        .map_or(output.provider_failure_attempts.as_slice(), |observation| {
+            observation.provider_failure_events.as_slice()
+        });
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        "gemini",
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
+
+pub(crate) fn persist_v3_responses_relay_failure_sources(
+    state: &Arc<V3ListenerState>,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    output: &routecodex_v3_runtime::V3ResponsesRelayRuntimeOutput,
+) {
+    let attempts = output
+        .observability
+        .as_ref()
+        .map_or(&[][..], |observation| {
+            observation.provider_failure_events.as_slice()
+        });
+    persist_v3_chat_failure_evidence_sources(
+        state,
+        entry_protocol,
+        endpoint,
+        request_id,
+        attempts,
+        output.diagnostic_source.as_ref(),
+        output.diagnostic_cause.as_ref(),
+    );
+}
 #[cfg(test)]
 mod tests;

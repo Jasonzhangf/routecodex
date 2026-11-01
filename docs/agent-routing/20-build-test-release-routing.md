@@ -1,41 +1,23 @@
-# 构建 / 测试 / 发布路由
+# 构建、测试与发布路由
 
-## 索引概要
-- L1-L7 `scope`：覆盖范围。
-- L9-L20 `build-order`：构建与安装顺序。
-- L22-L30 `verification`：最小验证栈。
-- L32-L36 `release-boundary`：发布边界。
+适用于 V3 本地构建、回归、安装与发布。先沿 `10-runtime-ssot-routing.md` 定位受影响 owner 和必要验证；已有效的定位与结果直接复用。
 
-## 覆盖范围
-适用于：本地编译、全局安装、release 打包、回归验证。
+## 开发与测试
 
-## 构建前查询（必须）
+当前构建入口为 `npm --prefix v3 run build`，实现位于 `v3/scripts/build.mjs`。它运行独立构建边界检查、Rust workspace build 和 CLI 产物复制。不要先构建已退役的 `sharedmodule/llmswitch-core`。
 
-凡是会进入 build / install / restart / smoke 的任务，先查：
+按 `docs/architecture/v3-verification-map.yml` 选择受影响用例。运行时修复须有真实公开入口或实际 consumer 的成功、失败及副作用断言。真实失败样本存在时，复测同入口样本并保留 control。工具和 gate 变更验证对应 CLI/hook 行为；纯文档做针对性检查。
 
-1. `docs/agent-routing/05-foundation-contract.md`
-2. `docs/architecture/function-map.yml`
-3. `docs/architecture/mainline-call-map.yml`
-4. `docs/architecture/verification-map.yml`
-5. 对应 mainline source / wiki review surface
+不因每次编辑或记录笔记重复运行全部 gate。完整且重大的 milestone 在作者验收后、提交或集成前做一次整体 review。提交、CI、main 合并、推送和清理沿 `05-foundation-contract.md`。
 
-如果这一步无法在 1-2 次查询内锁到唯一 owner / 唯一主线边，先补 map/contract，再跑构建验证。
+## 安装与运行边界
 
-## 构建顺序
-1. `sharedmodule/llmswitch-core` 先构建。
-2. 根仓执行 `npm run build:dev`。
-3. 需要发布时执行 `npm run install:release`。
+安装命令及其副作用以实际 `scripts/install-global.sh`、`scripts/install-release.sh` 和 `v3/package.json` 为准。`install:release` 当前包含安装及运行时重启/健康检查，不是普通开发检查。不要为治理、文档或 gate 消融调用安装脚本。
 
-## 最小验证栈
-- 先补并跑目标改动对应的最小 red test / 同路径回归，必须先看到“当前为红”。
-- 至少一条 failing-shape replay + 一条 control replay。
-- red test 转绿后，必须在线重放旧错误样本或同入口真实样本；没有样本在线复测，不算闭环。
-- 安装后版本/可执行性复核（`routecodex --version` / `rcc --version`）。
-- 安装后真实 restart + `/health` 复核；仅 CLI 存在不算闭环。
-- 验证完成后必须补架构 review：确认不是 fallback、临时绕路、补丁式修复、错层修复，且结果正确同时架构正确。
+正式命令为 `rccv3`；`rcc` 和 `routecodex` 是兼容入口。当前 authoring 配置入口为 `~/.rcc/config.toml`，运行状态使用 `rccv3 status -c ~/.rcc/config.toml` 查询。安装和运行结果分别报告，不能从构建通过推断线上已生效。
 
-## 发布边界
-- CLI release 统一走 `npm run install:release`（隔离构建 + release snapshot 安装 + restart/health smoke）。
-- `install:release` 消费提交后的干净源码快照；未提交改动不会进入 `~/.rcc/install/current`。V3 lifecycle/CLI 改动必须先 commit，再 release install + live verify。
-- release 运行时真源是 `~/.rcc/install/current`；dev `install:global` 仍是独立语义。
-- 不提交构建产物（`dist/`、tarball）。
+4444/7777 承载实时流量。正式 `rccv3 restart`（含兼容入口 `rcc restart`）前须说明预计中断，无需另行人类授权。每次加载新构建只执行一次正式 restart；失败后先查原因，不盲目重复。stop/start（含所有参数及兼容入口）仍须先说明中断并取得人类明确批准，不得用它们或自行接管代替 restart。健康检查不能替代受影响请求重放。
+
+## 对外发布
+
+仅在实际准备对外发布时执行发布所需检查。开发期间不建立 SHA/checksum、候选身份、冻结快照或内容等价包装门禁。不提交构建产物；已发布历史记录不因本次消融重写。

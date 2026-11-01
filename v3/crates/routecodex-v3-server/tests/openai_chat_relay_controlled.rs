@@ -10,7 +10,7 @@ use futures_util::StreamExt;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -214,7 +214,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert_eq!(body.matches("data: [DONE]").count(), 1, "{body}");
     let _sse_capture = captures_rx.recv().await.unwrap();
 
-    let error_response = client
+    let error_result = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
@@ -222,23 +222,17 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(error_response.status(), StatusCode::BAD_GATEWAY);
-    let error_body: Value = error_response.json().await.unwrap();
-    assert_eq!(error_body["error"]["message"], "network error");
-    assert_eq!(error_body["error"]["code"], "network_error");
-    assert!(
-        error_body["error"].get("class").is_none()
-            && error_body["error"].get("error_node").is_none()
-            && error_body["error"].get("stage").is_none()
-            && error_body["error"].get("decision").is_none(),
-        "Error06 body must not carry control-plane fields: {error_body}"
-    );
-    assert!(
-        error_body["error"].get("type").is_none(),
-        "provider raw error body must not bypass ErrorErr06 projection: {error_body}"
-    );
+        .await;
+    match error_result {
+        Ok(response) => panic!(
+            "a provider-terminal 429 must not reach the chat client, got {}",
+            response.status()
+        ),
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted chat client transport: {error}"
+        ),
+    }
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
         .expect("provider failure must produce a capture")
@@ -249,7 +243,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert!(error_capture.body.get("metadata_center").is_none());
 
-    let sse_error_response = client
+    let sse_error_result = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
@@ -257,16 +251,28 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":true
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(sse_error_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(
-        sse_error_response.headers().get("content-type").unwrap(),
-        "text/event-stream"
-    );
-    let sse_error_body = sse_error_response.text().await.unwrap();
-    assert!(sse_error_body.contains("network_error"), "{sse_error_body}");
-    assert!(sse_error_body.contains("network error"), "{sse_error_body}");
+        .await;
+    match sse_error_result {
+        Ok(response) => {
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get("content-type").unwrap(),
+                "text/event-stream"
+            );
+            let break_error = tokio::time::timeout(Duration::from_secs(2), response.text())
+                .await
+                .expect("streaming provider terminal must settle within the transport break")
+                .expect_err("a streaming provider terminal must break the client transport");
+            assert!(
+                !break_error.to_string().contains("rate_limit_error"),
+                "the provider body must not reach the client: {break_error}"
+            );
+        }
+        Err(error) => assert!(
+            error.is_request(),
+            "expected an aborted chat client transport: {error}"
+        ),
+    }
     let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
             .await
@@ -290,47 +296,94 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     );
     assert!(sse_failure_capture.body.get("metadata_center").is_none());
 
+    let opaque_business = json!({"route":"business-route","requiredCapabilities":["read"]});
     let isolation_response = client
         .post(&endpoint)
         .json(&json!({
             "model":"chat-client-alias",
             "messages":[{"role":"user","content":"isolation"}],
-            "metadata_center":{"route":"must-not-leak"}
+            "metadata_center":opaque_business.clone()
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(isolation_response.status().as_u16(), 598);
-    if let Ok(Some(capture)) =
-        tokio::time::timeout(Duration::from_millis(100), captures_rx.recv()).await
-    {
-        assert_ne!(
-            capture
-                .body
-                .pointer("/messages/0/content")
-                .and_then(Value::as_str),
-            Some("isolation"),
-            "client isolation request must not reach provider"
-        );
-    }
+    assert_eq!(isolation_response.status(), StatusCode::OK);
+    let isolation_body: Value = isolation_response.json().await.unwrap();
+    assert_eq!(
+        isolation_body["choices"][0]["message"]["content"],
+        "controlled json"
+    );
+    let isolation_capture = captures_rx.recv().await.unwrap();
+    assert_eq!(isolation_capture.body["metadata_center"], opaque_business);
+    assert_eq!(
+        isolation_capture.body["messages"][0]["content"],
+        "isolation"
+    );
+    // Typed route/model/auth stay independent from the ordinary business field.
+    assert_eq!(isolation_capture.body["model"], "chat-wire-model");
+    assert_eq!(
+        isolation_capture.authorization.as_deref(),
+        Some("Bearer controlled-secret")
+    );
+
+    let unlisted_model_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"controlled.unknown-model",
+            "messages":[{"role":"user","content":"unlisted"}],
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        unlisted_model_response.status(),
+        StatusCode::OK,
+        "a client model that is not a declared provider.model must fall back to normal routing"
+    );
+    let unlisted_model_body: Value = unlisted_model_response.json().await.unwrap();
+    assert_eq!(
+        unlisted_model_body["choices"][0]["message"]["content"],
+        "controlled json"
+    );
+    let unlisted_model_capture = loop {
+        let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
+            .await
+            .expect("a client model that is not a declared provider.model must reach the provider")
+            .unwrap();
+        if capture
+            .body
+            .pointer("/messages/0/content")
+            .and_then(Value::as_str)
+            == Some("unlisted")
+        {
+            break capture;
+        }
+    };
+    assert_eq!(
+        unlisted_model_capture.body["model"], "chat-wire-model",
+        "the fallback must serve the default pool target, not the requested name"
+    );
 
     handle.shutdown().await;
     upstream_shutdown_tx.send(()).unwrap();
     std::env::remove_var("V3_OPENAI_CHAT_CONTROLLED_KEY");
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 fn manifest(
     server_port: u16,
     upstream_port: u16,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    // This controlled test owns the openai_chat Relay server-entry coverage.
+    // The shared hub_v1 fixture now defaults openai_chat to Direct, so this test
+    // re-pins its own explicit Relay binding (same pattern as responses_relay_manifest).
+    let direct_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
+    let hub_v1_declaration = hub_v1_test_declaration().replace(direct_binding, relay_binding);
     let source = format!(
         r#"
 version = 3
@@ -363,7 +416,7 @@ targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wi
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "controlled", model = "chat-wire-model", key = "controlled", priority = 1 }}]
 "#,
-        hub_v1_declaration = hub_v1_test_declaration(),
+        hub_v1_declaration = hub_v1_declaration,
         server_execution = hub_v1_server_execution("controlled"),
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()

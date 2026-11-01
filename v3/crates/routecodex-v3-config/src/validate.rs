@@ -1,9 +1,10 @@
-use crate::memory_raw_capture::compile_memory_raw_capture;
 use crate::types::*;
 use crate::{
     compile_v3_http_sse_keepalive_ms_from_environment, looks_like_secret_literal, validation,
     V3ConfigError,
 };
+use crate::{memory_raw_capture::compile_memory_raw_capture, runtime_config::compile_runtime};
+mod auth;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn validate_schema(
@@ -71,6 +72,7 @@ pub(crate) fn build_resource_registry(
         error: compile_error(authoring.error, provider_error_action_policies)?,
         admin_webui,
         memory_raw_capture: compile_memory_raw_capture(authoring.memory_raw_capture)?,
+        runtime: compile_runtime(authoring.runtime)?,
     })
 }
 pub(crate) fn publish_manifest(
@@ -232,18 +234,6 @@ fn compile_hub_v1(
                 hook.hook_id
             )));
         }
-        if hook.profile == Some(V3HubHookProfile::Servertool)
-            && !matches!(
-                hook.node,
-                V3HubFixedNode::V3HubReqChatProcess04Governed
-                    | V3HubFixedNode::V3HubRespChatProcess03Governed
-            )
-        {
-            return Err(validation(format!(
-                "hub_v1 servertool profile is forbidden at node {}",
-                hook.node.node_id()
-            )));
-        }
         hooks.push(V3HubHookManifest {
             hook_id: hook.hook_id,
             node: hook.node,
@@ -254,7 +244,6 @@ fn compile_hub_v1(
             order: hook.order,
             allowed_resources: allowed.into_iter().collect(),
             forbidden_resources: forbidden.into_iter().collect(),
-            profile: hook.profile,
         });
     }
     for node in V3HubFixedNode::ALL {
@@ -593,7 +582,7 @@ fn compile_server_execution(
             server_id,
             "allowed_invocation_sources",
             authoring.allowed_invocation_sources,
-            &["client", "servertool_followup", "dry_run"],
+            &["client", "refill", "dry_run"],
         )?,
         allowed_transports: closed_list(
             server_id,
@@ -621,24 +610,17 @@ fn compile_providers(
     let mut provider_error_action_policies = Vec::new();
     for (id, provider) in authoring {
         require_id("provider", &id)?;
-        if provider.provider_type.trim().is_empty() {
-            return Err(validation(format!("provider {id} type is empty")));
-        }
-        if !matches!(
-            provider.provider_type.as_str(),
-            "responses" | "anthropic" | "gemini" | "openai_chat"
-        ) {
-            return Err(validation(format!(
-                "provider {id} declares unknown protocol {}",
-                provider.provider_type
-            )));
-        }
-        if provider.base_url.trim().is_empty() {
-            return Err(validation(format!("provider {id} base_url is empty")));
+        if !provider.legacy_provider_type.trim().is_empty() {
+            crate::provider_config::validate_provider_protocol(
+                &id,
+                &provider.legacy_provider_type,
+                provider.reasoning_effort,
+            )?;
         }
         if provider.models.is_empty() {
             return Err(validation(format!("provider {id} has no models")));
         }
+        crate::provider_config::validate_provider_headers(&id, &provider.headers)?;
         if providers_using_default_model.contains(&id)
             && !provider.models.contains_key(&provider.default_model)
         {
@@ -652,10 +634,48 @@ fn compile_providers(
                 "provider {id} sse_first_frame_timeout_ms must be non-zero"
             )));
         }
+        if provider.sse_first_frame_timeout_ms.unwrap_or(0) > provider.request_timeout_ms {
+            return Err(validation(format!(
+                "provider {id} sse_first_frame_timeout_ms must not exceed request_timeout_ms"
+            )));
+        }
+        // Only the pre-first-byte budget is capped. `request_timeout_ms` owns the
+        // whole request lifetime, so a long streaming response may legitimately
+        // exceed it; capping that value would cut healthy streams.
+        if !provider.local {
+            if let Some(sse_first_frame_timeout_ms) = provider.sse_first_frame_timeout_ms {
+                if sse_first_frame_timeout_ms > V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS {
+                    return Err(validation(format!(
+                        "provider {id} sse_first_frame_timeout_ms {sse_first_frame_timeout_ms} \
+                         exceeds the {}ms remote first-byte budget; declare local = true only when \
+                         the provider runs on this machine.",
+                        V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS
+                    )));
+                }
+            }
+        }
         let auth = compile_auth(&id, provider.auth)?;
-        let provider_type = provider.provider_type;
         let mut models = compile_models(&id, provider.models)?;
-        let responses = compile_provider_responses(&id, provider.responses, &models)?;
+        let interfaces = compile_provider_interfaces(
+            &id,
+            provider.legacy_provider_type,
+            provider.base_url,
+            provider.responses,
+            provider.interfaces,
+            &models,
+        )?;
+        let default_interface = interfaces
+            .values()
+            .filter(|interface| interface.enabled)
+            .find(|interface| interface.id == "default")
+            .or_else(|| interfaces.values().find(|interface| interface.enabled))
+            .ok_or_else(|| {
+                validation(format!("provider {id} must enable at least one interface"))
+            })?;
+        let provider_type = default_interface.provider_type.clone();
+        let base_url = default_interface.base_url.clone();
+        let responses = default_interface.responses.clone();
+        let semantic_policy_provider_type = (interfaces.len() == 1).then(|| provider_type.clone());
         apply_implicit_provider_model_capabilities(&provider_type, &mut models);
         let health = compile_provider_health(&id, provider.health)?;
         let provider_request_cleanup =
@@ -675,7 +695,7 @@ fn compile_providers(
                 policy_id: policy.policy_id,
                 scope: V3ProviderErrorPolicyScopeAuthoringConfig {
                     provider_id: Some(id.clone()),
-                    provider_type: Some(provider_type.clone()),
+                    provider_type: semantic_policy_provider_type.clone(),
                     model_id: None,
                     routing_group: None,
                 },
@@ -690,7 +710,8 @@ fn compile_providers(
                 id,
                 enabled: provider.enabled,
                 provider_type,
-                base_url: provider.base_url.trim_end_matches('/').to_string(),
+                base_url: base_url.trim_end_matches('/').to_string(),
+                interfaces,
                 default_model: provider.default_model,
                 auth,
                 models,
@@ -698,8 +719,11 @@ fn compile_providers(
                 concurrency: provider.concurrency,
                 health,
                 provider_request_cleanup,
+                reasoning_effort: provider.reasoning_effort,
                 compatibility_profile,
+                headers: provider.headers,
                 features: provider.features,
+                local: provider.local,
                 request_timeout_ms: provider.request_timeout_ms,
                 sse_first_frame_timeout_ms: Some(
                     provider
@@ -743,67 +767,7 @@ fn collect_providers_using_default_model(
     providers
 }
 
-fn normalize_v3_provider_compatibility_profile(profile: Option<String>) -> Option<String> {
-    profile
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-/// v3-native inline provider 的 compatibility profile 编译默认：只允许已
-/// 登记给 v3-native 的条目，避免 v2 provider-directory 的整表默认静默改变
-/// v3-native 既有配置的 wire 行为。已登记条目包括 opencode-go 的
-/// `responses:deepseek-console-go`（Console Go 网关工具映射 + 交错工具段
-/// reasoning 注入契约）和 cc-sol 的 `responses:thinking-tags`（direct
-/// 当前轮 thinking tag / reasoning_content 投影）。
-fn resolve_v3_native_provider_default_compatibility_profile(provider_id: &str) -> Option<String> {
-    match provider_id.trim() {
-        "opencode-go" => Some("responses:deepseek-console-go".to_string()),
-        "cc-sol" => Some("responses:thinking-tags".to_string()),
-        _ => None,
-    }
-}
-
-fn compile_provider_responses(
-    provider_id: &str,
-    responses: Option<V3ProviderResponsesAuthoringConfig>,
-    _models: &BTreeMap<String, V3ProviderModelManifest>,
-) -> Result<Option<V3ProviderResponsesAuthoringConfig>, V3ConfigError> {
-    let Some(responses) = responses else {
-        return Ok(None);
-    };
-
-    match responses.transport {
-        V3ResponsesTransportKind::Http => {
-            if responses.websocket_v2_url.is_some() {
-                return Err(validation(format!(
-                    "provider {provider_id} HTTP transport cannot declare websocket_v2_url"
-                )));
-            }
-        }
-        V3ResponsesTransportKind::WebsocketV2 => {
-            let endpoint = responses
-                .websocket_v2_url
-                .as_deref()
-                .map(str::trim)
-                .filter(|endpoint| !endpoint.is_empty())
-                .ok_or_else(|| {
-                    validation(format!("provider {provider_id} websocket_v2_url is required for websocket_v2 transport"))
-                })?;
-            if !(endpoint.starts_with("ws://") || endpoint.starts_with("wss://")) {
-                return Err(validation(format!(
-                    "provider {provider_id} websocket_v2_url must use ws:// or wss://"
-                )));
-            }
-            if endpoint.chars().any(char::is_whitespace) {
-                return Err(validation(format!(
-                    "provider {provider_id} websocket_v2_url cannot contain whitespace"
-                )));
-            }
-        }
-    }
-
-    Ok(Some(responses))
-}
+include!("validate/provider_interfaces.rs");
 
 fn apply_implicit_provider_model_capabilities(
     provider_type: &str,
@@ -911,129 +875,7 @@ pub(crate) fn compile_auth(
     provider_id: &str,
     authoring: V3ProviderAuthAuthoringConfig,
 ) -> Result<V3ProviderAuthManifest, V3ConfigError> {
-    if matches!(
-        authoring.selection.strategy,
-        V3SelectionStrategy::RoundRobin
-    ) {
-        return Err(validation(format!(
-            "provider {provider_id} auth only supports priority or weighted selection"
-        )));
-    }
-    if authoring.entries.is_empty() {
-        return Err(validation(format!(
-            "provider {provider_id} auth entries are empty"
-        )));
-    }
-    let mut aliases = BTreeSet::new();
-    let mut entries = Vec::new();
-    for entry in authoring.entries {
-        if entry.priority.is_some_and(|priority| priority < 0) {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} priority cannot be negative",
-                entry.alias
-            )));
-        }
-        if entry.weight.is_some_and(|weight| weight == 0) {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} weight must be positive",
-                entry.alias
-            )));
-        }
-        require_id("auth alias", &entry.alias)?;
-        if !aliases.insert(entry.alias.clone()) {
-            return Err(validation(format!(
-                "provider {provider_id} has duplicate auth alias {}",
-                entry.alias
-            )));
-        }
-        let handle_count = usize::from(entry.env.is_some())
-            + usize::from(entry.token_file.is_some())
-            + usize::from(entry.secret_file.is_some())
-            + usize::from(entry.api_key.is_some());
-        if handle_count != 1 {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} must define exactly one of env, token_file, secret_file, or api_key", entry.alias
-            )));
-        }
-        if entry.secret_file.is_some() != entry.secret_key.is_some() {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file and secret_key must be declared together", entry.alias
-            )));
-        }
-        if entry
-            .secret_file
-            .as_deref()
-            .is_some_and(|path| path.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} secret_file cannot be empty",
-                entry.alias
-            )));
-        }
-        if entry
-            .secret_key
-            .as_deref()
-            .is_some_and(|key| key.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} secret_key cannot be empty",
-                entry.alias
-            )));
-        }
-        if let (Some(secret_file), Some(secret_key)) = (&entry.secret_file, &entry.secret_key) {
-            // 集中 secret 文件在编译期解析校验：文件可读、key 存在、值非空——fail-fast
-            // 在 config check / 启动阶段暴露；值不写入 manifest（避免明文进快照）。
-            crate::read_v3_secret_file_key(secret_file, secret_key).map_err(|error| {
-                validation(format!(
-                    "provider {provider_id} auth {} secret_file validation failed: {error}",
-                    entry.alias
-                ))
-            })?;
-        }
-        if let Some(env) = &entry.env {
-            if env.trim().is_empty() || looks_like_secret_literal(env) {
-                return Err(validation(format!(
-                    "provider {provider_id} auth {} env must be a secret handle name",
-                    entry.alias
-                )));
-            }
-        }
-        if entry
-            .token_file
-            .as_deref()
-            .is_some_and(|path| path.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} token_file cannot be empty",
-                entry.alias
-            )));
-        }
-        if entry
-            .api_key
-            .as_deref()
-            .is_some_and(|secret| secret.trim().is_empty())
-        {
-            return Err(validation(format!(
-                "provider {provider_id} auth {} api_key cannot be empty",
-                entry.alias
-            )));
-        }
-        entries.push(V3ProviderAuthEntryManifest {
-            alias: entry.alias,
-            priority: entry.priority,
-            weight: entry.weight,
-            env: entry.env,
-            token_file: entry.token_file,
-            secret_file: entry.secret_file,
-            secret_key: entry.secret_key,
-            api_key: entry.api_key,
-        });
-    }
-    Ok(V3ProviderAuthManifest {
-        auth_type: authoring.auth_type,
-        selection: authoring.selection.clone(),
-        entries,
-    })
+    auth::compile_auth(provider_id, authoring)
 }
 
 fn compile_models(
@@ -1086,25 +928,26 @@ fn compile_models(
                 )));
             }
         }
-        match (
-            model.web_search_execution_mode,
-            model.web_search_backend.as_deref(),
-        ) {
-            (mode, binding)
-                if mode.is_metadata_center_local_search()
-                    && binding.is_none_or(|value| value.trim().is_empty()) =>
-            {
+        if model
+            .web_search_execution_mode
+            .is_metadata_center_local_search()
+        {
+            return Err(validation(format!(
+                "provider {provider_id} model {id} web_search_execution_mode = {} is no longer supported; RouteCodex has no local search backend and executes no search itself. Provider-owned hosted web_search stays available via web_search_execution_mode = native_remote_search_tool_mix or native_remote_search_search_only.",
+                model.web_search_execution_mode.as_str()
+            )));
+        }
+        if let Some(binding) = model.web_search_backend.as_deref() {
+            if !binding.trim().is_empty() {
                 return Err(validation(format!(
-                    "provider {provider_id} model {id} metadata_center_local_search requires exactly one web_search_backend binding"
+                    "provider {provider_id} model {id} declares web_search_backend = {binding}, which is no longer supported; RouteCodex has no local search backend. Remove web_search_backend and keep provider-owned hosted web_search."
                 )));
             }
-            (mode, Some(_)) if !mode.is_metadata_center_local_search() => {
-                return Err(validation(format!(
-                    "provider {provider_id} model {id} declares web_search_backend but execution mode {} does not use a local search backend",
-                    mode.as_str()
-                )));
-            }
-            _ => {}
+        }
+        if let Some(availability) = model.availability.as_ref() {
+            availability
+                .validate(&format!("provider {provider_id} model {id}"))
+                .map_err(validation)?;
         }
         if !(10_000..=100_000).contains(&model.context_token_estimate_scale_bps) {
             return Err(validation(format!(
@@ -1119,14 +962,14 @@ fn compile_models(
                 aliases: model.aliases,
                 capabilities: model.capabilities,
                 web_search_execution_mode: model.web_search_execution_mode,
-                web_search_backend_binding: model.web_search_backend,
                 supports_streaming: model.supports_streaming,
                 supports_thinking: model.supports_thinking,
                 thinking: model.thinking,
                 max_tokens: model.max_tokens,
-                max_context_tokens: model.max_context_tokens,
+                max_context_tokens: model.max_context_tokens.or(Some(200_000)),
                 context_token_estimate_scale_bps: model.context_token_estimate_scale_bps,
                 features: model.features,
+                availability: model.availability,
             },
         );
     }
@@ -1196,6 +1039,12 @@ fn compile_forwarders(
                             target.key.as_deref(),
                             providers,
                         )?;
+                        validate_provider_interface_ref(
+                            &format!("forwarder {id}"),
+                            provider,
+                            target.interface.as_deref(),
+                            providers,
+                        )?;
                         if target.id.is_some() {
                             return Err(validation(format!(
                                 "forwarder {id} provider_model target cannot define id"
@@ -1214,9 +1063,10 @@ fn compile_forwarders(
                         if target.provider.is_some()
                             || target.model.is_some()
                             || target.key.is_some()
+                            || target.interface.is_some()
                         {
                             return Err(validation(format!(
-                                "forwarder {id} forwarder target cannot define provider/model/key"
+                                "forwarder {id} forwarder target cannot define provider/model/key/interface"
                             )));
                         }
                     }
@@ -1233,6 +1083,7 @@ fn compile_forwarders(
                     provider: target.provider,
                     model: target.model,
                     key: target.key,
+                    interface: target.interface,
                     priority: target.priority,
                     weight: target.weight,
                 });
@@ -1313,11 +1164,6 @@ fn compile_route_groups(
                 .into_iter()
                 .map(|(pool_id, pool)| {
                     require_id("route pool", &pool_id)?;
-                    if pool.targets.is_empty() {
-                        return Err(validation(format!(
-                            "route group {group_id} pool {pool_id} is empty"
-                        )));
-                    }
                     let mut targets = Vec::new();
                     let match_rule = match (pool_id.as_str(), pool.match_rule) {
                         ("default", Some(_)) => {
@@ -1346,6 +1192,7 @@ fn compile_route_groups(
                                 })?;
                                 validate_provider_model_ref(&format!("route group {group_id} pool {pool_id}"), provider, model, providers)?;
                                 validate_auth_alias_ref(&format!("route group {group_id} pool {pool_id}"), provider, target.key.as_deref(), providers)?;
+                                validate_provider_interface_ref(&format!("route group {group_id} pool {pool_id}"), provider, target.interface.as_deref(), providers)?;
                                 if target.id.is_some() {
                                     return Err(validation(format!("route group {group_id} pool {pool_id} provider_model target cannot define id")));
                                 }
@@ -1362,6 +1209,11 @@ fn compile_route_groups(
                                 if target.provider.is_some() || target.model.is_some() || target.key.is_some() {
                                     return Err(validation(format!("route group {group_id} pool {pool_id} forwarder target cannot define provider/model/key")));
                                 }
+                                if target.interface.is_some() {
+                                    return Err(validation(format!(
+                                        "route group {group_id} pool {pool_id} forwarder target cannot define interface"
+                                    )));
+                                }
                             }
                         }
                         validate_selection_weight(
@@ -1376,6 +1228,7 @@ fn compile_route_groups(
                             provider: target.provider,
                             model: target.model,
                             key: target.key,
+                            interface: target.interface,
                             priority: target.priority,
                             weight: target.weight,
                         });
@@ -1445,38 +1298,6 @@ fn compile_route_policies(
                         )));
                     }
                     V3RouteConditionManifest::CurrentCompaction
-                }
-                V3RouteConditionAuthoringConfig::SearchPoolTurnRatioAtLeast {
-                    window_turns,
-                    numerator,
-                    denominator,
-                } => {
-                    if *window_turns == 0 || *denominator == 0 || numerator > denominator {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid search ratio",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::SearchPoolTurnRatioAtLeast {
-                        window_turns: *window_turns,
-                        numerator: *numerator,
-                        denominator: *denominator,
-                    }
-                }
-                V3RouteConditionAuthoringConfig::ToolExecutionErrorTurnsAtLeast {
-                    window_turns,
-                    count,
-                } => {
-                    if *window_turns == 0 || *count > *window_turns {
-                        return Err(validation(format!(
-                            "route group {group_id} route policy {} has invalid tool error window",
-                            policy.id
-                        )));
-                    }
-                    V3RouteConditionManifest::ToolExecutionErrorTurnsAtLeast {
-                        window_turns: *window_turns,
-                        count: *count,
-                    }
                 }
             };
             Ok(V3RoutePolicyManifest {
@@ -1641,15 +1462,39 @@ fn validate_auth_alias_ref(
     Ok(())
 }
 
+fn validate_provider_interface_ref(
+    owner: &str,
+    provider_id: &str,
+    interface_id: Option<&str>,
+    providers: &BTreeMap<String, V3ProviderManifest>,
+) -> Result<(), V3ConfigError> {
+    let Some(interface_id) = interface_id else {
+        return Ok(());
+    };
+    let provider = &providers[provider_id];
+    let interface = provider.interfaces.get(interface_id).ok_or_else(|| {
+        validation(format!(
+            "{owner} provider {provider_id} references unknown interface {interface_id}"
+        ))
+    })?;
+    if !interface.enabled {
+        return Err(validation(format!(
+            "{owner} provider {provider_id} interface {interface_id} is disabled"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn compile_debug(
     authoring: V3DebugAuthoringConfig,
 ) -> Result<V3DebugManifest, V3ConfigError> {
-    if authoring
-        .log_file
-        .as_deref()
-        .is_some_and(|path| path.trim().is_empty())
-    {
+    let debug_log_file = authoring.log_file.as_deref();
+    if debug_log_file.is_some_and(|p| p.trim().is_empty()) {
         return Err(validation("debug log_file cannot be empty"));
+    }
+    let debug_drop_log_file = authoring.projection_drop_log_file.as_deref();
+    if debug_drop_log_file.is_some_and(|p| p.trim().is_empty()) {
+        return Err(validation("debug projection_drop_log_file cannot be empty"));
     }
     let snapshot_stages = authoring
         .snapshot_stages
@@ -1658,6 +1503,7 @@ pub(crate) fn compile_debug(
     Ok(V3DebugManifest {
         log_console: authoring.log_console,
         log_file: authoring.log_file,
+        projection_drop_log_file: authoring.projection_drop_log_file,
         snapshots: authoring.snapshots,
         // Preserve the explicit authoring authorization; the runtime still
         // decides which lifecycle stages may write samples.

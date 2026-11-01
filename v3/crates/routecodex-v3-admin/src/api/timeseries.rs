@@ -1,6 +1,7 @@
 // feature_id: v3.admin_observability_aggregation
 // Daily/Hourly timeseries projection for the admin observability records endpoint.
 
+use routecodex_v3_runtime::hub_v1::usage_normalization::split_v3_canonical_usage_cache;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -23,9 +24,18 @@ pub(crate) struct TimeseriesBucket {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u64>,
     pub total_tokens: u64,
-    /// Cache hit rate within this bucket. None when raw input is zero.
+    /// Cache hit rate within this bucket. None when effective input is zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_hit_rate_percent: Option<f64>,
+    /// Canonical effective input accumulated per row through the shared truth
+    /// source. Internal accumulator; never serialized. Rows in one bucket can
+    /// use different input semantics (OpenAI sub-count vs Anthropic increment),
+    /// so the rate cannot be recovered by re-classifying the summed fields.
+    #[serde(skip)]
+    canonical_effective_input_tokens: u64,
+    /// Canonical cache-hit count accumulated per row. Internal accumulator.
+    #[serde(skip)]
+    canonical_cached_tokens: u64,
 }
 
 pub(crate) struct TimeseriesRow<'a> {
@@ -38,19 +48,10 @@ pub(crate) fn usage_is_countable(result: Option<&str>) -> bool {
     result == Some("success")
 }
 
-fn token_for(row_usage: Option<&Value>, name: &str) -> u64 {
+fn token_for(row_usage: Option<&Value>, name: &str) -> Option<u64> {
     row_usage
         .and_then(|usage| usage.get(name))
         .and_then(Value::as_u64)
-        .unwrap_or(0)
-}
-
-fn row_cache_read(row_usage: Option<&Value>, legacy_cached_tokens: u64) -> u64 {
-    let direct = token_for(row_usage, "cache_read_input_tokens");
-    if direct > 0 {
-        return direct;
-    }
-    legacy_cached_tokens
 }
 
 pub(crate) fn system_epoch_ms() -> Result<u64, String> {
@@ -165,38 +166,48 @@ pub(crate) fn build_timeseries(
                 cache_creation_input_tokens: None,
                 total_tokens: 0,
                 cache_hit_rate_percent: None,
+                canonical_effective_input_tokens: 0,
+                canonical_cached_tokens: 0,
             });
         bucket.count += 1;
         // Token sums follow the same aggregate rule as the records stats: only
         // successful terminal responses have billable/cacheable usage.
         if usage_is_countable(row.result) {
             let usage = row.usage;
-            let token = |name: &str| {
-                usage
-                    .and_then(|usage| usage.get(name))
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
-            };
+            let token = |name: &str| token_for(usage, name).unwrap_or(0);
             let row_input = token("input_tokens");
             let row_output = token("output_tokens");
-            let row_cached = token("cached_tokens");
-            let row_effective = row_input.max(row_cached);
+            // Canonical cache split (shared truth source): OpenAI/Responses rows
+            // carry `cached_tokens` as a sub-count of an input that already
+            // includes cache, while Anthropic/MiniMax/glm rows carry read and
+            // creation counts outside `input_tokens`.
+            let row_cache = split_v3_canonical_usage_cache(
+                Some(row_input),
+                token_for(usage, "cached_tokens"),
+                token_for(usage, "cache_read_input_tokens"),
+                token_for(usage, "cache_creation_input_tokens"),
+            );
             bucket.input_tokens += row_input;
             bucket.output_tokens += row_output;
-            // Clamp bucket cached so cross-row accumulation never exceeds bucket
-            // effective input (raw input tokens already include cache_read).
-            bucket.cached_tokens += row_cached.min(row_effective);
-            // Anthropic/MiniMax/glm-5.3 split: cache_read hits drive the
-            // rate and the diagnostic field; cache_creation is tracked but
-            // excluded from the rate. OpenAI/Responses rows fall back to
-            // `cached_tokens` so legacy aggregation stays numerically
-            // identical to the previous shape.
-            let row_cache_read_value = row_cache_read(usage, row_cached.min(row_effective));
-            bucket.cache_read_input_tokens =
-                Some(bucket.cache_read_input_tokens.unwrap_or(0) + row_cache_read_value);
+            bucket.cached_tokens += token("cached_tokens");
+            // The bucket rate is accumulated per row in canonical units. Summing
+            // raw fields and re-splitting would force one row's input semantics
+            // onto the whole bucket and drop the other semantics' hits.
+            bucket.canonical_effective_input_tokens = bucket
+                .canonical_effective_input_tokens
+                .saturating_add(row_cache.effective_input_tokens);
+            bucket.canonical_cached_tokens = bucket
+                .canonical_cached_tokens
+                .saturating_add(row_cache.cached_tokens.unwrap_or(0));
+            // Anthropic/MiniMax/glm-5.3 split: the canonical hit count drives the
+            // rate and the diagnostic field; cache_creation is tracked
+            // separately and only enters the denominator.
+            bucket.cache_read_input_tokens = Some(
+                bucket.cache_read_input_tokens.unwrap_or(0) + row_cache.cached_tokens.unwrap_or(0),
+            );
             bucket.cache_creation_input_tokens = Some(
                 bucket.cache_creation_input_tokens.unwrap_or(0)
-                    + token("cache_creation_input_tokens"),
+                    + row_cache.cache_creation_input_tokens.unwrap_or(0),
             );
             bucket.total_tokens += token("total_tokens");
         }
@@ -223,6 +234,8 @@ pub(crate) fn build_timeseries(
                         cache_creation_input_tokens: None,
                         total_tokens: 0,
                         cache_hit_rate_percent: None,
+                        canonical_effective_input_tokens: 0,
+                        canonical_cached_tokens: 0,
                     });
             }
         } else if is_month {
@@ -245,6 +258,8 @@ pub(crate) fn build_timeseries(
                         cache_creation_input_tokens: None,
                         total_tokens: 0,
                         cache_hit_rate_percent: None,
+                        canonical_effective_input_tokens: 0,
+                        canonical_cached_tokens: 0,
                     });
                 week_start += 7 * day_ms;
             }
@@ -273,6 +288,8 @@ pub(crate) fn build_timeseries(
                         cache_creation_input_tokens: None,
                         total_tokens: 0,
                         cache_hit_rate_percent: None,
+                        canonical_effective_input_tokens: 0,
+                        canonical_cached_tokens: 0,
                     });
                 day += day_ms;
             }
@@ -283,16 +300,16 @@ pub(crate) fn build_timeseries(
         .into_iter()
         .map(|(date, mut bucket)| {
             bucket.date = date;
-            // Anthropic/MiniMax/glm-5.3: cache_read is the only hit
-            // contribution; cache_creation is excluded. Legacy OpenAI rows
-            // (no `cache_read_input_tokens`) keep the previous OpenAI
-            // `cached_tokens / max(input, cached)` shape.
-            let read_hits = bucket
-                .cache_read_input_tokens
-                .unwrap_or(bucket.cached_tokens);
-            let effective = bucket.input_tokens.max(bucket.cached_tokens);
+            // Canonical bucket rate from per-row canonical accumulation. The raw
+            // bucket fields are display sums only: re-running the classifier on
+            // them would let one row's input semantics hijack the whole bucket
+            // and silently drop the other semantics' hits.
+            let effective = bucket.canonical_effective_input_tokens;
             bucket.cache_hit_rate_percent = if effective > 0 {
-                Some((read_hits.min(effective) as f64 / effective as f64) * 100.0)
+                Some(
+                    (bucket.canonical_cached_tokens.min(effective) as f64 / effective as f64)
+                        * 100.0,
+                )
             } else {
                 None
             };
@@ -475,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn timeseries_cache_hit_uses_read_tokens_over_raw_input() {
+    fn timeseries_cache_hit_uses_read_tokens_over_effective_input() {
         let now_ms = system_epoch_ms().unwrap();
         let today_start = local_day_start(now_ms, 0);
         let yesterday_start = today_start - 86_400_000;
@@ -513,7 +530,9 @@ mod tests {
             .expect("today bucket");
         assert_eq!(today.cache_read_input_tokens, Some(700));
         assert_eq!(today.cache_creation_input_tokens, Some(200));
-        assert_eq!(today.cache_hit_rate_percent, Some(70.0));
+        // Anthropic input excludes cache, so the denominator is
+        // input + read + creation = 1900 and the rate is 700 / 1900 = 36.8%.
+        assert_eq!(today.cache_hit_rate_percent, Some(700.0 / 1900.0 * 100.0));
 
         let yesterday = buckets
             .iter()
@@ -521,6 +540,76 @@ mod tests {
             .expect("yesterday bucket");
         assert_eq!(yesterday.cache_read_input_tokens, Some(0));
         assert_eq!(yesterday.cache_creation_input_tokens, Some(200));
+        // Creation is not a hit, but it is part of the denominator.
         assert_eq!(yesterday.cache_hit_rate_percent, Some(0.0));
+    }
+
+    #[test]
+    fn timeseries_openai_cached_subcount_keeps_input_denominator() {
+        let now_ms = system_epoch_ms().unwrap();
+        let day_start = local_day_start(now_ms, 0);
+        let usage = json!({
+            "input_tokens": 1_000,
+            "output_tokens": 20,
+            "cached_tokens": 250,
+            "total_tokens": 1_020
+        });
+        let rows = vec![TimeseriesRow {
+            started_epoch_ms: day_start + 1_000,
+            usage: Some(&usage),
+            result: Some("success"),
+        }];
+
+        let buckets = build_timeseries(&rows, "all", 0).unwrap();
+        assert_eq!(buckets.len(), 1);
+        let bucket = &buckets[0];
+        // OpenAI input already includes the cache sub-count, so the hit rate is
+        // 250 / 1000 and the diagnostic read count stays the sub-count.
+        assert_eq!(bucket.cached_tokens, 250);
+        assert_eq!(bucket.cache_read_input_tokens, Some(250));
+        assert_eq!(bucket.cache_hit_rate_percent, Some(25.0));
+    }
+
+    #[test]
+    fn timeseries_mixed_semantics_bucket_accumulates_canonical_per_row() {
+        let now_ms = system_epoch_ms().unwrap();
+        let day_start = local_day_start(now_ms, 0);
+        // Same bucket, two different input semantics. Re-classifying the summed
+        // fields would pick OpenAI semantics (because `cached_tokens > 0`) and
+        // drop the Anthropic row's read/creation entirely.
+        let openai_usage = json!({
+            "input_tokens": 1_000,
+            "output_tokens": 20,
+            "cached_tokens": 250,
+            "total_tokens": 1_020
+        });
+        let anthropic_usage = json!({
+            "input_tokens": 800,
+            "output_tokens": 20,
+            "cache_read_input_tokens": 600,
+            "cache_creation_input_tokens": 100,
+            "total_tokens": 820
+        });
+        let rows = vec![
+            TimeseriesRow {
+                started_epoch_ms: day_start + 1_000,
+                usage: Some(&openai_usage),
+                result: Some("success"),
+            },
+            TimeseriesRow {
+                started_epoch_ms: day_start + 2_000,
+                usage: Some(&anthropic_usage),
+                result: Some("success"),
+            },
+        ];
+
+        let buckets = build_timeseries(&rows, "all", 0).unwrap();
+        assert_eq!(buckets.len(), 1);
+        let bucket = &buckets[0];
+        // Canonical per row: OpenAI 250/1000, Anthropic 600/1500.
+        // Bucket: hits 850 over effective input 2500 = 34.0%.
+        assert_eq!(bucket.cache_read_input_tokens, Some(850));
+        assert_eq!(bucket.cache_creation_input_tokens, Some(100));
+        assert_eq!(bucket.cache_hit_rate_percent, Some(850.0 / 2_500.0 * 100.0));
     }
 }

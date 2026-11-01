@@ -1,0 +1,202 @@
+TAP version 13
+# Subtest: Anthropic simple text representations compare without discarding any other meaning
+ok 1 - Anthropic simple text representations compare without discarding any other meaning
+  ---
+  duration_ms: 1.849958
+  type: 'test'
+  ...
+# Subtest: Responses single leading system instruction equivalence preserves priority and ordered input
+ok 2 - Responses single leading system instruction equivalence preserves priority and ordered input
+  ---
+  duration_ms: 0.254
+  type: 'test'
+  ...
+# Subtest: resolvePath follows dotted keys and array indices without conflating null and missing
+ok 3 - resolvePath follows dotted keys and array indices without conflating null and missing
+  ---
+  duration_ms: 0.059291
+  type: 'test'
+  ...
+# Subtest: deepEqual is structural, ordered for arrays, and never coerces
+ok 4 - deepEqual is structural, ordered for arrays, and never coerces
+  ---
+  duration_ms: 0.059917
+  type: 'test'
+  ...
+# Subtest: provider exact and body_must subset expectations both pass
+ok 5 - provider exact and body_must subset expectations both pass
+  ---
+  duration_ms: 0.755833
+  type: 'test'
+  ...
+# Subtest: provider exact is strict and never accepts an array prefix
+ok 6 - provider exact is strict and never accepts an array prefix
+  ---
+  duration_ms: 0.086625
+  type: 'test'
+  ...
+# Subtest: wrong provider model, path, and arguments are caught
+ok 7 - wrong provider model, path, and arguments are caught
+  ---
+  duration_ms: 0.084833
+  type: 'test'
+  ...
+# Subtest: provider auth uses the protocol-native carrier and rejects empty credentials
+ok 8 - provider auth uses the protocol-native carrier and rejects empty credentials
+  ---
+  duration_ms: 0.183
+  type: 'test'
+  ...
+# Subtest: provider forbidden rules and fake control leakage are caught
+ok 9 - provider forbidden rules and fake control leakage are caught
+  ---
+  duration_ms: 0.29325
+  type: 'test'
+  ...
+# Subtest: startup and probe captures are excluded only by explicit attempt_kind
+ok 10 - startup and probe captures are excluded only by explicit attempt_kind
+  ---
+  duration_ms: 0.303167
+  type: 'test'
+  ...
+# Subtest: strict closed rejects HTTP 500, empty HTTP 200, and any received bytes
+ok 11 - strict closed rejects HTTP 500, empty HTTP 200, and any received bytes
+  ---
+  duration_ms: 0.211959
+  type: 'test'
+  ...
+# Subtest: genuine socket close with no status or bytes satisfies expected closed
+ok 12 - genuine socket close with no status or bytes satisfies expected closed
+  ---
+  duration_ms: 0.053125
+  type: 'test'
+  ...
+# Subtest: completion accepts whole-body JSON and keeps missing distinct from null and zero
+ok 13 - completion accepts whole-body JSON and keeps missing distinct from null and zero
+  ---
+  duration_ms: 0.254666
+  type: 'test'
+  ...
+# Subtest: complete transport requires a clean sendHttp receipt, so matching bytes do not hide a failed transport
+ok 14 - complete transport requires a clean sendHttp receipt, so matching bytes do not hide a failed transport
+  ---
+  duration_ms: 0.300292
+  type: 'test'
+  ...
+# Subtest: complete SSE transport rejects an expected terminal followed by a timeout
+ok 15 - complete SSE transport rejects an expected terminal followed by a timeout
+  ---
+  duration_ms: 0.1
+  type: 'test'
+  ...
+# Subtest: adapters without a complete receipt record fail closed for a complete expectation
+ok 16 - adapters without a complete receipt record fail closed for a complete expectation
+  ---
+  duration_ms: 0.081
+  type: 'test'
+  ...
+# Subtest: ordered arrays are exact: no prefix and no reordering pass
+ok 17 - ordered arrays are exact: no prefix and no reordering pass
+  ---
+  duration_ms: 0.057708
+  type: 'test'
+  ...
+# Subtest: SSE body expectations inspect a parsed observation, not substrings of the stream
+ok 18 - SSE body expectations inspect a parsed observation, not substrings of the stream
+  ---
+  duration_ms: 0.808667
+  type: 'test'
+  ...
+# Subtest: incomplete SSE without a parsed observation cannot prove completion or body expectations
+ok 19 - incomplete SSE without a parsed observation cannot prove completion or body expectations
+  ---
+  duration_ms: 0.106875
+  type: 'test'
+  ...
+# Subtest: the protocol dependency wires parsed observation and semantic terminal
+ok 20 - the protocol dependency wires parsed observation and semantic terminal
+  ---
+  duration_ms: 0.102334
+  type: 'test'
+  ...
+# Subtest: the real protocol module wires whole-body JSON and SSE terminal detection
+ok 21 - the real protocol module wires whole-body JSON and SSE terminal detection
+  ---
+  duration_ms: 0.384583
+  type: 'test'
+  ...
+# Subtest: client forbidden fields and fake control leakage are caught
+ok 22 - client forbidden fields and fake control leakage are caught
+  ---
+  duration_ms: 0.141
+  type: 'test'
+  ...
+# Subtest: a non-2xx completed response and a wrong terminal are rejected
+ok 23 - a non-2xx completed response and a wrong terminal are rejected
+  ---
+  duration_ms: 0.059083
+  type: 'test'
+  ...
+# Subtest: assertions never mutate actual or expected inputs
+ok 24 - assertions never mutate actual or expected inputs
+  ---
+  duration_ms: 0.108791
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence accepts either declared order with the correct wire body
+ok 25 - provider attempt sequence accepts either declared order with the correct wire body
+  ---
+  duration_ms: 0.187166
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence rejects a repeated identity even when the second attempt is healthy
+ok 26 - provider attempt sequence rejects a repeated identity even when the second attempt is healthy
+  ---
+  duration_ms: 0.08775
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence rejects an unknown authorization identity
+ok 27 - provider attempt sequence rejects an unknown authorization identity
+  ---
+  duration_ms: 0.14325
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence rejects missing and extra business attempts
+ok 28 - provider attempt sequence rejects missing and extra business attempts
+  ---
+  duration_ms: 0.081625
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence excludes only explicitly labelled probe and startup captures
+ok 29 - provider attempt sequence excludes only explicitly labelled probe and startup captures
+  ---
+  duration_ms: 0.082542
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence re-checks the wire body of every ordered attempt
+ok 30 - provider attempt sequence re-checks the wire body of every ordered attempt
+  ---
+  duration_ms: 0.051584
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence requires a declared auth_orders contract
+ok 31 - provider attempt sequence requires a declared auth_orders contract
+  ---
+  duration_ms: 0.035125
+  type: 'test'
+  ...
+# Subtest: provider attempt sequence never mutates captures or expected
+ok 32 - provider attempt sequence never mutates captures or expected
+  ---
+  duration_ms: 0.079667
+  type: 'test'
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 105.425875

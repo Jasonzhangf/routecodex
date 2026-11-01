@@ -1,5 +1,7 @@
 # V3 Relay Tool and Servertool Multiturn Parity Closeout Plan
 
+历史计划，不作为当前实施合同。其中 RCC servertool、搜索专用跨轮执行及旧门禁要求已由 `66301e2-servertool-refill-integrated-plan.md` 替代；当前普通工具与 refill 边界见[工具路由](../agent-routing/30-servertool-lifecycle-routing.md)。下文仅保留原任务证据，不能据此恢复旧架构或覆盖当前透明代理合同。
+
 ## 1. 目标与验收标准
 
 目标：补齐 V3 Relay 在真实多轮工具、servertool、history 和附件治理上的 V2 功能等价验证面，证明已实现的 Hub v1 Relay 主流水线不仅能 controlled closeout，还能承载协议级工具生命周期。
@@ -44,8 +46,7 @@ Out of scope：
 - docs/architecture/wiki/v3-hub-relay-fixed-pipeline.md
 - docs/goals/v3-hub-relay-runtime-closeout-plan.md
 - docs/design/v3-hub-relay-fixed-pipeline-contract.md
-- .agents/skills/rcc-dev-skills/references/22-servertool-hook-skeleton-workflow.md
-- .agents/skills/rcc-dev-skills/references/23-servertool-hook-dev-debug-flow.md
+- 当前替代入口：docs/agent-routing/30-servertool-lifecycle-routing.md（两份旧 servertool Skill 参考已删除）
 - .agents/skills/rcc-dev-skills/references/25-protocol-sse-continuation-boundary.md
 - V3 resource/function/mainline/verification maps
 

@@ -69,6 +69,7 @@ Its physical Chat representation is fixed as follows:
 | `request.store` | `routecodex_chat_extension.responses_request.store` | registered payload extension |
 | `request.text.output_config` | `routecodex_chat_extension.responses_request.text` | registered payload extension |
 | `request.anthropic_system_blocks` | `routecodex_chat_extension.anthropic_request.system` | registered payload extension |
+| `request.messages.tool_result.extra_fields` | `messages[].routecodex_chat_extension.responses_tool_output_extra_fields` | opaque business fields restored by Responses Outbound; other targets explicitly unmapped |
 | `request.reasoning_effort` | `reasoning_effort` | Chat request field |
 | `request.reasoning_budget_tokens` | `reasoning_budget_tokens` | registered Chat request field |
 | `request.reasoning_summary_policy` | `reasoning_summary_policy` | registered Chat request field |
@@ -218,6 +219,13 @@ does not authorize reuse of the source object or of another target's mapping.
 | `truncation` | Responses context policy extension | preserve `auto`/`disabled`; no silent history deletion in Chat Process | exact Responses only | unmapped | unmapped |
 | `user` | upstream user identifier payload | preserve separately from `client_metadata.user_id` and `safety_identifier` | exact | exact `user` | unmapped; never relabel as metadata user_id |
 
+DeepSeek Chat-compatible providers accept only `none` and `auto` for
+`tool_choice` across all modes; `required`, named function, and custom object
+forms are rejected with a generic upstream 400. This is a registered
+provider-private compatibility exception: provider-compat normalizes those
+unsupported forms to `auto` before the provider wire and documents the
+downgrade at the compatibility owner so it is not treated as silent fallback.
+
 The matrix is closed-world: a source field absent from this table is not
 implicitly pass-through. It must be added with the same six-column treatment,
 including a named owner and positive/negative tests, before implementation.
@@ -232,7 +240,7 @@ Anthropic. No provider response object is reused as a client response object.
 | Provider response field family | Chat response semantic | Responses client | OpenAI Chat client | Anthropic client |
 | --- | --- | --- | --- | --- |
 | identity: `id`, `model`, `created`/`created_at` | response identity/time/model | exact fieldwise mapping; created units validated | exact `id/model/created` | exact `id/model` with generated message id only where Anthropic requires it |
-| terminal: `status`, `finish_reason`, `stop_reason`, `stop_sequence` | terminal reason + terminality | `status` plus `incomplete_details`/finish projection | `choices[].finish_reason` | `stop_reason`/`stop_sequence` |
+| terminal: `status`, `finish_reason`, `stop_reason`, `stop_sequence` | terminal reason + terminality; canonical `finish_reason` is an internal carrier only | `status` plus `incomplete_details`/`stop_sequence`/`stop_details` (Responses wire has no `finish_reason` field) | `choices[].finish_reason` | `stop_reason`/`stop_sequence` |
 | text message content and annotations | ordered output text parts + annotations | ordered `message.content[].output_text` and aggregate `output_text` | `choices[].message.content` and annotations | ordered `content[].text` blocks |
 | refusal/error content | refusal semantic or Error chain | `refusal`/`error` only at client projection owner | `message.refusal` or protocol error | provider error schema or text refusal per declared field |
 | function call: id/call_id/name/arguments/status | function call semantic with exact argument bytes | `output[].function_call` | native function `tool_calls[].function` | `tool_use` only when arguments are valid JSON; malformed bytes follow explicit reversible error path |
@@ -257,14 +265,23 @@ then projected by the single typed terminal owner in the Anthropic response
 codec. The following table is closed-world; a value not listed here is not a
 successful terminal response.
 
-| Anthropic `stop_reason` | Hub terminal semantic | Responses projection | Mapping class | Additional contract |
+Column contract: "Hub canonical semantic" is the canonical response owned by
+Chat Process, which legitimately carries `finish_reason` as an internal
+terminal-reason carrier for cross-protocol projection; the "Responses wire
+projection" column states exactly what the client-visible `/v1/responses`
+object carries — the Responses protocol has no `finish_reason` field, so
+terminality on the wire is `status` (plus `incomplete_details` /
+`stop_sequence` / `stop_details` only where a row declares them) and the
+`finish_reason=` fragments below never reach a Responses client object.
+
+| Anthropic `stop_reason` | Hub terminal semantic | Responses wire projection | Mapping class | Additional contract |
 | --- | --- | --- | --- | --- |
-| `end_turn` | `stop` | `status=completed`, `finish_reason=end_turn` | `mapped_exact` | `stop_sequence` and `stop_details` must be absent/null. |
-| `tool_use` | `tool_calls` | `status=requires_action`, `finish_reason=tool_use` | `mapped_compatible_registered` | RouteCodex's registered local tool-continuation status; output must contain a typed tool call. |
-| `max_tokens` | `max_tokens` | `status=incomplete`, `incomplete_details.reason=max_output_tokens`, `finish_reason=max_tokens` | `mapped_exact` | Partial output remains business response data, not a provider error. |
-| `stop_sequence` | `stop_sequence` | `status=completed`, exact `finish_reason=stop_sequence` and exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
-| `pause_turn` | `pause_turn` | `status=in_progress`, `finish_reason=pause_turn` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
-| `refusal` | `content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, `finish_reason=refusal`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
+| `end_turn` | `stop`, canonical `finish_reason=stop` | `status=completed` | `mapped_exact` | `stop_sequence` and `stop_details` must be absent/null. |
+| `tool_use` | `tool_calls`, canonical `finish_reason=tool_calls` | `status=completed`, tool call carried by `output` function_call items | `mapped_compatible_registered` | Responses has no tool-continuation status: a tool call is a completed response whose `output` carries the typed tool call. RouteCodex must never fabricate `requires_action`, and no `finish_reason` field is written to the Responses wire object. |
+| `max_tokens` | `max_tokens`, canonical `finish_reason=length` | `status=incomplete`, `incomplete_details.reason=max_output_tokens` | `mapped_exact` | Partial output remains business response data, not a provider error. |
+| `stop_sequence` | `stop_sequence`, canonical `finish_reason=stop_sequence` | `status=completed`, exact `stop_sequence` | `mapped_exact` | A non-empty `stop_sequence` is required. |
+| `pause_turn` | `pause_turn`, canonical `finish_reason=pause_turn` | `status=in_progress` | `mapped_compatible_registered` | Preserves Anthropic's resumable non-terminal meaning without fabricating a tool result or incomplete reason. |
+| `refusal` | `content_filter`, canonical `finish_reason=content_filter` | `status=incomplete`, `incomplete_details.reason=content_filter`, exact `stop_details` when present | `mapped_compatible_registered` | Refusal is response terminal semantics, not transport/provider failure. |
 | `model_context_window_exceeded` | `context_window_exceeded` | no exact Responses incomplete reason | `unsupported_fail_fast` | Fail with the exact source value; never relabel input-context exhaustion as `max_output_tokens`. |
 
 `stop_reason=null` is valid only on the Anthropic streaming `message_start`
@@ -488,8 +505,8 @@ Anthropic tool_use response
     -> for a fresh provider response, select the custom branch only when the
        active governed declaration marks the exact tool name as custom
     -> bind the provider-generated tool_use.id as the current call identity
-    -> require the registered wrapper shape and string input
-    -> restore the exact Chat custom raw input
+    -> restore the exact Chat custom raw input from a recognized string wrapper
+    -> otherwise preserve the complete JSON value once as custom input text
 
 Historical replay or tool_result pairing
     -> require the previously bound call identity to match exactly
@@ -508,9 +525,14 @@ request declared that exact tool name as custom and the wrapper contains exactly
 the registered keys/types. A fresh provider-generated `tool_use.id` is bound
 after that branch is selected; it is not a prerequisite for selecting the
 branch. Historical replay and `tool_result` pairing must then match that bound
-call identity exactly. Unknown wrappers, extra fields, missing string input,
-silent relabeling, wrapper leakage to Responses/OpenAI clients, `{}` repair,
-double stringify, result deletion, and provider switching are forbidden.
+call identity exactly. For a declared custom call whose parameters do not match
+the registered wrapper, serialize the complete JSON value once into the client's
+string-valued custom input. Do not extract a plausible inner value or reject
+representable model-generated parameters. The consumer can return its error
+under the same call ID. Follow-up history wraps that exact client-visible string;
+it does not parse JSON text to reconstruct the original native object.
+Silent relabeling, loss of fields, `{}` repair, double stringify of a raw string,
+result deletion, and provider switching are forbidden.
 
 Malformed function-call arguments use a different registered compatibility
 mapping: `v3.function_call.anthropic_raw_argument_wrapper.v1`. When a governed

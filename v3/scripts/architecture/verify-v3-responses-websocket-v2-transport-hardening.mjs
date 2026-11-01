@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,28 +16,10 @@ const packagePath = 'v3/package.json';
 
 const installedV3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const explicitSourceRoot = String(process.env.ROUTECODEX_V3_SOURCE_ROOT ?? '').trim();
-const explicitRootIsV3Root = explicitSourceRoot
-  && existsSync(resolve(explicitSourceRoot, 'crates'))
-  && existsSync(resolve(explicitSourceRoot, 'package.json'));
-const runningFromV3Root = !explicitSourceRoot
-  && existsSync(resolve(process.cwd(), 'crates'))
-  && existsSync(resolve(process.cwd(), 'package.json'));
 const architectureRoot = explicitSourceRoot
-  ? explicitRootIsV3Root
-    ? resolve(explicitSourceRoot, '..')
-    : resolve(explicitSourceRoot)
-  : process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-    ? resolve(process.cwd())
-    : runningFromV3Root
-      ? resolve(process.cwd(), '..')
-      : resolve(installedV3Root, 'build-contracts', 'architecture-admission', 'repo');
-const v3Root = explicitRootIsV3Root
   ? resolve(explicitSourceRoot)
-  : explicitSourceRoot || process.env.ROUTECODEX_V3_ADMISSION_WORKSPACE === '1'
-    ? resolve(architectureRoot, 'v3')
-    : runningFromV3Root
-      ? resolve(process.cwd())
-      : installedV3Root;
+  : resolve(installedV3Root, '..');
+const v3Root = resolve(architectureRoot, 'v3');
 const resolveFile = (path) => path.startsWith('v3/')
   ? resolve(v3Root, path.slice(3))
   : resolve(architectureRoot, path);
@@ -60,7 +42,9 @@ for (const [owner, text, phrases] of [
     'const OPENAI_BETA_HEADER: &str = "openai-beta";',
     'const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";',
     'websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>',
-    'session.lock_owned().await',
+    'let lock = session.lock_owned();',
+    'connection = lock => Ok(Some(connection))',
+    'None => Ok(Some(lock.await)),',
     'struct WebSocketSseState',
     'impl Drop for WebSocketSseState',
     'if !self.finished {',
@@ -71,7 +55,8 @@ for (const [owner, text, phrases] of [
     'connection closed before terminal response event',
     'const V3_RESPONSES_WEBSOCKET_PROTOCOL_AGGREGATION_OWNER: &str =',
     'struct V3ResponsesWebSocketProtocolAggregate',
-    'function_call_items: BTreeMap<u64, Value>',
+    'output_items: BTreeMap<u64, Value>',
+    'response.function_call_arguments.delta targets a non-function_call output_item',
     'fn apply_responses_websocket_protocol_events_to_terminal_response(',
     'response.function_call_arguments.delta arrived before function_call output_item',
     'handshake.headers_mut().insert(\n                OPENAI_BETA_HEADER,\n                HeaderValue::from_static(RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE),\n            );',
@@ -89,7 +74,9 @@ for (const [owner, text, phrases] of [
     'websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leakage',
     'websocket_v2_ping_pong_and_split_utf8_frames_preserve_one_terminal_event',
     'websocket_v2_cancellation_before_connect_or_reused_send_is_client_disconnect',
-    'websocket_v2_json_aggregates_function_call_item_when_terminal_output_is_empty',
+    'websocket_v2_json_preserves_mixed_output_items_when_terminal_output_is_empty',
+    'output[0]["type"], "message"',
+    'output[1]["type"], "reasoning"',
     'V3_WS_KEY_EARLY_DROP',
     'V3_WS_KEY_READ_CANCEL',
     'V3_WS_KEY_CONCURRENT',

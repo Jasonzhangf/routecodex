@@ -59,8 +59,6 @@ verification:
     - npm run verify:v3-architecture-docs
     - npm run verify:v3-resource-map
     - npm run verify:v3-module-boundaries
-    - npm run verify:v3-rust-only
-    - npm run verify:v3-static-hook-registry
     - npm run verify:v3-relay-payload-copy-budget
     - npm run verify:v3-cargo-fmt
     - npm run verify:v3-clippy

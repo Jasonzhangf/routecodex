@@ -52,10 +52,9 @@ for (const scope of ['Server', 'Listener', 'RoutingGroup', 'Session', 'Request',
 for (const kind of ['Control', 'Debug', 'Error', 'Snapshot', 'ProviderHealth']) {
   if (!types.includes(`    ${kind},`)) failures.push(`missing side-channel resource kind ${kind}`);
 }
-if (!hooks.includes('V3HubHookProfile::Servertool')
-  || !hooks.includes('V3HubFixedNode::V3HubReqChatProcess04Governed')
+if (!hooks.includes('V3HubFixedNode::V3HubReqChatProcess04Governed')
   || !hooks.includes('V3HubFixedNode::V3HubRespChatProcess03Governed')) {
-  failures.push('servertool profile placement must be closed to ReqChatProcess04/RespChatProcess03');
+  failures.push('tool governance placement must be closed to ReqChatProcess04/RespChatProcess03');
 }
 if (!hooks.includes('V3HubHookImplementation::DisabledNoop')) {
   failures.push('optional disabled hooks must project a typed no-op');

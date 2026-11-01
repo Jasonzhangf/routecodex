@@ -1,0 +1,110 @@
+{
+  "id": "v3.responses_sse_client_frame_commit",
+  "version": "1",
+  "inputs": [
+    {
+      "id": "provider-attempt-frame",
+      "schema": "Array",
+      "schema_ref": "v3.responses_sse_client_frame_commit.arc.provider_attempt_frame"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "collect_provider_attempt_frames",
+      "operator": "routecodex.v3.runtime.collect_direct_sse_attempt_frames",
+      "operator_version": "1",
+      "inputs": ["provider-attempt-frame"],
+      "output": {
+        "id": "buffered-attempt-frames",
+        "schema": "Array",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.buffered_attempt_frames"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Items",
+      "resources": {
+        "reads": [],
+        "writes": ["v3.sse.direct.full_attempt_buffer"]
+      }
+    },
+    {
+      "id": "detect_first_committable_frame",
+      "operator": "routecodex.v3.runtime.detect_first_committable_frame",
+      "operator_version": "1",
+      "inputs": ["buffered-attempt-frames"],
+      "output": {
+        "id": "commit-decision",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.commit_decision"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Items",
+      "resources": {
+        "reads": ["v3.runtime.provider_attempt_business_control"],
+        "writes": []
+      }
+    },
+    {
+      "id": "commit_client_channel",
+      "operator": "routecodex.v3.runtime.commit_client_channel",
+      "operator_version": "1",
+      "inputs": ["commit-decision"],
+      "output": {
+        "id": "client-frame-ledger",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.client_frame_ledger"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.sse.direct.full_attempt_buffer"],
+        "writes": ["v3.sse.client_frame_ledger"]
+      }
+    },
+    {
+      "id": "continue_append_only",
+      "operator": "routecodex.v3.runtime.continue_append_only_client_frames",
+      "operator_version": "1",
+      "inputs": ["client-frame-ledger"],
+      "output": {
+        "id": "append-only-frames",
+        "schema": "Array",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.append_only_frames"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Items",
+      "resources": {
+        "reads": ["v3.sse.client_frame_ledger"],
+        "writes": ["v3.sse.client_frame_ledger"]
+      }
+    },
+    {
+      "id": "terminal_closeout",
+      "operator": "routecodex.v3.runtime.terminal_closeout_client_frames",
+      "operator_version": "1",
+      "inputs": ["append-only-frames"],
+      "output": {
+        "id": "client-frame-candidate",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.client_frame"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Items",
+      "resources": {
+        "reads": ["v3.sse.client_frame_ledger"],
+        "writes": ["v3.sse.client_frame_ledger"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "collect_provider_attempt_frames", "to": "detect_first_committable_frame", "arc_id": "buffered-attempt-frames" },
+    { "from": "detect_first_committable_frame", "to": "commit_client_channel", "arc_id": "commit-decision" },
+    { "from": "commit_client_channel", "to": "continue_append_only", "arc_id": "client-frame-ledger" },
+    { "from": "continue_append_only", "to": "terminal_closeout", "arc_id": "append-only-frames" }
+  ],
+  "outputs": ["client-frame-candidate"]
+}

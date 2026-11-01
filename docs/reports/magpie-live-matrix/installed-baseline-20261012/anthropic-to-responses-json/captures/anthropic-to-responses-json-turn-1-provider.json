@@ -1,0 +1,77 @@
+{
+  "case_id": "anthropic-to-responses-json",
+  "turn": 1,
+  "turn_id": null,
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "anthropic-to-responses-json",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "responses",
+      "method": "POST",
+      "path": "/v1/responses",
+      "query": "",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:56836",
+        "content-length": "157"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"input\":[{\"content\":[{\"text\":\"hello\",\"type\":\"input_text\"}],\"role\":\"user\",\"type\":\"message\"}],\"max_output_tokens\":64,\"model\":\"responses-model\",\"stream\":false}",
+      "body": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "hello",
+                "type": "input_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          }
+        ],
+        "max_output_tokens": 64,
+        "model": "responses-model",
+        "stream": false
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791823037671,
+      "response_script": {
+        "protocol": "responses",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "id": "resp_anthropic_to_responses_json",
+          "status": "completed",
+          "output": [
+            {
+              "type": "message",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "ok"
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 7,
+            "output_tokens": 2,
+            "total_tokens": 9
+          }
+        }
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "business_attempts": 1,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

@@ -17,11 +17,23 @@ pub enum V3ProviderTransportAttemptState {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum V3ProviderTransportSendPhase {
+    NotSent,
+    SendStarted,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct V3ProviderTransportAttemptKey {
     pub request_id: String,
     pub provider_id: String,
     pub attempt_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct V3ProviderTransportSendFact {
+    pub key: V3ProviderTransportAttemptKey,
+    pub phase: V3ProviderTransportSendPhase,
 }
 
 /// Request-scoped control identity for provider transport handoff. This is
@@ -48,6 +60,12 @@ pub struct V3ProviderTransportCheckpoint {
 #[derive(Debug, Clone)]
 struct V3ProviderTransportAttempt {
     checkpoint: V3ProviderTransportCheckpoint,
+    // Kept beside the checkpoint, not inside it: an outer timeout must retain
+    // this fact without changing the restart checkpoint serialization.
+    send_phase: V3ProviderTransportSendPhase,
+    // True once a send has claimed this attempt identity. A control clone may
+    // still read the fact, but only one send may own the attempt.
+    send_claimed: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -110,9 +128,29 @@ impl V3ProviderTransportAttemptBroker {
                     next_provider_sequence: 0,
                     runtime_generation,
                 },
+                send_phase: V3ProviderTransportSendPhase::NotSent,
+                send_claimed: false,
             },
         );
         Ok(())
+    }
+
+    /// Atomically claim the attempt for exactly one send. Returns true only
+    /// for the caller that wins; a second claim for the same identity returns
+    /// false and no upstream bytes are sent under that identity.
+    pub(crate) fn claim_for_send(&self, key: &V3ProviderTransportAttemptKey) -> bool {
+        let mut attempts = self
+            .attempts
+            .lock()
+            .expect("provider transport attempt lock");
+        let Some(attempt) = attempts.get_mut(key) else {
+            return false;
+        };
+        if attempt.send_claimed {
+            return false;
+        }
+        attempt.send_claimed = true;
+        true
     }
 
     pub fn state(
@@ -124,6 +162,41 @@ impl V3ProviderTransportAttemptBroker {
             .expect("provider transport attempt lock")
             .get(key)
             .map(|attempt| attempt.checkpoint.state)
+    }
+
+    pub fn send_fact(
+        &self,
+        key: &V3ProviderTransportAttemptKey,
+    ) -> Option<V3ProviderTransportSendFact> {
+        self.attempts
+            .lock()
+            .expect("provider transport attempt lock")
+            .get(key)
+            .map(|attempt| V3ProviderTransportSendFact {
+                key: attempt.checkpoint.key.clone(),
+                phase: attempt.send_phase,
+            })
+    }
+
+    pub(crate) fn mark_send_started(&self, key: &V3ProviderTransportAttemptKey) {
+        let mut attempts = self
+            .attempts
+            .lock()
+            .expect("provider transport attempt lock");
+        if let Some(attempt) = attempts.get_mut(key) {
+            attempt.send_phase = V3ProviderTransportSendPhase::SendStarted;
+        }
+    }
+
+    pub(crate) fn is_latest_attempt(&self, key: &V3ProviderTransportAttemptKey) -> bool {
+        let next_ids = self
+            .next_attempt_ids
+            .lock()
+            .expect("provider transport attempt id lock");
+        next_ids
+            .get(&(key.request_id.clone(), key.provider_id.clone()))
+            .copied()
+            == Some(key.attempt_id.saturating_add(1))
     }
 
     pub fn transition(
@@ -264,6 +337,10 @@ impl V3ProviderTransportAttemptBroker {
                 restored.key.clone(),
                 V3ProviderTransportAttempt {
                     checkpoint: restored,
+                    // The old checkpoint cannot prove NotSent. Keep the
+                    // conservative uncertainty across restart.
+                    send_phase: V3ProviderTransportSendPhase::SendStarted,
+                    send_claimed: false,
                 },
             );
         }
@@ -288,6 +365,69 @@ impl V3ProviderTransportAttemptBroker {
             .expect("provider transport attempt lock")
             .remove(key)
             .map(|attempt| attempt.checkpoint)
+    }
+}
+
+/// Cloneable read handle for one provider-owned attempt. Runtime may retain a
+/// clone outside its timeout future and read the transport fact after a drop.
+/// It cannot mutate transport state through the public surface.
+#[derive(Debug, Clone)]
+pub struct V3ProviderTransportAttemptControl {
+    broker: V3ProviderTransportAttemptBroker,
+    key: V3ProviderTransportAttemptKey,
+}
+
+impl V3ProviderTransportAttemptControl {
+    pub(crate) fn new(
+        broker: V3ProviderTransportAttemptBroker,
+        key: V3ProviderTransportAttemptKey,
+    ) -> Self {
+        Self { broker, key }
+    }
+
+    pub fn send_fact(&self) -> Option<V3ProviderTransportSendFact> {
+        self.broker.send_fact(&self.key)
+    }
+
+    pub(crate) fn key(&self) -> &V3ProviderTransportAttemptKey {
+        &self.key
+    }
+
+    /// A control is usable only with its owning broker, the same request and
+    /// transport kind, and as the newest attempt issued for that request.
+    /// This prevents an old same-request control from marking a later attempt.
+    pub(crate) fn is_bound_to(
+        &self,
+        broker: &V3ProviderTransportAttemptBroker,
+        request_id: &str,
+        provider_id: &str,
+        kind: V3ProviderTransportKind,
+    ) -> bool {
+        if !Arc::ptr_eq(&self.broker.attempts, &broker.attempts)
+            || self.key.request_id != request_id
+            || self.key.provider_id != provider_id
+        {
+            return false;
+        }
+        let kind_matches = self
+            .broker
+            .attempts
+            .lock()
+            .expect("provider transport attempt lock")
+            .get(&self.key)
+            .is_some_and(|attempt| attempt.checkpoint.kind == kind);
+        kind_matches && self.broker.is_latest_attempt(&self.key)
+    }
+
+    pub(crate) fn mark_send_started(&self) {
+        self.broker.mark_send_started(&self.key);
+    }
+
+    /// Atomically claim the attempt for this send. A clone of the same control
+    /// that is passed to another send_observed call is rejected at the broker
+    /// before any upstream send is attempted.
+    pub(crate) fn claim_for_send(&self) -> bool {
+        self.broker.claim_for_send(&self.key)
     }
 }
 
@@ -388,5 +528,11 @@ mod tests {
         );
         assert_eq!(restored_checkpoint.next_provider_sequence, 1);
         assert_eq!(restored_checkpoint.scope.runtime_generation, 7);
+        let restored_fact = restored.send_fact(&key).unwrap();
+        assert_eq!(restored_fact.key, key);
+        assert_eq!(
+            restored_fact.phase,
+            V3ProviderTransportSendPhase::SendStarted
+        );
     }
 }

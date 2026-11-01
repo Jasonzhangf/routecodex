@@ -117,21 +117,13 @@ pub(crate) fn normalize_v3_provider_sse_json_data_with_event_name(
 pub(crate) fn normalize_v3_responses_function_call_arguments(
     event: &mut Value,
 ) -> Result<bool, String> {
-    let event_name = event
-        .get("type")
-        .and_then(Value::as_str)
-        .or_else(|| event.get("event").and_then(Value::as_str))
-        .or_else(|| event.get("event_name").and_then(Value::as_str))
-        .map(ToOwned::to_owned);
-    normalize_v3_responses_function_call_arguments_for_event(event, event_name.as_deref())
+    normalize_v3_responses_function_call_arguments_for_event(event)
 }
 
 fn normalize_v3_responses_function_call_arguments_for_event(
     event: &mut Value,
-    event_name: Option<&str>,
 ) -> Result<bool, String> {
     let mut normalized = false;
-    let partial_function_call = event_name == Some("response.output_item.added");
     let mut normalize_item = |item: &mut Value| -> Result<(), String> {
         let Some(object) = item.as_object_mut() else {
             return Ok(());
@@ -139,23 +131,15 @@ fn normalize_v3_responses_function_call_arguments_for_event(
         if object.get("type").and_then(Value::as_str) != Some("function_call") {
             return Ok(());
         }
-        normalized |= super::request_outbound_mcp_names::restore_responses_mcp_namespace(object);
         let Some(arguments) = object.get_mut("arguments") else {
-            if partial_function_call {
-                object.insert("arguments".to_owned(), Value::String(String::new()));
-                normalized = true;
-            }
             return Ok(());
         };
-        if partial_function_call && arguments.is_null() {
-            *arguments = Value::String(String::new());
-            normalized = true;
-        } else if !arguments.is_string() {
+        if !arguments.is_string() {
             // Responses function_call.arguments is JSON text. Providers may
             // emit the JSON value itself (object/array/number/bool/null);
             // serialize that value at the provider-response boundary without
-            // interpreting or rewriting tool semantics. Missing terminal
-            // arguments remain invalid because there is no value to preserve.
+            // interpreting or rewriting tool semantics. A missing field stays
+            // absent because there is no value to preserve.
             *arguments =
                 Value::String(serde_json::to_string(arguments).map_err(|error| error.to_string())?);
             normalized = true;
@@ -398,11 +382,19 @@ pub(super) fn response_terminal_has_client_output(event: &Value) -> Result<bool,
 }
 
 pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<bool, String> {
+    let item_value = item;
     let item = item
         .as_object()
         .ok_or_else(|| "provider Responses output item must be an object".to_string())?;
     match item.get("type").and_then(Value::as_str) {
         Some("message") => {
+            if item.get("content").is_none()
+                && ["text", "reasoning", "reasoning_content", "reasoning_text"]
+                    .iter()
+                    .any(|field| item.get(*field).is_some())
+            {
+                return Ok(super::provider_attempt_business_content::v3_responses_output_item_has_deliverable_content(item_value));
+            }
             let content = item
                 .get("content")
                 .and_then(Value::as_array)
@@ -445,15 +437,14 @@ pub(super) fn response_output_item_has_client_output(item: &Value) -> Result<boo
         Some("function_call") => {
             require_non_empty_output_string(item, "function_call", "call_id")?;
             require_non_empty_output_string(item, "function_call", "name")?;
-            require_output_string(item, "function_call", "arguments")?;
             Ok(true)
         }
         Some("custom_tool_call") => {
             require_non_empty_output_string(item, "custom_tool_call", "call_id")?;
             require_non_empty_output_string(item, "custom_tool_call", "name")?;
-            require_output_string(item, "custom_tool_call", "input")?;
             Ok(true)
         }
+        Some("function_call_output") => Ok(true),
         Some("tool_search_call") => {
             require_non_empty_output_string(item, "tool_search_call", "call_id")?;
             if !item.get("arguments").is_some_and(Value::is_object) {
@@ -562,31 +553,9 @@ pub(super) fn require_non_empty_output_string(
     Ok(())
 }
 
-pub(super) fn require_output_string(
-    item: &serde_json::Map<String, Value>,
-    output_type: &str,
-    field: &str,
-) -> Result<(), String> {
-    if item.get(field).and_then(Value::as_str).is_none() {
-        return Err(format!(
-            "provider Responses {output_type} output requires string field {field}"
-        ));
-    }
-    Ok(())
-}
-
 fn classify_v3_provider_anthropic_json_event(
     event: &Value,
 ) -> Result<V3ProviderResponsesJsonFrameOutcome, String> {
-    if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
-        V3HubProviderWireProtocol::Anthropic,
-        event,
-    ) {
-        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
-            code: failure.code,
-            message: failure.message,
-        });
-    }
     let event_type = event
         .get("type")
         .and_then(Value::as_str)
@@ -602,16 +571,21 @@ fn classify_v3_provider_anthropic_json_event(
                 .ok_or_else(|| {
                     "provider Anthropic message_start requires message object".to_string()
                 })?;
-            let content = message
-                .get("content")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    "provider Anthropic message_start requires content array".to_string()
-                })?;
-            let mut has_output = false;
-            for block in content {
-                has_output |= anthropic_content_block_has_client_output(block)?;
-            }
+            // `message_start.message.content` is optional provider business
+            // data, not a local admission boundary.  The common wire shape
+            // omits it; a supplied non-array value is opaque business content.
+            // Observe what is present and never reject a frame on its shape.
+            let has_output = match message.get("content") {
+                None | Some(Value::Null) => false,
+                Some(Value::Array(content)) => {
+                    let mut has_output = false;
+                    for block in content {
+                        has_output |= anthropic_content_block_has_client_output(block)?;
+                    }
+                    has_output
+                }
+                Some(_) => true,
+            };
             Ok(if has_output {
                 V3ProviderResponsesJsonFrameOutcome::StartClientStream
             } else {
@@ -705,15 +679,6 @@ fn anthropic_content_block_has_client_output(block: &Value) -> Result<bool, Stri
 fn classify_v3_provider_openai_chat_json_event(
     event: &Value,
 ) -> Result<V3ProviderResponsesJsonFrameOutcome, String> {
-    if let Some(failure) = crate::hub_v1::classify_v3_provider_terminal_admission(
-        V3HubProviderWireProtocol::OpenAiChat,
-        event,
-    ) {
-        return Ok(V3ProviderResponsesJsonFrameOutcome::Failure {
-            code: failure.code,
-            message: failure.message,
-        });
-    }
     if event.get("error").is_some() {
         return classify_provider_error_object(event, "openai_chat_provider_error");
     }
@@ -734,12 +699,10 @@ fn classify_v3_provider_openai_chat_json_event(
             .ok_or_else(|| "provider OpenAI Chat choice must be an object".to_string())?;
         if let Some(finish_reason) = choice.get("finish_reason") {
             if !finish_reason.is_null() {
-                if !has_non_empty_string(Some(finish_reason)) {
-                    return Err(
-                        "provider OpenAI Chat finish_reason must be a non-empty string".to_string(),
-                    );
-                }
-                terminal = true;
+                let reason = finish_reason.as_str().ok_or_else(|| {
+                    "provider OpenAI Chat finish_reason must be a string".to_string()
+                })?;
+                terminal |= !reason.trim().is_empty();
             }
         }
         if let Some(delta) = choice.get("delta") {
@@ -779,12 +742,16 @@ pub(crate) fn classify_v3_provider_gemini_json_event(
     if event.get("error").is_some() {
         return classify_provider_error_object(event, "gemini_provider_error");
     }
+    let prompt_blocked = super::v3_gemini_prompt_feedback_is_terminal(event);
+    if event.get("candidates").is_none() && prompt_blocked {
+        return Ok(V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput);
+    }
     let candidates = event
         .get("candidates")
         .and_then(Value::as_array)
         .ok_or_else(|| "provider Gemini SSE event requires candidates array".to_string())?;
     let mut has_output = false;
-    let mut terminal = false;
+    let mut terminal = prompt_blocked;
     for candidate in candidates {
         let candidate = candidate
             .as_object()
@@ -902,13 +869,6 @@ pub(crate) fn record_v3_provider_sse_json_frame(
     let Some(event) = parse_v3_provider_sse_json_data(&data)? else {
         return Ok(());
     };
-    if let Some(field) =
-        routecodex_v3_provider_responses::find_v3_routecodex_control_payload_key(&event)
-    {
-        return Err(format!(
-            "provider SSE event carries RouteCodex control payload key {field:?}"
-        ));
-    }
     stream_observation.record_provider_event_json(&event)
 }
 
@@ -1163,6 +1123,69 @@ mod provider_sse_json_codec_tests {
             })
         );
         assert_eq!(classify(r#"{"type":"ping"}"#), None);
+
+        // Canonical 52eb92d fixture (`usage-cache-writes-chat-entry`): a
+        // `message_start` that omits `message.content`, a real `OK` text
+        // delta, a usage-bearing `message_delta`, then `message_stop`.  Every
+        // frame keeps its native outcome, so the omitted content neither
+        // becomes a provider failure nor hides the later business delta.
+        let canonical_fixture = [
+            (
+                r#"{"type":"message_start","message":{"id":"m1","type":"message","role":"assistant","usage":{"input_tokens":10,"cache_creation_input_tokens":6416,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":6416},"output_tokens":4}}}"#,
+                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering,
+            ),
+            (
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"OK"}}"#,
+                V3ProviderResponsesJsonFrameOutcome::StartClientStream,
+            ),
+            (
+                r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"cache_creation_input_tokens":6416,"cache_read_input_tokens":0,"output_tokens":40}}"#,
+                V3ProviderResponsesJsonFrameOutcome::ContinueBuffering,
+            ),
+            (
+                r#"{"type":"message_stop"}"#,
+                V3ProviderResponsesJsonFrameOutcome::TerminalWithoutOutput,
+            ),
+        ];
+        for (data, expected) in canonical_fixture {
+            assert_eq!(
+                classify(data),
+                Some(expected),
+                "canonical 52eb92d fixture frame must keep its native outcome: {data}"
+            );
+        }
+
+        // Focused boundaries for the removed `message_start.message.content`
+        // admission.  Absent or explicit-null content carries no output yet;
+        // supplied content is observed as business data and never rejected.
+        for no_content in [
+            r#"{"type":"message_start","message":{"id":"msg_absent","type":"message","role":"assistant"}}"#,
+            r#"{"type":"message_start","message":{"id":"msg_null","content":null}}"#,
+        ] {
+            assert_eq!(
+                classify(no_content),
+                Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering),
+                "missing/null message_start content is no output yet: {no_content}"
+            );
+        }
+        for supplied_content in [
+            r#"{"type":"message_start","message":{"id":"msg_object","content":{"type":"text","text":"hi"}}}"#,
+            r#"{"type":"message_start","message":{"id":"msg_string","content":"provider text"}}"#,
+            r#"{"type":"message_start","message":{"id":"msg_block","content":[{"type":"text","text":"hi"}]}}"#,
+        ] {
+            assert_eq!(
+                classify(supplied_content),
+                Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream),
+                "supplied message_start content is observed business data: {supplied_content}"
+            );
+        }
+        // The `message` object is still required; only the content array
+        // admission was removed.
+        assert!(classify_v3_provider_sse_json_data(
+            V3HubProviderWireProtocol::Anthropic,
+            r#"{"type":"message_start"}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -1180,6 +1203,18 @@ mod provider_sse_json_codec_tests {
         assert_eq!(
             classify(
                 r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+        assert_eq!(
+            classify(
+                r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":""}]}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+        assert_eq!(
+            classify(
+                r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"  "}]}"#
             ),
             Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
         );
@@ -1293,6 +1328,27 @@ mod provider_sse_json_codec_tests {
                 "business output must authorize streaming: {data}"
             );
         }
+    }
+
+    #[test]
+    fn responses_function_call_output_is_preserved_business_data() {
+        let item = r#"{"type":"function_call_output","call_id":"call_output","output":{"receipt":"ok","encrypted_content":"business-cipher","nested":{"opaque":"keep"}}}"#;
+        let item_done =
+            format!(r#"{{"type":"response.output_item.done","output_index":3,"item":{item}}}"#);
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &item_done)
+                .expect("function_call_output output item must remain valid business data"),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
+        );
+
+        let completed = format!(
+            r#"{{"type":"response.completed","response":{{"id":"resp_output","status":"completed","output":[{item}]}}}}"#
+        );
+        assert_eq!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &completed)
+                .expect("completed response with function_call_output must remain business data"),
+            Some(V3ProviderResponsesJsonFrameOutcome::Terminal)
+        );
     }
 
     #[test]
@@ -1581,7 +1637,7 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn responses_partial_function_call_missing_arguments_is_empty_string() {
+    fn responses_partial_function_call_preserves_missing_and_null_arguments() {
         for arguments in ["missing", "null"] {
             let item = if arguments == "missing" {
                 r#"{"type":"function_call","call_id":"call_1","name":"exec_command"}"#
@@ -1596,7 +1652,11 @@ mod provider_sse_json_codec_tests {
             )
             .expect("partial function call must normalize");
             let value: Value = serde_json::from_str(&normalized).expect("normalized JSON");
-            assert_eq!(value["item"]["arguments"], "");
+            if arguments == "missing" {
+                assert!(value["item"].get("arguments").is_none());
+            } else {
+                assert_eq!(value["item"]["arguments"], "null");
+            }
             assert_eq!(
                 classify_v3_provider_sse_json_data(
                     V3HubProviderWireProtocol::Responses,
@@ -1633,16 +1693,18 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
-    fn responses_terminal_function_call_missing_arguments_still_fails() {
+    fn responses_terminal_function_call_missing_arguments_is_preserved() {
         let data = normalize_v3_provider_sse_json_data_with_event_name(
             V3HubProviderWireProtocol::Responses,
             r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"exec_command"}}"#,
             None,
         )
         .expect("terminal frame normalization must not guess arguments");
-        let error = classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data)
-            .expect_err("terminal function call without arguments must fail");
-        assert!(error.contains("arguments"), "unexpected error: {error}");
+        let event: Value = serde_json::from_str(&data).unwrap();
+        assert!(event["item"].get("arguments").is_none());
+        assert!(
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, &data).is_ok()
+        );
     }
 
     #[test]

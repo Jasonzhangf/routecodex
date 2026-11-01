@@ -517,7 +517,6 @@ owners:
   required_gates:
   - npm run test:v3-workspace
   - npm run verify:v3-cargo-fmt
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-resource-map
   migration_target: rust
@@ -604,7 +603,8 @@ owners:
     external, and derived internal timing; Server is a read-only projection.
   owner_kind: rust_v3_runtime_observability
   owner_scope: One Runtime timing state spans all provider attempts and publishes
-    only after governed terminal output or Direct SSE clean EOF.
+    only after successful complete-attempt admission and sealing. Direct SSE
+    frames close external time without finalizing the Runtime before Error recovery.
   owner_module: v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
   resource_bindings:
     reads:
@@ -629,6 +629,7 @@ owners:
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-server/src/lib.rs
@@ -636,7 +637,6 @@ owners:
   - docs/goals/v3-runtime-timing-observability-debug-contract.json
   - docs/goals/v3-runtime-timing-observability-test-design.md
   - docs/architecture
-  - scripts/architecture/verify-v3-runtime-timing-observability.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:
@@ -732,7 +732,6 @@ owners:
   - npm run test:v3-debug-payload-budget-red-fixtures
   - npm run verify:v3-resource-map
   - npm run verify:v3-mainline-caller-flow
-  - npm run verify:v3-rust-only
   - npm run verify:v3-module-boundaries
   - npm run test:v3-workspace
   - npm run build:v3-cli

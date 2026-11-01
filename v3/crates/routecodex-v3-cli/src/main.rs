@@ -5,10 +5,7 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_lifecycle::{
     V3ManagedLifecycle, V3ManagedLifecycleObservation, V3ManagedListenerDeclaration,
-    V3ManagedStatusRecord,
-};
-use servertool_core::cli_contract::{
-    build_servertool_cli_binary_run_command_from_client_exec_result, ServertoolCliRunInput,
+    V3ManagedRunState, V3ManagedStatusRecord,
 };
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -46,6 +43,8 @@ enum Command {
     Status {
         #[arg(short, long)]
         config: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Restart {
         #[arg(short, long)]
@@ -69,10 +68,6 @@ enum Command {
         #[arg(long, default_value_t = 15_000)]
         timeout_ms: u64,
     },
-    Servertool {
-        #[command(subcommand)]
-        command: ServertoolCommand,
-    },
     Init {
         #[arg(short, long)]
         config: Option<String>,
@@ -91,21 +86,6 @@ enum Command {
     Server {
         #[command(subcommand)]
         command: ServerCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum ServertoolCommand {
-    Run {
-        tool_name: String,
-        #[arg(long = "input-json")]
-        input_json: String,
-        #[arg(long = "flow")]
-        flow: Option<String>,
-        #[arg(long = "session-id")]
-        session_id: Option<String>,
-        #[arg(long = "request-id")]
-        request_id: Option<String>,
     },
 }
 
@@ -138,6 +118,8 @@ enum ServerCommand {
     Status {
         #[arg(short, long)]
         config: Option<String>,
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     Restart {
         #[arg(short, long)]
@@ -226,29 +208,6 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
                 bind: Some(bind),
                 port,
             })?;
-        }
-        Command::Servertool {
-            command:
-                ServertoolCommand::Run {
-                    tool_name,
-                    input_json,
-                    flow,
-                    session_id,
-                    request_id,
-                },
-        } => {
-            let input = serde_json::from_str(&input_json)
-                .map_err(|error| format!("SERVERTOOL_CLI_INVALID_JSON: {error}"))?;
-            let output = build_servertool_cli_binary_run_command_from_client_exec_result(
-                ServertoolCliRunInput {
-                    tool_name,
-                    input,
-                    flow_id: flow,
-                    session_id,
-                    request_id,
-                },
-            )?;
-            println!("{}", serde_json::to_string(&output)?);
         }
         Command::Start {
             config,
@@ -348,20 +307,24 @@ async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Command::Server {
-            command: ServerCommand::Status { config },
+            command: ServerCommand::Status { config, json },
         }
-        | Command::Status { config } => {
+        | Command::Status { config, json } => {
             let config = resolve_config_path(config)?;
             let manifest = load_manifest(&config)?;
-            for server in manifest.servers.values() {
-                println!(
-                    "{} enabled={} address={}:{}",
-                    server.id, server.enabled, server.bind, server.port
-                );
-            }
             let executable = std::env::current_exe()?;
             let status = V3ManagedLifecycle::new(config)?.status(&executable).await?;
-            println!("{}", serde_json::to_string(&status)?);
+            if json {
+                println!("{}", serde_json::to_string(&status)?);
+            } else {
+                emit_v3_cli_status_console_line(&status);
+                for server in manifest.servers.values() {
+                    println!(
+                        "{} enabled={} address={}:{}",
+                        server.id, server.enabled, server.bind, server.port
+                    );
+                }
+            }
         }
         Command::Server {
             command:
@@ -633,6 +596,41 @@ fn emit_v3_cli_stop_completed_console_line(status: &V3ManagedStatusRecord) {
         status.instance_id
     );
     flush_stdout_best_effort();
+}
+
+fn emit_v3_cli_status_console_line(status: &V3ManagedStatusRecord) {
+    let mut line = format!(
+        "[RouteCodexV3] Status state={} instance={}",
+        format!("{:?}", status.state).to_ascii_lowercase(),
+        status.instance_id
+    );
+    if let Some(impact) = v3_cli_status_impact(&status.state) {
+        line.push_str(&format!(" impact={impact}"));
+    }
+    if let Some(detail) = status
+        .detail
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        line.push_str(&format!(" detail={detail}"));
+    }
+    println!("{line}");
+    flush_stdout_best_effort();
+}
+
+fn v3_cli_status_impact(state: &V3ManagedRunState) -> Option<&'static str> {
+    match state {
+        V3ManagedRunState::Running => None,
+        V3ManagedRunState::Starting => Some("enabled listeners may refuse requests until running"),
+        V3ManagedRunState::Stopping => Some("enabled listeners may refuse requests during stop"),
+        V3ManagedRunState::Stopped => {
+            Some("enabled listeners refuse client requests until the service is started")
+        }
+        V3ManagedRunState::Failed => {
+            Some("enabled listeners refuse client requests because the service failed")
+        }
+    }
 }
 
 fn emit_v3_cli_lifecycle_observation(observation: V3ManagedLifecycleObservation) {

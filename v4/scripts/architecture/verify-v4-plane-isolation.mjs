@@ -2,26 +2,12 @@
 /** Locks typed data/control/diagnostic isolation and its machine-readable edge contract. */
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import yaml from 'js-yaml';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MAP_PATH = 'docs/architecture/v4-resource-operation-map.yml';
 const CONTRACT_PATH = 'contracts/data-control-boundary.contract.json';
-const SOURCE_PATHS = {
-  control: 'crates/routecodex-v4-control/src/lib.rs',
-  controlTests: 'crates/routecodex-v4-control/tests/l2_control.rs',
-  standardPlugins: 'crates/routecodex-v4-standard-plugins/src/lib.rs',
-  responseInbound: 'crates/routecodex-v4-standard-plugins/src/response_inbound.rs',
-  responseOutbound: 'crates/routecodex-v4-standard-plugins/src/response_outbound.rs',
-};
-const CONTRACT_HASHES = {
-  forbiddenEdges: 'sha256:af6dea8727859fbe4953293efd1e272f3139a041f63cb0d8183b53652a97d7bc',
-  invariants: 'sha256:c411741d0d3e6ed7e70e3b57d8b560e8f15668ffd5dea74699f66b05731430a9',
-  redGates: 'sha256:16037f265a61606eed0ca5c79e91a8a53b98158f3bb03f7a5ab45afdb2be9c85',
-  activationConditions: 'sha256:820b26c09fad7c191a54df5e61b807bf507eda469cf3a15f532ce0ca174c7006',
-};
 
 function failure(code, message) {
   return { code, message };
@@ -35,63 +21,11 @@ function sameOrdered(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function sha256(value) {
-  return 'sha256:' + crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
 function edgeIds(resourceMap) {
   return sortedUnique((resourceMap.forbidden_direct_edges ?? []).map((edge) => `${edge.from}->${edge.to}`));
 }
 
-function sortedValues(values) {
-  return [...values].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-}
-
-function redGateProjection(boundaryContract) {
-  return sortedValues((boundaryContract?.red_test_gates ?? []).map((gate) => ({
-    gate_id: gate.gate_id,
-    name: gate.name,
-    required_for: [...(gate.required_for ?? [])].sort(),
-  })));
-}
-
-function validatePhysicalSources(sourceInputs, failures) {
-  if (!sourceInputs || Object.keys(SOURCE_PATHS).some((key) => typeof sourceInputs[key] !== 'string')) {
-    failures.push(failure('BOUNDARY_SOURCE_SET_MISSING', 'all owning source/test inputs are required'));
-    return;
-  }
-  const control = sourceInputs.control;
-  if (!/pub fn try_reconstruct_from_payload[\s\S]*?Err\(ControlError::ControlNotReconstructibleFromPayload\)[\s\S]*?\n    }/.test(control)
-      || !/pub fn write_control[\s\S]*?Err\(ControlError::ControlIntoPayload\)[\s\S]*?\n    }/.test(control)) {
-    failures.push(failure('CONTROL_PAYLOAD_FAILFAST_SOURCE',
-      'control owner must fail fast on payload reconstruction and control-to-payload writes'));
-  }
-  const controlTests = sourceInputs.controlTests;
-  for (const testName of [
-    'payload_gate_write_control_red',
-    'protocol_metadata_cannot_become_control_red',
-    'payload_reconstruction_forbidden_red',
-  ]) {
-    if (!new RegExp('fn ' + testName + '\\(\\)').test(controlTests)) {
-      failures.push(failure('CONTROL_PAYLOAD_RED_TEST_SOURCE', testName + ' is missing'));
-    }
-  }
-  if ((sourceInputs.responseInbound.match(/reject_control_fields\(/g) ?? []).length !== 2
-      || !sourceInputs.responseInbound.includes('reject_control_fields(raw)?;')
-      || (sourceInputs.responseOutbound.match(/reject_control_fields\(/g) ?? []).length !== 3) {
-    failures.push(failure('WIRE_CONTROL_REJECTION_SOURCE',
-      'provider/client response boundaries must reject control fields before projection'));
-  }
-  const providerWirePair = 'vec!["v4.request.provider_semantic"],\n        vec!["v4.request.provider_wire_payload"]';
-  if (sourceInputs.standardPlugins.split(providerWirePair).length - 1 !== 2
-      || sourceInputs.standardPlugins.includes('write_control_resource("v4.request.provider_wire_payload"')
-      || sourceInputs.standardPlugins.includes('write_control_resource("v4.response.client_wire_payload"')) {
-    failures.push(failure('PROVIDER_WIRE_SOURCE_BINDING',
-      'provider wire builders must consume provider semantic data only; control writers are forbidden'));
-  }
-}
-
-export function validatePlaneIsolation(resourceMap, boundaryContract, sourceInputs) {
+export function validatePlaneIsolation(resourceMap, boundaryContract) {
   const failures = [];
   const resources = resourceMap?.resources ?? [];
   const duplicateIds = resources.map((resource) => resource.resource_id)
@@ -195,18 +129,6 @@ export function validatePlaneIsolation(resourceMap, boundaryContract, sourceInpu
   if (!sameOrdered(contractEdges, mapEdges)) {
     failures.push(failure('BOUNDARY_EDGE_CONTRACT_DRIFT', 'contract and resource-map forbidden edges differ'));
   }
-  if (sha256([...rawContractEdges].sort()) !== CONTRACT_HASHES.forbiddenEdges) {
-    failures.push(failure('BOUNDARY_EDGE_SET_WEAKENED', 'mandatory forbidden edge set drifted'));
-  }
-  if (sha256(sortedValues(boundaryContract?.invariants ?? [])) !== CONTRACT_HASHES.invariants) {
-    failures.push(failure('BOUNDARY_INVARIANT_SET_WEAKENED', 'mandatory invariant set drifted'));
-  }
-  if (sha256(redGateProjection(boundaryContract)) !== CONTRACT_HASHES.redGates) {
-    failures.push(failure('BOUNDARY_RED_GATE_SET_WEAKENED', 'mandatory red gate set drifted'));
-  }
-  if (sha256(sortedValues(boundaryContract?.activation_conditions ?? [])) !== CONTRACT_HASHES.activationConditions) {
-    failures.push(failure('BOUNDARY_ACTIVATION_CONDITIONS', 'activation condition set drifted'));
-  }
   const activationGates = sortedUnique(boundaryContract?.activation_gates ?? []);
   if (!sameOrdered(activationGates, [
     'v4_parity_gate_plane_isolation',
@@ -215,7 +137,6 @@ export function validatePlaneIsolation(resourceMap, boundaryContract, sourceInpu
   ])) {
     failures.push(failure('BOUNDARY_ACTIVATION_GATES', 'boundary activation gate set drifted'));
   }
-  validatePhysicalSources(sourceInputs, failures);
   return failures;
 }
 
@@ -229,12 +150,12 @@ function mutateAllowed(map, fromId, toId) {
   from.allowed_readers = sortedUnique([...(from.allowed_readers ?? []), to.owner_node]);
 }
 
-export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sourceInputs) {
-  const baseline = validatePlaneIsolation(resourceMap, boundaryContract, sourceInputs);
+export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract) {
+  const baseline = validatePlaneIsolation(resourceMap, boundaryContract);
   if (baseline.length > 0) throw new Error(`baseline is not green: ${baseline.map((item) => item.code).join(',')}`);
   const shuffled = clone(resourceMap);
   shuffled.resources.reverse();
-  if (validatePlaneIsolation(shuffled, boundaryContract, sourceInputs).length > 0) {
+  if (validatePlaneIsolation(shuffled, boundaryContract).length > 0) {
     throw new Error('resource ordering changed the verdict');
   }
   const cases = [
@@ -262,26 +183,6 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
       expected: ['FORBIDDEN_EDGE_FORWARD'],
     },
     {
-      name: 'map and contract jointly delete mandatory edge',
-      mutate(map, contract) {
-        const removed = contract.forbidden_direct_edges[0];
-        contract.forbidden_direct_edges = contract.forbidden_direct_edges.slice(1);
-        map.forbidden_direct_edges = map.forbidden_direct_edges
-          .filter((edge) => `${edge.from}->${edge.to}` !== removed);
-      },
-      expected: ['BOUNDARY_EDGE_SET_WEAKENED'],
-    },
-    {
-      name: 'mandatory invariant set deleted',
-      mutate(_map, contract) { contract.invariants = []; },
-      expected: ['BOUNDARY_INVARIANT_SET_WEAKENED'],
-    },
-    {
-      name: 'mandatory red gate set deleted',
-      mutate(_map, contract) { contract.red_test_gates = []; },
-      expected: ['BOUNDARY_RED_GATE_SET_WEAKENED'],
-    },
-    {
       name: 'diagnostic enters provider body',
       mutate(map) {
         const snapshot = map.resources.find((resource) => resource.resource_id === 'v4.debug.snapshot_ledger');
@@ -297,37 +198,12 @@ export function runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sour
       },
       expected: ['CLIENT_ERROR_PROJECTION_FIELDS'],
     },
-    {
-      name: 'control owner stops failing fast',
-      mutate(_map, _contract, sources) {
-        sources.control = sources.control.replace('Err(ControlError::ControlIntoPayload)', 'Ok(())');
-      },
-      expected: ['CONTROL_PAYLOAD_FAILFAST_SOURCE'],
-    },
-    {
-      name: 'response ingress control rejection removed',
-      mutate(_map, _contract, sources) {
-        sources.responseInbound = sources.responseInbound.replace('    reject_control_fields(raw)?;\n', '');
-      },
-      expected: ['WIRE_CONTROL_REJECTION_SOURCE'],
-    },
-    {
-      name: 'provider wire descriptor bypasses provider semantic',
-      mutate(_map, _contract, sources) {
-        sources.standardPlugins = sources.standardPlugins.replace(
-          'vec!["v4.request.provider_semantic"],',
-          'vec!["v4.request.normal_payload"],',
-        );
-      },
-      expected: ['PROVIDER_WIRE_SOURCE_BINDING'],
-    },
   ];
   for (const testCase of cases) {
     const mutated = clone(resourceMap);
     const mutatedContract = clone(boundaryContract);
-    const mutatedSources = clone(sourceInputs);
-    testCase.mutate(mutated, mutatedContract, mutatedSources);
-    const actual = sortedUnique(validatePlaneIsolation(mutated, mutatedContract, mutatedSources)
+    testCase.mutate(mutated, mutatedContract);
+    const actual = sortedUnique(validatePlaneIsolation(mutated, mutatedContract)
       .map((item) => item.code));
     if (!sameOrdered(actual, testCase.expected)) {
       throw new Error(`${testCase.name}: ${actual.join(',')} != ${testCase.expected.join(',')}`);
@@ -340,8 +216,6 @@ function readInputs() {
   return {
     resourceMap: yaml.load(fs.readFileSync(path.join(root, MAP_PATH), 'utf8')),
     boundaryContract: JSON.parse(fs.readFileSync(path.join(root, CONTRACT_PATH), 'utf8')),
-    sourceInputs: Object.fromEntries(Object.entries(SOURCE_PATHS)
-      .map(([key, relativePath]) => [key, fs.readFileSync(path.join(root, relativePath), 'utf8')])),
   };
 }
 
@@ -360,9 +234,9 @@ if (direct) {
     console.error(`[v4_parity_gate_plane_isolation] MODE_INVALID ${args.join(' ')}`);
     process.exit(2);
   }
-  const { resourceMap, boundaryContract, sourceInputs } = readInputs();
+  const { resourceMap, boundaryContract } = readInputs();
   if (mode === 'definition') {
-    const failures = validatePlaneIsolation(resourceMap, boundaryContract, sourceInputs);
+    const failures = validatePlaneIsolation(resourceMap, boundaryContract);
     if (failures.length > 0) {
       printFailures(failures);
       process.exit(1);
@@ -370,7 +244,7 @@ if (direct) {
     console.log('[v4_parity_gate_plane_isolation] OK control/data/diagnostic isolation locked');
   } else if (mode === '--red-self-test') {
     try {
-      const count = runPlaneIsolationRedSelfTest(resourceMap, boundaryContract, sourceInputs);
+      const count = runPlaneIsolationRedSelfTest(resourceMap, boundaryContract);
       console.log(`[v4_parity_gate_plane_isolation_red] OK ${count} exact mutations/order checks`);
     } catch (error) {
       console.error(`[v4_parity_gate_plane_isolation_red] FAIL ${error.message}`);

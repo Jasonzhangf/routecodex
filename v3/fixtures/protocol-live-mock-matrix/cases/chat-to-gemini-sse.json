@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "case_id": "chat-to-gemini-sse",
+  "cell": {"entry_protocol": "openai_chat", "provider_protocol": "gemini", "transport": "sse", "mode": "relay"},
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "headers": {"content-type": "application/json"},
+    "body": {"model": "mock.gemini-model", "messages": [{"role": "user", "content": "hello"}], "stream": true}
+  },
+  "expected_provider": {
+    "paths": ["/v1beta/models/gemini-model:streamGenerateContent"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {"contents.0.parts.0.text": "hello"},
+    "body_must_not": ["routecodex_internal", "metadata_center", "debug_snapshot"],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "gemini",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {"data": {"candidates": [{"content": {"role": "model", "parts": [{"text": "ok"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 2, "totalTokenCount": 9}}}
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {"text": "ok", "finish_reason": "stop"},
+    "body_must_not": ["provider_error", "internal_error", "routecodex_internal", "metadata_center"],
+    "semantic_terminal_required": true
+  },
+  "assertions": {"provider_attempt_count": 1, "probe_attempts_may_occur": true, "no_control_leakage": true},
+  "source": {
+    "sha": "bfaedf18301d02a423bd5422d22e41432d231ab8",
+    "files": ["internal/gateway/gemini_function_parts_test.go"],
+    "tests": ["internal/gateway/gemini_function_parts_test.go::TestGeminiFunctionResponseImageReachesUpstream"],
+    "adaptation": "Gemini SSE input shape; expected semantics are protocol-native and independently written."
+  },
+  "contract_differences": []
+}

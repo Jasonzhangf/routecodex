@@ -9,6 +9,82 @@ use crate::hub_v1::V3ToolThinkingTurnContext;
 use crate::runtime_timing::V3RuntimeTimingState;
 use routecodex_v3_config::V3Config05ManifestPublished;
 
+#[path = "direct_response_hooks_dsml.rs"]
+mod dsml;
+pub(crate) use dsml::RawObject as V3DirectRawObject;
+pub(crate) use dsml::{
+    normalize_v3_direct_dsml_response, rewrite_v3_direct_dsml_attempt, V3DirectDsmlContext,
+};
+
+#[path = "direct_response_hooks_commit_probe.rs"]
+mod commit_probe;
+pub(crate) use commit_probe::V3DirectPrefixCommitProbe;
+
+/// Where a governed text marker can appear. The thinking owner searches the
+/// whole text; the DSML owner only removes a label that is a complete line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3GovernedTextScope {
+    Inline,
+    Line,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct V3GovernedTextMarker {
+    pub(crate) text: &'static str,
+    pub(crate) scope: V3GovernedTextScope,
+}
+
+/// Every text marker that a registered Direct complete-attempt owner can act on
+/// for this attempt, with the scope that owner matches it in. The thinking owner
+/// moves `<thinking>` bodies into synthesized reasoning items wherever they
+/// appear; the DSML owner removes the standalone protocol labels that no tool
+/// declaration is needed for. The first-frame commit probe treats a prefix
+/// containing any of them as not yet governed.
+pub(crate) fn v3_direct_governed_text_markers() -> Vec<V3GovernedTextMarker> {
+    let mut markers: Vec<V3GovernedTextMarker> = crate::tool_markup_parser::governed_text_markers()
+        .into_iter()
+        .map(|text| V3GovernedTextMarker {
+            text,
+            scope: V3GovernedTextScope::Line,
+        })
+        .collect();
+    markers.push(V3GovernedTextMarker {
+        text: crate::shared_direct_thinking_compat::THINKING_OPEN,
+        scope: V3GovernedTextScope::Inline,
+    });
+    markers.push(V3GovernedTextMarker {
+        text: crate::shared_direct_thinking_compat::THINKING_CLOSE,
+        scope: V3GovernedTextScope::Inline,
+    });
+    markers
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum V3DirectResponseHookFailure {
+    UnharvestableToolMarkup,
+}
+
+pub(crate) fn normalize_v3_direct_complete_json_response(
+    payload: &mut serde_json::Value,
+    context: &V3DirectDsmlContext,
+) -> Result<(), V3DirectResponseHookFailure> {
+    normalize_v3_direct_dsml_response(payload, context)?;
+    crate::shared_direct_thinking_compat::normalize_v3_direct_thinking_json(payload);
+    Ok(())
+}
+
+pub(crate) fn rewrite_v3_direct_complete_response_attempt(
+    frames: &[Vec<u8>],
+    flushed: usize,
+    context: &V3DirectDsmlContext,
+) -> Result<Option<(Vec<Vec<u8>>, usize)>, V3DirectResponseHookFailure> {
+    let serialized_tools = rewrite_v3_direct_dsml_attempt(frames, flushed, context)?;
+    let normalized = serialized_tools
+        .as_ref()
+        .map_or(frames, |(frames, _)| frames.as_slice());
+    Ok(crate::kernel::rewrite_v3_direct_thinking_attempt(normalized).or(serialized_tools))
+}
+
 /// The sole Direct response payload hook for protocol-neutral response cleanup.
 /// Both buffered JSON and SSE consumers call this owner; neither transport
 /// layer may reimplement response-id or cipher projection.
@@ -16,13 +92,53 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     payload: &mut serde_json::Value,
     strip_client_response_id: bool,
     retain_response_cipher: bool,
+    provider_protocol: V3HubProviderWireProtocol,
 ) {
     if !retain_response_cipher {
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
+        match provider_protocol {
+            // Anthropic signature 由 typed wire witness 保留，不按密文形状猜测来源。
+            V3HubProviderWireProtocol::Anthropic => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, true,
+                );
+            }
+            // Responses wire 全剥非工具密文（fe1ec4b 契约），function_call_output 保留。
+            V3HubProviderWireProtocol::Responses => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, false,
+                );
+            }
+            // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）；只清理
+            // Codex 本地密文前缀，其余 opaque 值原样进入客户端。
+            V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+                routecodex_v3_provider_responses::apply_v3_chat_reasoning_cipher_policy(
+                    payload, false,
+                );
+            }
+        }
     }
     if strip_client_response_id {
         crate::shared::strip_v3_response_id_from_json_body(payload);
     }
+}
+
+/// Direct response payload projection with the request-local declared tool
+/// identity inverse. The cleanup projection above and the namespace restore
+/// share this single owner so buffered JSON and SSE consumers cannot drift.
+pub(crate) fn apply_v3_direct_response_projection_hooks_with_identities(
+    payload: &mut serde_json::Value,
+    strip_client_response_id: bool,
+    retain_response_cipher: bool,
+    provider_protocol: V3HubProviderWireProtocol,
+    namespace_tool_identities: &std::collections::HashMap<String, (String, String)>,
+) {
+    apply_v3_direct_response_projection_hooks(
+        payload,
+        strip_client_response_id,
+        retain_response_cipher,
+        provider_protocol,
+    );
+    crate::hub_v1::restore_v3_responses_namespace_identities(payload, namespace_tool_identities);
 }
 
 pub(crate) fn apply_v3_memory_raw_capture_json_payload(
@@ -30,12 +146,24 @@ pub(crate) fn apply_v3_memory_raw_capture_json_payload(
     manifest: &V3Config05ManifestPublished,
     request_id: &str,
 ) {
-    if !manifest.memory_raw_capture.enabled {
+    apply_v3_memory_raw_capture_json_payload_with_config(
+        payload,
+        &manifest.memory_raw_capture,
+        request_id,
+    );
+}
+
+pub(crate) fn apply_v3_memory_raw_capture_json_payload_with_config(
+    payload: &mut serde_json::Value,
+    memory_raw_capture: &routecodex_v3_config::V3MemoryRawCaptureManifest,
+    request_id: &str,
+) {
+    if !memory_raw_capture.enabled {
         return;
     }
     let host_id = routecodex_v3_agent_memory::stable_host_id(&format!(
         "{}{}",
-        manifest.memory_raw_capture.host_id_prefix, request_id
+        memory_raw_capture.host_id_prefix, request_id
     ));
     let report =
         match routecodex_v3_agent_memory::capture_responses_json(payload, &host_id, request_id) {
@@ -49,7 +177,7 @@ pub(crate) fn apply_v3_memory_raw_capture_json_payload(
         routecodex_v3_agent_memory::strip_memory_envelope_from_responses_payload(payload, &report);
         for captured in &report.captured {
             if let Err(error) = routecodex_v3_agent_memory::publish_l3_entry(
-                &manifest.memory_raw_capture.project_root,
+                &memory_raw_capture.project_root,
                 captured,
             ) {
                 eprintln!("memory l3 publication diagnostic request_id={request_id}: {error}");
@@ -63,6 +191,13 @@ pub enum V3DirectResponseCompatBlock {
     Passthrough,
     ThinkingTags,
     DeepseekConsoleGoResponseShape,
+    /// Provider-private response compatibility (the `chat:*` / other
+    /// non-`responses:*` profiles). The payload rewrite itself is owned by the
+    /// single provider response compat owner
+    /// (`provider_resp_compat_02_provider_compat` -> `run_resp_inbound_stage3_compat`),
+    /// never by this Direct plan. This block only records that the Direct
+    /// response path must invoke that owner with the configured profile.
+    ProviderResponseCompat,
 }
 
 #[derive(Debug, Clone)]
@@ -78,11 +213,22 @@ pub struct V3DirectResponseCompatPlan {
     pub provider_protocol: V3HubProviderWireProtocol,
     pub canonical_model_id: String,
     pub blocks: Vec<V3DirectResponseCompatBlock>,
+    /// Configured provider-private compat profile carried for the
+    /// `ProviderResponseCompat` block. `None` when the plan does not select it.
+    pub provider_compat_profile: Option<String>,
+    pub custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
 }
 
 impl V3DirectResponseCompatPlan {
     pub fn has_block(&self, block: V3DirectResponseCompatBlock) -> bool {
         self.blocks.contains(&block)
+    }
+
+    /// The provider-private compat profile the Direct response path must pass
+    /// to the provider response compat owner. Only present when the plan
+    /// selected `ProviderResponseCompat`.
+    pub fn provider_response_compat_profile(&self) -> Option<&str> {
+        self.provider_compat_profile.as_deref()
     }
 }
 
@@ -96,6 +242,12 @@ pub struct V3DirectResponseCompatContext {
     pub toolreason_client_projection: bool,
     pub toolreason_observation_session_id: Option<String>,
     pub tool_thinking_turn_context: V3ToolThinkingTurnContext,
+    pub custom_tool_function_binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    /// Request-local declared tool identity inverse (provider wire name ->
+    /// client namespace + leaf). Built once from the originating request so
+    /// the Direct Responses response owner restores the same identity the
+    /// forward projection emitted. Never crosses a request boundary.
+    pub namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     pub(crate) runtime_timing: V3RuntimeTimingState,
 }
 
@@ -111,12 +263,14 @@ impl V3DirectResponseCompatContext {
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+        let mut plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
             provider_protocol: self.provider_protocol,
             canonical_model_id: &self.canonical_model_id,
             model_capabilities: &capabilities,
             compatibility_profile: self.compatibility_profile.as_deref(),
-        })
+        })?;
+        plan.custom_tool_function_binding = self.custom_tool_function_binding.clone();
+        Ok(plan)
     }
 }
 
@@ -126,19 +280,29 @@ pub fn compile_direct_response_compat_plan(
     let profile = facts
         .compatibility_profile
         .map(str::trim)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        .map(str::to_ascii_lowercase);
     let supports_reasoning = facts
         .model_capabilities
         .iter()
         .any(|capability| matches!(capability.trim(), "reasoning" | "thinking"));
-    let block = match profile {
+    let block = match profile.as_deref() {
         None => V3DirectResponseCompatBlock::Passthrough,
+        // `chat:openai` is a declared Chat provider profile whose provider
+        // response compat is a no-op; keep the fast path PR #236 added so the
+        // plan stays Passthrough instead of routing a no-op through the owner.
+        Some("chat:openai") if facts.provider_protocol == V3HubProviderWireProtocol::OpenAiChat => {
+            V3DirectResponseCompatBlock::Passthrough
+        }
+        // Explicit no-op profile: resolving it through the provider response
+        // compat owner would also yield passthrough, so keep it local.
+        Some("compat:passthrough") => V3DirectResponseCompatBlock::Passthrough,
         Some("responses:thinking-tags" | "responses:cc" | "responses:deepseek-console-go")
             if facts.provider_protocol != V3HubProviderWireProtocol::Responses =>
         {
             return Err(format!(
                 "unsupported direct response compatibility profile {} for protocol {:?} model {}",
-                profile.unwrap_or_default(),
+                profile.as_deref().unwrap_or_default(),
                 facts.provider_protocol,
                 facts.canonical_model_id
             ));
@@ -161,17 +325,24 @@ pub fn compile_direct_response_compat_plan(
                 facts.canonical_model_id
             ));
         }
-        Some(unknown) => {
-            return Err(format!(
-                "unsupported direct response compatibility profile {unknown} for protocol {:?} model {}",
-                facts.provider_protocol, facts.canonical_model_id
-            ));
-        }
+        // Everything else is provider-private compat: the `chat:*` profiles and
+        // any `responses:*` profile without a Direct-local Responses event
+        // rewriter (for example `responses:lmstudio`). Relay applies all of
+        // these through the single provider response compat owner; Direct must
+        // reach the same owner instead of rejecting the request or
+        // reimplementing the rewrite. The `responses:thinking-tags` /
+        // `responses:cc` / `responses:deepseek-console-go` rewriters above are
+        // already handled locally and never fall through, so this arm cannot
+        // double-apply them.
+        Some(_) => V3DirectResponseCompatBlock::ProviderResponseCompat,
     };
     Ok(V3DirectResponseCompatPlan {
         provider_protocol: facts.provider_protocol,
         canonical_model_id: facts.canonical_model_id.to_string(),
         blocks: vec![block],
+        provider_compat_profile: (block == V3DirectResponseCompatBlock::ProviderResponseCompat)
+            .then(|| profile.unwrap_or_default().to_string()),
+        custom_tool_function_binding: None,
     })
 }
 
@@ -206,6 +377,78 @@ mod tests {
     }
 
     #[test]
+    fn compat_plan_accepts_chat_wire_profiles_for_direct() {
+        // chat-wire same-protocol providers are routed through the Direct
+        // kernel. Their configured profile is a provider-response-compat
+        // profile (chat:*), not a Responses event rewriter; the plan must
+        // carry it to the sole provider-response-compat owner instead of
+        // rejecting the request. `chat:openai` is the one declared no-op: its
+        // provider response compat is a passthrough, so the plan keeps it local
+        // (asserted separately in
+        // `chat_direct_accepts_openai_compat_profile_without_response_rewrite`).
+        for profile in [
+            "chat:glm",
+            "chat:glm-unsupported-prompt-cache-key-verbosity",
+            "chat:minimax",
+            "chat:gemini",
+            "chat:lmstudio",
+        ] {
+            let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+                provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+                canonical_model_id: "deepseek-v4.1-flash",
+                model_capabilities: &["text"],
+                compatibility_profile: Some(profile),
+            })
+            .unwrap_or_else(|error| panic!("chat-wire profile {profile} must compile: {error}"));
+            assert_eq!(
+                plan.blocks,
+                vec![V3DirectResponseCompatBlock::ProviderResponseCompat],
+                "profile {profile} must route through the provider response compat owner"
+            );
+            assert_eq!(
+                plan.provider_compat_profile.as_deref(),
+                Some(profile),
+                "profile {profile} must be carried to the owner verbatim"
+            );
+        }
+    }
+
+    #[test]
+    fn compat_plan_routes_unknown_responses_profile_to_owner_not_err() {
+        // A `responses:*` profile without a Direct-local Responses event
+        // rewriter (for example `responses:lmstudio`) must reach the single
+        // provider response compat owner instead of hard-failing the Direct
+        // path; the Responses event rewriters above keep their Err contract.
+        let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::Responses,
+            canonical_model_id: "lmstudio-model",
+            model_capabilities: &["text"],
+            compatibility_profile: Some("responses:lmstudio"),
+        })
+        .expect("responses:lmstudio must compile through the owner");
+        assert_eq!(
+            plan.blocks,
+            vec![V3DirectResponseCompatBlock::ProviderResponseCompat]
+        );
+        assert_eq!(
+            plan.provider_compat_profile.as_deref(),
+            Some("responses:lmstudio")
+        );
+    }
+
+    #[test]
+    fn compat_plan_keeps_passthrough_for_compat_passthrough() {
+        let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            canonical_model_id: "glm-5.2",
+            model_capabilities: &["text"],
+            compatibility_profile: Some("compat:passthrough"),
+        })
+        .expect("compat:passthrough must compile");
+        assert_eq!(plan.blocks, vec![V3DirectResponseCompatBlock::Passthrough]);
+    }
+
+    #[test]
     fn compat_plan_rejects_profile_protocol_mismatch() {
         let error = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
             provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
@@ -218,27 +461,112 @@ mod tests {
     }
 
     #[test]
+    fn chat_direct_accepts_openai_compat_profile_without_response_rewrite() {
+        let plan = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            canonical_model_id: "deepseek-v4.1-flash",
+            model_capabilities: &["text", "tools"],
+            compatibility_profile: Some("chat:openai"),
+        })
+        .expect("chat:openai is a declared Chat provider profile");
+        assert_eq!(plan.blocks, vec![V3DirectResponseCompatBlock::Passthrough]);
+        let mixed_case = compile_direct_response_compat_plan(V3DirectResponseCompatFacts {
+            provider_protocol: V3HubProviderWireProtocol::OpenAiChat,
+            canonical_model_id: "deepseek-v4.1-flash",
+            model_capabilities: &["text", "tools"],
+            compatibility_profile: Some("chat:OpenAI"),
+        })
+        .expect("profile matching follows request compat normalization");
+        assert_eq!(
+            mixed_case.blocks,
+            vec![V3DirectResponseCompatBlock::Passthrough]
+        );
+    }
+
+    #[test]
     fn direct_response_projection_preserves_function_output_cipher_only() {
         let mut payload = json!({
             "output": [
                 {
                     "type": "reasoning",
-                    "encrypted_content": "rsn_reasoning_cipher"
+                    "encrypted_content": "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
+                    "summary": [{"type": "summary_text", "text": "plain reasoning"}]
                 },
                 {
                     "type": "function_call_output",
                     "call_id": "call_1",
-                    "encrypted_content": "rsn_opaque_function_output"
+                    "encrypted_content": "113833ee-native-cipher"
                 }
             ]
         });
 
-        apply_v3_direct_response_projection_hooks(&mut payload, false, false);
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::Responses,
+        );
 
         assert!(payload["output"][0].get("encrypted_content").is_none());
         assert_eq!(
-            payload["output"][1]["encrypted_content"],
-            "rsn_opaque_function_output"
+            payload["output"][0]["summary"][0]["text"],
+            "plain reasoning"
         );
+        assert_eq!(
+            payload["output"][1]["encrypted_content"],
+            "113833ee-native-cipher"
+        );
+    }
+
+    #[test]
+    fn direct_response_projection_keeps_signature_for_typed_anthropic_source() {
+        let mut payload = json!({
+            "output": [{
+                "type": "reasoning",
+                "encrypted_content": "typed-anthropic-signature",
+                "summary": [{"type": "summary_text", "text": "signed thought"}]
+            }]
+        });
+
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::Anthropic,
+        );
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "typed-anthropic-signature"
+        );
+        assert_eq!(payload["output"][0]["summary"][0]["text"], "signed thought");
+    }
+
+    #[test]
+    fn direct_response_projection_preserves_chat_wire_business_cipher() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "preserved cipher",
+                    "summary": [{"type": "summary_text", "text": "chat reasoning"}]
+                },
+                {"type": "reasoning", "encrypted_content": "rsn_CODEX_CIPHER"}
+            ]
+        });
+
+        apply_v3_direct_response_projection_hooks(
+            &mut payload,
+            false,
+            false,
+            V3HubProviderWireProtocol::OpenAiChat,
+        );
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "preserved cipher"
+        );
+        assert_eq!(payload["output"][0]["summary"][0]["text"], "chat reasoning");
+        assert!(payload["output"][1].get("encrypted_content").is_none());
     }
 }

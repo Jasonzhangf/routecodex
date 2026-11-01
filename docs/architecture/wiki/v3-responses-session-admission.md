@@ -1,60 +1,47 @@
-# V3 Responses Session Admission
+# V3 Independent Responses Dispatch
 
 ## Owner
 
-- Feature: `v3.responses_session_inflight_admission`
-- Resource: `v3.server.responses_session_admission`
-- Crate: `routecodex-v3-server`
-- Node block: `V3Server03ResponsesSessionAdmissionBlock` inside the existing
-  `V3Server03HttpRequestRaw` HTTP boundary.
+- Feature: `v3.responses_session_inflight_admission` (retained registry ID).
+- Resource: existing `v3.front.request_activity_gate`.
+- Crate: `routecodex-v3-server`.
+- Entry: `pending_model_request` → `pending_endpoint_after_json_parse`.
 
 ## Lifecycle
 
 ```mermaid
-flowchart LR
-  R[V3Server03HttpRequestRaw] --> A[V3Server03ResponsesSessionAdmissionBlock]
-  A -->|admitted| P[Normal Direct or Relay Runtime]
-  P --> O[V3ServerRespOutbound06ClientFrame]
-  O -->|body EOF / error / drop| X[Release exact permit]
-  A -->|same listener and same session or conversation| W[Await permit notification]
-  W -->|predicate recheck| A
+flowchart TD
+  R[Canonical JSON request] --> A[Request activity admission]
+  A --> P[Independent Direct or Relay Runtime]
+  P --> O[This request's client transport]
+  O --> X[Release activity after error, drop or successful front flush]
 ```
+
+This is one request's single-entry/single-exit lifecycle. Explicit aggregate
+maintenance pauses new dispatch at the existing activity owner. It does not
+serialize ordinary requests by business identity.
 
 ## Contract
 
-1. Each `V3ListenerState` owns one gate, so ports are isolated by construction.
-2. Only `POST /v1/responses` participates.
-3. `read_json_payload` remains the only HTTP JSON body parser. Admission runs
-   immediately after its typed result and before Direct/Relay Runtime.
-4. Explicit session and conversation identities come only from transparent
-   protocol headers or `x-codex-turn-metadata`; request payload cannot construct
-   this control identity.
-5. A matching non-empty session or matching non-empty conversation waits inside
-   the listener-local gate until the exact active permit releases.
-6. Missing identities do not create a global or request-derived lock key.
-7. Contention does not enter Error01-Error06, does not reach Runtime/provider
-   transport early, and does not return an overlap error to the client.
-8. The permit lives in the HTTP response body stream and releases on EOF,
-   stream error, or client drop.
-9. Permit release wakes all predicate waiters so a notification for one scope
-   cannot strand a different scope whose permit has become available.
+1. Matching session, conversation or both never creates a business mutex.
+2. Each request owns its cancellation, original deadline, attempts and response.
+3. `read_json_payload` remains the sole HTTP JSON parser. Real identities and
+   history remain intact; do not change them to evade admission.
+4. Exact provider capacity and health remain with their existing typed owners.
+   Healthy alternatives remain usable while another identity is constrained.
+5. Explicit maintenance pauses new dispatch atomically. Cancelling its owner
+   restores dispatch. Restart preparation does not drain accepted business work.
+6. Request activity stays with the response body; successful EOF transfers it
+   to the stable front socket until flush. Error/drop releases only that request.
 
-## Forbidden Owners
+## Public Acceptance
 
-- Virtual Router
-- Provider Action Gate
-- continuation store
-- Anthropic/OpenAI/provider codecs
-- Provider Runtime
-- SSE semantic projection
+- Hold the first upstream response. Require a second upstream receipt before
+  releasing the first, including session-only and conversation-only matches.
+- Cover native Direct and real Chat Relay, preserving actual business results.
+- Require the second request to arrive before cancelling the first. Cancellation
+  must not cancel the second request or remove its delivery rights.
+- Explicit maintenance must still pause new requests and resume after cancellation.
+- Keep configured capacity, separate identities and front-flush custody covered.
 
-## Review Checklist
-
-- [ ] Same listener and same session waits before provider capture, then returns
-      200 after the active response body releases.
-- [ ] Same listener and different session remains concurrent.
-- [ ] Different listeners and the same session remain concurrent.
-- [ ] EOF, stream error, and client drop release the exact permit.
-- [ ] A real TCP client disconnect releases before provider EOF.
-- [ ] No client-visible admission error, fallback, history repair, or
-      provider-specific branch exists.
+Source tests do not establish formal runtime deployment or historical live causes.

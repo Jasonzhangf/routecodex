@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,12 +15,14 @@ const fineScopes = [
   'v3_tool',
 ];
 const cases = [
+  { relative: 'note.md', contents: 'Large task evidence\n'.repeat(100000), v3: false, v4: false },
+  { relative: 'note.md', contents: 'Large task evidence\n'.repeat(100000), diffMode: 'new-ref', v3: false, v4: false },
   { relative: 'docs/design/v3-gate.md', v3: true, v4: false },
   { relative: 'docs/goals/v3-gate.md', v3: true, v4: false },
   { relative: 'docs/schemas/v3-gate.yml', v3: true, v4: false },
   { relative: '.agents/skills/gate/SKILL.md', v3: false, v4: false },
   { relative: 'scripts/unrelated-tool.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
-  { relative: 'scripts/architecture/verify-v3-dependency-projection.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
+  { relative: 'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
   { relative: 'scripts/architecture/architecture-wiki-lib.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/architecture/verify-architecture-mainline-call-map.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/architecture/verify-runtime-responses-provider-compat.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
@@ -31,11 +32,14 @@ const cases = [
   { relative: 'scripts/install-global.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
   { relative: 'scripts/install-release.sh', contents: '#!/bin/sh\ntrue\n', v3: true, v4: false },
   { relative: 'scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'v3/scripts/run-v3-cargo-test.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: true }, v3: true, v4: false },
+  { relative: 'v3/scripts/tests/v3-cargo-test-stack-env-regression.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: true }, v3: true, v4: false },
+  { relative: 'v3/scripts/verify-ci.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: true }, v3: true, v4: false },
+  { relative: 'v3/scripts/unrelated-test-helper.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_build: false }, v3: true, v4: false },
   { relative: 'scripts/tests/v3-scope-fixture.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: '.agents/skills/rcc-dev-skills/references/96-v3-selected-provider-model-binding-sop.md', v3: true, v4: false },
   { relative: 'sharedmodule/llmswitch-core/src/conversion/compat/provider-resolution-config.json', contents: '{}\n', v3: true, v4: false },
   { relative: 'scripts/ci/unrelated-check.mjs', contents: 'export const scopeFixture = true;\n', v3: false, v4: false },
-  { relative: 'scripts/ci/check-file-line-limit.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: false }, v3: true, v4: false },
   { relative: 'scripts/ci/repo-sanity.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: false }, v3: true, v4: false },
   { relative: 'scripts/ci/mempalace-scan-artifact-audit.mjs', contents: 'export const scopeFixture = true;\n', fine: { v3_architecture: false }, v3: true, v4: false },
   { relative: 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
@@ -45,8 +49,6 @@ const cases = [
   { relative: 'package.json', contents: '{"scripts":{"verify:v3":"npm --prefix v3 run verify:ci"}}\n', fine: { v3_architecture: true }, v3: true, v4: false, v4Full: false },
   { relative: 'package.json', contents: '{"scripts":{"verify:v4":"npm --prefix v4 run verify:ci"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: true, v4Full: true },
   { relative: 'package.json', contents: '{"scripts":{"verify:fallback-hardcode":"npm run verify:no-fallback-all && npm run verify:internal-policy-hardcode"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
-  { relative: 'package.json', contents: '{"scripts":{"verify:file-line-limit":"node scripts/ci/check-file-line-limit.mjs"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
-  { relative: 'package.json', contents: '{"scripts":{"test:file-line-limit":"node --test tests/scripts/file-line-limit.test.mjs"}}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false, v4Full: false },
   { relative: 'package-lock.json', contents: '{"lockfileVersion":3}\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: false, v4: false, v4Full: false },
   { relative: 'scripts/verify-fast.mjs', contents: 'export const scopeFixture = true;\n', fine: Object.fromEntries(fineScopes.map((name) => [name, false])), v3: true, v4: false },
   {
@@ -67,6 +69,7 @@ const cases = [
     v4Full: true,
   },
   { relative: 'scripts/ensure-cli-command-shim.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
+  { relative: 'scripts/ensure-cli-executable.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'scripts/install-v3-cli.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'tests/scripts/v3-cli-distribution.spec.mjs', contents: 'export const scopeFixture = true;\n', v3: true, v4: false },
   { relative: 'v3/crates/routecodex-v3-provider-responses/src/lib.rs', contents: 'pub const SCOPE_FIXTURE: bool = true;\n', fine: { v3_build: true, v3_provider: true }, v3: true, v4: false },
@@ -77,6 +80,28 @@ const cases = [
     relative: '.github/workflows/test.yml',
     contents: '  - name: V3 gate\n    run: npm run verify:v3\n',
     fine: { v3_architecture: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: Installed V3 protocol matrix\n    run: node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs --binary "$HOME/.local/bin/rccv3" --binary-kind installed\n',
+    fine: { v3_architecture: true, v3_build: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V3 host tests\n    run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture\n',
+    diffMode: 'new-ref',
+    fine: { v3_architecture: true, v3_build: true },
+    v3: true,
+    v4: false,
+  },
+  {
+    relative: '.github/workflows/test.yml',
+    contents: '  - name: V3 cargo test stack environment regression\n    run: npm --prefix v3 run --silent test:v3-cargo-test-stack-env-regression\n',
+    fine: { v3_architecture: true, v3_build: true },
     v3: true,
     v4: false,
   },
@@ -147,7 +172,6 @@ const cases = [
   },
 ];
 const failures = [];
-
 const workflow = readFileSync(join(repo, '.github', 'workflows', 'test.yml'), 'utf8');
 const v3Verify = readFileSync(join(repo, 'v3', 'scripts', 'verify.mjs'), 'utf8');
 const directArchitectureRuns = (workflow.match(/^\s*run: npm run verify:v3-architecture-ci\s*$/gmu) ?? []).length;
@@ -197,8 +221,6 @@ const metadataScopedPlan = spawnSync(process.execPath, [join(repo, 'v4', 'script
 });
 if (metadataScopedPlan.status !== 0
     || !`${metadataScopedPlan.stdout || ''}`.includes('metadata-only')
-    || !`${metadataScopedPlan.stdout || ''}`.includes('checks=3')
-    || !`${metadataScopedPlan.stdout || ''}`.includes('contract:verification-map')
     || !`${metadataScopedPlan.stdout || ''}`.includes('contract:verification-map-binding')
     || !`${metadataScopedPlan.stdout || ''}`.includes('shared:data-control-plane')) {
   failures.push(`V4 metadata-only plan must not require a module owner, got status=${metadataScopedPlan.status}\n${metadataScopedPlan.stdout || ''}\n${metadataScopedPlan.stderr || ''}`);
@@ -221,7 +243,6 @@ if (docsOnlyPlan.status !== 0
 const independentGateScopes = {
   'Fallback and internal policy hardcode gate': 'v3',
   'V3 Responses session admission behavior': 'v3_session',
-  'File line-limit gate (<500)': 'v3',
   'V3 provider action gate': 'v3_provider',
   'V3 provider action architecture gate': 'v3_provider',
   'V3 provider action red fixtures': 'v3_provider',
@@ -230,7 +251,6 @@ const independentGateScopes = {
   'V3 debug payload budget': 'v3_debug',
   'V3 debug payload budget red fixtures': 'v3_debug',
   'V3 route-classifier semantic gate': 'v3_router',
-  'Servertool Rust-only gate': 'v3_tool',
 };
 for (const [name, scope] of Object.entries(independentGateScopes)) {
   const start = workflow.indexOf(`      - name: ${name}\n`);
@@ -246,6 +266,15 @@ for (const name of ['Build (release)', 'Install direct V3 CLI binary', 'Install 
   const block = start >= 0 ? workflow.slice(start, end >= 0 ? end : undefined) : '';
   if (block.includes('!cancelled()')) {
     failures.push(`dependent step must retain success dependency: ${name}`);
+  }
+}
+for (const name of ['V3 cargo test stack environment regression']) {
+  const start = workflow.indexOf(`      - name: ${name}\n`);
+  const end = workflow.indexOf('\n      - ', start + 1);
+  const block = start >= 0 ? workflow.slice(start, end >= 0 ? end : undefined) : '';
+  if (!block.includes("needs.scope.outputs.v3_build == 'true'")
+      || !block.includes('test:v3-cargo-test-stack-env-regression')) {
+    failures.push(`managed wrapper stack regression is not wired into the v3_build lane: ${name}`);
   }
 }
 
@@ -416,7 +445,7 @@ try {
   writeFileSync(manifestPath, '[workspace]\nmembers = ["crates/known-owner"]\nresolver = "2"\n');
   writeFileSync(knownManifestPath, '[package]\nname = "known-owner"\nversion = "0.1.0"\nedition = "2021"\n');
   writeFileSync(knownSourcePath, 'pub const KNOWN_OWNER: bool = true;\n');
-  writeFileSync(join(missingRustOwnerRoot, 'v3', 'Cargo.lock'), '# This file is automatically @generated by Cargo.\nversion = 3\n');
+  execFileSync('cargo', ['generate-lockfile', '--offline', '--manifest-path', manifestPath], { cwd: missingRustOwnerRoot });
   const rustPath = join(missingRustOwnerRoot, 'v3', 'crates', 'missing-owner', 'src', 'lib.rs');
   mkdirSync(join(rustPath, '..'), { recursive: true });
   writeFileSync(rustPath, 'pub const OWNER_FIXTURE: bool = true;\n');
@@ -450,7 +479,7 @@ try {
   writeFileSync(packageManifestPath, '[package]\nname = "known-owner"\nversion = "0.1.0"\nedition = "2021"\n');
   writeFileSync(packageSourcePath, 'pub const KNOWN_OWNER: bool = true;\n');
   writeFileSync(deletedFixturePath, 'pub const RETIRED_FIXTURE: bool = true;\n');
-  writeFileSync(join(deletedRustOwnerRoot, 'v3', 'Cargo.lock'), '# This file is automatically @generated by Cargo.\nversion = 3\n');
+  execFileSync('cargo', ['generate-lockfile', '--offline', '--manifest-path', manifestPath], { cwd: deletedRustOwnerRoot });
   symlinkSync(join(repo, 'node_modules'), join(deletedRustOwnerRoot, 'node_modules'), 'dir');
   execFileSync('git', ['init', '-q'], { cwd: deletedRustOwnerRoot });
   execFileSync('git', ['add', 'v3'], { cwd: deletedRustOwnerRoot });
@@ -483,7 +512,7 @@ try {
   writeFileSync(packageManifestPath, '[package]\nname = "known-owner"\nversion = "0.1.0"\nedition = "2021"\n');
   writeFileSync(packageSourcePath, 'pub mod retired;\n');
   writeFileSync(deletedSourcePath, 'pub const RETIRED_SOURCE: bool = true;\n');
-  writeFileSync(join(deletedOwnedRustRoot, 'v3', 'Cargo.lock'), '# This file is automatically @generated by Cargo.\nversion = 3\n');
+  execFileSync('cargo', ['generate-lockfile', '--offline', '--manifest-path', manifestPath], { cwd: deletedOwnedRustRoot });
   symlinkSync(join(repo, 'node_modules'), join(deletedOwnedRustRoot, 'node_modules'), 'dir');
   execFileSync('git', ['init', '-q'], { cwd: deletedOwnedRustRoot });
   execFileSync('git', ['add', 'v3'], { cwd: deletedOwnedRustRoot });

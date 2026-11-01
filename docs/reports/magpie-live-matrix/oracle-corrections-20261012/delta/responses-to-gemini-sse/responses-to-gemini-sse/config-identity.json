@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-gemini-sse/responses-to-gemini-sse/v3-protocol-live-mock-lifecycle-na4cUA/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-gemini-sse/responses-to-gemini-sse/v3-protocol-live-mock-lifecycle-na4cUA/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 50051
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 50052
+    }
+  ],
+  "admin_bind": "127.0.0.1:50052",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:50052"
+  },
+  "mode": "relay",
+  "model": "mock.gemini-model",
+  "wire_model": "gemini-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-gemini",
+      "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-gemini-sse/responses-to-gemini-sse/v3-protocol-live-mock-lifecycle-na4cUA/provider/mock-gemini/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-gemini-sse/responses-to-gemini-sse/provider.toml",
+      "model": "mock.gemini-model",
+      "wire_model": "gemini-model",
+      "sha256": "99e77f2e2fb7cacdff49f3e30bbf39f0bee5b0e99dc08b360721e3092549f1f4"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "gemini",
+    "wire_model": "gemini-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-gemini/mock.gemini-model",
+        "provider_id": "mock-gemini",
+        "model": "mock.gemini-model",
+        "wire_model": "gemini-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/oracle-author/delta/responses-to-gemini-sse/responses-to-gemini-sse/v3-protocol-live-mock-lifecycle-na4cUA/provider/mock-gemini/config.v2.toml",
+        "provider_sha256": "99e77f2e2fb7cacdff49f3e30bbf39f0bee5b0e99dc08b360721e3092549f1f4",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-gemini/mock.gemini-model"
+  ]
+}

@@ -36,7 +36,8 @@ the routed observability block until their runtime owners publish equivalent tru
 - Request headline contains port, protocol, project, selected provider/model, route, endpoint,
   and timestamp.
 - Port/protocol, project, and route/model use exact terminal display-width columns 24, 20, and
-  36; oversized ASCII and CJK values are middle-truncated before padding.
+  36; oversized human-prefix values are middle-truncated to fit their column before padding, while
+  the diagnostic session scope never truncates its safe session id.
 - Request diagnostic line contains request id, session id, stream mode, input counts, and event.
 - Response headline contains project, success/failure marker, status, response status,
   `finish_reason`, elapsed time, and transport.
@@ -52,8 +53,8 @@ the routed observability block until their runtime owners publish equivalent tru
   with `ANSI_DEBUG_DIM`, and the two layers remain visibly distinct.
 - Plain mode preserves the same inline headline/diagnostic hierarchy without ANSI escapes.
 - Short, UUID-length, and oversized session identities keep `req=` at the same diagnostic column.
-  Oversized values are middle-truncated only in the fixed-width scope and retained completely as
-  `sessionIDFull`.
+  The diagnostic session scope retains the complete safe session id, pads it to the fixed-width
+  column when it is shorter, never middle-truncates it, and appends no `sessionIDFull` suffix.
 - A Direct SSE error retains its exact Error01 stage, code, message, and source kind instead of a
   reconstructed RuntimeFailure or fabricated Error06.
 - Client disconnect is raised at `V3ServerRespOutbound06ClientFrame`, renders status 499, and

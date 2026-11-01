@@ -42,11 +42,11 @@ node scripts/replay-codex-sample.mjs \
 
 Require final provider URL/body/headers and proof provider network send stopped. Response-side issue requires a complete raw JSON/SSE provider snapshot through `POST /_routecodex/debug/dry-run`; lazy or partial stream trace is not response evidence.
 
-After both controlled paths pass, install and replay same entry. Specialized Toolreason flow: `26-toolreason-dryrun-diagnostic.md`.
+Use the controlled path that answers the current request- or response-side hypothesis; use both only when the failure crosses those boundaries. Reuse its evidence in the main skill's applicable install and same-entry replay steps, rather than running a second lifecycle sequence here. Specialized Toolreason flow: `26-toolreason-dryrun-diagnostic.md`.
 
 ## Stop Conditions
 
-- Missing provider-bound request or raw response: no layer attribution.
+- Missing the artifact needed to distinguish the suspected boundary: keep attribution unconfirmed and collect that artifact. If execution never reached provider send, use the request-side failure evidence; do not require a nonexistent provider response.
 - Wrong entry/provider/protocol/runtime identity: scope invalidated; recapture.
 - New first divergence in another owner: stop patch and reopen diagnosis.
 - Do not repair provider/request meaning in handler, SSE framer, debug, or client projection.

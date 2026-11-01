@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -65,7 +65,7 @@ export function cargoMetadataFailures(env = process.env, warn = () => {}, runCar
       }
     }
   }
-  for (const crate of ['provider-compat-core', 'servertool-core']) {
+  for (const crate of ['provider-compat-core']) {
     const owners = metadata.packages.filter((pkg) => pkg.name === crate);
     if (owners.length !== 1 || !isInside(v3Root, resolve(owners[0]?.manifest_path ?? '/'))) {
       failures.push(`${crate} must have one V3-local Cargo owner`);
@@ -80,6 +80,7 @@ export function collectIsolationFailures({
   read = readLocal,
   inspectCargo = cargoMetadataFailures,
   resolveNodeDependency = (name) => require.resolve(name),
+  realpath = (path) => realpathSync(path),
   warn = () => {},
 } = {}) {
   const failures = [];
@@ -131,7 +132,16 @@ export function collectIsolationFailures({
 
   try {
     const yamlPath = resolve(resolveNodeDependency('yaml'));
-    if (!isInside(resolve(v3Root, 'node_modules'), yamlPath)) {
+    const nodeModulesRoot = resolve(v3Root, 'node_modules');
+    let local = isInside(nodeModulesRoot, yamlPath);
+    if (!local) {
+      try {
+        local = isInside(realpath(nodeModulesRoot), realpath(yamlPath));
+      } catch {
+        local = false;
+      }
+    }
+    if (!local) {
       failures.push(`V3 Node dependency yaml resolved outside v3/node_modules: ${yamlPath}`);
     }
   } catch (error) {

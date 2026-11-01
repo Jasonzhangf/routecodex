@@ -37,6 +37,7 @@ flowchart LR
 - Empty/absent root `providers` selects Provider directory mode.
 - Partial inline/directory mixing fails.
 - Provider directory files use the V2 Provider codec plus optional `[provider.v3]` policy fields.
+- `concurrency.acquire_timeout_ms` remains accepted for config compatibility. Business requests do not queue for provider concurrency, so this field does not delay or time out request admission.
 - No parse error causes a source-mode fallback.
 
 ## Review checklist

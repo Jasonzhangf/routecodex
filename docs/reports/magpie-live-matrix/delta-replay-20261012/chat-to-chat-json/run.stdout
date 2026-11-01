@@ -1,0 +1,20 @@
+chat-to-chat-json: passed
+{
+  "harness_id": "v3.protocol_live_mock_matrix",
+  "status": "passed",
+  "json_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/chat-to-chat-json/baseline-report.json",
+  "markdown_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/chat-to-chat-json/delta-report.md",
+  "summary": {
+    "total": 1,
+    "entries": 1,
+    "duplicate_case_ids": [],
+    "duplicate_entries": 0,
+    "passed": 1,
+    "failed": 0,
+    "not_run": 0,
+    "skipped": 0,
+    "infra_failure": 0,
+    "product_failures": 0,
+    "runner_failures": 0
+  }
+}

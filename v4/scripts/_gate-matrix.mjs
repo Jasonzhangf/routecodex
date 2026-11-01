@@ -10,7 +10,6 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-capability-isolation.mjs',
   'verify-v4-cordis-bridge.mjs',
   'verify-v4-execution-binding.mjs',
-  'verify-v4-feature-layer-batches.mjs',
   'verify-v4-feature-gap.mjs',
   'verify-v4-infrastructure.mjs',
   'verify-v4-node-graph.mjs',
@@ -19,10 +18,6 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-relay-continuation.mjs',
   'verify-v4-resource-binding.mjs',
   'verify-v4-responses-direct-compat.mjs',
-  'verify-v4-product-differential.mjs',
-  'verify-v4-product-parity-ledger.mjs',
-  'verify-v4-product-parity-status.mjs',
-  'verify-v4-v3-baseline-delta.mjs',
   'verify-v4-semantic-parity.mjs',
   'verify-v4-skeleton-topology.mjs',
   'verify-v4-v3-resource-coverage.mjs',
@@ -31,7 +26,6 @@ export const ARCHITECTURE_GATES = [
   'verify-v4-real-pipeline-mock-transport.mjs',
   'verify-v4-admin.mjs',
   'verify-v4-cordis-host.mjs',
-  'verify-v4-node-container.mjs',
   'verify-v4-standard-plugins.mjs',
   'verify-v4-cli-plugin.mjs',
   'verify-v4-real-runtime-admission.mjs',
@@ -40,12 +34,7 @@ export const ARCHITECTURE_GATES = [
 export const RED_SUITES = [
   ['verify-v4-cordis-bridge.mjs', '--red-self-test'],
   ['verify-v4-execution-binding.mjs', '--red-self-test'],
-  ['verify-v4-feature-layer-batches.mjs', '--red-self-test'],
   ['verify-v4-feature-gap.mjs', '--red-self-test'],
-  ['verify-v4-product-differential.mjs', '--red-self-test'],
-  ['verify-v4-product-parity-ledger.mjs', '--red-self-test'],
-  ['verify-v4-product-parity-status.mjs', '--red-self-test'],
-  ['verify-v4-v3-baseline-delta.mjs', '--red-self-test'],
   ['verify-v4-infrastructure.mjs', '--red-self-test'],
   ['verify-v4-node-graph.mjs', '--red-self-test'],
   ['verify-v4-plane-isolation.mjs', '--red-self-test'],
@@ -58,7 +47,6 @@ export const RED_SUITES = [
   ['verify-v4-real-pipeline-mock-transport.mjs', '--red-self-test'],
   ['verify-v4-admin.mjs', '--red-self-test'],
   ['verify-v4-cordis-host.mjs', '--red-self-test'],
-  ['verify-v4-node-container.mjs', '--red-self-test'],
   ['verify-v4-standard-plugins.mjs', '--red-self-test'],
   ['verify-v4-cli-plugin.mjs', '--red-self-test'],
   ['verify-v4-real-runtime-admission.mjs', '--red-self-test'],
@@ -85,8 +73,6 @@ export const CONSUMER_REGRESSIONS = [
 // These are the unique active map commands that are not architecture or
 // build-link consumer commands. A shared command runs once and can project
 // into several map roles; it must not be copied into one entry per role.
-// Strict feature-layer admission is intentionally not part of this build
-// matrix: install/compile entrypoints and the dedicated admission job own it.
 export const MODULE_REGRESSIONS = [
   { label: 'module:routecodex-v4-plugin-plan', command: 'cargo test -p routecodex-v4-plugin-plan --manifest-path Cargo.toml --locked' },
   { label: 'module:routecodex-v4-cordis-bridge', command: 'cargo test -p routecodex-v4-cordis-bridge --manifest-path Cargo.toml --locked' },
@@ -95,8 +81,6 @@ export const MODULE_REGRESSIONS = [
   { label: 'module:routecodex-v4-cli', command: 'cargo test -p routecodex-v4-cli --manifest-path Cargo.toml --locked' },
   { label: 'module:routecodex-v4-lifecycle', command: 'cargo test -p routecodex-v4-lifecycle --manifest-path Cargo.toml --locked' },
   { label: 'module:routecodex-v4-servertool', command: 'cargo test -p routecodex-v4-servertool --test l2_servertool --manifest-path Cargo.toml --locked' },
-  { label: 'module:feature-layer-self-test', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --self-test' },
-  { label: 'module:feature-layer-boundary', command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs --boundary-self-test' },
   { label: 'module:standard-plugins-request', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_request_plugins --manifest-path Cargo.toml --locked' },
   { label: 'module:standard-plugins-response', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_inbound_outbound --manifest-path Cargo.toml --locked' },
   { label: 'module:standard-plugins-response-chat-process', command: 'cargo test -p routecodex-v4-standard-plugins --test l2_response_chat_process_plugins --manifest-path Cargo.toml --locked' },

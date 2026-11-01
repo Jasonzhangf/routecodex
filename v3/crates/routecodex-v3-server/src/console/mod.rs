@@ -14,7 +14,7 @@ pub(crate) fn read_injected_workspace_cwd_from_payload(payload: &Value) -> Optio
         let Some(role) = message.get("role").and_then(Value::as_str) else {
             continue;
         };
-        if !role.eq_ignore_ascii_case("system") {
+        if !role.eq_ignore_ascii_case("system") && !role.eq_ignore_ascii_case("developer") {
             continue;
         }
         let content = match message.get("content") {
@@ -40,15 +40,33 @@ fn read_injected_workspace_cwd_from_text(text: &str) -> Option<String> {
         };
         let tail = &text[idx + marker.len()..];
         let trimmed = tail.trim_start();
-        let quote_start = trimmed.find('"')? + 1;
-        let path = &trimmed[quote_start..];
-        let quote_end = path.find('"')?;
+        let Some(quote_start) = trimmed.find('"') else {
+            continue;
+        };
+        let path = &trimmed[quote_start + 1..];
+        let Some(quote_end) = path.find('"') else {
+            continue;
+        };
         let cwd = path[..quote_end].trim();
         if !cwd.is_empty() {
             return Some(cwd.to_string());
         }
     }
-    None
+    read_injected_workspace_cwd_section(text)
+}
+
+/// Reads the pi system prompt `cwd` section (`<cwd>\n/path\n</cwd>`), which carries the
+/// session working directory as a structured section instead of the legacy prose marker.
+fn read_injected_workspace_cwd_section(text: &str) -> Option<String> {
+    let start = text.find("<cwd>")? + "<cwd>".len();
+    let tail = &text[start..];
+    let end = tail.find("</cwd>")?;
+    let cwd = tail[..end].trim();
+    if cwd.is_empty() {
+        None
+    } else {
+        Some(cwd.to_string())
+    }
 }
 
 pub(crate) fn align_display_width(value: &str, width: usize) -> String {

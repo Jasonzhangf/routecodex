@@ -1,9 +1,12 @@
 use crate::attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
 use crate::memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 use crate::provider_priority_schedule::V3ProviderPriorityScheduleAuthoringConfig;
+use crate::runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
+use crate::V3ReasoningEffort;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::fmt;
+use std::collections::{BTreeMap, BTreeSet};
+
+pub use crate::auth_types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3Config01FileSource {
@@ -34,6 +37,8 @@ pub struct V3Config02AuthoringParsed {
     pub admin_webui: V3AdminWebuiAuthoringConfig,
     #[serde(default)]
     pub memory_raw_capture: V3MemoryRawCaptureAuthoringConfig,
+    #[serde(default, skip_serializing_if = "V3RuntimeAuthoringConfig::is_default")]
+    pub runtime: V3RuntimeAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -117,8 +122,6 @@ pub struct V3HubHookAuthoringConfig {
     pub order: u32,
     pub allowed_resources: Vec<String>,
     pub forbidden_resources: Vec<String>,
-    #[serde(default)]
-    pub profile: Option<V3HubHookProfile>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -209,12 +212,6 @@ pub enum V3HubHookRequirement {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum V3HubHookProfile {
-    Servertool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
 pub enum V3HubResourceKind {
     Control,
     Debug,
@@ -243,6 +240,11 @@ pub struct V3DebugAuthoringConfig {
     pub log_console: bool,
     #[serde(default)]
     pub log_file: Option<String>,
+    /// 独立的 stage-3 出站投影丢弃日志（append-only JSONL）。刻意与
+    /// `log_file` 分离：丢弃证据不得混入 debug 日志。未配置时默认落在
+    /// `log_file` 同目录的 `projection-drops.jsonl`。
+    #[serde(default)]
+    pub projection_drop_log_file: Option<String>,
     #[serde(default)]
     pub snapshots: bool,
     #[serde(default)]
@@ -264,8 +266,6 @@ pub struct V3ErrorAuthoringConfig {
     pub policies: BTreeMap<String, V3ErrorPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyAuthoringConfig>,
-    #[serde(default)]
-    pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_error_default_path: Option<Vec<V3ProviderDispositionStepAuthoringConfig>>,
 }
@@ -343,11 +343,9 @@ pub enum V3ProviderDispositionStepAuthoringConfig {
         provider_global_failure: bool,
     },
     Project {
-        status: u16,
         reason_code: String,
         #[serde(default)]
         public_code: Option<String>,
-        message_mode: V3ClientErrorProjectionMessageMode,
     },
 }
 
@@ -466,37 +464,6 @@ pub enum V3ProviderErrorRetryMode {
     ProjectTerminal,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ClientErrorProjectionPolicyAuthoringConfig {
-    pub policy_id: String,
-    #[serde(rename = "match")]
-    pub matcher: V3ClientErrorProjectionMatcherAuthoringConfig,
-    pub projection: V3ClientErrorProjectionAuthoringConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ClientErrorProjectionMatcherAuthoringConfig {
-    #[serde(default)]
-    pub reason_code: Option<String>,
-    #[serde(default)]
-    pub action_class: Option<V3ProviderErrorActionClass>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ClientErrorProjectionAuthoringConfig {
-    pub public_code: String,
-    pub message_mode: V3ClientErrorProjectionMessageMode,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum V3ClientErrorProjectionMessageMode {
-    CodeOnly,
-}
-
 #[derive(Debug, Clone)]
 pub struct V3Config03SchemaValidated {
     pub authoring: V3Config02AuthoringParsed,
@@ -542,8 +509,15 @@ pub struct V3ProviderAuthoringConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(rename = "type")]
-    pub provider_type: String,
+    #[serde(default)]
+    pub legacy_provider_type: String,
+    #[serde(default)]
     pub base_url: String,
+    /// Per-interface protocol/endpoint/transport authoring. When non-empty,
+    /// this is the single source for candidate expansion; legacy scalar
+    /// `type`/`baseURL`/`responses` must not be declared alongside it.
+    #[serde(default)]
+    pub interfaces: BTreeMap<String, V3ProviderInterfaceAuthoringConfig>,
     pub default_model: String,
     pub auth: V3ProviderAuthAuthoringConfig,
     pub models: BTreeMap<String, V3ProviderModelAuthoringConfig>,
@@ -561,24 +535,42 @@ pub struct V3ProviderAuthoringConfig {
     pub semantic_error_policy: Vec<V3ProviderSemanticErrorPolicyAuthoringConfig>,
     #[serde(default)]
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    #[serde(default)]
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     #[serde(default, alias = "compatibilityProfile")]
     pub compatibility_profile: Option<String>,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
-    /// per-request 总超时（毫秒）；默认 300_000（300s）。
+    /// Declares a provider that serves on this machine (for example a local
+    /// model runtime). Only a declared local provider may exceed the remote
+    /// first-byte budget below.
+    #[serde(default)]
+    pub local: bool,
+    /// per-request 总超时（毫秒）；默认 60_000（60s）。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
-    /// 本地慢部署（如 dwarfstar 缓存未命中可数分钟出首帧）按 provider 配置
-    /// 放宽，避免 idle 误杀；大多数 provider 无需配置。
+    /// Remote providers are capped at 120_000 by compile-time validation.
+    /// A declared local provider may raise it (for example a local runtime with
+    /// minutes of cold-start latency); most providers need no configuration.
     #[serde(default, alias = "sseFirstFrameTimeoutMs")]
     pub sse_first_frame_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
-/// provider per-request 总超时默认值（毫秒）：300s。
+/// provider per-request 总超时默认值（毫秒）：60s。
 pub fn default_provider_request_timeout_ms() -> u64 {
-    300_000
+    60_000
 }
+
+/// Upper bound for any remote provider's pre-first-byte wait, expressed through
+/// the SSE first-frame timeout. A remote provider that produces no first frame
+/// within this budget is a failed candidate, not a request to keep waiting.
+/// Only a provider declared `local = true` may exceed it. The whole-request
+/// `request_timeout_ms` is a separate budget and is not capped here, so a long
+/// healthy stream is not cut off.
+pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 120_000;
 
 /// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
 pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
@@ -602,61 +594,15 @@ pub struct V3ProviderHealthAuthoringConfig {
     /// bounded ladder, but never wait longer than this configured interval.
     #[serde(default)]
     pub probe_interval_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ProviderAuthAuthoringConfig {
-    #[serde(rename = "type")]
-    pub auth_type: V3ProviderAuthType,
+    /// When true the recovery probe is advisory: probe success or failure only
+    /// updates the probe's own cadence. A scheduled, in-flight or failed probe
+    /// never removes the identity from formal candidate selection and never
+    /// advances the health ladder, so a probe failure cannot keep a provider
+    /// locked out while the upstream is down. Availability stays decided by the
+    /// real business failure hold window and by real business results. Defaults
+    /// to false, preserving cooling behavior.
     #[serde(default)]
-    pub selection: V3SelectionPolicy,
-    pub entries: Vec<V3ProviderAuthEntryAuthoringConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum V3ProviderAuthType {
-    #[serde(alias = "apikey")]
-    ApiKey,
-    OAuth,
-    TokenFile,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct V3ProviderAuthEntryAuthoringConfig {
-    pub alias: String,
-    #[serde(default)]
-    pub priority: Option<i32>,
-    #[serde(default)]
-    pub weight: Option<u32>,
-    #[serde(default)]
-    pub env: Option<String>,
-    #[serde(default, alias = "tokenFile")]
-    pub token_file: Option<String>,
-    #[serde(default, alias = "apiKey")]
-    pub api_key: Option<String>,
-    /// 集中 secret 文件（一个文件管理该 provider 的全部 key，每行 `name = value`）。
-    /// 与 `secret_key` 成对使用：读取文件后按 name 取对应值。
-    #[serde(default, alias = "secretFile")]
-    pub secret_file: Option<String>,
-    /// 集中 secret 文件内本 entry 对应的 key 名（`name` 行）。
-    #[serde(default, alias = "secretKey")]
-    pub secret_key: Option<String>,
-}
-
-impl fmt::Debug for V3ProviderAuthEntryAuthoringConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("V3ProviderAuthEntryAuthoringConfig")
-            .field("alias", &self.alias)
-            .field("env", &self.env)
-            .field("token_file", &self.token_file)
-            .field("secret_file", &self.secret_file)
-            .field("secret_key", &self.secret_key)
-            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
-            .finish()
-    }
+    pub advisory_probe: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -670,9 +616,10 @@ pub struct V3ProviderModelAuthoringConfig {
     pub capabilities: Vec<String>,
     #[serde(default)]
     pub web_search_execution_mode: V3WebSearchExecutionMode,
-    /// Mode B（metadata_center_local_search / servertool_search_backend）的
-    /// 编译期唯一搜索后端引用（例如 search provider 池目标 "provider.model"）。
-    /// 缺失或歧义在 manifest 编译期 fail-fast。
+    /// Retired legacy authoring token. Local search backends are no longer
+    /// supported; the field is parsed only so that config compilation can
+    /// reject it with an explicit `V3ConfigError::Validation` instead of
+    /// silently ignoring it.
     #[serde(default)]
     pub web_search_backend: Option<String>,
     #[serde(default)]
@@ -689,6 +636,8 @@ pub struct V3ProviderModelAuthoringConfig {
     pub context_token_estimate_scale_bps: u64,
     #[serde(default)]
     pub features: BTreeMap<String, bool>,
+    #[serde(default)]
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 fn default_context_token_estimate_scale_bps() -> u64 {
@@ -702,11 +651,12 @@ pub enum V3WebSearchExecutionMode {
     None,
     NativeRemoteSearchToolMix,
     NativeRemoteSearchSearchOnly,
-    /// Proposal `metadata_center_local_search`: local ServerToolCenter
-    /// governed search with exactly one compiled backend binding.
+    /// Retired legacy parse token. RCC-owned local search is no longer
+    /// supported; config compilation rejects this value with an explicit
+    /// `V3ConfigError::Validation`.
     MetadataCenterLocalSearch,
-    /// Legacy alias for `MetadataCenterLocalSearch`; kept for config
-    /// compatibility and maps to the same Mode B semantics.
+    /// Retired legacy parse token (alias of `MetadataCenterLocalSearch`);
+    /// config compilation rejects this value explicitly.
     ServertoolSearchBackend,
 }
 
@@ -721,8 +671,7 @@ impl V3WebSearchExecutionMode {
         }
     }
 
-    /// Mode B: local ServerToolCenter governed search requires exactly one
-    /// compiled backend binding.
+    /// Retired local-search modes; config compilation rejects them.
     pub const fn is_metadata_center_local_search(self) -> bool {
         matches!(
             self,
@@ -738,8 +687,23 @@ pub struct V3ProviderResponsesAuthoringConfig {
     pub streaming: V3StreamingPolicy,
     #[serde(default)]
     pub transport: V3ResponsesTransportKind,
-    #[serde(default)]
+    #[serde(default, alias = "websocketV2URL", alias = "websocketV2Url")]
     pub websocket_v2_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct V3ProviderInterfaceAuthoringConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(rename = "type")]
+    pub interface_type: String,
+    #[serde(alias = "baseURL", alias = "baseUrl")]
+    pub base_url: String,
+    #[serde(default)]
+    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
+    #[serde(default, alias = "compatibilityProfile")]
+    pub compatibility_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -771,6 +735,8 @@ pub enum V3StreamingPolicy {
 #[serde(deny_unknown_fields)]
 pub struct V3ProviderConcurrencyAuthoringConfig {
     pub max_in_flight: u32,
+    /// Runtime recovery waits for temporary capacity/cooldown exhaustion within
+    /// this budget. A single synchronous admission remains nonblocking.
     pub acquire_timeout_ms: u64,
     pub stale_lease_ms: u64,
 }
@@ -804,6 +770,8 @@ pub struct V3ForwarderTargetAuthoringConfig {
     #[serde(default)]
     pub key: Option<String>,
     #[serde(default)]
+    pub interface: Option<String>,
+    #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
     pub weight: Option<u32>,
@@ -834,15 +802,6 @@ pub struct V3RoutePolicyAuthoringConfig {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum V3RouteConditionAuthoringConfig {
     CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -895,6 +854,8 @@ pub struct V3RoutePoolTargetAuthoringConfig {
     #[serde(default)]
     pub key: Option<String>,
     #[serde(default)]
+    pub interface: Option<String>,
+    #[serde(default)]
     pub priority: Option<i32>,
     #[serde(default)]
     pub weight: Option<u32>,
@@ -914,6 +875,16 @@ pub struct V3SelectionPolicy {
     pub strategy: V3SelectionStrategy,
 }
 
+impl V3SelectionPolicy {
+    pub fn is_sticky(&self) -> bool {
+        matches!(self.strategy, V3SelectionStrategy::Sticky)
+    }
+
+    pub fn is_default(&self) -> bool {
+        self.strategy == V3SelectionStrategy::Priority
+    }
+}
+
 impl Default for V3SelectionPolicy {
     fn default() -> Self {
         Self {
@@ -928,6 +899,7 @@ pub enum V3SelectionStrategy {
     Priority,
     Weighted,
     RoundRobin,
+    Sticky,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -943,6 +915,7 @@ pub struct V3Config04ResourceRegistryBuilt {
     pub error: V3ErrorManifest,
     pub admin_webui: Option<V3AdminWebuiManifest>,
     pub memory_raw_capture: V3MemoryRawCaptureManifest,
+    pub runtime: V3RuntimeManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -962,6 +935,7 @@ pub struct V3Config05ManifestPublished {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3ProviderPriorityBaseline {
     pub provider_id: String,
+    pub interface_id: String,
     pub auth_alias: String,
     pub model_id: String,
     pub priority: i32,
@@ -996,19 +970,16 @@ impl V3HubV1Manifest {
 /// without interpreting provider internals itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3DirectModelResolution {
-    /// Not a direct route (no dot, or the segment before the first dot is not
-    /// an enabled provider id) — fall back to normal classification.
+    /// Not a direct route: no dot, the segment before the first dot is not an
+    /// enabled provider id, or the provider declares no such model or alias.
+    /// The request falls back to normal classification — the same path the
+    /// `auto` and virtual entry names take.
     NotDirect,
     /// Resolved to an enabled provider and canonical model id.
     Resolved {
         provider_id: String,
         model_id: String,
         model_capabilities: Vec<String>,
-    },
-    /// The provider exists but declares no such model or alias.
-    UnknownModel {
-        provider_id: String,
-        model_id: String,
     },
 }
 
@@ -1025,23 +996,68 @@ pub struct V3CapabilityModelCandidate {
 
 impl V3Config05ManifestPublished {
     pub fn provider_priority_baselines(&self) -> Vec<V3ProviderPriorityBaseline> {
-        self.route_groups
+        let mut baselines = Vec::new();
+        let mut seen = BTreeSet::new();
+        for target in self
+            .route_groups
             .values()
             .flat_map(|group| group.pools.values())
             .flat_map(|pool| pool.targets.iter())
-            .filter_map(|target| {
-                Some(V3ProviderPriorityBaseline {
-                    provider_id: target.provider.clone()?,
-                    auth_alias: target.key.clone()?,
-                    model_id: target.model.clone()?,
-                    priority: target.priority?,
-                })
-            })
-            .collect()
+        {
+            let Some(provider_id) = target.provider.clone() else {
+                continue;
+            };
+            let Some(auth_alias) = target.key.clone() else {
+                continue;
+            };
+            let Some(model_id) = target.model.clone() else {
+                continue;
+            };
+            let Some(priority) = target.priority else {
+                continue;
+            };
+            let interface_ids = match target.interface.as_ref() {
+                Some(interface_id) => vec![interface_id.clone()],
+                None => self
+                    .providers
+                    .get(&provider_id)
+                    .map(|provider| {
+                        provider
+                            .interfaces
+                            .iter()
+                            .filter(|(_, interface)| interface.enabled)
+                            .map(|(interface_id, _)| interface_id.clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .filter(|interface_ids| !interface_ids.is_empty())
+                    .unwrap_or_else(|| vec!["default".to_string()]),
+            };
+            for interface_id in interface_ids {
+                let key = (
+                    provider_id.clone(),
+                    interface_id.clone(),
+                    auth_alias.clone(),
+                    model_id.clone(),
+                );
+                if seen.insert(key) {
+                    baselines.push(V3ProviderPriorityBaseline {
+                        provider_id: provider_id.clone(),
+                        interface_id,
+                        auth_alias: auth_alias.clone(),
+                        model_id: model_id.clone(),
+                        priority,
+                    });
+                }
+            }
+        }
+        baselines
     }
 
     /// Splits `requested` on its first `.` and resolves the leading segment
     /// against enabled providers, mapping model aliases to the canonical id.
+    /// An enabled provider that declares no such model is `NotDirect`: an
+    /// unlisted model name must fall back to normal classification, never fail
+    /// the request.
     pub fn resolve_direct_provider_model(&self, requested: &str) -> V3DirectModelResolution {
         let requested = requested.trim();
         let Some((provider_id, model_part)) = requested.split_once('.') else {
@@ -1065,10 +1081,7 @@ impl V3Config05ManifestPublished {
                 model_id: model.id.clone(),
                 model_capabilities: model.capabilities.clone(),
             },
-            None => V3DirectModelResolution::UnknownModel {
-                provider_id: provider_id.to_string(),
-                model_id: model_part.to_string(),
-            },
+            None => V3DirectModelResolution::NotDirect,
         }
     }
 
@@ -1104,8 +1117,21 @@ fn entry_protocol_endpoint_pattern_matches(pattern: &str, endpoint_path: &str) -
         return true;
     }
     pattern == "/v1beta/models/:model/generateContent"
-        && endpoint_path.starts_with("/v1beta/models/")
-        && endpoint_path.ends_with("/generateContent")
+        && endpoint_path
+            .strip_prefix("/v1beta/models/")
+            .is_some_and(|tail| {
+                [
+                    "/generateContent",
+                    ":generateContent",
+                    ":streamGenerateContent",
+                ]
+                .iter()
+                .any(|action| {
+                    tail.strip_suffix(action).is_some_and(|model| {
+                        !model.is_empty() && !model.contains('/') && !model.contains(':')
+                    })
+                })
+            })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1142,7 +1168,6 @@ pub struct V3HubHookManifest {
     pub order: u32,
     pub allowed_resources: Vec<String>,
     pub forbidden_resources: Vec<String>,
-    pub profile: Option<V3HubHookProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1173,53 +1198,45 @@ pub struct V3ServerExecutionManifest {
 pub struct V3ProviderManifest {
     pub id: String,
     pub enabled: bool,
+    /// Derived projection of the selected default interface for legacy
+    /// scalar consumers. Multi-interface providers populate `interfaces`;
+    /// this scalar is not a second source of truth.
     pub provider_type: String,
+    /// Derived projection of the selected default interface for legacy
+    /// scalar consumers.
     pub base_url: String,
+    /// Canonical per-interface protocol/endpoint/transport manifest.
+    pub interfaces: BTreeMap<String, V3ProviderInterfaceManifest>,
+    /// Derived projection of the selected default interface for legacy
+    /// scalar consumers.
+    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub default_model: String,
     pub auth: V3ProviderAuthManifest,
     pub models: BTreeMap<String, V3ProviderModelManifest>,
-    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
+    pub reasoning_effort: Option<V3ReasoningEffort>,
     pub compatibility_profile: Option<String>,
     pub features: BTreeMap<String, bool>,
+    /// Declares a provider served on this machine. Only such a provider may
+    /// exceed the remote first-byte budget.
+    pub local: bool,
     /// per-request 总超时（毫秒）
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
     pub sse_first_frame_timeout_ms: Option<u64>,
+    pub headers: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ProviderAuthManifest {
-    pub auth_type: V3ProviderAuthType,
-    pub selection: V3SelectionPolicy,
-    pub entries: Vec<V3ProviderAuthEntryManifest>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub struct V3ProviderAuthEntryManifest {
-    pub alias: String,
-    pub priority: Option<i32>,
-    pub weight: Option<u32>,
-    pub env: Option<String>,
-    pub token_file: Option<String>,
-    pub secret_file: Option<String>,
-    pub secret_key: Option<String>,
-    pub api_key: Option<String>,
-}
-
-impl fmt::Debug for V3ProviderAuthEntryManifest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("V3ProviderAuthEntryManifest")
-            .field("alias", &self.alias)
-            .field("env", &self.env)
-            .field("token_file", &self.token_file)
-            .field("secret_file", &self.secret_file)
-            .field("secret_key", &self.secret_key)
-            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
-            .finish()
-    }
+pub struct V3ProviderInterfaceManifest {
+    pub id: String,
+    pub enabled: bool,
+    pub provider_type: String,
+    pub base_url: String,
+    pub responses: Option<V3ProviderResponsesAuthoringConfig>,
+    pub compatibility_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1229,7 +1246,6 @@ pub struct V3ProviderModelManifest {
     pub aliases: Vec<String>,
     pub capabilities: Vec<String>,
     pub web_search_execution_mode: V3WebSearchExecutionMode,
-    pub web_search_backend_binding: Option<String>,
     pub supports_streaming: bool,
     pub supports_thinking: bool,
     pub thinking: Option<String>,
@@ -1237,6 +1253,7 @@ pub struct V3ProviderModelManifest {
     pub max_context_tokens: Option<u64>,
     pub context_token_estimate_scale_bps: u64,
     pub features: BTreeMap<String, bool>,
+    pub availability: Option<crate::V3ProviderModelAvailabilityAuthoringConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1257,6 +1274,7 @@ pub struct V3ForwarderTargetManifest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub key: Option<String>,
+    pub interface: Option<String>,
     pub priority: Option<i32>,
     pub weight: Option<u32>,
 }
@@ -1265,6 +1283,8 @@ pub struct V3ForwarderTargetManifest {
 pub struct V3DebugManifest {
     pub log_console: bool,
     pub log_file: Option<String>,
+    /// 独立的 stage-3 出站投影丢弃日志路径（append-only JSONL）。
+    pub projection_drop_log_file: Option<String>,
     pub snapshots: bool,
     pub codex_samples: bool,
     pub snapshot_stages: Option<String>,
@@ -1282,7 +1302,6 @@ pub struct V3ErrorManifest {
     pub policies: BTreeMap<String, V3ErrorPolicyManifest>,
     pub provider_error_action_policy: Vec<V3ProviderErrorActionPolicyManifest>,
     pub provider_error_default_path: Vec<V3ProviderDispositionStepManifest>,
-    pub client_error_projection_policy: Vec<V3ClientErrorProjectionPolicyManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1323,10 +1342,8 @@ pub enum V3ProviderDispositionStepManifest {
         provider_global_failure: bool,
     },
     Project {
-        status: u16,
         reason_code: String,
         public_code: Option<String>,
-        message_mode: V3ClientErrorProjectionMessageMode,
     },
 }
 
@@ -1363,119 +1380,4 @@ pub struct V3ProviderErrorActionManifest {
     pub provider_global_failure: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ClientErrorProjectionPolicyManifest {
-    pub policy_id: String,
-    pub matcher: V3ClientErrorProjectionMatcherManifest,
-    pub projection: V3ClientErrorProjectionManifest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct V3ClientErrorProjectionMatcherManifest {
-    pub reason_code: Option<String>,
-    pub action_class: Option<V3ProviderErrorActionClass>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3ClientErrorProjectionManifest {
-    pub public_code: String,
-    pub message_mode: V3ClientErrorProjectionMessageMode,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RouteGroupManifest {
-    pub id: String,
-    pub pools: BTreeMap<String, V3RoutePoolManifest>,
-    pub compact_route_object: Option<String>,
-    pub route_policies: Vec<V3RoutePolicyManifest>,
-    pub features: BTreeMap<String, bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePolicyManifest {
-    pub id: String,
-    pub precedence: i32,
-    pub condition: V3RouteConditionManifest,
-    pub action: V3RouteActionManifest,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum V3RouteConditionManifest {
-    CurrentCompaction,
-    SearchPoolTurnRatioAtLeast {
-        window_turns: usize,
-        numerator: usize,
-        denominator: usize,
-    },
-    ToolExecutionErrorTurnsAtLeast {
-        window_turns: usize,
-        count: usize,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RouteActionManifest {
-    pub select_route_pool: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePoolManifest {
-    pub id: String,
-    pub selection: V3SelectionPolicy,
-    pub route_object: Option<String>,
-    pub match_rule: Option<V3RoutePoolMatchManifest>,
-    pub targets: Vec<V3RoutePoolTargetManifest>,
-    pub features: BTreeMap<String, bool>,
-}
-
-impl V3RouteGroupManifest {
-    pub fn route_pool_for_object(&self, route_object: &str) -> Option<&str> {
-        self.pools.values().find_map(|pool| {
-            (pool.route_object.as_deref() == Some(route_object)).then_some(pool.id.as_str())
-        })
-    }
-
-    pub fn compact_route_pool(&self) -> Option<&str> {
-        self.compact_route_object
-            .as_deref()
-            .and_then(|route_object| self.route_pool_for_object(route_object))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePoolMatchManifest {
-    pub precedence: i32,
-    pub entry_protocol: Option<String>,
-    pub models: Vec<String>,
-    pub required_capabilities: Vec<String>,
-    pub min_input_tokens: Option<u64>,
-    pub max_input_tokens: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct V3RoutePoolTargetManifest {
-    pub kind: V3RouteTargetKind,
-    pub id: Option<String>,
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub key: Option<String>,
-    pub priority: Option<i32>,
-    pub weight: Option<u32>,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_hub_v1_skeleton() -> String {
-    "hub_v1".to_string()
-}
-
-fn default_all_entry_protocols() -> Vec<String> {
-    vec![
-        "responses".to_string(),
-        "anthropic".to_string(),
-        "gemini".to_string(),
-        "openai_chat".to_string(),
-    ]
-}
+include!("types/route_manifest.rs");

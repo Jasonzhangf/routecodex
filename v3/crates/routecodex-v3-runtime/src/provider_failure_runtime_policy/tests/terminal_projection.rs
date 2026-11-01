@@ -41,12 +41,13 @@ async fn transient_terminal_projection_releases_action_admission() {
                 failed_candidates: &mut failed_candidates,
                 same_candidate_retries: &mut same_candidate_retries,
                 trace: &mut trace,
+                last_external_http: &mut None,
             },
         ),
     )
     .await
     .expect("terminal projection must not wait on its own transient admission")
-    .expect("transient provider failure must project through Error05");
+    .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
 
     assert!(
         matches!(
@@ -58,6 +59,10 @@ async fn transient_terminal_projection_releases_action_admission() {
     );
     assert!(result.retry_selected.is_none());
     assert!(result.terminal_projection.is_some());
+    assert_eq!(
+        result.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
+    );
 }
 
 #[tokio::test]
@@ -78,7 +83,7 @@ auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
 [[providers.first.response_error_policy]]
 policy_id = "reselect_then_retry_policy"
 [providers.first.response_error_policy.match]
-http_status = 429
+http_status = 503
 [[providers.first.response_error_policy.path]]
 step = "wait_retry"
 retry_mode = "reselect_before_client_projection"
@@ -86,10 +91,8 @@ max_attempts = 3
 backoff_ms = 5000
 [[providers.first.response_error_policy.path]]
 step = "project"
-status = 503
 reason_code = "reselect_exhausted"
 public_code = "E_RESELECT_EXHAUSTED"
-message_mode = "code_only"
 [providers.first.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools"]
@@ -131,14 +134,15 @@ targets = [
         &context,
         selected,
         "V3ProviderRespInbound01Raw",
-        429,
-        Some("provider_http_429".to_string()),
-        "provider rate limited and no alternative remains".to_string(),
+        503,
+        Some("provider_http_503".to_string()),
+        "provider unavailable and no alternative remains".to_string(),
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_external_http: &mut None,
         },
     )
     .await
@@ -187,10 +191,8 @@ max_attempts = 3
 backoff_ms = 7000
 [[providers.first.response_error_policy.path]]
 step = "project"
-status = 503
 reason_code = "request_local_retry_exhausted"
 public_code = "E_REQUEST_LOCAL"
-message_mode = "code_only"
 [providers.first.models.gpt-test]
 wire_name = "gpt-test"
 capabilities = ["text", "tools"]
@@ -230,6 +232,12 @@ targets = [
         .iter()
         .find(|policy| policy.policy_id == "retry_same_policy")
         .expect("compiled retry policy");
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![("retry-after".to_string(), b"17".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+    );
+    let mut last_external_http = Some(upstream.clone());
     let result = run_v3_relay_provider_failure_policy(
         &context,
         selected,
@@ -242,6 +250,7 @@ targets = [
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_external_http: &mut last_external_http,
         },
     )
     .await
@@ -257,4 +266,11 @@ targets = [
         "request-local compat must not consume a same-candidate retry budget"
     );
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
+    // The request-local compat failure is the terminal, but the real upstream 429
+    // head that arrived on an earlier attempt is still the provider terminal's
+    // evidence: it is recorded, never projected to the client.
+    assert_eq!(
+        result.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+    );
 }

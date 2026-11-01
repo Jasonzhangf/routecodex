@@ -225,7 +225,7 @@
         <tr><td>tool call request</td><td><code>assistant.tool_calls[]</code></td><td><code>output.function_call</code> + <code>required_action.submit_tool_outputs.tool_calls[]</code></td><td><code>content[].tool_use</code></td><td>governed tool-call response</td></tr>
         <tr><td>tool-call id</td><td><code>tool_calls[].id</code></td><td><code>call_id</code> / <code>id</code></td><td><code>tool_use.id</code></td><td>same semantic tool-call identity</td></tr>
         <tr><td>tool result linkage</td><td><code>tool_call_id</code> in next request</td><td><code>function_call_output.call_id</code></td><td><code>tool_result.tool_use_id</code></td><td>same semantic linkage id</td></tr>
-        <tr><td>terminal marker</td><td><code>finish_reason</code></td><td><code>response.completed</code> / <code>response.done</code></td><td>content-block terminal / final completion</td><td>unified terminal response state</td></tr>
+        <tr><td>terminal marker</td><td><code>finish_reason</code></td><td><code>response.completed</code></td><td>content-block terminal / final completion</td><td>unified terminal response state</td></tr>
         <tr><td>continuation resume truth</td><td>internal only</td><td>rebuilt protocol fields only</td><td>internal only</td><td><code>semantics.continuation</code></td></tr>
         <tr><td>hidden reasoning</td><td>hidden/internal</td><td>replay-safe retained subset only</td><td>hidden/internal native carrier</td><td>internal carrier only</td></tr>
         </tbody>
@@ -235,7 +235,7 @@
         <thead><tr><th>Semantic</th><th>JSON surface</th><th>SSE surface</th><th>Must hold</th></tr></thead>
         <tbody>
         <tr><td>---</td><td>---</td><td>---</td><td>---</td></tr>
-        <tr><td>terminal completion</td><td>final JSON body</td><td><code>response.completed</code> / <code>response.done</code></td><td>same terminal truth</td></tr>
+        <tr><td>terminal completion</td><td>final JSON body</td><td><code>response.completed</code></td><td>same terminal truth</td></tr>
         <tr><td>tool call availability</td><td>final <code>assistant.tool_calls</code> or <code>required_action</code></td><td>completed event / final SSE frame</td><td>same consumer-visible tool call set</td></tr>
         <tr><td>tool-call ids</td><td>final body ids</td><td>terminal SSE frame ids</td><td>ids must match exactly</td></tr>
         <tr><td>plain text output</td><td>final text field</td><td>accumulated SSE visible output</td><td>semantic equality, not necessarily byte-for-byte chunking</td></tr>

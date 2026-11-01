@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const admissionRoot = resolve(v3Root, 'build-contracts', 'architecture-admission', 'repo');
+const repoRoot = resolve(v3Root, '..');
 const verifier = resolve(v3Root, 'scripts/architecture/verify-v3-responses-inbound-websocket-proxy.mjs');
 const copied = [
   'v3/crates/routecodex-v3-server/src/lib.rs',
@@ -85,7 +85,7 @@ const cases = [
   {
     name: 'Relay WebSocket unplanned branch dispatch removed',
     file: 'v3/crates/routecodex-v3-server/src/websocket.rs',
-    from: '        None => {\n            execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(',
+    from: '        None => {\n            execute_v3_responses_relay_runtime_with_default_transport_health(',
     to: '        None => {\n            execute_v3_responses_relay_runtime_without_health(',
     diagnostic: /planned and unplanned WebSocket Relay Runtime entry calls/,
   },
@@ -126,9 +126,7 @@ for (const testCase of cases) {
     for (const path of copied) {
       const destination = resolve(root, path);
       mkdirSync(dirname(destination), { recursive: true });
-      const source = path.startsWith('v3/')
-        ? resolve(v3Root, path.slice(3))
-        : resolve(admissionRoot, path);
+      const source = resolve(repoRoot, path);
       cpSync(source, destination);
     }
     const target = resolve(root, testCase.file);

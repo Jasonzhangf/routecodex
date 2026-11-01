@@ -65,30 +65,26 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         .ok_or(V3AnthropicCodecError::MalformedField {
             field: "tool_use.input",
         })?;
-    if context.is_governed_custom_tool(name) {
-        let wrapper = input
-            .as_object()
-            .filter(|value| value.contains_key("input"));
+    if let Some(client_name) = context.governed_custom_tool_client_name(name) {
+        let wrapper = input.as_object().filter(|value| {
+            super::resp_chat_process_03_governed::recognized_v3_custom_tool_wrapper_input_at_resp03(
+                value,
+            )
+            .is_some()
+        });
         let mut output = Map::from_iter([
             (
                 "type".to_string(),
                 Value::String("custom_tool_call".to_string()),
             ),
             ("call_id".to_string(), Value::String(call_id.to_owned())),
-            ("name".to_string(), Value::String(name.to_owned())),
+            ("name".to_string(), Value::String(client_name.to_owned())),
         ]);
+        if let Some((namespace, tool_name)) = context.namespaced_custom_tool_identity(name) {
+            output.insert("namespace".to_string(), Value::String(namespace.to_owned()));
+            output.insert("name".to_string(), Value::String(tool_name.to_owned()));
+        }
         let raw = if let Some(wrapper) = wrapper {
-            if !wrapper.keys().all(|key| {
-                matches!(
-                    key.as_str(),
-                    "input" | "reason" | "goal_alignment_confidence" | "model_id"
-                )
-            }) || wrapper.get("input").and_then(Value::as_str).is_none()
-            {
-                return Err(V3AnthropicCodecError::MalformedField {
-                    field: "custom tool_use.input",
-                });
-            }
             for key in ["reason", "goal_alignment_confidence", "model_id"] {
                 if let Some(value) = wrapper.get(key) {
                     output.insert(key.to_string(), value.clone());
@@ -107,6 +103,23 @@ pub(super) fn anthropic_tool_use_as_responses_call(
         output.insert("input".to_string(), Value::String(raw));
         return Ok(Value::Object(output));
     }
+    // The declared native discovery tool regains its kind only from the same
+    // request-local declaration that owns namespace identity. An undeclared or
+    // ordinary same-named call never reaches this branch, so a provider name
+    // alone can never authorize the native kind.
+    if name == provider_compat_core::namespace_tools::NATIVE_TOOL_SEARCH_WIRE_NAME
+        && context.declares_native_tool_search()
+    {
+        return Ok(Value::Object(Map::from_iter([
+            (
+                "type".to_string(),
+                Value::String("tool_search_call".to_string()),
+            ),
+            ("call_id".to_string(), Value::String(call_id.to_owned())),
+            ("execution".to_string(), Value::String("client".to_string())),
+            ("arguments".to_string(), input.clone()),
+        ])));
+    }
     let mut output = Map::from_iter([
         (
             "type".to_string(),
@@ -123,18 +136,44 @@ pub(super) fn anthropic_tool_use_as_responses_call(
             })?),
         ),
     ]);
-    super::request_outbound_mcp_names::restore_responses_mcp_namespace(&mut output);
+    super::request_outbound_mcp_names::restore_responses_mcp_namespace(
+        &mut output,
+        context.mcp_tool_identities(),
+    );
     Ok(Value::Object(output))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn namespace_custom_malformed_wrapper_preserves_complete_provider_input() {
+        let request = serde_json::json!({"tools":[{"type":"namespace","name":"alpha","tools":[{"type":"custom","name":"run","format":{"type":"text"}}]}]});
+        let context =
+            super::V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&request)
+                .unwrap();
+        for input in [
+            serde_json::json!({"input":17}),
+            serde_json::json!({"input":"raw","unexpected":{"x":1}}),
+        ] {
+            let call = super::anthropic_tool_use_as_responses_call(&serde_json::json!({"type":"tool_use","id":"invalid_wrapper","name":"alpha__run","input":input}), &context).unwrap();
+            assert_eq!(call["type"], "custom_tool_call");
+            assert_eq!(call["namespace"], "alpha");
+            assert_eq!(call["name"], "run");
+            assert_eq!(call["call_id"], "invalid_wrapper");
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(call["input"].as_str().unwrap()).unwrap(),
+                input
+            );
+        }
+    }
     use super::*;
 
     #[test]
-    fn flattened_mcp_tool_use_restores_namespace_for_responses_client() {
+    fn declared_namespace_tool_use_restores_namespace_for_responses_client() {
         let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
-            "tools": [{"type": "function", "name": "mcp__mcpx__workspace"}]
+            "tools": [{"type": "namespace", "name": "mcp__mcpx", "tools": [
+                {"type": "function", "name": "workspace"}
+            ]}]
         }))
         .expect("projection context");
         let call = anthropic_tool_use_as_responses_call(
@@ -152,6 +191,63 @@ mod tests {
         assert_eq!(call["namespace"], "mcp__mcpx");
         assert_eq!(call["name"], "workspace");
         assert_eq!(call["call_id"], "call_mcpx_workspace");
+    }
+
+    #[test]
+    fn namespace_custom_tool_use_restores_declared_client_identity_and_raw_input() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "namespace", "name": "functions", "tools": [
+                {"type": "custom", "name": "exec", "format": {"type": "text"}}
+            ]}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_exec", "name": "functions__exec", "input": {"input": "pwd"}}),
+            &context,
+        )
+        .expect("namespace custom tool_use must restore the client declaration");
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["namespace"], "functions");
+        assert_eq!(call["name"], "exec");
+        assert_eq!(call["input"], "pwd");
+        assert_eq!(call["call_id"], "call_exec");
+    }
+
+    #[test]
+    fn nested_namespace_custom_tool_use_restores_the_declared_client_identity() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type":"namespace","name":"functions","tools":[
+                {"type":"namespace","name":"mcp__mcpx","tools":[
+                    {"type":"custom","name":"exec","format":{"type":"text"}}
+                ]}
+            ]}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type":"tool_use","id":"call_nested","name":"functions__mcp__mcpx__exec","input":{"input":"pwd"}}),
+            &context,
+        ).expect("nested custom tool must restore client name");
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["namespace"], "functions.mcp__mcpx");
+        assert_eq!(call["name"], "exec");
+        assert_eq!(call["input"], "pwd");
+    }
+
+    #[test]
+    fn top_level_custom_tool_with_dotted_name_restores_flat_client_identity() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "custom", "name": "functions.exec"}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_dotted", "name": "functions__exec", "input": {"input": "pwd"}}),
+            &context,
+        )
+        .expect("top-level custom tool name must be preserved");
+        assert_eq!(call["name"], "functions.exec");
+        assert!(call.get("namespace").is_none());
+        assert_eq!(call["call_id"], "call_dotted");
+        assert_eq!(call["input"], "pwd");
     }
 
     #[test]
@@ -199,5 +295,135 @@ mod tests {
         assert_eq!(call["type"], "custom_tool_call");
         assert_eq!(call["input"], "{}");
         assert!(call.get("model_id").is_none());
+    }
+
+    #[test]
+    fn declared_native_tool_search_regains_its_kind_with_complete_arguments_and_id() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [
+                {"type": "tool_search", "execution": "client", "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}, "limit": {"type": "number"}}
+                }},
+                {"type": "function", "name": "local_note", "parameters": {"type": "object"}}
+            ]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({
+                "type": "tool_use",
+                "id": "call_search",
+                "name": "tool_search",
+                "input": {"query": "echo nonce", "limit": 4}
+            }),
+            &context,
+        )
+        .expect("a declared native discovery tool must regain its kind");
+        assert_eq!(call["type"], "tool_search_call");
+        assert_eq!(call["call_id"], "call_search");
+        assert_eq!(call["execution"], "client");
+        assert_eq!(call["arguments"]["query"], "echo nonce");
+        assert_eq!(call["arguments"]["limit"], 4);
+    }
+
+    #[test]
+    fn undeclared_tool_use_is_forwarded_verbatim_as_function_call() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "function", "name": "local_note", "parameters": {"type": "object"}}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "c", "name": "tool_search", "input": {"query": "x"}}),
+            &context,
+        )
+        .expect("an undeclared call must still be forwarded");
+        assert_eq!(call["type"], "function_call");
+        assert_eq!(call["name"], "tool_search");
+    }
+
+    /// A non-client native declaration must not gain client-native authority.
+    /// `execution = "server"` and an omitted execution field both stay with the
+    /// ordinary function projection and keep the original call id and input.
+    #[test]
+    fn non_client_tool_search_declaration_keeps_ordinary_function_call() {
+        for declaration in [
+            json!({"type": "tool_search", "execution": "server", "parameters": {"type": "object"}}),
+            json!({"type": "tool_search", "parameters": {"type": "object"}}),
+        ] {
+            let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(
+                &json!({"tools": [declaration]}),
+            )
+            .expect("projection context");
+            assert!(
+                !context.declares_native_tool_search(),
+                "only a client declaration grants client-native authority"
+            );
+            let call = anthropic_tool_use_as_responses_call(
+                &json!({"type": "tool_use", "id": "call_search", "name": "tool_search", "input": {"query": "x"}}),
+                &context,
+            )
+            .expect("a non-client search call must still be forwarded");
+            assert_eq!(call["type"], "function_call");
+            assert_eq!(call["name"], "tool_search");
+            assert_eq!(call["call_id"], "call_search");
+            assert_eq!(
+                call["arguments"], "{\"query\":\"x\"}",
+                "original arguments must stay verbatim"
+            );
+            assert!(call.get("execution").is_none());
+        }
+    }
+
+    #[test]
+    fn ordinary_function_named_tool_search_keeps_its_own_kind() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [{"type": "function", "name": "tool_search", "parameters": {"type": "object"}}]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_ordinary", "name": "tool_search", "input": {"query": "x"}}),
+            &context,
+        )
+        .expect("ordinary tool_search must project as a function_call");
+        assert_eq!(call["type"], "function_call");
+        assert_eq!(call["name"], "tool_search");
+        assert_eq!(call["call_id"], "call_ordinary");
+    }
+
+    #[test]
+    fn ordinary_declaration_named_tool_search_wins_over_a_native_declaration() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [
+                {"type": "tool_search", "execution": "client", "parameters": {"type": "object"}},
+                {"type": "function", "name": "tool_search", "parameters": {"type": "object"}}
+            ]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_collision", "name": "tool_search", "input": {"query": "x"}}),
+            &context,
+        )
+        .expect("the ordinary declaration must keep precedence");
+        assert_eq!(call["type"], "function_call");
+        assert_eq!(call["call_id"], "call_collision");
+    }
+
+    #[test]
+    fn custom_tool_named_tool_search_keeps_custom_kind_under_a_native_declaration() {
+        let context = V3AnthropicResponsesProjectionContext::from_chat_canonical_request(&json!({
+            "tools": [
+                {"type": "tool_search", "execution": "client", "parameters": {"type": "object"}},
+                {"type": "custom", "name": "tool_search", "format": {"type": "text"}}
+            ]
+        }))
+        .expect("projection context");
+        let call = anthropic_tool_use_as_responses_call(
+            &json!({"type": "tool_use", "id": "call_custom", "name": "tool_search", "input": {"input": "raw"}}),
+            &context,
+        )
+        .expect("the custom declaration must keep precedence");
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["name"], "tool_search");
+        assert_eq!(call["input"], "raw");
     }
 }

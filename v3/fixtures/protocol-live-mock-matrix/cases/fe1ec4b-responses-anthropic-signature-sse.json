@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "case_id": "fe1ec4b-responses-anthropic-signature-sse",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "anthropic",
+    "transport": "sse",
+    "mode": "relay"
+  },
+  "public_entry": {
+    "kind": "http-listener",
+    "consumer": "node-http",
+    "endpoint": "/v1/responses",
+    "isolation": "task-owned-loopback-listener"
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "mock.anthropic-model",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "preserve typed Anthropic SSE signature"
+            }
+          ]
+        }
+      ],
+      "stream": true
+    }
+  },
+  "expected_provider": {
+    "paths": ["/v1/messages"],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "anthropic-model",
+      "messages.0.role": "user",
+      "stream": true
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "upstream_response": {
+    "protocol": "anthropic",
+    "mode": "sse",
+    "status": 200,
+    "content_type": "text/event-stream",
+    "sse_events": [
+      {
+        "event": "message_start",
+        "data": {
+          "type": "message_start",
+          "message": {
+            "id": "msg_fe1ec4b_anthropic_sse",
+            "type": "message",
+            "role": "assistant",
+            "content": [],
+            "usage": {
+              "input_tokens": 9,
+              "output_tokens": 0
+            }
+          }
+        }
+      },
+      {
+        "event": "content_block_start",
+        "data": {
+          "type": "content_block_start",
+          "index": 0,
+          "content_block": {
+            "type": "redacted_thinking",
+            "data": "redacted-anthropic-fe1ec4b-sse"
+          }
+        }
+      },
+      {
+        "event": "content_block_stop",
+        "data": {
+          "type": "content_block_stop",
+          "index": 0
+        }
+      },
+      {
+        "event": "content_block_start",
+        "data": {
+          "type": "content_block_start",
+          "index": 1,
+          "content_block": {
+            "type": "thinking",
+            "thinking": "typed SSE "
+          }
+        }
+      },
+      {
+        "event": "content_block_delta",
+        "data": {
+          "type": "content_block_delta",
+          "index": 1,
+          "delta": {
+            "type": "thinking_delta",
+            "thinking": "reasoning"
+          }
+        }
+      },
+      {
+        "event": "content_block_delta",
+        "data": {
+          "type": "content_block_delta",
+          "index": 1,
+          "delta": {
+            "type": "signature_delta",
+            "signature": "thinking-anthropic-fe1ec4b-sse"
+          }
+        }
+      },
+      {
+        "event": "content_block_stop",
+        "data": {
+          "type": "content_block_stop",
+          "index": 1
+        }
+      },
+      {
+        "event": "content_block_start",
+        "data": {
+          "type": "content_block_start",
+          "index": 2,
+          "content_block": {
+            "type": "text",
+            "text": "typed sse answer"
+          }
+        }
+      },
+      {
+        "event": "content_block_stop",
+        "data": {
+          "type": "content_block_stop",
+          "index": 2
+        }
+      },
+      {
+        "event": "message_delta",
+        "data": {
+          "type": "message_delta",
+          "delta": {
+            "stop_reason": "end_turn"
+          },
+          "usage": {
+            "output_tokens": 3
+          }
+        }
+      },
+      {
+        "event": "message_stop",
+        "data": {
+          "type": "message_stop"
+        }
+      }
+    ]
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "text": "typed sse answer",
+      "output_items.0.type": "reasoning",
+      "output_items.0.encrypted_content": "redacted-anthropic-fe1ec4b-sse",
+      "output_items.1.type": "reasoning",
+      "output_items.1.summary.0.text": "typed SSE reasoning",
+      "output_items.1.encrypted_content": "thinking-anthropic-fe1ec4b-sse",
+      "output_items.2.content.0.text": "typed sse answer"
+    },
+    "body_must_not": [
+      "redacted_thinking",
+      "thinking_delta",
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "files": [
+      "v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs"
+    ],
+    "tests": [
+      "v3/scripts/tests/v3-protocol-live-mock-matrix.mjs::--case fe1ec4b-responses-anthropic-signature-sse",
+      "v3/crates/routecodex-v3-runtime/tests/responses_relay_anthropic_provider_wire_integration.rs::responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_content_to_responses_client"
+    ],
+    "adaptation": "A typed Anthropic SSE provider returns redacted-thinking data and a thinking signature delta. Responses SSE projection must preserve both as reasoning.encrypted_content."
+  },
+  "contract_differences": []
+}

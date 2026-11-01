@@ -1,0 +1,101 @@
+{
+  "id": "v3.operation_runner.error",
+  "version": "2",
+  "inputs": [
+    { "id": "source-failure", "schema": "Object", "schema_ref": "v3.operation_runner.arc.source_failure" }
+  ],
+  "nodes": [
+    {
+      "id": "error_err01_source_raised",
+      "operator": "routecodex.v3.error.err01_source_raised",
+      "operator_version": "1",
+      "inputs": ["source-failure"],
+      "output": { "id": "error-source", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_source" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": ["v3.error.chain"]
+      }
+    },
+    {
+      "id": "error_err02_classified",
+      "operator": "routecodex.v3.error.err02_classified",
+      "operator_version": "1",
+      "inputs": ["error-source"],
+      "output": { "id": "error-classified", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_classified" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain"],
+        "writes": ["v3.error.chain"]
+      }
+    },
+    {
+      "id": "error_err03_target_local_action",
+      "operator": "routecodex.v3.error.err03_target_local_action",
+      "operator_version": "1",
+      "inputs": ["error-classified"],
+      "output": { "id": "error-target-local-action", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_target_local_action" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.target.candidate_set", "v3.provider.availability_projection"],
+        "writes": ["v3.error.chain", "v3.error.action_plan"]
+      }
+    },
+    {
+      "id": "error_err04_target_exhaustion",
+      "operator": "routecodex.v3.error.err04_target_exhaustion",
+      "operator_version": "1",
+      "inputs": ["error-target-local-action"],
+      "output": { "id": "error-target-exhaustion", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_target_exhaustion" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.action_plan", "v3.error.provider_action_gate"],
+        "writes": ["v3.error.chain", "v3.error.exhaustion_decision"]
+      }
+    },
+    {
+      "id": "error_err05_execution_decision",
+      "operator": "routecodex.v3.error.err05_execution_decision",
+      "operator_version": "1",
+      "inputs": ["error-target-exhaustion"],
+      "output": { "id": "error-execution-decision", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_execution_decision" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.exhaustion_decision"],
+        "writes": ["v3.error.chain", "v3.error.execution_decision"]
+      }
+    },
+    {
+      "id": "error_err06_client_projected",
+      "operator": "routecodex.v3.error.err06_client_projected",
+      "operator_version": "1",
+      "inputs": ["error-execution-decision"],
+      "output": { "id": "internal-error-outcome", "schema": "Object", "schema_ref": "v3.operation_runner.arc.error_client_projected" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.execution_decision"],
+        "writes": ["v3.error.client_projection_candidate"]
+      }
+    }
+  ],
+  "edges": [
+    { "from": "error_err01_source_raised", "to": "error_err02_classified", "arc_id": "error-source" },
+    { "from": "error_err02_classified", "to": "error_err03_target_local_action", "arc_id": "error-classified" },
+    { "from": "error_err03_target_local_action", "to": "error_err04_target_exhaustion", "arc_id": "error-target-local-action" },
+    { "from": "error_err04_target_exhaustion", "to": "error_err05_execution_decision", "arc_id": "error-target-exhaustion" },
+    { "from": "error_err05_execution_decision", "to": "error_err06_client_projected", "arc_id": "error-execution-decision" }
+  ],
+  "outputs": ["internal-error-outcome"]
+}

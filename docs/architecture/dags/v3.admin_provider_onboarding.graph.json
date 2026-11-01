@@ -1,0 +1,131 @@
+{
+  "id": "v3.admin_provider_onboarding",
+  "version": "3",
+  "inputs": [
+    { "id": "operator-onboarding-intent", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.operator_intent" }
+  ],
+  "nodes": [
+    {
+      "id": "admin_n01_admin_token_admitted",
+      "operator": "routecodex.v3.admin.auth.require_admin",
+      "operator_version": "1",
+      "inputs": ["operator-onboarding-intent"],
+      "output": { "id": "admin-admitted-intent", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.admitted_intent" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.control_token"], "writes": [] }
+    },
+    {
+      "id": "admin_n02_environment_observed",
+      "operator": "routecodex.v3.admin.api.deploy.build_environment",
+      "operator_version": "1",
+      "inputs": ["admin-admitted-intent"],
+      "output": { "id": "admin-environment", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.environment" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.environment", "v3.lifecycle.status_record", "v3.user_config.file_source"], "writes": [] }
+    },
+    {
+      "id": "admin_n03_provider_models_discovered",
+      "operator": "routecodex.v3.admin.provider_onboarding.discover_models",
+      "operator_version": "1",
+      "inputs": ["admin-environment"],
+      "output": { "id": "admin-provider-models", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.provider_models" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_candidate"], "writes": ["v3.admin.provider_candidate"] }
+    },
+    {
+      "id": "admin_n04_provider_candidate_validated",
+      "operator": "routecodex.v3.admin.provider_onboarding.validate_provider",
+      "operator_version": "1",
+      "inputs": ["admin-provider-models"],
+      "output": { "id": "admin-provider-validated", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.provider_validated" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_candidate"], "writes": ["v3.admin.provider_candidate"] }
+    },
+    {
+      "id": "admin_n05_provider_candidate_probed",
+      "operator": "routecodex.v3.admin.provider_probe.probe_candidate",
+      "operator_version": "1",
+      "inputs": ["admin-provider-validated"],
+      "output": { "id": "admin-provider-probed", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.provider_probed" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_candidate"], "writes": ["v3.admin.provider_probe_result"] }
+    },
+    {
+      "id": "admin_n06_provider_authoring_committed",
+      "operator": "routecodex.v3.admin.provider_onboarding.create_provider",
+      "operator_version": "1",
+      "inputs": ["admin-provider-probed"],
+      "output": { "id": "admin-provider-committed", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.provider_committed" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.admin.provider_candidate"], "writes": ["v3.provider.directory_authoring"] }
+    },
+    {
+      "id": "admin_n07_route_pool_bound",
+      "operator": "routecodex.v3.admin.provider_onboarding.bind_provider_to_route",
+      "operator_version": "1",
+      "inputs": ["admin-provider-committed"],
+      "output": { "id": "admin-route-bound", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.route_bound" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.provider.directory_authoring", "v3.user_config.file_source"], "writes": ["v3.user_config.file_source"] }
+    },
+    {
+      "id": "admin_n08_runtime_restart_requested",
+      "operator": "routecodex.v3.admin.api.deploy.restart_runtime",
+      "operator_version": "1",
+      "inputs": ["admin-route-bound"],
+      "output": { "id": "admin-runtime-applied", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.runtime_applied" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.lifecycle.status_record"], "writes": [] }
+    },
+    {
+      "id": "admin_n09_end_to_end_verified",
+      "operator": "routecodex.v3.debug.observability_store.v3_webui_observability_read_raw_rows",
+      "operator_version": "1",
+      "inputs": ["admin-runtime-applied"],
+      "output": { "id": "admin-provider-verified", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.provider_verified" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.observability.webui_store"], "writes": [] }
+    },
+    {
+      "id": "admin_n10_provider_removed",
+      "operator": "routecodex.v3.admin.provider_onboarding.delete_provider",
+      "operator_version": "1",
+      "inputs": ["admin-provider-verified"],
+      "output": { "id": "admin-provider-retired", "schema": "Object", "schema_ref": "v3.admin_provider_onboarding.arc.provider_retired" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.provider.directory_authoring"], "writes": ["v3.provider.directory_authoring"] }
+    }
+  ],
+  "edges": [
+    { "from": "admin_n01_admin_token_admitted", "to": "admin_n02_environment_observed", "arc_id": "admin-admitted-intent" },
+    { "from": "admin_n02_environment_observed", "to": "admin_n03_provider_models_discovered", "arc_id": "admin-environment" },
+    { "from": "admin_n03_provider_models_discovered", "to": "admin_n04_provider_candidate_validated", "arc_id": "admin-provider-models" },
+    { "from": "admin_n04_provider_candidate_validated", "to": "admin_n05_provider_candidate_probed", "arc_id": "admin-provider-validated" },
+    { "from": "admin_n05_provider_candidate_probed", "to": "admin_n06_provider_authoring_committed", "arc_id": "admin-provider-probed" },
+    { "from": "admin_n06_provider_authoring_committed", "to": "admin_n07_route_pool_bound", "arc_id": "admin-provider-committed" },
+    { "from": "admin_n07_route_pool_bound", "to": "admin_n08_runtime_restart_requested", "arc_id": "admin-route-bound" },
+    { "from": "admin_n08_runtime_restart_requested", "to": "admin_n09_end_to_end_verified", "arc_id": "admin-runtime-applied" },
+    { "from": "admin_n09_end_to_end_verified", "to": "admin_n10_provider_removed", "arc_id": "admin-provider-verified" }
+  ],
+  "outputs": ["admin-provider-retired"]
+}

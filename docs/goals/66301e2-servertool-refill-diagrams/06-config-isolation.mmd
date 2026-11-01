@@ -1,0 +1,15 @@
+%%{init: {"theme":"base","themeVariables":{"lineColor":"#475569"}}}%%
+flowchart TD
+  S([config crate 的 internal.toml]):::boundary --> P[internal.rs 解析 chat_process.refill]:::action
+  P --> C[(只读 max_consecutive_refills 默认1)]:::data
+  C --> LOAD[重建并正式加载 binary]:::action
+  LOAD --> NEW[每个新客户端请求创建独立 used 等于0]:::action
+  NEW --> R[(本请求 typed 控制与原始身份引用)]:::data
+  R --> O([供共享 Chat Process 策略读取]):::boundary
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F1EAFE,stroke:#7C3AED,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569

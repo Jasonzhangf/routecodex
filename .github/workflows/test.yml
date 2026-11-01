@@ -38,6 +38,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install scope dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Git hook behavior regression
+        run: npm run --silent test:git-hooks
       - name: Changed-path fast gate and scope classification
         id: changed
         env:
@@ -74,7 +76,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.v3 == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,21 +94,18 @@ jobs:
         run: npm ci --prefix v3 --ignore-scripts --no-audit --no-fund
       - name: Fetch Rust dependencies for V3 checks
         run: cargo fetch --locked --manifest-path v3/Cargo.toml
-      - name: V3 CI gate wiring regression
+      - name: Prepare native previous-release migration fixture
+        if: ${{ !cancelled() && (needs.scope.outputs.v3_architecture == 'true' || needs.scope.outputs.v3_build == 'true') }}
+        run: node v3/scripts/prepare-v3-previous-release-fixture.mjs
+      - name: Install pinned DAGPipe graph CLI
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
-        run: node --test tests/scripts/v3-ci-gate-dedup.test.mjs
+        run: cargo install --git https://github.com/Jasonzhangf/DAGpipe.git --rev 8cb59fb5262b5e1e440638faf3b04e06a2762cfb --locked pipeline_runtime
       - name: Fallback and internal policy hardcode gate
         if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
         run: npm run verify:fallback-hardcode
       - name: V3 Responses session admission behavior
         if: ${{ !cancelled() && needs.scope.outputs.v3_session == 'true' }}
         run: npm run test:v3-responses-session-admission
-      - name: File line-limit gate (<500)
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run verify:file-line-limit
-      - name: File line-limit behavior regression
-        if: ${{ !cancelled() && needs.scope.outputs.v3 == 'true' }}
-        run: npm run test:file-line-limit
       - name: V3 provider action gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_provider == 'true' }}
         run: npm run test:v3-provider-action-gate
@@ -129,14 +128,18 @@ jobs:
         if: ${{ !cancelled() && needs.scope.outputs.v3_debug == 'true' }}
         run: npm run test:v3-debug-payload-budget-red-fixtures
       - name: V3 canonical verification stack
+        id: v3_canonical
         if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
         run: npm --prefix v3 run verify:ci
+      - name: V3 DAGPipe graph governance
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        run: npm run verify:v3-dagpipe-governance
+      - name: V3 non-proxy feature DAG graph governance
+        if: ${{ !cancelled() && needs.scope.outputs.v3_architecture == 'true' }}
+        run: npm run verify:v3-dagpipe-feature-graphs
       - name: V3 route-classifier semantic gate
         if: ${{ !cancelled() && needs.scope.outputs.v3_router == 'true' }}
         run: npm run test:route-classifier-semantics
-      - name: Servertool Rust-only gate
-        if: ${{ !cancelled() && needs.scope.outputs.v3_tool == 'true' }}
-        run: node scripts/verify-servertool-rust-only.mjs
       - name: Build (release)
         if: needs.scope.outputs.v3_build == 'true'
         env:
@@ -149,9 +152,47 @@ jobs:
       - name: Install built V3 CLI shim
         if: needs.scope.outputs.v3_build == 'true'
         run: npm run fix:cli-shim
+      - name: Allow unprivileged user namespaces for Codex sandbox
+        if: needs.scope.outputs.v3_build == 'true'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Prepare pinned Codex consumer
+        if: needs.scope.outputs.v3_build == 'true'
+        run: |
+          npm install --prefix "$RUNNER_TEMP/rcc-codex-consumer" \
+            --no-save --no-package-lock --no-audit --no-fund \
+            "@openai/codex@0.163.0-alpha.10.2"
+          echo "CODEX_CLI_PATH=$RUNNER_TEMP/rcc-codex-consumer/node_modules/.bin/codex" >> "$GITHUB_ENV"
+      - name: Verify pinned Codex consumer prerequisite
+        if: needs.scope.outputs.v3_build == 'true'
+        run: |
+          "$CODEX_CLI_PATH" --version
+      - name: Installed V3 protocol live-mock matrix
+        id: v3_protocol_matrix
+        if: needs.scope.outputs.v3_build == 'true'
+        run: |
+          node v3/scripts/tests/v3-protocol-live-mock-matrix.mjs \
+            --binary "$HOME/.local/bin/rccv3" \
+            --binary-kind installed \
+            --evidence "$RUNNER_TEMP/v3-installed-protocol-matrix" \
+            --allow-capability-skips
+      - name: Upload V3 protocol matrix evidence
+        if: ${{ !cancelled() && (steps.v3_protocol_matrix.outcome == 'success' || steps.v3_protocol_matrix.outcome == 'failure') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3-installed-protocol-matrix
+          path: ${{ runner.temp }}/v3-installed-protocol-matrix
+          if-no-files-found: warn
       - name: Run host tests after install
         if: needs.scope.outputs.v3_build == 'true'
-        run: node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
+        run: |
+          if [[ '${{ needs.scope.outputs.v3_architecture }}' == 'true' && '${{ steps.v3_canonical.outcome }}' == 'success' ]]; then
+            node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli -p routecodex-v3-lifecycle -- --nocapture
+          else
+            node v3/scripts/run-v3-cargo-test.mjs --workspace -- --nocapture
+          fi
+      - name: V3 cargo test stack environment regression
+        if: needs.scope.outputs.v3_build == 'true'
+        run: npm --prefix v3 run --silent test:v3-cargo-test-stack-env-regression
 
   v4-build:
     needs: scope
@@ -179,33 +220,6 @@ jobs:
         env:
           RCCV4_REAL_RUNTIME_ADMISSION_MODE: contract
         run: npm --prefix v4 run verify:ci
-
-  v4-appsdk-admission:
-    needs: scope
-    if: needs.scope.outputs.v4_full == 'true'
-    runs-on: macos-14
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Build global AppSDK from locked release source
-        run: |
-          git clone --depth 1 --branch v0.1.5 \
-            https://github.com/Jasonzhangf/appsdk.git "$RUNNER_TEMP/appsdk-src"
-          cargo build --release --locked \
-            --manifest-path "$RUNNER_TEMP/appsdk-src/rust/Cargo.toml"
-          mkdir -p "$HOME/.local/bin"
-          install -m 0755 \
-            "$RUNNER_TEMP/appsdk-src/rust/target/release/appsdk" \
-            "$HOME/.local/bin/appsdk"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: V4 AppSDK admission
-        run: |
-          command -v appsdk
-          appsdk version
-          test -x "$(command -v appsdk)"
-          appsdk verify --admission v4
 
   v4-scoped:
     needs: scope

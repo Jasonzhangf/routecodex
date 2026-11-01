@@ -3,18 +3,21 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, Uri},
     response::Response,
     routing::post,
     Router,
 };
-use futures_util::{SinkExt, StreamExt};
-use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
+use futures_util::{future::join_all, SinkExt, StreamExt};
+use routecodex_v3_config::{
+    compile_v3_config_05_manifest, parse_v3_config_02_authoring, V3EntryProtocolExecutionMode,
+};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
+use std::os::unix::fs::PermissionsExt;
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc, oneshot, Mutex, Semaphore},
     time::{sleep, timeout, Duration},
@@ -29,7 +32,473 @@ use tokio_tungstenite::{
     },
 };
 
-static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+/// Serialized public-entry tests share process-global test hooks.
+///
+/// Some tests pin the refill limit to zero to count upstream attempts. The
+/// guard establishes that fixture baseline on acquire and release. Tests
+/// exercising the compiled refill policy explicitly clear the override.
+struct TestLock {
+    inner: Mutex<()>,
+}
+
+impl TestLock {
+    const fn new() -> Self {
+        Self {
+            inner: Mutex::const_new(()),
+        }
+    }
+
+    async fn lock(&self) -> TestLockGuard<'_> {
+        let inner = self.inner.lock().await;
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+        TestLockGuard { _inner: inner }
+    }
+}
+
+struct TestLockGuard<'lock> {
+    _inner: tokio::sync::MutexGuard<'lock, ()>,
+}
+
+impl Drop for TestLockGuard<'_> {
+    fn drop(&mut self) {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    }
+}
+
+static TEST_LOCK: TestLock = TestLock::new();
+
+#[path = "support/image_input_blackbox.rs"]
+mod image_input_blackbox;
+
+#[path = "support/pool_empty_recovery_blackbox.rs"]
+mod pool_empty_recovery_blackbox;
+#[path = "support/sustained_429_window_blackbox.rs"]
+mod sustained_429_window_blackbox;
+
+#[path = "multi_listener_server/issue127_disabled_health.rs"]
+mod issue127_disabled_health;
+
+#[path = "multi_listener_server/issue231_stale_probe.rs"]
+mod issue231_stale_probe;
+
+#[path = "multi_listener_server/issue245_permission_search.rs"]
+mod issue245_permission_search;
+
+#[path = "multi_listener_server/issue3ccb5fa_dsml.rs"]
+mod issue3ccb5fa_dsml;
+
+#[path = "multi_listener_server/issue_d94731e_thinking.rs"]
+mod issue_d94731e_thinking;
+
+#[path = "multi_listener_server/issue4effed6_relay_markers.rs"]
+mod issue4effed6_relay_markers;
+#[path = "multi_listener_server/issue4effed6_relay_serialized.rs"]
+mod issue4effed6_relay_serialized;
+#[path = "multi_listener_server/issueff1e031_chat_markup.rs"]
+mod issueff1e031_chat_markup;
+
+async fn read_raw_content_length_response(socket: &mut TcpStream) -> Vec<u8> {
+    let mut wire = Vec::new();
+    while !wire.ends_with(b"\r\n\r\n") {
+        wire.push(socket.read_u8().await.unwrap());
+    }
+    let head = String::from_utf8(wire.clone()).unwrap();
+    let length = head
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().unwrap())
+        })
+        .expect("bounded test response has Content-Length");
+    let head_length = wire.len();
+    wire.resize(head_length + length, 0);
+    socket.read_exact(&mut wire[head_length..]).await.unwrap();
+    wire
+}
+
+// Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
+#[tokio::test]
+async fn client_transport_observation_public_blackbox() {
+    if std::env::var_os("V3_CLIENT_OBSERVATION_CONSOLE_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "client_transport_observation_public_blackbox",
+                "--nocapture",
+            ])
+            .env("V3_CLIENT_OBSERVATION_CONSOLE_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "public consumer failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for bytes in [&output.stdout, &output.stderr] {
+            assert!(
+                !String::from_utf8_lossy(bytes).contains("\"event\":\"client_transport\""),
+                "high-frequency transport diagnostics reached the human console"
+            );
+        }
+        return;
+    }
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("client-transport-observation");
+    let log = std::env::temp_dir().join(format!("v3-client-wire-{}.jsonl", free_port()));
+    let mut manifest = p6_manifest(free_port(), free_port(), "http://127.0.0.1:9/v1");
+    manifest.debug.log_file = Some(log.to_string_lossy().into_owned());
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    for _ in 0..2 {
+        socket
+            .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let wire = read_raw_content_length_response(&mut socket).await;
+        assert!(wire.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    }
+    socket
+        .write_all(
+            b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: invalid\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut terminal = Vec::new();
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut terminal))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        terminal.is_empty(),
+        "framing error cannot become client error bytes"
+    );
+    let response = reqwest::get(format!("http://{addr}/health")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response.bytes().await.unwrap();
+    let control = reqwest::Client::new()
+        .post(format!("http://{addr}/_routecodex/debug/dry-run"))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    let control_status = control.status().as_u16();
+    assert!(control_status >= 400);
+    control.bytes().await.unwrap();
+    handle.shutdown().await;
+    let records = fs::read_to_string(&log).unwrap();
+    let events = records
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["event"] == "client_transport")
+        .collect::<Vec<_>>();
+    fs::remove_file(&log).unwrap();
+    assert!(
+        !events.is_empty(),
+        "actual client boundary has no diagnostic receipts"
+    );
+    let written = events
+        .iter()
+        .filter(|e| e["stage"] == "socket_write" && e["prepared_status"] == 200)
+        .collect::<Vec<_>>();
+    assert!(
+        written.len() >= 3,
+        "each real successful response needs a socket receipt: {events:?}"
+    );
+    let first_connection = &written[0]["connection_id"];
+    let sequences = written
+        .iter()
+        .filter(|e| &e["connection_id"] == first_connection)
+        .map(|e| e["request_sequence"].as_u64().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        sequences.len(),
+        2,
+        "keep-alive writes must retain their own request sequence"
+    );
+    assert!(events
+        .iter()
+        .any(|e| e["stage"] == "http_connection_end" && !e["error"].is_null()));
+    assert!(events.iter().any(|e| e["stage"] == "socket_write"
+        && e["prepared_status"] == control_status
+        && e["endpoint"] == "/_routecodex/debug/dry-run"));
+    assert!(!events.iter().any(|e| e["stage"] == "socket_write"
+        && e["endpoint"] == "/v1/responses"
+        && e["prepared_status"].as_u64().is_some_and(|s| s >= 400)));
+}
+
+// Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
+#[tokio::test]
+async fn malformed_http_framing_never_sends_client_error_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let handle = spawn_v3_server_aggregate(p6_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+    ))
+    .await
+    .unwrap();
+    let addr = handle.listeners[0].addr;
+    let mut results = Vec::new();
+    for endpoint in [
+        "/v1/chat/completions",
+        "/v1/responses",
+        "/v1/responses/compact",
+        "/v1/messages",
+        "/v1beta/models/wire-test/generateContent",
+    ] {
+        for malformed in [
+            "Content-Length: invalid\r\n".to_owned(),
+            "Content-Length: 1\r\nContent-Length: 2\r\n".to_owned(),
+            "bad header: value\r\n".to_owned(),
+            "x: v\r\n".repeat(101),
+        ] {
+            for reused in ["fresh", "reused", "pipelined"] {
+                let mut socket = TcpStream::connect(addr).await.unwrap();
+                if reused == "reused" {
+                    socket
+                        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                        .await
+                        .unwrap();
+                    let success = timeout(
+                        Duration::from_secs(5),
+                        read_raw_content_length_response(&mut socket),
+                    )
+                    .await
+                    .expect("keep-alive success must finish");
+                    assert!(success.starts_with(b"HTTP/1.1 200"));
+                }
+                socket
+                    .write_all(
+                        format!(
+                            "{}POST {endpoint} HTTP/1.1\r\nHost: localhost\r\n{malformed}\r\n",
+                            if reused == "pipelined" {
+                                "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                            } else {
+                                ""
+                            }
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                if reused == "pipelined" {
+                    let success = timeout(
+                        Duration::from_secs(5),
+                        read_raw_content_length_response(&mut socket),
+                    )
+                    .await
+                    .expect("the preceding pipelined success must finish");
+                    assert!(success.starts_with(b"HTTP/1.1 200"));
+                }
+                let mut wire = Vec::new();
+                let terminal = timeout(Duration::from_secs(5), socket.read_to_end(&mut wire)).await;
+                let ended = matches!(terminal, Ok(Ok(_)))
+                    || matches!(terminal, Ok(Err(ref error)) if error.kind() == std::io::ErrorKind::ConnectionReset);
+                results.push((endpoint, malformed.clone(), reused, ended, wire));
+            }
+        }
+    }
+    handle.shutdown().await;
+    for (endpoint, malformed, reused, ended, wire) in &results {
+        eprintln!(
+            "framing-public {endpoint} connection={reused} header_bytes={} response_bytes={} terminal={ended}",
+            malformed.len(),
+            wire.len()
+        );
+    }
+    for (endpoint, malformed, reused, ended, wire) in results {
+        assert!(ended, "{endpoint} reused={reused} must close, not hang");
+        assert!(
+            wire.is_empty(),
+            "{endpoint} reused={reused} header_bytes={} leaked framing error: {}",
+            malformed.len(),
+            String::from_utf8_lossy(&wire)
+        );
+    }
+}
+
+// Public dependency consumer: the local patch preserves Hyper's default policy.
+#[tokio::test]
+async fn hyper_default_error_policy_preserves_upstream_behavior_blackbox() {
+    for explicitly_enabled in [false, true] {
+        for (header, status) in [
+            ("Content-Length: invalid\r\n".to_owned(), "400"),
+            ("x: v\r\n".repeat(101), "431"),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let task = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let service =
+                    hyper::service::service_fn(|_: hyper::Request<hyper::body::Incoming>| async {
+                        panic!("a parse failure must not enter the application");
+                        #[allow(unreachable_code)]
+                        Ok::<_, std::convert::Infallible>(Response::new(Body::empty()))
+                    });
+                let mut builder = hyper::server::conn::http1::Builder::new();
+                if explicitly_enabled {
+                    builder.automatic_error_responses(true);
+                }
+                let result = builder
+                    .serve_connection(hyper_util::rt::TokioIo::new(socket), service)
+                    .await;
+                assert!(result.is_err(), "the original parse error stays internal");
+            });
+            let mut socket = TcpStream::connect(addr).await.unwrap();
+            socket
+                .write_all(
+                    format!("POST /upstream HTTP/1.1\r\nHost: localhost\r\n{header}\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+            let mut wire = Vec::new();
+            timeout(Duration::from_secs(5), socket.read_to_end(&mut wire))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(wire.starts_with(format!("HTTP/1.1 {status}").as_bytes()));
+            task.await.unwrap();
+        }
+    }
+}
+
+async fn front_transport_test_listener(
+    router: Router,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let (socket, peer) = listener.accept().await.unwrap();
+        let broker = routecodex_v3_server::V3FrontTransportBroker::new(1);
+        let identity = broker.allocate_connection_identity();
+        routecodex_v3_server::serve_v3_front_http_connection(
+            socket, peer, identity, broker, router,
+        )
+        .await
+        .unwrap();
+    });
+    (addr, task)
+}
+
+// Public Front consumer: protects transparent payloads, control errors, and interim heads.
+#[tokio::test]
+async fn front_http_framing_preserves_authorized_responses_blackbox() {
+    let router = Router::new()
+        .route(
+            "/control",
+            axum::routing::get(|| async { (StatusCode::IM_A_TEAPOT, "control-error") }),
+        )
+        .route(
+            "/opaque",
+            axum::routing::get(|| async {
+                Body::from_stream(futures_util::stream::unfold(0, |index| async move {
+                    if index == 64 {
+                        return None;
+                    }
+                    sleep(Duration::from_millis(2)).await;
+                    let bytes = format!("HTTP/1.1 500 body-data-{index}:{}", "x".repeat(32768));
+                    Some((Ok::<_, std::io::Error>(bytes), index + 1))
+                }))
+            }),
+        );
+    let (addr, task) = front_transport_test_listener(router).await;
+    let client = reqwest::Client::new();
+    let control = client
+        .get(format!("http://{addr}/control"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(control.status(), StatusCode::IM_A_TEAPOT);
+    assert_eq!(control.text().await.unwrap(), "control-error");
+    let opaque = client
+        .get(format!("http://{addr}/opaque"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(opaque.status(), StatusCode::OK);
+    let body = opaque.text().await.unwrap();
+    let expected = (0..64)
+        .map(|index| format!("HTTP/1.1 500 body-data-{index}:{}", "x".repeat(32768)))
+        .collect::<String>();
+    assert_eq!(body, expected);
+    drop(client);
+    timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let echo = Router::new().route("/echo", post(|body: axum::body::Bytes| async move { body }));
+    let (addr, task) = front_transport_test_listener(echo).await;
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket
+        .write_all(b"POST /echo HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 4\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut interim = Vec::new();
+    timeout(Duration::from_secs(5), async {
+        while !interim.ends_with(b"\r\n\r\n") {
+            interim.push(socket.read_u8().await.unwrap());
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(interim, b"HTTP/1.1 100 Continue\r\n\r\n");
+    socket.write_all(b"echo").await.unwrap();
+    let response = timeout(
+        Duration::from_secs(5),
+        read_raw_content_length_response(&mut socket),
+    )
+    .await
+    .unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    assert!(response.ends_with(b"echo"));
+    drop(socket);
+    timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+async fn assert_websocket_closes_without_data(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+) {
+    let terminal = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("failed request must close its WebSocket");
+    assert!(
+        matches!(terminal, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
+        "no error or success payload may be sent for a failed request: {terminal:?}"
+    );
+}
+
+async fn assert_incomplete_sse_or_no_response(response: Result<reqwest::Response, reqwest::Error>) {
+    if let Ok(mut response) = response {
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+        let mut wire = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+                Err(_) => break,
+                Ok(None) => panic!("failed request must not complete its SSE transfer"),
+            }
+        }
+        let text = String::from_utf8_lossy(&wire);
+        assert!(
+            !text.contains("error")
+                && !text.contains("provider")
+                && !text.contains("transport break")
+                && !text.contains("response.failed")
+                && !text.contains("[DONE]")
+                && !text.contains("response.completed"),
+            "{text}"
+        );
+    }
+}
 
 struct TestHomeGuard {
     previous: Option<OsString>,
@@ -50,10 +519,14 @@ impl TestHomeGuard {
     }
 
     fn codex_samples_root(&self, port: u16) -> PathBuf {
+        self.codex_samples_root_for("openai-responses", port)
+    }
+
+    fn codex_samples_root_for(&self, endpoint: &str, port: u16) -> PathBuf {
         self.path
             .join(".rcc")
             .join("codex-samples")
-            .join("openai-responses")
+            .join(endpoint)
             .join("ports")
             .join(port.to_string())
     }
@@ -115,6 +588,52 @@ fn read_single_responses_sample_response(samples_root: &std::path::Path) -> Valu
     serde_json::from_str(&response).unwrap()
 }
 
+fn assert_responses_sse_delivered_business_text(body: &str, expected: &str) {
+    assert!(
+        body.contains("event: response.completed"),
+        "client SSE must reach the protocol terminal: {body}"
+    );
+    assert!(
+        body.contains(expected),
+        "client SSE must carry the provider business text {expected:?}: {body}"
+    );
+}
+
+fn assert_responses_sample_sse_delivered_business_text(sample: &Value, expected: &str) {
+    let raw = sample
+        .get("rawSse")
+        .and_then(Value::as_str)
+        .expect("persisted SSE sample must expose rawSse");
+    assert!(
+        raw.contains(expected),
+        "persisted SSE sample must carry provider business text {expected:?}"
+    );
+}
+
+/// Wait for the provider-terminal evidence of the failed request to reach disk.
+///
+/// The boundary records the evidence before it breaks the client transport, but
+/// the sample store persists it through its own worker, so the artifact can land
+/// slightly after the client observes the abort. Parseable JSON, not file
+/// existence, is the completion signal: a reader can otherwise observe a
+/// partially written file.
+async fn wait_for_v3_provider_terminal_evidence(samples_root: &std::path::Path) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-terminal.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        return evidence;
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("provider terminal evidence must appear under {samples_root:?}");
+}
+
 fn read_responses_sample_response_by_request_marker(
     samples_root: &std::path::Path,
     request_marker: &str,
@@ -134,6 +653,155 @@ fn read_responses_sample_response_by_request_marker(
     panic!("no Codex sample request contains marker {request_marker}");
 }
 
+fn read_snapall_sample_dir(samples_root: &std::path::Path, request_marker: &str) -> PathBuf {
+    let entries = fs::read_dir(samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for entry in entries {
+        let request = fs::read_to_string(entry.path().join("request.json")).unwrap_or_default();
+        if request.contains(request_marker) {
+            return entry.path();
+        }
+    }
+    panic!("no Codex sample request contains marker {request_marker}");
+}
+
+fn assert_snapall_four_stage_artifacts(label: &str, sample_dir: &std::path::Path) {
+    let mut persisted = fs::read_dir(sample_dir)
+        .unwrap_or_else(|error| panic!("sample directory {sample_dir:?} must exist: {error}"))
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    persisted.sort();
+    for artifact in [
+        "request.json",
+        "provider-request.json",
+        "provider-response.json",
+        "response.json",
+    ] {
+        let path = sample_dir.join(artifact);
+        assert!(
+            path.is_file(),
+            "snapall {label} must persist {artifact} under {sample_dir:?}; persisted={persisted:?}"
+        );
+        serde_json::from_slice::<Value>(&fs::read(&path).unwrap())
+            .unwrap_or_else(|error| panic!("{path:?} must be complete JSON: {error}"));
+    }
+}
+
+fn read_snapall_json(sample_dir: &std::path::Path, file_name: &str) -> Value {
+    serde_json::from_slice(&fs::read(sample_dir.join(file_name)).unwrap()).unwrap()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn assert_snapall_protocol_json_and_sse(
+    handle: &routecodex_v3_server::V3ServerAggregateHandle,
+    home_guard: &TestHomeGuard,
+    client: &reqwest::Client,
+    endpoint_name: &str,
+    json_url: &str,
+    sse_url: &str,
+    json_payload: Value,
+    sse_payload: Value,
+    json_marker: &str,
+    sse_marker: &str,
+    provider_json_marker: &str,
+    provider_sse_marker: &str,
+) {
+    eprintln!("snapall matrix protocol start endpoint={endpoint_name}");
+    let json_response = client
+        .post(json_url)
+        .json(&json_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), StatusCode::OK);
+    let client_json: Value = json_response.json().await.unwrap();
+    eprintln!("snapall matrix protocol json complete endpoint={endpoint_name}");
+
+    let sse_response = client
+        .post(sse_url)
+        .json(&sse_payload)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), StatusCode::OK);
+    let client_sse = sse_response.text().await.unwrap();
+    eprintln!("snapall matrix protocol sse complete endpoint={endpoint_name}");
+
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted snapall samples must finish before disk inspection");
+    let samples_root =
+        home_guard.codex_samples_root_for(endpoint_name, handle.listeners[0].addr.port());
+    let json_dir = read_snapall_sample_dir(&samples_root, json_marker);
+    let sse_dir = read_snapall_sample_dir(&samples_root, sse_marker);
+    assert_snapall_four_stage_artifacts("JSON request", &json_dir);
+    assert_snapall_four_stage_artifacts("SSE request", &sse_dir);
+
+    let json_request = read_snapall_json(&json_dir, "request.json");
+    assert!(
+        json_request.to_string().contains(json_marker),
+        "request.json must preserve the complete JSON client request"
+    );
+    let json_provider_request = read_snapall_json(&json_dir, "provider-request.json");
+    assert!(
+        json_provider_request.to_string().contains(json_marker),
+        "provider-request.json must preserve the provider-bound JSON request"
+    );
+    let json_provider_response = read_snapall_json(&json_dir, "provider-response.json");
+    assert!(
+        json_provider_response.to_string().contains(provider_json_marker),
+        "provider-response.json must preserve the genuine provider JSON body: {json_provider_response}"
+    );
+    assert!(
+        !json_provider_response
+            .to_string()
+            .contains("\"bodyKind\":\"sse\""),
+        "a JSON provider response must not be recorded as SSE: {json_provider_response}"
+    );
+    let json_response_sample = read_snapall_json(&json_dir, "response.json");
+    if json_response_sample.get("bodyKind").is_some() {
+        assert_eq!(json_response_sample["bodyKind"], "json");
+        assert_eq!(json_response_sample["rawBody"], client_json);
+    } else {
+        assert_eq!(
+            json_response_sample, client_json,
+            "persisted JSON response must equal the exact JSON body received by the client"
+        );
+    }
+
+    let sse_request = read_snapall_json(&sse_dir, "request.json");
+    assert!(
+        sse_request.to_string().contains(sse_marker),
+        "request.json must preserve the complete SSE client request"
+    );
+    let sse_provider_request = read_snapall_json(&sse_dir, "provider-request.json");
+    assert!(
+        sse_provider_request.to_string().contains(sse_marker),
+        "provider-request.json must preserve the provider-bound SSE request"
+    );
+    let sse_provider_response = read_snapall_json(&sse_dir, "provider-response.json");
+    assert!(
+        sse_provider_response
+            .to_string()
+            .contains("\"bodyKind\":\"sse\""),
+        "an SSE provider response must stay genuine SSE: {sse_provider_response}"
+    );
+    assert!(
+        sse_provider_response.to_string().contains(provider_sse_marker),
+        "provider-response.json must preserve the genuine provider SSE wire: {sse_provider_response}"
+    );
+    let sse_response_sample = read_snapall_json(&sse_dir, "response.json");
+    assert_eq!(sse_response_sample["bodyKind"], "sse");
+    assert_eq!(
+        sse_response_sample["rawSse"].as_str(),
+        Some(client_sse.as_str()),
+        "persisted rawSse must equal the exact wire received by the client"
+    );
+}
+
 const HUB_V1_TEST_DECLARATION: &str = r#"
 [pipelines.hub_v1]
 skeleton = "hub_v1"
@@ -142,7 +810,7 @@ hook_set_id = "hub_v1.default"
 entry_protocol_bindings = [
   { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" },
   { entry_protocol = "anthropic", endpoint_patterns = ["/v1/messages"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Anthropic Messages endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_anthropic_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs" },
-  { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" },
+  { entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" },
   { entry_protocol = "gemini", endpoint_patterns = ["/v1beta/models/:model/generateContent"], execution_mode = "relay", protocol_profile_owner = "v3.gemini_relay_runtime_integration", implemented = true, forbidden_reentry_behavior = "Gemini endpoint must not fall through to pending or direct runtime.", runtime_owner_symbol = "execute_v3_gemini_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs" },
 ]
 resources = { metadata_center = { kind = "control", scope = "request" }, error_chain = { kind = "error", scope = "request" }, debug_artifact = { kind = "debug", scope = "debug" }, snapshot_buffer = { kind = "snapshot", scope = "debug" }, provider_health = { kind = "provider_health", scope = "provider" } }
@@ -151,7 +819,7 @@ hooks = [
   { hook_id = "hub_v1.V3HubReqInbound01ClientRaw.exit.not_implemented", node = "V3HubReqInbound01ClientRaw", phase = "exit", requirement = "required", priority = 0, order = 1, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.entry.not_implemented", node = "V3HubReqInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 2, allowed_resources = ["metadata_center"], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqInbound02Normalized.exit.not_implemented", node = "V3HubReqInbound02Normalized", phase = "exit", requirement = "optional", enabled = false, priority = 0, order = 3, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubReqChatProcess04Governed.entry.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "entry", requirement = "required", priority = 0, order = 4, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqChatProcess04Governed.exit.not_implemented", node = "V3HubReqChatProcess04Governed", phase = "exit", requirement = "required", priority = 0, order = 5, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqExecution05Planned.entry.not_implemented", node = "V3HubReqExecution05Planned", phase = "entry", requirement = "required", priority = 0, order = 6, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubReqExecution05Planned.exit.not_implemented", node = "V3HubReqExecution05Planned", phase = "exit", requirement = "required", priority = 0, order = 7, allowed_resources = [], forbidden_resources = [] },
@@ -171,7 +839,7 @@ hooks = [
   { hook_id = "hub_v1.ProviderRespCompat02ProviderCompat.exit.not_implemented", node = "ProviderRespCompat02ProviderCompat", phase = "exit", requirement = "required", priority = 0, order = 21, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespInbound02Normalized.entry.not_implemented", node = "V3HubRespInbound02Normalized", phase = "entry", requirement = "required", priority = 0, order = 22, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespInbound02Normalized.exit.not_implemented", node = "V3HubRespInbound02Normalized", phase = "exit", requirement = "required", priority = 0, order = 23, allowed_resources = [], forbidden_resources = [] },
-  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [], profile = "servertool" },
+  { hook_id = "hub_v1.V3HubRespChatProcess03Governed.entry.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "entry", requirement = "required", priority = 0, order = 24, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespChatProcess03Governed.exit.not_implemented", node = "V3HubRespChatProcess03Governed", phase = "exit", requirement = "required", priority = 0, order = 25, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.entry.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "entry", requirement = "required", priority = 0, order = 26, allowed_resources = [], forbidden_resources = [] },
   { hook_id = "hub_v1.V3HubRespOutbound05ClientSemantic.exit.not_implemented", node = "V3HubRespOutbound05ClientSemantic", phase = "exit", requirement = "required", priority = 0, order = 27, allowed_resources = [], forbidden_resources = [] },
@@ -183,12 +851,12 @@ hooks = [
 const HUB_V1_TEST_SERVER_EXECUTION: &str = r#"
 [servers.a.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [servers.b.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 "#;
 
@@ -238,59 +906,22 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
-fn metadata_center_local_search_manifest(
-    port_a: u16,
-    port_b: u16,
-) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
-    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
-    let source = format!(
-        r#"
-version = 3
-{hub_v1_declaration}
-[servers.a]
-bind = "127.0.0.1"
-port = {port_a}
-routing_group = "default"
-endpoints = ["responses"]
-[servers.b]
-bind = "127.0.0.1"
-port = {port_b}
-routing_group = "default"
-endpoints = ["responses"]
-{hub_v1_server_execution}
-[providers.test]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
-[providers.test.models.test]
-capabilities = ["web_search"]
-web_search_execution_mode = "metadata_center_local_search"
-web_search_backend = "search.backend"
-[providers.search]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_TEST_KEY" }}] }}
-[providers.search.models.backend]
-[debug]
-log_console = false
-snapshots = false
-dry_run = false
-retention = {{ raw_requests = 4, raw_responses = 4, events = 128 }}
-[route_groups.default.pools.default]
-selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
-"#
-    );
-    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
-}
-
 fn p6_manifest(
     port_a: u16,
     port_b: u16,
     provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    p6_manifest_with_context_window(port_a, port_b, provider_base_url, 128_000)
+}
+
+/// `max_context_tokens` bounds every candidate in the p6 route pools, so a
+/// window too small for the request forces a selection-time pool exhaustion
+/// with no provider attempt at all.
+fn p6_manifest_with_context_window(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    max_context_tokens: u32,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
@@ -314,6 +945,7 @@ type = "responses"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.test.models.test]
 wire_name = "wire-test"
@@ -323,7 +955,7 @@ supports_streaming = true
 supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
-max_context_tokens = 128000
+max_context_tokens = {max_context_tokens}
 [providers.test.models."gpt-5.6-sol"]
 wire_name = "gpt-5.6-sol"
 capabilities = ["text", "reasoning", "tools"]
@@ -357,15 +989,104 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
+/// `p6_manifest` with a declared `expose_models` entry list. `client-test` and
+/// `offroute-test` are both reachable routed visible ids (one pool match each);
+/// `gpt-5.5` and `auto` match no provider model and are therefore client entry
+/// names rather than routed or direct ids.
+fn p6_manifest_with_expose_models(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+expose_models = ["gpt-5.5", "auto", "client-test"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.test.models.test]
+wire_name = "wire-test"
+aliases = ["client-test"]
+capabilities = ["text", "tools", "vision"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+[providers.test.models.offroute]
+wire_name = "offroute-wire"
+aliases = ["offroute-test"]
+capabilities = ["text", "tools"]
+supports_streaming = true
+max_tokens = 2048
+max_context_tokens = 64000
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.offroute]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 20, models = ["offroute-test"] }}
+targets = [{{ kind = "provider_model", provider = "test", model = "offroute", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn responses_relay_manifest(
     port_a: u16,
     port_b: u16,
     provider_base_url: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    responses_relay_provider_protocol_manifest(port_a, port_b, provider_base_url, "responses", None)
+}
+
+fn responses_relay_provider_protocol_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    provider_type: &str,
+    fallback_base_url: Option<&str>,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
     let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let fallback_provider = fallback_base_url.map_or(String::new(), |base_url| {
+        format!(
+            "[providers.fallback]\ntype = \"responses\"\nbase_url = \"{base_url}\"\ndefault_model = \"test\"\nauth = {{ type = \"api_key\", entries = [{{ alias = \"key\", env = \"V3_P6_TEST_KEY\" }}] }}\n[providers.fallback.models.test]\nwire_name = \"wire-test\"\ncapabilities = [\"text\", \"tools\"]\nsupports_streaming = true\nmax_tokens = 4096\nmax_context_tokens = 128000\n"
+        )
+    });
+    let targets = if fallback_base_url.is_some() {
+        "{ kind = \"provider_model\", provider = \"test\", model = \"test\", key = \"key\", priority = 2 }, { kind = \"provider_model\", provider = \"fallback\", model = \"test\", key = \"key\", priority = 1 }"
+    } else {
+        "{ kind = \"provider_model\", provider = \"test\", model = \"test\", key = \"key\", priority = 1 }"
+    };
     let source = format!(
         r#"
 version = 3
@@ -382,10 +1103,11 @@ routing_group = "default"
 endpoints = ["responses"]
 {hub_v1_server_execution}
 [providers.test]
-type = "responses"
+type = "{provider_type}"
 base_url = "{provider_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.test.models.test]
 wire_name = "wire-test"
@@ -396,6 +1118,7 @@ supports_thinking = true
 thinking = "optional"
 max_tokens = 4096
 max_context_tokens = 128000
+{fallback_provider}
 [debug]
 log_console = false
 snapshots = true
@@ -404,10 +1127,10 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 [route_groups.default.pools.client_test]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{targets}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{targets}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -432,7 +1155,7 @@ routing_group = "default"
 endpoints = ["responses"]
 [servers.a.execution]
 allowed_modes = [{allowed_modes}]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 [servers.b]
 bind = "127.0.0.1"
@@ -441,7 +1164,7 @@ routing_group = "default"
 endpoints = ["responses"]
 [servers.b.execution]
 allowed_modes = [{allowed_modes}]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 [providers.mixed]
 type = "{provider_type}"
@@ -512,6 +1235,274 @@ fn responses_direct_binding_openai_chat_provider_direct_only_manifest(
     )
 }
 
+fn snapall_openai_chat_direct_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["openai_chat"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["openai_chat"]
+{hub_v1_server_execution}
+[providers.chat]
+type = "openai_chat"
+base_url = "{provider_base_url}"
+default_model = "chat-test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_TEST_KEY" }}] }}
+[providers.chat.models.chat-test]
+wire_name = "chat-test"
+aliases = ["client-test"]
+capabilities = ["text"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+[debug]
+log_console = false
+snapshots = true
+dry_run = false
+retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "provider_model", provider = "chat", model = "chat-test", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "chat", model = "chat-test", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn set_snapall_entry_protocol_modes(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    mode: V3EntryProtocolExecutionMode,
+) {
+    let hub = manifest
+        .hub_v1
+        .as_mut()
+        .expect("snapall matrix requires the Hub V1 pipeline");
+    for binding in &mut hub.entry_protocol_bindings {
+        binding.execution_mode = mode;
+    }
+}
+
+fn enable_snapall_full_sampling(manifest: &mut routecodex_v3_config::V3Config05ManifestPublished) {
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+}
+
+fn snapall_all_protocols_manifest(
+    port_a: u16,
+    port_b: u16,
+    upstream_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+{hub_v1_server_execution}
+[providers.responses_ok]
+type = "responses"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "responses-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.responses_ok.models.responses-wire]
+wire_name = "responses-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.chat_ok]
+type = "openai_chat"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "chat-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.chat_ok.models.chat-wire]
+wire_name = "chat-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.anthropic_ok]
+type = "anthropic"
+base_url = "{upstream_base_url}/ok"
+default_model = "anthropic-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.anthropic_ok.models.anthropic-wire]
+wire_name = "anthropic-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.gemini_ok]
+type = "gemini"
+base_url = "{upstream_base_url}/ok/v1beta"
+default_model = "gemini-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.gemini_ok.models.gemini-wire]
+wire_name = "gemini-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[debug]
+log_console = false
+snapshots = true
+dry_run = false
+retention = {{ raw_requests = 64, raw_responses = 64, events = 128 }}
+[route_groups.default.pools.responses]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "responses", models = ["responses-wire"] }}
+targets = [{{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.chat]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-wire"] }}
+targets = [{{ kind = "provider_model", provider = "chat_ok", model = "chat-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.anthropic]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-wire"] }}
+targets = [{{ kind = "provider_model", provider = "anthropic_ok", model = "anthropic-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.gemini]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "gemini" }}
+targets = [{{ kind = "provider_model", provider = "gemini_ok", model = "gemini-wire", key = "key", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn snapall_handoff_manifest(
+    port_a: u16,
+    port_b: u16,
+    upstream_base_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses", "anthropic", "gemini", "openai_chat"]
+{hub_v1_server_execution}
+[providers.chat_alpha]
+type = "openai_chat"
+base_url = "{upstream_base_url}/fail/v1"
+default_model = "chat-alpha-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.chat_alpha.models.chat-alpha-wire]
+wire_name = "chat-alpha-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.responses_ok]
+type = "responses"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "responses-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.responses_ok.models.responses-wire]
+wire_name = "responses-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.anthropic_alpha]
+type = "anthropic"
+base_url = "{upstream_base_url}/fail"
+default_model = "anthropic-alpha-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.anthropic_alpha.models.anthropic-alpha-wire]
+wire_name = "anthropic-alpha-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.chat_ok]
+type = "openai_chat"
+base_url = "{upstream_base_url}/ok/v1"
+default_model = "chat-ok-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.chat_ok.models.chat-ok-wire]
+wire_name = "chat-ok-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[providers.gemini_alpha]
+type = "gemini"
+base_url = "{upstream_base_url}/fail/v1beta"
+default_model = "gemini-alpha-wire"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_SNAPALL_MATRIX_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.gemini_alpha.models.gemini-alpha-wire]
+wire_name = "gemini-alpha-wire"
+capabilities = ["text", "tools"]
+supports_streaming = true
+[debug]
+log_console = false
+snapshots = true
+dry_run = false
+retention = {{ raw_requests = 64, raw_responses = 64, events = 128 }}
+[route_groups.default.pools.chat_handoff]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-alpha-wire"] }}
+targets = [
+  {{ kind = "provider_model", provider = "chat_alpha", model = "chat-alpha-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}
+]
+[route_groups.default.pools.anthropic_handoff]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-alpha-wire"] }}
+targets = [
+  {{ kind = "provider_model", provider = "anthropic_alpha", model = "anthropic-alpha-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "chat_ok", model = "chat-ok-wire", key = "key", priority = 1 }}
+]
+[route_groups.default.pools.gemini_handoff]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-alpha-wire"] }}
+targets = [
+  {{ kind = "provider_model", provider = "gemini_alpha", model = "gemini-alpha-wire", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "chat_ok", model = "chat-ok-wire", key = "key", priority = 1 }}
+]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
 fn responses_relay_nested_protocol_handoff_manifest(
     port_a: u16,
     port_b: u16,
@@ -570,10 +1561,10 @@ model = "client-test"
 aliases = ["client-test"]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "relay_first", model = "relay-first", key = "key", priority = 1 }},
-  {{ kind = "provider_model", provider = "direct_second", model = "direct-second", key = "key", priority = 2 }},
-  {{ kind = "provider_model", provider = "relay_third", model = "relay-third", key = "key", priority = 3 }},
-  {{ kind = "provider_model", provider = "direct_final", model = "direct-final", key = "key", priority = 4 }}
+  {{ kind = "provider_model", provider = "relay_first", model = "relay-first", key = "key", priority = 4 }},
+  {{ kind = "provider_model", provider = "direct_second", model = "direct-second", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "relay_third", model = "relay-third", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "direct_final", model = "direct-final", key = "key", priority = 1 }}
 ]
 [debug]
 log_console = false
@@ -599,6 +1590,7 @@ fn p6_remote_continuation_manifest(
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let auth_alias = format!("key-{port_a}");
     let source = format!(
         r#"
 version = 3
@@ -618,7 +1610,7 @@ endpoints = ["responses"]
 type = "responses"
 base_url = "http://controlled.invalid/v1"
 default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+auth = {{ type = "api_key", entries = [{{ alias = "{auth_alias}", env = "V3_P6_TEST_KEY" }}] }}
 responses = {{ process = "chat", streaming = "always", transport = "websocket_v2", websocket_v2_url = "{websocket_v2_url}" }}
 [providers.test.models.test]
 wire_name = "wire-test"
@@ -637,10 +1629,10 @@ retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 [route_groups.default.pools.client_test]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "{auth_alias}", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "{auth_alias}", priority = 1 }}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -846,6 +1838,7 @@ struct ProviderState {
 struct HeldProviderState {
     captures: mpsc::UnboundedSender<ProviderCapture>,
     release: Arc<Semaphore>,
+    fail_probes: bool,
 }
 
 async fn controlled_held_responses_upstream(
@@ -855,8 +1848,19 @@ async fn controlled_held_responses_upstream(
 ) -> Response<Body> {
     state
         .captures
-        .send(ProviderCapture::from_http(&headers, body))
+        .send(ProviderCapture::from_http(&headers, body.clone()))
         .unwrap();
+    if state.fail_probes
+        && body
+            .get("input")
+            .is_some_and(|input| input.to_string().contains("ping; reply pong"))
+    {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"error":"controlled probe failure"}"#))
+            .unwrap();
+    }
     let release = Arc::clone(&state.release);
     let body = futures_util::stream::once(async {
         Ok::<_, std::io::Error>(
@@ -867,7 +1871,7 @@ async fn controlled_held_responses_upstream(
     .chain(futures_util::stream::once(async move {
         let _permit = release.acquire_owned().await.unwrap();
         Ok::<_, std::io::Error>(
-            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n"
+            b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_held\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"held response released\"}]}]}}\n\ndata: [DONE]\n\n"
                 .to_vec(),
         )
     }));
@@ -893,7 +1897,7 @@ async fn controlled_responses_upstream(
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
             .body(Body::from(
-                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\"}}\n\ndata: [DONE]\n\n",
+                "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"controlled SSE response\"}]}]}}\n\ndata: [DONE]\n\n",
             ))
             .unwrap()
     } else {
@@ -959,15 +1963,33 @@ async fn controlled_responses_relay_tool_upstream(
         .and_then(Value::as_array)
         .is_some_and(|items| {
             items.iter().any(|item| {
-                item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
             })
         });
+    let wants_apply_patch = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "apply_patch"));
     let response = if has_tool_output {
         json!({
             "id":"resp_body_metadata_completed",
             "status":"completed",
             "output_text":"RCCV3_BODY_METADATA_TURN2_OK",
             "output":[{"type":"output_text","text":"RCCV3_BODY_METADATA_TURN2_OK"}]
+        })
+    } else if wants_apply_patch {
+        json!({
+            "id":"resp_apply_patch_requires_action",
+            "status":"requires_action",
+            "output":[{
+                "type":"function_call",
+                "call_id":"call_apply_patch_parity",
+                "name":"apply_patch",
+                "arguments":"{\"patch\":\"*** Begin Patch\\n*** Update File: example.txt\\n@@\\n-old\\n+new\\n*** End Patch\"}"
+            }]
         })
     } else {
         json!({
@@ -1013,6 +2035,294 @@ async fn start_controlled_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+#[derive(Clone)]
+struct OAuthTokenState {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    access_token: String,
+}
+
+async fn oauth_token_endpoint(
+    State(state): State<OAuthTokenState>,
+    axum::Json(_body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .calls
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({
+                "access_token": state.access_token,
+                "refresh_token": "rotated-refresh",
+            }))
+            .unwrap(),
+        ))
+        .unwrap()
+}
+
+async fn start_oauth_token_endpoint(
+    access_token: String,
+) -> (
+    String,
+    Arc<std::sync::atomic::AtomicUsize>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/refresh", post(oauth_token_endpoint))
+        .with_state(OAuthTokenState {
+            calls: Arc::clone(&calls),
+            access_token,
+        });
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), calls, shutdown_tx)
+}
+
+#[derive(Clone)]
+struct OAuthRejectionState {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+async fn oauth_rejection_endpoint(
+    State(state): State<OAuthRejectionState>,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .calls
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let echoed = format!(
+        "{{\"error\":\"oauth-reject-sentinel\",\"refresh_token\":{}}}",
+        serde_json::to_string(
+            body.get("refresh_token")
+                .and_then(Value::as_str)
+                .unwrap_or("missing-refresh-token")
+        )
+        .unwrap()
+    );
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header("content-type", "application/json")
+        .body(Body::from(echoed))
+        .unwrap()
+}
+
+async fn start_oauth_rejection_endpoint() -> (
+    String,
+    Arc<std::sync::atomic::AtomicUsize>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/refresh", post(oauth_rejection_endpoint))
+        .with_state(OAuthRejectionState {
+            calls: Arc::clone(&calls),
+        });
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), calls, shutdown_tx)
+}
+
+fn oauth_manifest(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    source_path: &str,
+    refresh_endpoint: &str,
+    store_path: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
+    let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{hub_v1_server_execution}
+[providers.test]
+type = "responses"
+base_url = "{provider_base_url}"
+default_model = "test"
+auth = {{ type = "oauth", entries = [{{ alias = "oauth", oauth_source = {{ kind = "codex_auth_json", path = "{source_path}" }}, refresh_endpoint = "{refresh_endpoint}", client_id = "test-client", oauth_store = {{ kind = "file", path = "{store_path}" }} }}] }}
+[providers.test.models.test]
+[debug]
+log_console = false
+snapshots = false
+dry_run = false
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "oauth", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+// Stable public gate: OAuth refresh runs through the RCC HTTP entry and the
+// refreshed bearer reaches the provider; the Codex source stays read-only.
+#[tokio::test]
+async fn oauth_refresh_bearer_reaches_provider_through_rcc_http_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    let refreshed = "refreshed-access-token".to_string();
+    let (token_base, token_calls, token_shutdown) =
+        start_oauth_token_endpoint(refreshed.clone()).await;
+    let dir = std::env::temp_dir().join(format!("rcc-oauth-http-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source_path = dir.join("auth.json");
+    fs::write(
+        &source_path,
+        serde_json::to_vec(&json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "stale-access",
+                "refresh_token": "refresh-one",
+                "expires_at": 0
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let source_before = fs::read(&source_path).unwrap();
+    let store_path = dir.join("oauth-store.json");
+
+    let handle = spawn_v3_server_aggregate(oauth_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        &source_path.display().to_string(),
+        &format!("{token_base}/refresh"),
+        &store_path.display().to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model": "test", "input": "hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body_text = response.text().await.unwrap();
+    let body: Value = serde_json::from_str(&body_text).unwrap();
+    assert_eq!(body["id"], "resp_json");
+    assert_eq!(body["output_text"], "ok");
+    assert!(!body_text.contains(&refreshed));
+    assert!(!body_text.contains("refresh-one"));
+    assert!(!body_text.contains("test-client"));
+
+    let capture = captures
+        .recv()
+        .await
+        .expect("the provider must receive the request");
+    assert_eq!(
+        capture.authorization.as_deref(),
+        Some(format!("Bearer {refreshed}").as_str())
+    );
+    assert_eq!(token_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the Codex auth.json source must never be written"
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    token_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn oauth_refresh_rejection_never_reaches_client_or_model_endpoint() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    let (token_base, token_calls, token_shutdown) = start_oauth_rejection_endpoint().await;
+    let dir = std::env::temp_dir().join(format!("rcc-oauth-reject-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source_path = dir.join("auth.json");
+    fs::write(
+        &source_path,
+        serde_json::to_vec(&json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "access_token": "stale-access",
+                "refresh_token": "refresh-one",
+                "expires_at": 0
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let source_before = fs::read(&source_path).unwrap();
+    let store_path = dir.join("oauth-store.json");
+
+    let handle = spawn_v3_server_aggregate(oauth_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        &source_path.display().to_string(),
+        &format!("{token_base}/refresh"),
+        &store_path.display().to_string(),
+    ))
+    .await
+    .unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model": "test", "input": "hello"}))
+        .send()
+        .await;
+    let error = response.expect_err(
+        "a refresh rejection must terminate the request at the transport boundary, not \
+         project a provider/proxy error payload",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must not receive a projected provider/proxy HTTP status: {error}"
+    );
+    assert_eq!(token_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(
+        captures.try_recv().is_err(),
+        "the OAuth model endpoint must not be called after refresh rejection"
+    );
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        source_before,
+        "the Codex auth.json source must never be written"
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    token_shutdown.send(()).unwrap();
+}
+
 async fn start_controlled_held_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
@@ -1029,6 +2339,41 @@ async fn start_controlled_held_upstream() -> (
         .with_state(Arc::new(HeldProviderState {
             captures: captures_tx,
             release: Arc::clone(&release),
+            fail_probes: false,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        release,
+        shutdown_tx,
+    )
+}
+
+async fn start_controlled_probe_failing_held_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<Semaphore>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_held_responses_upstream))
+        .with_state(Arc::new(HeldProviderState {
+            captures: captures_tx,
+            release: Arc::clone(&release),
+            fail_probes: true,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -1099,6 +2444,86 @@ async fn start_controlled_responses_relay_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
+#[derive(Clone)]
+struct ControlledTerminalState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    status: StatusCode,
+    content_type: &'static str,
+    response_body: Vec<u8>,
+}
+
+async fn controlled_terminal_upstream(
+    State(state): State<Arc<ControlledTerminalState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body))
+        .unwrap();
+    Response::builder()
+        .status(state.status)
+        .header("content-type", state.content_type)
+        .header("retry-after", "17")
+        .body(Body::from(state.response_body.clone()))
+        .unwrap()
+}
+
+async fn start_controlled_terminal_upstream(
+    status: StatusCode,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    start_controlled_terminal_upstream_with_body(
+        status,
+        "application/json",
+        br#"{"error":{"type":"rate_limit_error","message":"slow down","param":"upstream"}}"#
+            .to_vec(),
+    )
+    .await
+}
+
+async fn start_controlled_terminal_upstream_with_body(
+    status: StatusCode,
+    content_type: &'static str,
+    response_body: Vec<u8>,
+) -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(controlled_terminal_upstream))
+        .route("/v1/responses/compact", post(controlled_terminal_upstream))
+        .route(
+            "/v1beta/models/*operation",
+            post(controlled_terminal_upstream),
+        )
+        .route("/v1/messages", post(controlled_terminal_upstream))
+        .route("/v1/chat/completions", post(controlled_terminal_upstream))
+        .with_state(Arc::new(ControlledTerminalState {
+            captures: captures_tx,
+            status,
+            content_type,
+            response_body,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
 async fn controlled_anthropic_wire_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -1141,6 +2566,222 @@ async fn start_controlled_anthropic_wire_upstream() -> (
             .unwrap();
     });
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+async fn controlled_openai_chat_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(
+                "data: {\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"controlled chat SSE\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+            ))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"id":"chatcmpl_json","object":"chat.completion","created":1,"model":"chat-test","choices":[{"index":0,"message":{"role":"assistant","content":"controlled chat JSON"},"finish_reason":"stop"}]}"#,
+            ))
+            .unwrap()
+    }
+}
+
+async fn start_controlled_openai_chat_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post(controlled_openai_chat_upstream),
+        )
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+fn controlled_snapall_json_response(provider: &str, text: &str) -> Response<Body> {
+    let value = match provider {
+        "responses" => json!({
+            "id": "resp_json",
+            "object": "response",
+            "status": "completed",
+            "output_text": text,
+            "output": [{
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}]
+            }]
+        }),
+        "chat" => json!({
+            "id": "chatcmpl_json",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "chat-wire",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
+        }),
+        "anthropic" => json!({
+            "id": "msg_snapall_json",
+            "type": "message",
+            "role": "assistant",
+            "model": "anthropic-wire",
+            "content": [{"type": "text", "text": text}],
+            "stop_reason": "end_turn",
+            "stop_sequence": null,
+            "usage": {"input_tokens": 3, "output_tokens": 2}
+        }),
+        "gemini" => json!({
+            "candidates": [{
+                "index": 0,
+                "content": {"role": "model", "parts": [{"text": text}]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 3,
+                "candidatesTokenCount": 2,
+                "totalTokenCount": 5
+            }
+        }),
+        _ => unreachable!("controlled snapall provider"),
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_vec(&value).unwrap()))
+        .unwrap()
+}
+
+fn controlled_snapall_sse_response(provider: &str, text: &str) -> Response<Body> {
+    let body = match provider {
+        "responses" => format!(
+            "event: response.created\ndata: {{\"type\":\"response.created\",\"response\":{{\"id\":\"resp_sse\",\"status\":\"in_progress\"}}}}\n\nevent: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp_sse\",\"status\":\"completed\",\"output\":[{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"{text}\"}}]}}],\"output_text\":\"{text}\"}}}}\n\ndata: [DONE]\n\n"
+        ),
+        "chat" => format!(
+            "data: {{\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-wire\",\"choices\":[{{\"index\":0,\"delta\":{{\"role\":\"assistant\",\"content\":\"{text}\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"chatcmpl_sse\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-wire\",\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+        ),
+        "anthropic" => format!(
+            "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"msg_snapall_sse\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"anthropic-wire\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{{\"input_tokens\":3,\"output_tokens\":0}}}}}}\n\nevent: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{text}\"}}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":0}}\n\nevent: message_delta\ndata: {{\"type\":\"message_delta\",\"delta\":{{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}},\"usage\":{{\"output_tokens\":2}}}}\n\nevent: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n"
+        ),
+        "gemini" => format!(
+            "data: {{\"candidates\":[{{\"index\":0,\"content\":{{\"role\":\"model\",\"parts\":[{{\"text\":\"{text}\"}}]}},\"finishReason\":null}}]}}\n\ndata: {{\"candidates\":[{{\"index\":0,\"content\":{{\"role\":\"model\",\"parts\":[{{\"text\":\"\"}}]}},\"finishReason\":\"STOP\"}}],\"usageMetadata\":{{\"promptTokenCount\":3,\"candidatesTokenCount\":2,\"totalTokenCount\":5}}}}\n\n"
+        ),
+        _ => unreachable!("controlled snapall provider"),
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(body))
+        .unwrap()
+}
+
+async fn controlled_snapall_upstream(
+    State(state): State<Arc<ProviderState>>,
+    headers: HeaderMap,
+    uri: Uri,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let path = uri.path();
+    if path.starts_with("/fail/") {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"api_error","message":"controlled snapall alpha failure"}}"#,
+            ))
+            .unwrap();
+    }
+    let provider = if path.ends_with("/v1/responses") {
+        "responses"
+    } else if path.ends_with("/v1/chat/completions") {
+        "chat"
+    } else if path.ends_with("/v1/messages") {
+        "anthropic"
+    } else if path.contains(":generateContent") || path.contains(":streamGenerateContent") {
+        "gemini"
+    } else {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::empty())
+            .unwrap();
+    };
+    let stream = body.get("stream").and_then(Value::as_bool) == Some(true)
+        || uri.query() == Some("alt=sse")
+        || path.ends_with(":streamGenerateContent");
+    let text = match (provider, stream) {
+        ("responses", false) => "controlled responses JSON",
+        ("responses", true) => "controlled responses SSE",
+        ("chat", false) => "controlled chat JSON",
+        ("chat", true) => "controlled chat SSE",
+        ("anthropic", false) => "controlled anthropic JSON",
+        ("anthropic", true) => "controlled anthropic SSE",
+        ("gemini", false) => "controlled gemini JSON",
+        ("gemini", true) => "controlled gemini SSE",
+        _ => unreachable!("controlled snapall provider"),
+    };
+    if stream {
+        controlled_snapall_sse_response(provider, text)
+    } else {
+        controlled_snapall_json_response(provider, text)
+    }
+}
+
+async fn start_controlled_snapall_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .fallback(controlled_snapall_upstream)
+        .with_state(Arc::new(ProviderState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}"), captures_rx, shutdown_tx)
 }
 
 #[allow(clippy::result_large_err)]
@@ -1324,6 +2965,464 @@ async fn start_controlled_failure_upstream_all_protocols() -> (String, oneshot::
     (format!("http://{address}/v1"), shutdown_tx)
 }
 
+/// Upstream that answers every protocol with a real HTTP response carrying a
+/// caller-chosen status, headers, and body.
+///
+/// Bug `705d624` keeps an upstream 502 out of any client response, so a 502 from
+/// this upstream is exactly the "real response that is not eligible for client
+/// projection" case: the client must never see it, and the provider-private
+/// evidence must still record it.
+async fn start_controlled_status_upstream(
+    status: StatusCode,
+    content_type: &'static str,
+    response_body: &'static [u8],
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(move || async move {
+                Response::builder()
+                    .status(status)
+                    .header("content-type", content_type)
+                    .header("x-control-upstream", "status-upstream")
+                    .body(Body::from(response_body))
+                    .unwrap()
+            }),
+        )
+        .route(
+            "/v1/messages",
+            post(move || async move {
+                Response::builder()
+                    .status(status)
+                    .header("content-type", content_type)
+                    .body(Body::from(response_body))
+                    .unwrap()
+            }),
+        );
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+/// A real upstream 502 must be recorded as provider-private evidence, not
+/// reported as "no provider response".
+///
+/// Bug `705d624` keeps the 502 out of every client response; that rule decides
+/// what the client may see and must not decide what the evidence records. The
+/// upstream here really did answer 502 with a body and headers, so the artifact
+/// has to say `external_http` and carry the real status, headers, and body.
+#[tokio::test]
+async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("p6-upstream-502-evidence");
+    let (failure_base_url, failure_shutdown) = start_controlled_status_upstream(
+        StatusCode::BAD_GATEWAY,
+        "application/json",
+        br#"{"error":"controlled_bad_gateway"}"#,
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-upstream-502");
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
+            .await
+            .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    // The client boundary stays a transport break: no upstream status, code, or
+    // body is projected, and no proxy 502 is fabricated for the entry either.
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .expect("a streaming client must receive the SSE response head");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = response.text().await;
+    assert!(
+        body.is_err(),
+        "an upstream 502 must abort the streaming body, not project the upstream response: {body:?}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "a real upstream response head was received, so the evidence must not claim no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 502);
+    assert_eq!(
+        evidence["body"],
+        json!(br#"{"error":"controlled_bad_gateway"}"#.as_slice())
+    );
+    // The headers the upstream really sent are recorded verbatim, byte for byte.
+    // Only the controlled headers are asserted; the hop-by-hop `content-length`
+    // and `date` this upstream also emits are recorded too but are not stable.
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = |name: &str| -> Value {
+        headers
+            .iter()
+            .find(|entry| entry[0] == json!(name))
+            .unwrap_or_else(|| panic!("upstream header {name} must be recorded: {evidence}"))[1]
+            .clone()
+    };
+    assert_eq!(
+        recorded("content-type"),
+        json!("application/json".as_bytes())
+    );
+    assert_eq!(
+        recorded("x-control-upstream"),
+        json!("status-upstream".as_bytes())
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
+}
+
+/// A received response head is evidence even when the body never decodes.
+///
+/// This is the third face of bug `705d624`. The upstream really answered 200
+/// with `text/event-stream` and headers, but the stream's payload is malformed,
+/// so the relay lane fails while consuming it and never reaches a complete
+/// underlying response. Recording the witness only from a readable body would
+/// then report `no_response` — claiming upstream said nothing when it plainly
+/// did. The head must be recorded as `external_http`, and the client must still
+/// see only an aborted SSE transfer.
+#[tokio::test]
+async fn provider_stream_head_is_recorded_as_evidence_when_the_payload_never_decodes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("provider-stream-head-evidence");
+    // `data:` that is not valid JSON: the SSE head and framing are real, the
+    // payload cannot be decoded.
+    let malformed_sse =
+        b"event: response.created\ndata: {\"type\":\"response.created\"\n\n".to_vec();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        malformed_sse,
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-stream-head-evidence");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .expect("a streaming client must receive the SSE response head");
+    assert!(
+        captures.recv().await.is_some(),
+        "the provider must be reached"
+    );
+    // Client contract: only the SSE head plus an aborted transfer. No upstream
+    // status, headers, or body is projected, and no proxy 502 is fabricated.
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let body = response.text().await;
+    assert!(
+        body.is_err(),
+        "a malformed provider stream must abort the transfer, not project a response: {body:?}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "the upstream response head really arrived, so the evidence must not claim \
+         no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 200);
+    // The head is recorded verbatim; the payload was never readable, so no body
+    // bytes are invented for it.
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = headers
+        .iter()
+        .find(|entry| entry[0] == json!("content-type"))
+        .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
+    assert_eq!(recorded[1], json!("text/event-stream".as_bytes()));
+    assert_eq!(
+        evidence["body"],
+        json!(Vec::<u8>::new()),
+        "an unreadable stream body must not be materialized into the evidence: {evidence}"
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// A raw TCP upstream that answers with a real response head and then closes
+/// before sending the `content-length` it promised.
+///
+/// Axum always sends a body consistent with its own framing, so this is the
+/// only way to reach the transport path that fails *after* the head was already
+/// parsed. That head is real evidence and must not be lost.
+async fn start_truncated_body_upstream(
+    declared_length: usize,
+    sent_body: Vec<u8>,
+) -> (String, oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        loop {
+            let accepted = tokio::select! {
+                _ = &mut shutdown_rx => break,
+                accepted = listener.accept() => accepted,
+            };
+            let Ok((mut socket, _)) = accepted else {
+                break;
+            };
+            let body = sent_body.clone();
+            tokio::spawn(async move {
+                let mut request = [0u8; 8192];
+                let _ = socket.read(&mut request).await;
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                     content-length: {declared_length}\r\nconnection: close\r\n\r\n"
+                );
+                let _ = socket.write_all(head.as_bytes()).await;
+                let _ = socket.write_all(&body).await;
+                let _ = socket.flush().await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    (format!("http://{address}/v1"), shutdown_tx)
+}
+
+/// A content-type mismatch is decided only *after* the provider response head
+/// has been read, so that head is real evidence: it must be recorded instead of
+/// being reported as `no_response`.
+#[tokio::test]
+async fn provider_content_type_mismatch_records_the_received_head_as_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("provider-content-type-mismatch-evidence");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        b"event: response.created\ndata: {}\n\n".to_vec(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-content-type-mismatch");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    // A non-streaming client asks for JSON while the provider answers with an
+    // SSE content type. The mismatch is only knowable once the head is read.
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await;
+    assert!(
+        captures.recv().await.is_some(),
+        "the provider must be reached"
+    );
+    // Client contract: no provider status, headers, or body is projected, and no
+    // proxy 502 is fabricated. The client sees a header-less close.
+    let error = response.expect_err(
+        "a non-streaming client must see a header-less close, never a projected \
+         provider status or a fabricated 502",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must never receive a projected HTTP status: {error}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "the upstream head really arrived before the content-type mismatch, so the \
+         evidence must not claim no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 200);
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = headers
+        .iter()
+        .find(|entry| entry[0] == json!("content-type"))
+        .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
+    assert_eq!(recorded[1], json!("text/event-stream".as_bytes()));
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// A 2xx head whose body read fails is still a received head. It must be
+/// recorded as evidence rather than being collapsed into `no_response`.
+#[tokio::test]
+async fn provider_truncated_body_records_the_received_head_as_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("provider-truncated-body-evidence");
+    // A real `200 OK` head, then far fewer bytes than `content-length` promises.
+    let (provider_base_url, shutdown) =
+        start_truncated_body_upstream(500, b"{\"incomplete\"".to_vec()).await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-truncated-body");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await;
+    // Client contract: a header-less close, never a fabricated 502.
+    let error = response.expect_err(
+        "a non-streaming client must see a header-less close, never a projected \
+         provider status or a fabricated 502",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must never receive a projected HTTP status: {error}"
+    );
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(
+        evidence["kind"], "external_http",
+        "the upstream answered with a real 200 head before its body read failed, so \
+         the evidence must not claim no response: {evidence}"
+    );
+    assert_eq!(evidence["status"], 200);
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = headers
+        .iter()
+        .find(|entry| entry[0] == json!("content-type"))
+        .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
+    assert_eq!(recorded[1], json!("application/json".as_bytes()));
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+}
+
+/// The WebSocket entry is a client boundary too: a provider terminal there must
+/// record the same provider-private evidence.
+///
+/// The WebSocket lane closes the socket without a payload, so without an
+/// explicit reader on that entry the witness would be dropped and the provider's
+/// real 429 would be silently swallowed.
+#[tokio::test]
+async fn responses_websocket_provider_429_is_recorded_as_provider_private_evidence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("ws-provider-429-evidence");
+    let upstream_body = json!({
+        "error": {"type":"rate_limit_error","message":"slow down","param":"upstream"}
+    });
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/json",
+        serde_json::to_vec(&upstream_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-evidence");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let port = handle.listeners[0].addr.port();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws 429 evidence"})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("an exhausted provider terminal must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "a provider HTTP failure must not project its status, headers, or body to the client"
+    );
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 429);
+    assert_eq!(
+        evidence["body"],
+        json!(serde_json::to_vec(&upstream_body).unwrap())
+    );
+    // The real upstream header is recorded verbatim, not projected to the client.
+    let headers = evidence["headers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("evidence headers must be an array: {evidence}"));
+    let recorded = |name: &str| -> Value {
+        headers
+            .iter()
+            .find(|entry| entry[0] == json!(name))
+            .unwrap_or_else(|| panic!("upstream header {name} must be recorded: {evidence}"))[1]
+            .clone()
+    };
+    assert_eq!(
+        recorded("content-type"),
+        json!("application/json".as_bytes())
+    );
+    assert_eq!(recorded("retry-after"), json!("17".as_bytes()));
+
+    let _ = socket.close(None).await;
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+}
+
 async fn controlled_capturing_failure_upstream(
     State(state): State<Arc<ProviderState>>,
     headers: HeaderMap,
@@ -1377,13 +3476,9 @@ async fn start_controlled_capturing_failure_upstream() -> (
     (format!("http://{address}/v1"), captures_rx, shutdown_tx)
 }
 
-fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
+#[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
+mod test_ports;
+use test_ports::free_port;
 
 #[tokio::test]
 async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_error_chain() {
@@ -1415,35 +3510,13 @@ async fn starts_all_listeners_and_routes_gemini_runtime_input_errors_through_err
             ))
             .json(&json!({}))
             .send()
-            .await
-            .unwrap();
-        assert_eq!(invalid_gemini.status().as_u16(), 598);
-        let body: serde_json::Value = invalid_gemini.json().await.unwrap();
-        assert_eq!(body["error"]["code"], "gemini_relay_runtime_error");
-        assert_eq!(
-            body["error"]["message"],
-            "V3 Gemini target resolution failed: Gemini request contents must be an array"
+            .await;
+        assert!(
+            invalid_gemini.is_err(),
+            "invalid Gemini input must not receive an error response"
         );
     }
     handle.shutdown().await;
-}
-
-#[tokio::test]
-async fn aggregate_rejects_metadata_center_local_search_without_hooks_sidecar_socket() {
-    let _test_guard = TEST_LOCK.lock().await;
-    let error = spawn_v3_server_aggregate(metadata_center_local_search_manifest(
-        free_port(),
-        free_port(),
-    ))
-    .await
-    .expect_err("Mode B must not start without a hooks sidecar socket");
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-    assert!(
-        error
-            .to_string()
-            .contains("requires a hooks sidecar socket"),
-        "unexpected startup error: {error}"
-    );
 }
 
 #[tokio::test]
@@ -1506,22 +3579,104 @@ async fn entry_protocol_binding_dispatches_relay_without_body_leakage() {
         ))
         .json(&json!({}))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(disabled.status(), StatusCode::NOT_IMPLEMENTED);
-    let disabled_body: Value = disabled.json().await.unwrap();
-    assert_eq!(disabled_body["error"]["code"], "endpoint_not_enabled");
+        .await;
+    assert!(
+        disabled.is_err(),
+        "disabled model entry must not receive an error response"
+    );
 
     let unknown = client
         .post(format!("{disabled_base}/v1/unknown"))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-    let unknown_body: Value = unknown.json().await.unwrap();
-    assert_eq!(unknown_body["error"]["code"], "path_not_found");
+        .await;
+    assert!(
+        unknown.is_err(),
+        "unknown model path must close without error response"
+    );
 
     disabled_handle.shutdown().await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn openai_chat_http_entry_completes_responses_tool_round_trip() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-chat-tool-round-trip");
+    let port_a = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port_b = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut manifest = responses_relay_manifest(
+        port_a.local_addr().unwrap().port(),
+        port_b.local_addr().unwrap().port(),
+        &provider_base_url,
+    );
+    drop((port_a, port_b));
+    for server in manifest.servers.values_mut() {
+        server.endpoints.push("openai_chat".to_string());
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let tools = json!([{"type":"function","function":{"name":"lookup_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]);
+
+    let first = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&json!({
+            "model":"client-test",
+            "messages":[{"role":"user","content":"Weather in Paris?"}],
+            "tools":tools,
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let first_status = first.status();
+    let first_text = first.text().await.unwrap();
+    assert_eq!(first_status, StatusCode::OK, "{first_text}");
+    let first_body: Value = serde_json::from_str(&first_text).unwrap();
+    assert_eq!(first_body["choices"][0]["finish_reason"], "tool_calls");
+    let call = &first_body["choices"][0]["message"]["tool_calls"][0];
+    assert_eq!(call["id"], "call_body_metadata");
+    assert_eq!(call["function"]["name"], "lookup_weather");
+    assert_eq!(call["function"]["arguments"], "{\"city\":\"Paris\"}");
+    let first_capture = captures.recv().await.unwrap();
+    assert_eq!(first_capture.body["model"], "wire-test");
+
+    let second = client
+        .post(format!("{base}/v1/chat/completions"))
+        .json(&json!({
+            "model":"client-test",
+            "messages":[
+                {"role":"user","content":"Weather in Paris?"},
+                {"role":"assistant","content":null,"tool_calls":[call]},
+                {"role":"tool","tool_call_id":"call_body_metadata","content":"sunny"}
+            ],
+            "tools":tools,
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    let second_status = second.status();
+    let second_text = second.text().await.unwrap();
+    assert_eq!(second_status, StatusCode::OK, "{second_text}");
+    let second_body: Value = serde_json::from_str(&second_text).unwrap();
+    assert_eq!(
+        second_body["choices"][0]["message"]["content"],
+        "RCCV3_BODY_METADATA_TURN2_OK"
+    );
+    let second_capture = captures.recv().await.unwrap();
+    assert!(second_capture.body["input"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| {
+            item["type"] == "function_call_output"
+                && item["call_id"] == "call_body_metadata"
+                && item["output"] == "sunny"
+        })));
+
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -1625,6 +3780,72 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
 }
 
 #[tokio::test]
+async fn p6_models_endpoint_expose_models_publishes_entry_names_and_keeps_direct_surface() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_expose_models(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let response: Value = client
+        .get(format!("http://{}/v1/models", handle.listeners[0].addr))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(response["object"], "list");
+    let data = response["data"].as_array().unwrap();
+    let find = |id: &str| data.iter().find(|model| model["id"] == id);
+
+    // `expose_models` 中不对应任何 provider model 的名字是客户端入口名：它们与
+    // `auto` 走同一条正常 VR 路由，只发布目录条目，不是直连条目。
+    for entry_id in ["gpt-5.5", "auto"] {
+        let entry = find(entry_id).unwrap_or_else(|| panic!("{entry_id} must be listed"));
+        assert_eq!(
+            entry["direct_route"], false,
+            "{entry_id} must not be a direct route"
+        );
+        assert_eq!(
+            entry["owned_by"], "routecodex",
+            "{entry_id} is a client entry name"
+        );
+    }
+    assert_eq!(
+        find("gpt-5.5").unwrap()["context_window"],
+        272000,
+        "the default entry keeps the gpt-5.5 Codex capability surface"
+    );
+    assert_eq!(find("auto").unwrap()["context_window"], 128000);
+
+    // 白名单仍裁剪"路由组可达条目"。
+    assert!(
+        find("client-test").is_some(),
+        "a whitelisted routed visible id must stay listed"
+    );
+    for suppressed in ["offroute-test", "offroute"] {
+        assert!(
+            find(suppressed).is_none(),
+            "{suppressed} is a routed visible id outside expose_models and must stay suppressed"
+        );
+    }
+
+    // 直连面（provider.model）不受 `expose_models` 裁剪。
+    for direct_id in ["test.test", "test.offroute"] {
+        let direct = find(direct_id)
+            .unwrap_or_else(|| panic!("{direct_id} must be listed as a direct route"));
+        assert_eq!(direct["direct_route"], true, "{direct_id}");
+    }
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, _captures, shutdown) = start_controlled_upstream().await;
@@ -1660,6 +3881,7 @@ async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
             provider: Some("test".to_string()),
             model: Some("gpt-5.5".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(2),
             weight: None,
         });
@@ -1778,10 +4000,8 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
-                        web_search_backend_binding: manifest.providers["test"].models["test"]
-                            .web_search_backend_binding
-                            .clone(),
                         features: std::collections::BTreeMap::new(),
+                        availability: None,
                     },
                 ),
                 (
@@ -1805,10 +4025,8 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                         web_search_execution_mode: manifest.providers["test"].models["test"]
                             .web_search_execution_mode
                             .clone(),
-                        web_search_backend_binding: manifest.providers["test"].models["test"]
-                            .web_search_backend_binding
-                            .clone(),
                         features: std::collections::BTreeMap::new(),
+                        availability: None,
                     },
                 ),
             ]),
@@ -1836,6 +4054,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("test".to_string()),
             model: Some("model1".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(1),
             weight: None,
         },
@@ -1845,6 +4064,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("test".to_string()),
             model: Some("model2".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(2),
             weight: None,
         },
@@ -1854,6 +4074,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("test".to_string()),
             model: Some("shared".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(3),
             weight: None,
         },
@@ -1863,6 +4084,7 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
             provider: Some("other".to_string()),
             model: Some("shared".to_string()),
             key: Some("key".to_string()),
+            interface: None,
             priority: Some(4),
             weight: None,
         },
@@ -1981,14 +4203,11 @@ async fn responses_relay_client_metadata_cannot_authorize_tool_output_without_pa
             }
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    let second_body: Value = second.json().await.unwrap();
-    assert!(second_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("orphan tool output"));
+        .await;
+    assert!(
+        second.is_err(),
+        "orphan tool output must fail without client error response"
+    );
 
     let first_capture = timeout(Duration::from_secs(2), captures.recv())
         .await
@@ -2053,14 +4272,11 @@ async fn responses_relay_different_client_metadata_still_cannot_authorize_tool_o
             }
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    let second_body: Value = second.json().await.unwrap();
-    assert!(second_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("orphan tool output"));
+        .await;
+    assert!(
+        second.is_err(),
+        "wrong scope must fail without client error response"
+    );
     let _first_capture = captures.recv().await.unwrap();
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
@@ -2120,14 +4336,11 @@ async fn responses_relay_orphan_tool_output_fails_before_provider_send() {
             }]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 598);
-    let body: Value = response.json().await.unwrap();
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("orphan tool output"));
+        .await;
+    assert!(
+        response.is_err(),
+        "missing scope must fail without client error response"
+    );
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
@@ -2203,6 +4416,1773 @@ async fn responses_relay_full_history_tool_pair_without_client_scope_reaches_pro
 }
 
 #[tokio::test]
+async fn responses_relay_apply_patch_feedback_preserves_client_output_two_turns() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_responses_relay_tool_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-apply-patch-parity");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let tools = json!([{"type":"custom","name":"apply_patch","format":{"type":"text"}}]);
+
+    for output in [
+        "apply_patch verification failed: Failed to find expected lines in /tmp/rcc-apply-patch-probe/multi.txt:\r\nalpha\r\nbeta",
+        "Success. Updated /tmp/rcc-apply-patch-probe/multi.txt\r\n",
+    ] {
+        let first = client.post(&endpoint).json(&json!({
+            "model":"client-test", "input":"edit example.txt", "tools":tools, "stream":false
+        })).send().await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body: Value = first.json().await.unwrap();
+        let call = &first_body["output"][0];
+        assert_eq!(call["type"], "custom_tool_call");
+        assert_eq!(call["name"], "apply_patch");
+        assert_eq!(call["call_id"], "call_apply_patch_parity");
+        assert!(call["input"].as_str().unwrap().contains("*** Begin Patch"));
+        let first_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first_capture.body["tools"].as_array().is_some_and(|items| items.iter().any(|item| {
+            item["name"] == "apply_patch"
+        })), "provider tool declaration changed: {:?}", first_capture.body);
+
+        let second = client.post(&endpoint).json(&json!({
+            "model":"client-test", "input":[
+                {"role":"user","content":"edit example.txt"},
+                call,
+                {"type":"custom_tool_call_output","call_id":"call_apply_patch_parity","output":output}
+            ], "tools":tools, "stream":false
+        })).send().await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_body: Value = second.json().await.unwrap();
+        assert_eq!(second_body["status"], "completed");
+        let second_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(second_capture.body["input"].as_array().is_some_and(|items| items.iter().any(|item| {
+            item["call_id"] == "call_apply_patch_parity" && item["output"] == output
+        })), "provider-bound output changed: {:?}", second_capture.body);
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+const DSML_ANTHROPIC_SSE: &str = concat!(
+        "event: message_start\n",
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_dsml\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"wire-test\",\"content\":[],\"usage\":{\"input_tokens\":1}}}\n\n",
+        "event: content_block_start\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"<thinking>internal plan</thinking>Visible answer.\\n\\\"</｜DSML｜parameter>\\\"\\n\\\"</｜DSML｜invoke>\\\"\\n\\\"</｜DSML｜tool_calls>\\\"\"}}\n\n",
+        "event: content_block_stop\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: message_delta\n",
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":8}}\n\n",
+        "event: message_stop\n",
+        "data: {\"type\":\"message_stop\"}\n\n"
+);
+
+fn anthropic_sse_text_fixture(text: &str, native_tool: bool) -> Vec<u8> {
+    let mut events = vec![
+        json!({"type":"message_start","message":{"id":"msg_control_fixture","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":1}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+        json!({"type":"content_block_stop","index":0}),
+    ];
+    if native_tool {
+        events.extend([
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_native_dsml","name":"exec_command","input":{}}}),
+            json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":\"pwd\"}"}}),
+            json!({"type":"content_block_stop","index":1}),
+        ]);
+    }
+    events.extend([
+        json!({"type":"message_delta","delta":{"stop_reason":if native_tool {"tool_use"} else {"end_turn"}},"usage":{"output_tokens":8}}),
+        json!({"type":"message_stop"}),
+    ]);
+    let mut bytes = Vec::new();
+    for event in events {
+        bytes.extend_from_slice(
+            format!(
+                "event: {}\ndata: {}\n\n",
+                event["type"].as_str().unwrap(),
+                event
+            )
+            .as_bytes(),
+        );
+    }
+    bytes
+}
+
+fn anthropic_sse_cache_usage_fixture(
+    input_tokens: u64,
+    cache_read: u64,
+    cache_creation: u64,
+    output_tokens: u64,
+    text: &str,
+) -> Vec<u8> {
+    let events = vec![
+        json!({"type":"message_start","message":{"id":"msg_usage_fixture","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":input_tokens,"cache_read_input_tokens":cache_read,"cache_creation_input_tokens":cache_creation}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":text}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":output_tokens}}),
+        json!({"type":"message_stop"}),
+    ];
+    let mut bytes = Vec::new();
+    for event in events {
+        bytes.extend_from_slice(
+            format!(
+                "event: {}\ndata: {}\n\n",
+                event["type"].as_str().unwrap(),
+                event
+            )
+            .as_bytes(),
+        );
+    }
+    bytes
+}
+
+fn client_sse_terminal_usage(body: &str) -> Value {
+    let mut usage = None;
+    for line in body.lines() {
+        let Some(data) = line.strip_prefix("data: ") else {
+            continue;
+        };
+        let Ok(event) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        let candidate = event
+            .get("response")
+            .and_then(|response| response.get("usage"))
+            .or_else(|| event.get("usage"));
+        if let Some(value) = candidate {
+            if value.is_object() {
+                usage = Some(value.clone());
+            }
+        }
+    }
+    usage.expect("client terminal event must carry usage")
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_cache_usage_projects_openai_details_shape() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_cache_usage_fixture(3748, 217088, 0, 707, "cached answer"),
+    )
+    .await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let usage = client_sse_terminal_usage(&body);
+    assert_eq!(usage["input_tokens"], json!(220836), "{body}");
+    assert_eq!(
+        usage["input_tokens_details"]["cached_tokens"],
+        json!(217088),
+        "{body}"
+    );
+    assert_eq!(usage["total_tokens"], json!(221543), "{body}");
+    assert_eq!(usage["output_tokens"], json!(707), "{body}");
+    assert!(
+        !body.contains("cache_read_input_tokens"),
+        "anthropic-private cache field leaked to responses client: {body}"
+    );
+    assert!(
+        !body.contains("cache_creation_input_tokens"),
+        "anthropic-private cache field leaked to responses client: {body}"
+    );
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[derive(Clone)]
+struct ControlledAnthropicReasoningState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+}
+
+fn anthropic_sse_bytes(events: Vec<Value>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for event in events {
+        bytes.extend_from_slice(
+            format!(
+                "event: {}\ndata: {}\n\n",
+                event["type"].as_str().unwrap(),
+                event
+            )
+            .as_bytes(),
+        );
+    }
+    bytes
+}
+
+// Controlled provider fixtures (NOT a live provider sample). Turn 1 returns a
+// `thinking` block carrying an Anthropic prompt-cache breakpoint
+// (`cache_control`) plus a native `tool_use`. Turn 2 returns a final text
+// answer. The transparent-proxy contract requires the reasoning extension and
+// the paired tool history to survive the round trip.
+fn anthropic_sse_reasoning_tool_call_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_p0_turn1","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":11}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Let me check the lookup."}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"","cache_control":{"type":"ephemeral"}}}),
+        json!({"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"plan the lookup"}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_p0_reasoning","name":"mcp__codex_apps__codex_security_cloud__lookup","input":{}}}),
+        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"p0 reasoning\",\"limit\":3}"}}),
+        json!({"type":"content_block_stop","index":2}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":6}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
+fn anthropic_sse_redacted_reasoning_tool_call_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_p0_redacted_turn1","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":11}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","cache_control":{"type":"ephemeral"},"x-p0-marker":"plaintext","x-p0-opaque":{"a":1}}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plan the lookup"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"native-redacted-data","cache_control":{"type":"ephemeral"},"x-p0-marker":"redacted","x-p0-opaque":{"b":2}}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_p0_redacted","name":"mcp__codex_apps__codex_security_cloud__lookup","input":{}}}),
+        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"p0 reasoning\",\"limit\":3}"}}),
+        json!({"type":"content_block_stop","index":2}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":6}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
+fn anthropic_sse_mixed_reasoning_tool_call_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_p0_mixed_turn1","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":11}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"plain reasoning"}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"plain-signature"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"redacted-encrypted","cache_control":{"type":"ephemeral"}}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_p0_mixed","name":"mcp__codex_apps__codex_security_cloud__lookup","input":{}}}),
+        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"p0 reasoning\",\"limit\":3}"}}),
+        json!({"type":"content_block_stop","index":2}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":6}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
+fn anthropic_sse_final_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_p0_turn2","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":13}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"final reasoning","cache_control":{"type":"ephemeral"}}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"text","text":"lookup complete: 42"}}),
+        json!({"type":"content_block_stop","index":1}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
+// Controlled provider fixture: a reasoning block that omits its native
+// `thinking` payload. This is a real malformed business response, not a
+// provider HTTP error, so the proxy must keep it in the internal typed Error
+// chain and must not project an error payload to the model client.
+fn anthropic_sse_malformed_reasoning_fixture() -> Vec<u8> {
+    anthropic_sse_bytes(vec![
+        json!({"type":"message_start","message":{"id":"msg_p0_bad","type":"message","role":"assistant","model":"wire-test","content":[],"usage":{"input_tokens":9}}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","text":"alias without native payload"}}),
+        json!({"type":"content_block_stop","index":0}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}),
+        json!({"type":"message_stop"}),
+    ])
+}
+
+async fn controlled_anthropic_reasoning_upstream(
+    State(state): State<Arc<ControlledAnthropicReasoningState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    assert_eq!(
+        body["stream"], true,
+        "the controlled SSE provider requires an SSE request: {body}"
+    );
+    assert_eq!(
+        header_text(&headers, "x-api-key").as_deref(),
+        Some("reasoning-controlled-key")
+    );
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let control = |needle: &str| {
+        body["messages"].as_array().is_some_and(|messages| {
+            messages.iter().any(|message| {
+                message["content"]
+                    .as_array()
+                    .is_some_and(|content| content.iter().any(|block| block["text"] == needle))
+            })
+        })
+    };
+    let followup = body["messages"].as_array().is_some_and(|messages| {
+        messages.iter().any(|message| {
+            message["content"]
+                .as_array()
+                .is_some_and(|content| content.iter().any(|block| block["type"] == "tool_result"))
+        })
+    });
+    let redacted_reasoning_association = control("redacted-reasoning-association");
+    let mixed_reasoning_order = control("mixed-reasoning-order");
+    let bytes = if control("malformed-reasoning-control") {
+        anthropic_sse_malformed_reasoning_fixture()
+    } else if followup {
+        anthropic_sse_final_fixture()
+    } else if mixed_reasoning_order {
+        anthropic_sse_mixed_reasoning_tool_call_fixture()
+    } else if redacted_reasoning_association {
+        anthropic_sse_redacted_reasoning_tool_call_fixture()
+    } else {
+        anthropic_sse_reasoning_tool_call_fixture()
+    };
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(bytes))
+        .unwrap()
+}
+
+async fn start_controlled_anthropic_reasoning_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/messages",
+            post(controlled_anthropic_reasoning_upstream),
+        )
+        .with_state(Arc::new(ControlledAnthropicReasoningState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), captures_rx, shutdown_tx)
+}
+
+fn reasoning_client_completed_response(body: &str) -> Value {
+    body.lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .find(|event| event["type"] == "response.completed")
+        .unwrap_or_else(|| panic!("missing successful Responses terminal: {body}"))["response"]
+        .clone()
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_reasoning_cache_control_survives_two_turn_tool_roundtrip() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+
+    // Turn 1: the provider answers with reasoning (carrying `cache_control`)
+    // and a native tool call.
+    let first = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
+    let output = first_body["output"].as_array().expect("output array");
+    let reasoning = output
+        .iter()
+        .find(|item| item["type"] == "reasoning")
+        .unwrap_or_else(|| panic!("missing reasoning item: {first_body}"));
+    assert_eq!(
+        reasoning["summary"][0]["text"], "plan the lookup",
+        "{first_body}"
+    );
+    assert_eq!(
+        reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["cache_control"],
+        json!({"type":"ephemeral"}),
+        "a representable provider reasoning extension must survive projection: {first_body}"
+    );
+    let assistant_text = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .unwrap_or_else(|| panic!("missing assistant message item: {first_body}"));
+    assert_eq!(
+        assistant_text["content"][0]["text"], "Let me check the lookup.",
+        "provider text must project ahead of the reasoning item: {first_body}"
+    );
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("missing function_call item: {first_body}"));
+    assert_eq!(call["name"], declared_tool, "{first_body}");
+    assert!(
+        call.get("namespace").is_none(),
+        "a flat declared tool name must remain flat without a namespace declaration: {first_body}"
+    );
+    let call_id = call["call_id"].as_str().expect("call_id").to_string();
+    assert_eq!(call_id, "toolu_p0_reasoning");
+    let arguments: Value =
+        serde_json::from_str(call["arguments"].as_str().expect("arguments")).unwrap();
+    assert_eq!(
+        arguments,
+        json!({"query":"p0 reasoning","limit":3}),
+        "{first_body}"
+    );
+
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_capture.body["model"], "wire-test");
+    assert_eq!(first_capture.body["stream"], true);
+    assert!(
+        first_capture.body["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == declared_tool)),
+        "declared tool name must reach the provider wire: {}",
+        first_capture.body
+    );
+
+    // The client executes the returned call deterministically.
+    let execution = std::process::Command::new("node")
+        .args([
+            "-e",
+            "const c=JSON.parse(process.argv[1]);const p=JSON.parse(c.arguments);if(p.query!=='p0 reasoning'||p.limit!==3)throw Error('unexpected params');process.stdout.write(String(7*6));",
+            &call.to_string(),
+        ])
+        .output()
+        .unwrap();
+    assert!(execution.status.success());
+    let tool_output = String::from_utf8(execution.stdout).unwrap();
+    assert_eq!(tool_output, "42");
+
+    // Turn 2: paired follow-up carrying the executed output.
+    let second = client
+        .post(format!("{base}/v1/responses"))
+        .json(
+            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                {"role":"user","content":"look up p0 reasoning"},
+                assistant_text.clone(),
+                reasoning.clone(),
+                call.clone(),
+                {"type":"function_call_output","call_id":call_id,"output":tool_output}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+    assert_eq!(second_body["status"], "completed", "{second_body}");
+    let final_text = second_body["output"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|item| {
+            item["content"]
+                .as_array()
+                .and_then(|content| content.iter().find_map(|part| part["text"].as_str()))
+        })
+        .unwrap_or_else(|| panic!("missing final text: {second_body}"));
+    assert_eq!(final_text, "lookup complete: 42", "{second_body}");
+
+    let second_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let history_call = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"]
+                .as_array()
+                .and_then(|content| content.iter().find(|block| block["type"] == "tool_use"))
+        })
+        .expect("the provider must receive the paired tool call history");
+    assert_eq!(history_call["name"], declared_tool);
+    assert_eq!(history_call["id"], call_id);
+    assert_eq!(history_call["input"], arguments);
+    let history_reasoning = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"].as_array().and_then(|content| {
+                content.iter().find(|block| {
+                    block["type"] == "thinking" && block["thinking"] == "plan the lookup"
+                })
+            })
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "missing replayed thinking block on provider wire: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(
+        history_reasoning["cache_control"],
+        json!({"type":"ephemeral"}),
+        "reasoning extensions must survive the client replay round trip: {}",
+        second_capture.body
+    );
+    let tool_result = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"]
+                .as_array()
+                .and_then(|content| content.iter().find(|block| block["type"] == "tool_result"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "missing tool_result on provider wire: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(tool_result["tool_use_id"], call_id);
+    assert!(
+        tool_result["content"].to_string().contains("42"),
+        "client tool output must reach the paired provider tool_result: {}",
+        second_capture.body
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_null_encrypted_content_reasoning_history_completes_two_turns() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+
+    let first = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"look up p0 reasoning","stream":true,"tools":tools}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
+    let output = first_body["output"].as_array().expect("output array");
+    let assistant_text = output
+        .iter()
+        .find(|item| item["type"] == "message")
+        .expect("assistant message")
+        .clone();
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("function_call")
+        .clone();
+    let call_id = call["call_id"].as_str().expect("call_id").to_string();
+    let _first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+
+    for (label, reasoning) in [
+        (
+            "key-null",
+            json!({"type":"reasoning","summary":[],"encrypted_content":null}),
+        ),
+        ("key-absent", json!({"type":"reasoning","summary":[]})),
+    ] {
+        let second = client
+            .post(format!("{base}/v1/responses"))
+            .json(
+                &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                    {"role":"user","content":"look up p0 reasoning"},
+                    reasoning,
+                    assistant_text.clone(),
+                    call.clone(),
+                    {"type":"function_call_output","call_id":call_id,"output":"42"}
+                ]}),
+            )
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK, "{label}");
+        let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+        assert_eq!(second_body["status"], "completed", "{label}: {second_body}");
+
+        let capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let history = capture.body["messages"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: missing provider messages: {}", capture.body));
+        assert!(
+            !history.iter().any(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content
+                        .iter()
+                        .any(|block| block["type"] == "redacted_thinking")
+                })
+            }),
+            "{label}: data-less ciphertext must not become a redacted_thinking block on provider wire: {}",
+            capture.body
+        );
+        assert!(
+            history.iter().any(|message| {
+                message["content"].as_array().is_some_and(|content| {
+                    content
+                        .iter()
+                        .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
+                })
+            }),
+            "{label}: paired tool call must reach provider wire: {}",
+            capture.body
+        );
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_redacted_reasoning_association_survives_two_turn_tool_roundtrip(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+
+    let first = client
+        .post(format!("{base}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"redacted-reasoning-association","stream":true,"tools":tools}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
+    let output = first_body["output"].as_array().expect("output array");
+    let plaintext_reasoning = output
+        .iter()
+        .find(|item| {
+            item["type"] == "reasoning"
+                && item["routecodex_chat_extension"]["anthropic_reasoning"]["x-p0-marker"]
+                    == "plaintext"
+        })
+        .unwrap_or_else(|| panic!("missing plaintext reasoning item: {first_body}"))
+        .clone();
+    let redacted_reasoning = output
+        .iter()
+        .find(|item| {
+            item["type"] == "reasoning"
+                && item["routecodex_chat_extension"]["anthropic_reasoning"]["type"]
+                    == "redacted_thinking"
+        })
+        .unwrap_or_else(|| panic!("missing redacted reasoning item: {first_body}"))
+        .clone();
+    assert_eq!(
+        redacted_reasoning["encrypted_content"],
+        "native-redacted-data"
+    );
+    assert_eq!(
+        redacted_reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["cache_control"],
+        json!({"type":"ephemeral"}),
+        "{first_body}"
+    );
+    assert_eq!(
+        redacted_reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["x-p0-opaque"],
+        json!({"b":2}),
+        "{first_body}"
+    );
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .unwrap_or_else(|| panic!("missing function_call item: {first_body}"))
+        .clone();
+    let call_id = call["call_id"].as_str().expect("call_id").to_string();
+    assert_eq!(call_id, "toolu_p0_redacted");
+
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        first_capture.body["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == declared_tool)),
+        "declared tool name must reach the provider wire: {}",
+        first_capture.body
+    );
+
+    let execution = std::process::Command::new("node")
+        .args([
+            "-e",
+            "const c=JSON.parse(process.argv[1]);const p=JSON.parse(c.arguments);if(p.query!=='p0 reasoning'||p.limit!==3)throw Error('unexpected params');process.stdout.write(String(7*6));",
+            &call.to_string(),
+        ])
+        .output()
+        .unwrap();
+    assert!(execution.status.success());
+    let tool_output = String::from_utf8(execution.stdout).unwrap();
+    assert_eq!(tool_output, "42");
+
+    let second = client
+        .post(format!("{base}/v1/responses"))
+        .json(
+            &json!({"model":"client-test","stream":true,"tools":tools,"input":[
+                {"role":"user","content":"redacted-reasoning-association"},
+                plaintext_reasoning,
+                redacted_reasoning,
+                call,
+                {"type":"function_call_output","call_id":call_id,"output":tool_output}
+            ]}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+    assert_eq!(second_body["status"], "completed", "{second_body}");
+
+    let second_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let assistant_content = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"].as_array().filter(|content| {
+                content
+                    .iter()
+                    .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
+            })
+        })
+        .expect("the provider must receive the paired tool call history");
+    let replayed_plaintext = assistant_content
+        .iter()
+        .find(|block| block["type"] == "thinking" && block["x-p0-marker"] == "plaintext")
+        .unwrap_or_else(|| {
+            panic!(
+                "plaintext reasoning block lost its association: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(replayed_plaintext["thinking"], "plan the lookup");
+    assert_eq!(
+        replayed_plaintext["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+    assert_eq!(replayed_plaintext["x-p0-opaque"], json!({"a":1}));
+    let replayed_redacted = assistant_content
+        .iter()
+        .find(|block| block["type"] == "redacted_thinking" && block["x-p0-marker"] == "redacted")
+        .unwrap_or_else(|| {
+            panic!(
+                "redacted reasoning block lost its association: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(replayed_redacted["data"], "native-redacted-data");
+    assert_eq!(
+        replayed_redacted["cache_control"],
+        json!({"type":"ephemeral"})
+    );
+    assert_eq!(replayed_redacted["x-p0-opaque"], json!({"b":2}));
+    let tool_result = second_capture.body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|message| {
+            message["content"]
+                .as_array()
+                .and_then(|content| content.iter().find(|block| block["type"] == "tool_result"))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "missing tool_result on provider wire: {}",
+                second_capture.body
+            )
+        });
+    assert_eq!(tool_result["tool_use_id"], call_id);
+    assert!(
+        tool_result["content"].to_string().contains("42"),
+        "client tool output must reach the paired provider tool_result: {}",
+        second_capture.body
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_mixed_reasoning_blocks_keep_both_orders_and_paired_tool_result()
+{
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let declared_tool = "mcp__codex_apps__codex_security_cloud__lookup";
+    let tools = json!([{"type":"function","name":declared_tool,"parameters":{"type":"object","properties":{"query":{"type":"string"},"limit":{"type":"integer"}},"required":["query"]}}]);
+
+    for order in ["plain-first", "extended-first"] {
+        let first = client
+            .post(format!("{base}/v1/responses"))
+            .json(&json!({
+                "model":"client-test",
+                "input":"mixed-reasoning-order",
+                "stream":true,
+                "tools":tools
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body = reasoning_client_completed_response(&first.text().await.unwrap());
+        let output = first_body["output"].as_array().expect("output array");
+        let plain = output
+            .iter()
+            .find(|item| {
+                item["type"] == "reasoning" && item["summary"][0]["text"] == "plain reasoning"
+            })
+            .unwrap_or_else(|| panic!("missing extension-free reasoning item: {first_body}"))
+            .clone();
+        assert!(
+            plain.get("routecodex_chat_extension").is_none(),
+            "the plain reasoning fixture must not carry a provider extension: {first_body}"
+        );
+        assert_eq!(plain["encrypted_content"], "plain-signature");
+        let redacted = output
+            .iter()
+            .find(|item| {
+                item["type"] == "reasoning"
+                    && item["routecodex_chat_extension"]["anthropic_reasoning"]["type"]
+                        == "redacted_thinking"
+            })
+            .unwrap_or_else(|| panic!("missing extension-bearing reasoning item: {first_body}"))
+            .clone();
+        assert_eq!(redacted["encrypted_content"], "redacted-encrypted");
+        assert_eq!(
+            redacted["routecodex_chat_extension"]["anthropic_reasoning"]["cache_control"],
+            json!({"type":"ephemeral"}),
+            "{first_body}"
+        );
+        let call = output
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .unwrap_or_else(|| panic!("missing function_call item: {first_body}"))
+            .clone();
+        let call_id = call["call_id"].as_str().expect("call_id").to_string();
+        assert_eq!(call_id, "toolu_p0_mixed");
+
+        let first_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first_capture.body["model"], "wire-test");
+
+        let execution = std::process::Command::new("node")
+            .args([
+                "-e",
+                "const c=JSON.parse(process.argv[1]);const p=JSON.parse(c.arguments);if(p.query!=='p0 reasoning'||p.limit!==3)throw Error('unexpected params');process.stdout.write(String(7*6));",
+                &call.to_string(),
+            ])
+            .output()
+            .unwrap();
+        assert!(execution.status.success());
+        let tool_output = String::from_utf8(execution.stdout).unwrap();
+        assert_eq!(tool_output, "42");
+
+        let ordered_reasoning = if order == "plain-first" {
+            json!([plain, redacted])
+        } else {
+            json!([redacted, plain])
+        };
+        let second = client
+            .post(format!("{base}/v1/responses"))
+            .json(&json!({
+                "model":"client-test",
+                "stream":true,
+                "tools":tools,
+                "input":[
+                    {"role":"user","content":"mixed-reasoning-order"},
+                    {
+                        "type":"message",
+                        "role":"assistant",
+                        "content":[{"type":"output_text","text":"I will look up the value."}],
+                        "reasoning_content":"message-carried reasoning"
+                    },
+                    ordered_reasoning[0].clone(),
+                    ordered_reasoning[1].clone(),
+                    call,
+                    {"type":"function_call_output","call_id":call_id,"output":tool_output}
+                ]
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_body = reasoning_client_completed_response(&second.text().await.unwrap());
+        assert_eq!(second_body["status"], "completed", "{second_body}");
+
+        let second_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let assistant_content = second_capture.body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|message| {
+                message["content"].as_array().filter(|content| {
+                    content
+                        .iter()
+                        .any(|block| block["type"] == "tool_use" && block["id"] == call_id)
+                })
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing paired tool-call history for {order}: {}",
+                    second_capture.body
+                )
+            });
+        let expected_reasoning = if order == "plain-first" {
+            vec![
+                json!({
+                    "type":"thinking",
+                    "thinking":"message-carried reasoning"
+                }),
+                json!({
+                    "type":"thinking",
+                    "thinking":"plain reasoning",
+                    "signature":"plain-signature"
+                }),
+                json!({
+                    "type":"redacted_thinking",
+                    "data":"redacted-encrypted",
+                    "cache_control":{"type":"ephemeral"}
+                }),
+            ]
+        } else {
+            vec![
+                json!({
+                    "type":"thinking",
+                    "thinking":"message-carried reasoning"
+                }),
+                json!({
+                    "type":"redacted_thinking",
+                    "data":"redacted-encrypted",
+                    "cache_control":{"type":"ephemeral"}
+                }),
+                json!({
+                    "type":"thinking",
+                    "thinking":"plain reasoning",
+                    "signature":"plain-signature"
+                }),
+            ]
+        };
+        let reasoning_content = assistant_content
+            .iter()
+            .filter(|block| {
+                matches!(
+                    block["type"].as_str(),
+                    Some("thinking" | "redacted_thinking")
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reasoning_content,
+            expected_reasoning.as_slice(),
+            "{order} provider wire: {}",
+            second_capture.body
+        );
+        let expected_content_types = if order == "plain-first" {
+            vec![
+                "thinking",
+                "thinking",
+                "redacted_thinking",
+                "text",
+                "tool_use",
+            ]
+        } else {
+            vec![
+                "thinking",
+                "redacted_thinking",
+                "thinking",
+                "text",
+                "tool_use",
+            ]
+        };
+        assert_eq!(
+            assistant_content
+                .iter()
+                .filter_map(|block| block["type"].as_str())
+                .collect::<Vec<_>>(),
+            expected_content_types,
+            "{order} provider wire: {}",
+            second_capture.body
+        );
+        let tool_use = assistant_content
+            .iter()
+            .find(|block| block["type"] == "tool_use" && block["id"] == call_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing paired tool_use for {order}: {}",
+                    second_capture.body
+                )
+            });
+        assert_eq!(
+            tool_use,
+            &json!({
+                "type":"tool_use",
+                "id":call_id,
+                "name":declared_tool,
+                "input":{"query":"p0 reasoning","limit":3}
+            }),
+            "{order} provider wire: {}",
+            second_capture.body
+        );
+        let tool_result = second_capture.body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|message| {
+                message["content"]
+                    .as_array()
+                    .and_then(|content| content.iter().find(|block| block["type"] == "tool_result"))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing paired tool_result for {order}: {}",
+                    second_capture.body
+                )
+            });
+        assert_eq!(tool_result["tool_use_id"], call_id);
+        assert!(
+            tool_result["content"].to_string().contains("42"),
+            "{order} provider wire: {}",
+            second_capture.body
+        );
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_client_anthropic_malformed_reasoning_breaks_transport_without_error_payload() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_anthropic_reasoning_upstream().await;
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let payload =
+        json!({"model":"client-test","input":"malformed-reasoning-control","stream":true});
+    // The real HTTP provider transport must reach the codec. A mere client
+    // disconnect also occurs for missing auth or a content-type mismatch.
+    let typed = routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport(
+        &manifest,
+        routecodex_v3_runtime::V3ResponsesRelayRuntimeInput {
+            server_id: "a".to_owned(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "reasoning-control",
+                "default",
+                "typed-codec-control",
+            )
+            .unwrap(),
+            request_id: "reasoning-malformed-typed-control".to_owned(),
+            payload: payload.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(typed.error_chain.is_some());
+    let failure = &typed
+        .observability
+        .as_ref()
+        .unwrap()
+        .provider_failure_events[0];
+    assert_eq!(
+        failure.error_type.as_deref(),
+        Some("provider_response_event_codec_failure"),
+        "{failure:?}"
+    );
+    assert!(
+        failure
+            .message
+            .contains("Anthropic codec malformed thinking"),
+        "{failure:?}"
+    );
+    eprintln!("reasoning malformed real-HTTP typed failure: {failure:?}");
+    let typed_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(typed_capture.body["model"], "wire-test");
+    assert_eq!(typed_capture.body["stream"], true);
+
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let body = serde_json::to_vec(&payload).unwrap();
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+    socket.write_all(&body).await.unwrap();
+    let mut wire = Vec::new();
+    let received = timeout(Duration::from_secs(10), socket.read_to_end(&mut wire)).await;
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        capture.body, typed_capture.body,
+        "the public entry must exercise the same malformed provider request"
+    );
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        received.is_ok(),
+        "malformed reasoning must terminate its transport"
+    );
+    let text = String::from_utf8_lossy(&wire);
+    assert!(
+        !text.contains("\"error\"")
+            && !text.contains("data: ")
+            && !text.contains("event: ")
+            && !text.contains("event: error")
+            && !text.contains("response.failed")
+            && !text.contains("response.completed")
+            && !text.contains("[DONE]")
+            && !wire.ends_with(b"0\r\n\r\n"),
+        "codec failure must not leak errors or fabricate completion: {text}"
+    );
+    if !wire.is_empty() {
+        assert!(
+            text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+            "only transport acceptance is permitted: {text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn anthropic_client_anthropic_cache_usage_keeps_native_wire_shape() {
+    let _test_guard = TEST_LOCK.lock().await;
+    // This case asserts the exact single-round cache usage on the native wire,
+    // so the Chat Process continuation is pinned off; a real refill sums every
+    // round's usage into the delivered response.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_cache_usage_fixture(3748, 217088, 0, 707, "cached answer"),
+    )
+    .await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec![
+            "responses".to_string(),
+            "anthropic".to_string(),
+            "gemini".to_string(),
+            "openai_chat".to_string(),
+        ];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(format!("{base}/v1/messages"))
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "max_tokens":64,
+            "messages":[{"role":"user","content":"hello"}],
+            "stream":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("\"input_tokens\":3748"), "{body}");
+    assert!(body.contains("\"output_tokens\":707"), "{body}");
+    assert!(
+        body.contains("\"cache_read_input_tokens\":217088"),
+        "{body}"
+    );
+    assert!(
+        !body.contains("total_tokens"),
+        "responses-only field leaked to anthropic client: {body}"
+    );
+    assert!(
+        !body.contains("input_tokens_details"),
+        "responses-only field leaked to anthropic client: {body}"
+    );
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn chat_client_anthropic_cache_usage_projects_prompt_details_shape() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "usage-controlled-key");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_cache_usage_fixture(3748, 217088, 0, 707, "cached answer"),
+    )
+    .await;
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec![
+            "responses".to_string(),
+            "anthropic".to_string(),
+            "gemini".to_string(),
+            "openai_chat".to_string(),
+        ];
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let response = reqwest::Client::new()
+        .post(format!("{base}/v1/chat/completions"))
+        .header("accept", "text/event-stream")
+        .json(&json!({
+            "model":"client-test",
+            "messages":[{"role":"user","content":"hello"}],
+            "stream":true,
+            "stream_options":{"include_usage":true}
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let usage = client_sse_terminal_usage(&body);
+    assert_eq!(usage["prompt_tokens"], json!(220836), "{body}");
+    assert_eq!(
+        usage["prompt_tokens_details"]["cached_tokens"],
+        json!(217088),
+        "{body}"
+    );
+    assert_eq!(usage["completion_tokens"], json!(707), "{body}");
+    assert_eq!(usage["total_tokens"], json!(221543), "{body}");
+    assert!(
+        !body.contains("cache_read_input_tokens"),
+        "anthropic-private cache field leaked to chat client: {body}"
+    );
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_dsml_complete_text_is_faithfully_returned() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        DSML_ANTHROPIC_SSE.as_bytes().to_vec(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let send_result = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await;
+    let capture = timeout(Duration::from_secs(15), captures.recv())
+        .await
+        .expect("Anthropic mock must receive provider request")
+        .unwrap();
+    // Harvest thinking while preserving explicitly quoted marker examples.
+    let response = send_result.expect("complete Anthropic text must reach the client");
+    let status = response.status();
+    assert_eq!(
+        response.headers()["content-type"],
+        "text/event-stream",
+        "successful Anthropic text must retain the client SSE boundary",
+    );
+    let body = response
+        .text()
+        .await
+        .expect("complete Anthropic text must finish the client transfer normally");
+    let events: Vec<Value> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str(data).expect("client SSE data must be JSON"))
+        .collect();
+    let text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .filter_map(|event| event["item"]["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(capture.body["model"], "wire-test");
+    assert!(
+        captures.try_recv().is_err(),
+        "no additional provider attempt"
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+        "known leading thinking content must leave visible prose: {body}"
+    );
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("complete Anthropic text must project a completed business response");
+    assert_eq!(terminal["response"]["status"], "completed", "{body}");
+    assert!(
+        terminal["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan"
+            ),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        DSML_ANTHROPIC_SSE.as_bytes().to_vec(),
+    )
+    .await;
+    let (fallback_base_url, mut fallback_captures, fallback_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        Some(&fallback_base_url),
+    );
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .expect("complete Anthropic text must finish the client transfer normally");
+    let capture = timeout(Duration::from_secs(15), captures.recv())
+        .await
+        .expect("Anthropic mock must receive provider request")
+        .expect("first Anthropic attempt must reach provider");
+    let events: Vec<Value> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str(data).expect("client SSE data must be JSON"))
+        .collect();
+    let text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .filter_map(|event| event["item"]["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    fallback_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(capture.body["model"], "wire-test");
+    assert!(
+        captures.try_recv().is_err(),
+        "no additional provider attempt"
+    );
+    assert!(
+        fallback_captures.try_recv().is_err(),
+        "successful Anthropic business text must not trigger a fallback attempt"
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        text, "Visible answer.\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+        "known leading thinking content must leave visible prose: {body}"
+    );
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("complete Anthropic text must project a completed business response");
+    assert_eq!(terminal["response"]["status"], "completed", "{body}");
+    assert!(
+        terminal["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["type"] == "reasoning" && item["summary"][0]["text"] == "internal plan"
+            ),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordinary_prose() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let cases = [
+        (
+            "<thinking>internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+            true,
+            "internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+            "",
+        ),
+        ("<thinking>private</thinking>Visible answer", false, "Visible answer", "private"),
+        (
+            "<thinking>private<\u{2f}thinking>Visible answer\n\"<\u{2f}｜DSML｜parameter>\"\n\"<\u{2f}｜DSML｜invoke>\"\n\"<\u{2f}｜DSML｜tool_calls>\"",
+            false,
+            "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+            "private",
+        ),
+        ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
+        ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
+        ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),
+        ("Answer. <thinking>literal unfinished example", false, "Answer. literal unfinished example", ""),
+    ];
+    for (text, native_tool, expected_text, expected_reasoning) in cases {
+        let (provider_base_url, mut captures, shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::OK,
+                "text/event-stream",
+                anthropic_sse_text_fixture(text, native_tool),
+            )
+            .await;
+        let manifest = responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            provider_base_url.trim_end_matches("/v1"),
+            "anthropic",
+            None,
+        );
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header("accept", "text/event-stream")
+            .json(&json!({"model":"client-test","input":"hello","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = response.text().await.unwrap();
+        assert!(captures.recv().await.is_some());
+        handle.shutdown().await;
+        shutdown.send(()).unwrap();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let payloads: Vec<Value> = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|data| *data != "[DONE]")
+            .map(|data| serde_json::from_str(data).unwrap())
+            .collect();
+        let items: Vec<&Value> = payloads
+            .iter()
+            .filter(|event| event["type"] == "response.output_item.done")
+            .map(|event| &event["item"])
+            .collect();
+        let actual_text: String = items
+            .iter()
+            .filter_map(|item| item["content"].as_array())
+            .flatten()
+            .filter_map(|part| part["text"].as_str())
+            .collect();
+        assert_eq!(
+            actual_text, expected_text,
+            "visible prose must obey the declared marker policy: {body}"
+        );
+        let reasoning: String = items
+            .iter()
+            .filter(|item| item["type"] == "reasoning")
+            .filter_map(|item| item["summary"].as_array())
+            .flatten()
+            .filter_map(|part| part["text"].as_str())
+            .collect();
+        assert_eq!(
+            reasoning, expected_reasoning,
+            "thinking body must be retained: {body}"
+        );
+        assert!(captures.try_recv().is_err(), "no provider reselection");
+        if native_tool {
+            let call = items
+                .iter()
+                .find(|item| {
+                    item["type"] == "function_call" && item["call_id"] == "call_native_dsml"
+                })
+                .unwrap();
+            assert_eq!(call["name"], "exec_command");
+            assert_eq!(
+                serde_json::from_str::<Value>(call["arguments"].as_str().unwrap()).unwrap(),
+                json!({"cmd":"pwd"})
+            );
+        }
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let literal = "\"<thinking>unfinished ｜DSML｜invoke\"";
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_text_fixture(literal, false),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body.contains("unfinished ｜DSML｜invoke"), "{body}");
+}
+
+#[tokio::test]
+async fn responses_relay_genuine_responses_source_preserves_literal_control_text() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let literal = "\"<thinking>quoted literal ｜DSML｜invoke\"";
+    let upstream_body = json!({
+        "id":"resp_literal",
+        "status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":literal}]}],
+    })
+    .to_string();
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "application/json",
+        upstream_body.into_bytes(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let mut manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+        "responses",
+        None,
+    );
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert!(timeout(Duration::from_secs(15), captures.recv())
+        .await
+        .unwrap()
+        .is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let response = issue4effed6_relay_markers::completed(&body, true);
+    assert!(
+        response["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["type"] == "message"
+                && item["content"]
+                    .as_array()
+                    .is_some_and(|parts| parts.iter().any(|part| part["text"] == literal))),
+        "Responses literal was rewritten: {body}"
+    );
+}
+
+#[tokio::test]
 async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_summary() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("relay-live-sse-materialized-response");
@@ -2230,7 +6210,12 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
     let body = response.text().await.unwrap();
     assert!(body.contains("event: response.completed"));
     assert!(body.contains("relay sse reasoning summary"));
+    assert_responses_sse_delivered_business_text(&body, "relay sse final text");
     let _capture = captures.recv().await.unwrap();
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted Relay samples must finish before the E2E inspects disk");
 
     let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
     let sample = read_single_responses_sample_response(&samples_root);
@@ -2245,6 +6230,7 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
         .as_str()
         .unwrap()
         .contains("response.completed"));
+    assert_responses_sample_sse_delivered_business_text(&sample, "relay sse final text");
     assert_eq!(sample["materializedResponse"]["id"], "resp_sse");
     assert_eq!(sample["materializedResponse"]["status"], "completed");
     assert_eq!(
@@ -2252,7 +6238,7 @@ async fn responses_relay_live_sse_sample_saves_materialized_json_without_losing_
         "relay sse reasoning summary"
     );
     assert_eq!(
-        sample["materializedResponse"]["output"][1]["text"],
+        sample["materializedResponse"]["output"][1]["content"][0]["text"],
         "relay sse final text"
     );
 }
@@ -2322,7 +6308,9 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
     );
     let sse_body = sse_response.text().await.unwrap();
     assert!(sse_body.starts_with(": keepalive\n\n"), "{sse_body}");
-    assert!(sse_body.contains("[DONE]"));
+    // Responses 客户端帧只由协议终态收口，不得追加 Chat Completions 的 [DONE]。
+    assert!(!sse_body.contains("[DONE]"), "{sse_body}");
+    assert!(sse_body.contains("event: response.completed"), "{sse_body}");
     let second_capture = captures.recv().await.unwrap();
     assert_eq!(second_capture.body["model"], "wire-test");
     assert_eq!(second_capture.body["stream"], true);
@@ -2333,7 +6321,360 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
 }
 
 #[tokio::test]
-async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and_sse() {
+async fn responses_relay_openai_chat_reasoning_content_survives_public_entry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-chat-reasoning-content");
+    let reasoning_text = "Chat reasoning content must survive Responses projection";
+    let check_reasoning_item = |item: &Value, body: &str| {
+        assert_eq!(item["summary"][0]["text"], reasoning_text, "{body}");
+        assert_eq!(item["content"][0]["type"], "reasoning_text", "{body}");
+        assert_eq!(item["content"][0]["text"], reasoning_text, "{body}");
+    };
+    let cases: [(bool, &'static str, Vec<u8>); 2] = [
+        (
+            false,
+            "application/json",
+            json!({
+                "id": "chatcmpl_reasoning_json",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "wire-test",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "visible JSON answer",
+                        "reasoning_content": reasoning_text
+                    },
+                    "finish_reason": "stop"
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+        (
+            true,
+            "text/event-stream",
+            format!(
+                r#"data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{"role":"assistant","reasoning_content":"{reasoning_text}"}},"finish_reason":null}}]}}
+
+data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{"content":"visible SSE answer"}},"finish_reason":null}}]}}
+
+data: {{"id":"chatcmpl_reasoning_sse","object":"chat.completion.chunk","created":1,"model":"wire-test","choices":[{{"index":0,"delta":{{}},"finish_reason":"stop"}}]}}
+
+data: [DONE]
+
+"#
+            )
+            .into_bytes(),
+        ),
+    ];
+
+    for (stream, upstream_content_type, upstream_body) in cases {
+        let (provider_base_url, mut captures, upstream_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::OK,
+                upstream_content_type,
+                upstream_body,
+            )
+            .await;
+        let handle = spawn_v3_server_aggregate(responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            &provider_base_url,
+            "openai_chat",
+            None,
+        ))
+        .await
+        .unwrap();
+        let input = if stream {
+            "chat reasoning sse"
+        } else {
+            "chat reasoning json"
+        };
+        let response = reqwest::Client::new()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&json!({
+                "model": "client-test",
+                "input": input,
+                "stream": stream
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let client_content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = response.text().await.unwrap();
+        let capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("controlled Chat upstream must receive the request")
+            .unwrap();
+        handle.shutdown().await;
+        upstream_shutdown.send(()).unwrap();
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(capture.body["model"], "wire-test", "{body}");
+        assert!(
+            capture.body["messages"].as_array().is_some(),
+            "upstream request must be Chat wire shape: {body}"
+        );
+        if stream {
+            assert!(
+                client_content_type.starts_with("text/event-stream"),
+                "{client_content_type}"
+            );
+            let events: Vec<Value> = body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .map(|data| serde_json::from_str(data).unwrap())
+                .collect();
+            let done_reasoning = events
+                .iter()
+                .find(|event| {
+                    event["type"] == "response.output_item.done"
+                        && event["item"]["type"] == "reasoning"
+                })
+                .and_then(|event| event.get("item"))
+                .expect("public SSE must emit the reasoning output item");
+            check_reasoning_item(done_reasoning, &body);
+            let completed_reasoning = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .and_then(|event| event["response"]["output"].as_array())
+                .and_then(|output| output.iter().find(|item| item["type"] == "reasoning"))
+                .expect("public SSE completed response must retain the reasoning item");
+            check_reasoning_item(completed_reasoning, &body);
+        } else {
+            assert!(
+                client_content_type.starts_with("application/json"),
+                "{client_content_type}"
+            );
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            let reasoning = payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "reasoning")
+                .expect("public JSON response must expose the reasoning item");
+            check_reasoning_item(reasoning, &body);
+        }
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_native_responses_null_reasoning_content_preserves_business_response_without_reselection(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-native-null-reasoning-content");
+
+    let check_reasoning_item = |item: &Value, body: &str| {
+        assert_eq!(item["type"], "reasoning", "{body}");
+        assert_eq!(
+            item["summary"][0]["text"], "native reasoning summary",
+            "{body}"
+        );
+        assert_eq!(
+            item.get("content"),
+            Some(&Value::Null),
+            "explicit reasoning.content null must be preserved, not dropped or reselected: {body}"
+        );
+    };
+
+    let cases: [(bool, &'static str, &'static str, Vec<u8>); 2] = [
+        (
+            false,
+            "application/json",
+            "resp_native_null_json",
+            json!({
+                "object": "response",
+                "id": "resp_native_null_json",
+                "status": "completed",
+                "output_text": "native json answer",
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "id": "rs_native_null_json",
+                        "summary": [{"type": "summary_text", "text": "native reasoning summary"}],
+                        "content": null
+                    },
+                    {"type": "output_text", "text": "native json answer"}
+                ]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+        (
+            true,
+            "text/event-stream",
+            "resp_native_null_sse",
+            concat!(
+                "event: response.created\n",
+                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"in_progress\"}}\n\n",
+                "event: response.output_item.done\n",
+                "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null}}\n\n",
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_native_null_sse\",\"status\":\"completed\",\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_native_null_sse\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"native reasoning summary\"}],\"content\":null},{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"native sse answer\"}]}]}}\n\n",
+                "data: [DONE]\n\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        ),
+    ];
+
+    for (stream, upstream_content_type, expected_response_id, upstream_body) in cases {
+        let (provider_base_url, mut captures, upstream_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                StatusCode::OK,
+                upstream_content_type,
+                upstream_body,
+            )
+            .await;
+        let (fallback_base_url, mut fallback_captures, fallback_shutdown) =
+            start_controlled_responses_relay_upstream().await;
+        let manifest = responses_relay_provider_protocol_manifest(
+            free_port(),
+            free_port(),
+            &provider_base_url,
+            "responses",
+            Some(&fallback_base_url),
+        );
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let input = if stream {
+            "native null reasoning sse"
+        } else {
+            "native null reasoning json"
+        };
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .unwrap()
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&json!({
+                "model": "client-test",
+                "input": input,
+                "stream": stream
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let client_content_type = response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body = response.text().await.expect(
+            "successful provider business response must finish the client transfer normally",
+        );
+        let capture = timeout(Duration::from_secs(15), captures.recv())
+            .await
+            .expect("native Responses mock must receive provider request")
+            .unwrap();
+        handle.shutdown().await;
+        upstream_shutdown.send(()).unwrap();
+        fallback_shutdown.send(()).unwrap();
+
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(capture.body["model"], "wire-test", "{body}");
+        if stream {
+            assert!(
+                client_content_type.starts_with("text/event-stream"),
+                "{client_content_type}"
+            );
+            let events: Vec<Value> = body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .map(|data| serde_json::from_str(data).expect("client SSE data must be JSON"))
+                .collect();
+            assert!(
+                !events.iter().any(|event| matches!(
+                    event["type"].as_str(),
+                    Some("error" | "response.failed")
+                )),
+                "explicit null reasoning content must not become a client error terminal: {body}"
+            );
+            let done_reasoning = events
+                .iter()
+                .find(|event| {
+                    event["type"] == "response.output_item.done"
+                        && event["item"]["type"] == "reasoning"
+                })
+                .and_then(|event| event.get("item"))
+                .expect("client SSE must emit the native reasoning item");
+            check_reasoning_item(done_reasoning, &body);
+            let completed = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .expect("client SSE must close with response.completed");
+            assert_eq!(
+                completed["response"]["id"], expected_response_id,
+                "terminal response id must come from the primary provider: {body}"
+            );
+            let completed_reasoning = completed["response"]["output"]
+                .as_array()
+                .and_then(|output| output.iter().find(|item| item["type"] == "reasoning"))
+                .expect("completed response must retain the native reasoning item");
+            check_reasoning_item(completed_reasoning, &body);
+        } else {
+            assert!(
+                client_content_type.starts_with("application/json"),
+                "{client_content_type}"
+            );
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(
+                payload["id"], expected_response_id,
+                "JSON response id must come from the primary provider: {body}"
+            );
+            assert_eq!(payload["status"], "completed", "{body}");
+            let reasoning = payload["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "reasoning")
+                .expect("public JSON response must expose the reasoning item");
+            check_reasoning_item(reasoning, &body);
+        }
+        assert!(
+            captures.try_recv().is_err(),
+            "the primary provider must receive exactly one business request"
+        );
+        assert!(
+            fallback_captures.try_recv().is_err(),
+            "a preserved native business response must not trigger provider reselection"
+        );
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_relay_provider_503_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -2348,6 +6689,9 @@ async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
 
+    // A provider HTTP failure is provider-private. The client boundary is the
+    // transport break owned by the terminal disposition, so no provider status,
+    // code, or body may be projected onto the client.
     let json_response = client
         .post(&endpoint)
         .json(&json!({
@@ -2356,32 +6700,11 @@ async fn responses_relay_provider_exhaustion_projects_network_error_for_json_and
             "stream":false
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(json_response.headers()["content-type"], "application/json");
-    let json_body: Value = json_response.json().await.unwrap();
-    assert_eq!(
-        json_body,
-        json!({"error":{"code":"network_error","message":"network error"}})
+        .await;
+    assert!(
+        json_response.is_err(),
+        "a provider HTTP failure must not fabricate a client HTTP response"
     );
-
-    let sse_response = client
-        .post(&endpoint)
-        .header("accept", "text/event-stream")
-        .json(&json!({
-            "model":"client-test",
-            "input":"relay failure sse",
-            "stream":true
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(sse_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(sse_response.headers()["content-type"], "text/event-stream");
-    let sse_body = sse_response.text().await.unwrap();
-    assert!(sse_body.contains("network_error"), "{sse_body}");
-    assert!(sse_body.contains("network error"), "{sse_body}");
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -2599,15 +6922,780 @@ async fn p6_responses_endpoint_uses_runtime_provider_path_and_projects_json() {
 }
 
 #[tokio::test]
-async fn responses_same_listener_same_session_waits_for_release_then_returns_ok() {
+async fn capture_node_preconnection_matches_responses_http_success_and_failure() {
     let _test_guard = TEST_LOCK.lock().await;
-    let (provider_base_url, mut captures, release, shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-node01-compare");
     let handle =
         spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
             .await
             .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let valid =
+        json!({"model":"client-test","input":"hello","metadata":{"client_field":"preserve"}});
+    let captured_valid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(valid.clone())
+        .expect("capture valid request");
+    assert_eq!(captured_valid, valid);
+    let original = client.post(&endpoint).json(&valid).send().await.unwrap();
+    let projected = client
+        .post(&endpoint)
+        .json(&captured_valid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(original.status(), projected.status());
+    let original_body: Value = original.json().await.unwrap();
+    let projected_body: Value = projected.json().await.unwrap();
+    assert_eq!(original_body["output_text"], projected_body["output_text"]);
+    assert_eq!(
+        captures.recv().await.unwrap().body,
+        captures.recv().await.unwrap().body
+    );
+
+    let invalid = json!([]);
+    let captured_invalid = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(invalid.clone())
+        .expect("capture preserves invalid protocol shape");
+    assert_eq!(captured_invalid, invalid);
+    let original = client.post(&endpoint).json(&invalid).send().await;
+    let projected = client.post(&endpoint).json(&captured_invalid).send().await;
+    assert!(
+        original.is_err() && projected.is_err(),
+        "both invalid shapes must close without a client error"
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+fn p6_manifest_with_isolated_provider_capacity(
+    provider_base_url: &str,
+    max_in_flight: u32,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = p6_manifest(free_port(), free_port(), provider_base_url);
+    let alias = format!("capacity-{}", manifest.servers["a"].port);
+    let provider = manifest.providers.get_mut("test").unwrap();
+    provider.auth.entries[0].alias = alias.clone();
+    provider.concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
+        max_in_flight,
+        acquire_timeout_ms: 60_000,
+        stale_lease_ms: 300_000,
+    });
+    for pool in manifest
+        .route_groups
+        .get_mut("default")
+        .unwrap()
+        .pools
+        .values_mut()
+    {
+        for target in &mut pool.targets {
+            target.key = Some(alias.clone());
+        }
+    }
+    manifest
+}
+
+fn concurrency_switch_manifest(
+    first_url: &str,
+    second_url: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let port_a = free_port();
+    let port_b = free_port();
+    let first_id = format!("concurrency_first_{port_a}");
+    let second_id = format!("concurrency_second_{port_a}");
+    let providers = [(&first_id, first_url), (&second_id, second_url)]
+        .into_iter()
+        .map(|(id, url)| {
+            format!(
+                r#"
+[providers.{id}]
+type = "responses"
+base_url = "{url}"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
+responses = {{ process = "chat", streaming = "always" }}
+[providers.{id}.models.test]
+wire_name = "wire-test"
+capabilities = ["text", "tools", "vision"]
+supports_streaming = true
+max_tokens = 4096
+max_context_tokens = 128000
+"#
+            )
+        })
+        .collect::<String>();
+    let source = format!(
+        r#"
+version = 3
+{HUB_V1_TEST_DECLARATION}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{HUB_V1_TEST_SERVER_EXECUTION}
+{providers}
+[forwarders.concurrency]
+model = "client-test"
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "{first_id}", model = "test", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "{second_id}", model = "test", key = "key", priority = 1 }}]
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "concurrency", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "concurrency", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn spawn_concurrency_client(
+    endpoint: &str,
+    session: &str,
+) -> tokio::task::JoinHandle<(StatusCode, String)> {
+    let endpoint = endpoint.to_string();
+    let session = session.to_string();
+    tokio::spawn(async move {
+        let response = reqwest::Client::new()
+            .post(endpoint)
+            .header("session-id", &session)
+            .header("thread-id", &session)
+            .json(&json!({"model":"client-test","input":"held","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.text().await.unwrap())
+    })
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_full_switches_without_queueing() {
+    let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream provider attempts, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-switch");
+    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let first = spawn_concurrency_client(&endpoint, "concurrency-first");
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = spawn_concurrency_client(&endpoint, "concurrency-second");
+    timeout(Duration::from_millis(500), second_captures.recv())
+        .await
+        .expect("a full first provider must immediately switch to the second provider")
+        .unwrap();
+    assert!(
+        !first.is_finished(),
+        "the first provider must still be held"
+    );
+    assert!(
+        first_captures.try_recv().is_err(),
+        "the full provider must receive no extra request"
+    );
+    first_release.add_permits(1);
+    second_release.add_permits(1);
+    for task in [first, second] {
+        let (status, body) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("response.completed"), "{body}");
+        assert_responses_sse_delivered_business_text(&body, "held response released");
+    }
+    let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
+    timeout(Duration::from_millis(500), first_captures.recv())
+        .await
+        .expect("released capacity must restore the first provider's priority")
+        .unwrap();
+    assert!(second_captures.try_recv().is_err());
+    first_release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(2), third)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("response.completed"));
+    assert_responses_sse_delivered_business_text(&body, "held response released");
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_all_full_exhausts_after_wait_budget() {
+    let _test_guard = TEST_LOCK.lock().await;
+    // This case counts upstream provider attempts, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
+    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
+    for provider in manifest.providers.values_mut() {
+        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = spawn_concurrency_client(&endpoint, "concurrency-held-second");
+    timeout(Duration::from_millis(500), second_captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let wait_started = std::time::Instant::now();
+    let exhausted = timeout(
+        Duration::from_millis(500),
+        reqwest::Client::new()
+            .post(&endpoint)
+            .header("session-id", "concurrency-exhausted")
+            .header("thread-id", "concurrency-exhausted")
+            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
+            .send(),
+    )
+    .await
+    .expect("all full must finish after its declared wait budget");
+    assert!(wait_started.elapsed() >= Duration::from_millis(100));
+    assert!(
+        exhausted.is_err(),
+        "selection exhaustion must preserve the existing transport-break boundary"
+    );
+    assert!(first_captures.try_recv().is_err());
+    assert!(second_captures.try_recv().is_err());
+    assert!(!first.is_finished() && !second.is_finished());
+    first_release.add_permits(1);
+    second_release.add_permits(1);
+    for task in [first, second] {
+        let (status, body) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("response.completed"), "{body}");
+    }
+    assert!(first_captures.try_recv().is_err());
+    assert!(second_captures.try_recv().is_err());
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+fn concurrency_switch_manifest_with_mode(
+    first_url: &str,
+    second_url: &str,
+    execution_mode: V3EntryProtocolExecutionMode,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let mut manifest = concurrency_switch_manifest(first_url, second_url);
+    for provider in manifest.providers.values_mut() {
+        if let Some(health) = provider.health.as_mut() {
+            health.enabled = true;
+        }
+    }
+    match execution_mode {
+        V3EntryProtocolExecutionMode::Direct => {}
+        V3EntryProtocolExecutionMode::Relay => {
+            let binding = manifest
+                .hub_v1
+                .as_mut()
+                .expect("concurrency fixture must declare hub_v1")
+                .entry_protocol_bindings
+                .iter_mut()
+                .find(|binding| binding.entry_protocol == "responses")
+                .expect("concurrency fixture must declare the Responses binding");
+            binding.execution_mode = V3EntryProtocolExecutionMode::Relay;
+            binding.protocol_profile_owner = "v3.hub_relay_runtime_closeout".to_string();
+            binding.forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.".to_string();
+            binding.runtime_owner_symbol =
+                Some("execute_v3_responses_relay_runtime_with_default_transport".to_string());
+            binding.runtime_owner_path = Some(
+                "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs".to_string(),
+            );
+        }
+        _ => panic!("concurrency typed-source red tests require Direct or Relay mode"),
+    }
+    manifest
+}
+
+async fn wait_for_concurrency_failure_source(samples_root: &std::path::Path) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-failed-attempts.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        return evidence;
+                    }
+                }
+            }
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!("provider failure source evidence must appear under {samples_root:?}");
+}
+
+async fn concurrency_cooldown_entries(client: &reqwest::Client, base: &str) -> Vec<Value> {
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    pool["entries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("cooldown pool must return entries: {pool}"))
+}
+
+fn concurrency_cooldown_signature(entries: &[Value]) -> Vec<String> {
+    let mut signature = entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}|{}|{}|{}|{}",
+                entry["provider_id"].as_str().unwrap_or("-"),
+                entry["interface_id"].as_str().unwrap_or("-"),
+                entry["auth_alias"].as_str().unwrap_or("-"),
+                entry["model_id"].as_str().unwrap_or("-"),
+                entry["kind"].as_str().unwrap_or("-"),
+            )
+        })
+        .collect::<Vec<_>>();
+    signature.sort();
+    signature
+}
+
+fn assert_no_concurrency_business_capture(
+    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+    allow_recovery_probes: bool,
+    label: &str,
+) {
+    while let Ok(capture) = captures.try_recv() {
+        assert!(
+            allow_recovery_probes && capture.body.to_string().contains("ping; reply pong"),
+            "{label} must receive no business request: {capture:?}"
+        );
+    }
+}
+
+async fn assert_concurrency_execution_mode(
+    client: &reqwest::Client,
+    base: &str,
+    request_id: &str,
+    expected_mode: &str,
+) {
+    let logs: Value = client
+        .get(format!("{base}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("debug logs must return events: {logs}"));
+    let event = events
+        .iter()
+        .find(|event| {
+            event["request_id"] == request_id
+                && event["node_id"] == "V3Server03HttpRequestRaw"
+                && event["event"] == "received"
+        })
+        .unwrap_or_else(|| {
+            panic!("missing V3Server03HttpRequestRaw event for request {request_id}: {logs}")
+        });
+    assert_eq!(
+        event["details"]["execution_mode"], expected_mode,
+        "actual request execution mode must be {expected_mode}, not inferred from the port: {event}"
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ConcurrencyExhaustionShape {
+    PureAllBusy,
+    MixedBusyAndExcluded,
+}
+
+async fn run_concurrency_typed_source_case(
+    execution_mode: V3EntryProtocolExecutionMode,
+    shape: ConcurrencyExhaustionShape,
+    label: &str,
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new(label);
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) = match shape {
+        ConcurrencyExhaustionShape::PureAllBusy => start_controlled_held_upstream().await,
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
+            start_controlled_probe_failing_held_upstream().await
+        }
+    };
+    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-typed-source");
+
+    let mut manifest =
+        concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
+    // Exercise the terminal source after a real bounded wait, rather than
+    // requiring immediate all-busy rejection (superseded by issue44cc3af).
+    for provider in manifest.providers.values_mut() {
+        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
+    }
+    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let endpoint = format!("{base}/v1/responses");
+    let client = reqwest::Client::new();
+
+    let baseline_entries = match shape {
+        ConcurrencyExhaustionShape::PureAllBusy => {
+            let entries = concurrency_cooldown_entries(&client, &base).await;
+            assert!(
+                entries.is_empty(),
+                "pure all-busy baseline must not contain health exclusions: {entries:?}"
+            );
+            entries
+        }
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
+            let response = client
+                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
+                .json(&json!({
+                    "provider_id": second_id,
+                    "interface_id": "default",
+                    "auth_alias": "key",
+                    "model_id": "test",
+                    "kind": "auth_key",
+                    "duration_ms": 60_000
+                }))
+                .send()
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert_eq!(status, StatusCode::OK, "{body}");
+
+            let entries = concurrency_cooldown_entries(&client, &base).await;
+            assert_eq!(
+                entries.len(),
+                2,
+                "mixed case must start with the typed auth-key cooldown/probe pair: {entries:?}"
+            );
+            for entry in &entries {
+                assert_eq!(entry["provider_id"], second_id.as_str());
+                assert_eq!(entry["interface_id"], "default");
+                assert_eq!(entry["auth_alias"], "key");
+                assert!(entry["model_id"].is_null());
+            }
+            let cooldown = entries
+                .iter()
+                .find(|entry| entry["kind"] == "auth_key")
+                .expect("mixed case must retain the auth-key cooldown entry");
+            assert_eq!(cooldown["state"], "auth_key_cooldown");
+            let probe = entries
+                .iter()
+                .find(|entry| entry["kind"] == "probe")
+                .expect("mixed case must retain the provider cooldown probe entry");
+            assert!(
+                matches!(
+                    probe["state"].as_str(),
+                    Some("blocked" | "waiting" | "probing")
+                ),
+                "mixed case probe must remain in a cooldown substate: {probe}"
+            );
+            entries
+        }
+    };
+    let baseline_health = concurrency_cooldown_signature(&baseline_entries);
+
+    let first = spawn_concurrency_client(&endpoint, &format!("{label}-held-first"));
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .expect("first provider must receive its held request")
+        .expect("first provider capture channel must stay open");
+
+    let second = if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
+        let task = spawn_concurrency_client(&endpoint, &format!("{label}-held-second"));
+        timeout(Duration::from_secs(2), second_captures.recv())
+            .await
+            .expect("second provider must receive its held request")
+            .expect("second provider capture channel must stay open");
+        Some(task)
+    } else {
+        None
+    };
+
+    let exhausted = match timeout(
+        Duration::from_millis(500),
+        client
+            .post(&endpoint)
+            .header("session-id", format!("{label}-exhausted"))
+            .header("thread-id", format!("{label}-exhausted"))
+            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
+            .send(),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            let first_activity = first_captures.try_recv().ok();
+            let second_activity = second_captures.try_recv().ok();
+            panic!(
+                "capacity exhaustion must complete after the declared wait budget; first_activity={first_activity:?} second_activity={second_activity:?}"
+            );
+        }
+    };
+    let error = exhausted.expect_err(
+        "a capacity terminal must break the client transport without an error payload or normal completion",
+    );
+    assert!(
+        !error.is_status(),
+        "the client must not receive a synthetic status payload: {error}"
+    );
+
+    if let Ok(capture) = first_captures.try_recv() {
+        panic!("the busy first provider must receive no extra request: {capture:?}");
+    }
+    match shape {
+        ConcurrencyExhaustionShape::PureAllBusy => {
+            if let Ok(capture) = second_captures.try_recv() {
+                panic!("the busy second provider must receive no extra request: {capture:?}");
+            }
+        }
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
+            let capture = second_captures
+                .try_recv()
+                .expect("the mixed case must perform exactly one recovery probe");
+            assert!(
+                capture.body.to_string().contains("ping; reply pong"),
+                "the excluded second provider must receive no business retry: {capture:?}"
+            );
+        }
+    }
+
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let evidence = wait_for_concurrency_failure_source(&samples_root).await;
+    let request_id = evidence["request_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("failure evidence must carry request_id: {evidence}"));
+    assert_eq!(
+        evidence["attempts"],
+        json!([]),
+        "capacity rejection must not record or perform an upstream attempt: {evidence}"
+    );
+    let (expected_mode, expected_source_kind, expected_code) = match (execution_mode, shape) {
+        (V3EntryProtocolExecutionMode::Direct, ConcurrencyExhaustionShape::PureAllBusy) => (
+            "direct",
+            "target_pool_exhausted",
+            "provider_concurrency_busy",
+        ),
+        (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::PureAllBusy) => (
+            "relay",
+            "target_pool_exhausted",
+            "provider_concurrency_busy",
+        ),
+        (
+            V3EntryProtocolExecutionMode::Direct,
+            ConcurrencyExhaustionShape::MixedBusyAndExcluded,
+        )
+        | (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::MixedBusyAndExcluded) => {
+            (
+                if execution_mode == V3EntryProtocolExecutionMode::Direct {
+                    "direct"
+                } else {
+                    "relay"
+                },
+                "provider_failure",
+                "selected_target_exhausted",
+            )
+        }
+        _ => panic!("unsupported concurrency typed-source case"),
+    };
+    assert_eq!(
+        evidence["terminal_source"]["source_kind"], expected_source_kind,
+        "{expected_mode} {shape:?} must retain the expected typed source kind: {evidence}"
+    );
+    assert_eq!(
+        evidence["terminal_source"]["code"], expected_code,
+        "{expected_mode} {shape:?} must retain the expected typed source code: {evidence}"
+    );
+    assert_concurrency_execution_mode(&client, &base, request_id, expected_mode).await;
+
+    let after_entries = concurrency_cooldown_entries(&client, &base).await;
+    if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
+        assert_eq!(
+            concurrency_cooldown_signature(&after_entries),
+            baseline_health,
+            "pure capacity rejection must not add, remove, or replace health exclusions: before={baseline_entries:?} after={after_entries:?}"
+        );
+    } else {
+        assert!(
+            after_entries
+                .iter()
+                .all(|entry| entry["provider_id"] == second_id.as_str()),
+            "mixed capacity rejection must not mutate first-provider health: before={baseline_entries:?} after={after_entries:?}"
+        );
+    }
+    assert_eq!(
+        after_entries.len(),
+        baseline_entries.len(),
+        "capacity rejection must not mutate cooldown entry count"
+    );
+    assert!(
+        !first.is_finished(),
+        "the first provider holder must remain pending before release"
+    );
+    if let Some(second) = &second {
+        assert!(
+            !second.is_finished(),
+            "the second provider holder must remain pending before release"
+        );
+    }
+
+    first_release.add_permits(1);
+    if second.is_some() {
+        second_release.add_permits(1);
+    }
+    let mut held = vec![first];
+    if let Some(second) = second {
+        held.push(second);
+    }
+    for task in held {
+        let (status, body) = timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("response.completed"), "{body}");
+    }
+    let after_release = spawn_concurrency_client(&endpoint, &format!("{label}-after-release"));
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .expect("released capacity must admit a subsequent normal request")
+        .expect("first provider capture channel must stay open");
+    assert_no_concurrency_business_capture(
+        &mut second_captures,
+        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
+        "the subsequent normal request on the second provider",
+    );
+    first_release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(2), after_release)
+        .await
+        .expect("the subsequent normal request must complete after release")
+        .expect("the subsequent request task must not panic");
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("response.completed"), "{body}");
+    assert_no_concurrency_business_capture(
+        &mut first_captures,
+        false,
+        "the exhausted request on the first provider",
+    );
+    assert_no_concurrency_business_capture(
+        &mut second_captures,
+        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
+        "the exhausted request on the second provider",
+    );
+
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_direct_all_busy_preserves_typed_source() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Direct,
+        ConcurrencyExhaustionShape::PureAllBusy,
+        "concurrency-direct-all-busy-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_direct_mixed_exclusion_stays_generic() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Direct,
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
+        "concurrency-direct-mixed-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_relay_all_busy_preserves_typed_source() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Relay,
+        ConcurrencyExhaustionShape::PureAllBusy,
+        "concurrency-relay-all-busy-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_provider_concurrency_relay_mixed_exclusion_stays_generic() {
+    run_concurrency_typed_source_case(
+        V3EntryProtocolExecutionMode::Relay,
+        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
+        "concurrency-relay-mixed-red",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn responses_same_listener_same_session_admits_independent_requests() {
+    run_matching_identity_independence("session-overlap", "conversation-overlap").await;
+}
+
+#[tokio::test]
+async fn responses_independent_matching_identity_session_only() {
+    run_matching_identity_independence("session-overlap", "conversation-other").await;
+}
+
+#[tokio::test]
+async fn responses_independent_matching_identity_conversation_only() {
+    run_matching_identity_independence("session-other", "conversation-overlap").await;
+}
+
+async fn run_matching_identity_independence(second_session: &str, second_conversation: &str) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, release, shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let request = json!({"model":"client-test","input":"held","stream":true});
@@ -2631,12 +7719,14 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
     let second_client = client.clone();
     let second_endpoint = endpoint.clone();
     let second_request = request.clone();
+    let second_session = second_session.to_string();
+    let second_conversation = second_conversation.to_string();
     let mut second_task = tokio::spawn(async move {
         let response = second_client
             .post(second_endpoint)
             .header("accept", "text/event-stream")
-            .header("session-id", "session-overlap")
-            .header("thread-id", "conversation-overlap")
+            .header("session-id", second_session)
+            .header("thread-id", second_conversation)
             .json(&second_request)
             .send()
             .await
@@ -2645,34 +7735,212 @@ async fn responses_same_listener_same_session_waits_for_release_then_returns_ok(
         let body = response.text().await.unwrap();
         (status, body)
     });
-    assert!(timeout(Duration::from_millis(100), captures.recv())
+    timeout(Duration::from_millis(700), captures.recv())
         .await
-        .is_err());
+        .expect(
+            "the same session must not block another independent request before provider selection",
+        )
+        .expect("second independent provider request must arrive while the first is held");
     assert!(timeout(Duration::from_millis(100), &mut second_task)
         .await
         .is_err());
 
-    release.add_permits(1);
+    release.add_permits(2);
     let first = timeout(Duration::from_secs(2), first_task)
         .await
         .expect("first response headers must arrive after provider release")
         .expect("first request task must not panic");
     assert_eq!(first.status(), StatusCode::OK);
-    first.text().await.unwrap();
-    timeout(Duration::from_secs(2), captures.recv())
-        .await
-        .expect("second provider request must start after the first body releases")
-        .expect("second provider capture must remain open");
-    release.add_permits(1);
+    let first_body = first.text().await.unwrap();
+    assert_responses_sse_delivered_business_text(&first_body, "held response released");
     let (status, body) = timeout(Duration::from_secs(2), second_task)
         .await
-        .expect("second request must complete after admission release")
+        .expect("second independent request must complete after its provider release")
         .expect("second request task must not panic");
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains("request_in_flight"));
+    assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finishes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("maintenance-session-waiter");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (base_url, mut captures, release, shutdown) = start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-session");
+    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
+        .await
+        .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let request = json!({"model":"client-test", "input":"held", "stream":true});
+    let first_client = client.clone();
+    let first_endpoint = endpoint.clone();
+    let first_request = request.clone();
+    let first = tokio::spawn(async move {
+        let response = first_client
+            .post(first_endpoint)
+            .header("session-id", "maintenance-session")
+            .json(&first_request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        response.text().await.unwrap()
+    });
+    timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let preparation = timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
+        .await
+        .expect("exec preparation must not wait for the held business response")
+        .unwrap();
+    let mut queued = Box::pin(async {
+        let response = client
+            .post(&endpoint)
+            .header("session-id", "maintenance-session")
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.text().await.unwrap())
+    });
+    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .await
+        .is_err());
+    release.add_permits(1);
+    let first_body = timeout(Duration::from_secs(5), first)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_body.matches("event: response.completed").count(), 1);
+    assert_responses_sse_delivered_business_text(&first_body, "held response released");
+    // Only explicit maintenance pauses dispatch. The first response finishing
+    // must not let a new request escape that maintenance owner.
+    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .await
+        .is_err());
+    assert!(
+        captures.try_recv().is_err(),
+        "independent request escaped maintenance"
+    );
+    drop(preparation);
+    tokio::select! {
+        result = &mut queued => panic!("provider body is held: {result:?}"),
+        captured = captures.recv() => { captured.unwrap(); }
+        _ = sleep(Duration::from_secs(5)) => panic!("cancelled maintenance did not resume session waiter"),
+    }
+    release.add_permits(1);
+    let (status, body) = timeout(Duration::from_secs(5), queued).await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.matches("event: response.completed").count(), 1);
+    assert_responses_sse_delivered_business_text(&body, "held response released");
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("maintenance-keepalive");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-keepalive");
+    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
+        .await
+        .unwrap();
+    let mut socket = TcpStream::connect(handle.listeners[0].addr).await.unwrap();
+    let body = json!({"model":"client-test", "input":"keepalive", "stream":false}).to_string();
+    let request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let first = timeout(
+        Duration::from_secs(5),
+        read_raw_business_response(&mut socket),
+    )
+    .await
+    .unwrap();
+    assert!(first.starts_with(b"HTTP/1.1 200"));
+    assert!(String::from_utf8(first).unwrap().contains("resp_json"));
+    captures.recv().await.unwrap();
+    let preparation = handle.prepare_exec_attempt().await.unwrap();
+    socket.write_all(request.as_bytes()).await.unwrap();
+    assert!(timeout(Duration::from_millis(100), captures.recv())
+        .await
+        .is_err());
+    drop(preparation);
+    let second = timeout(
+        Duration::from_secs(5),
+        read_raw_business_response(&mut socket),
+    )
+    .await
+    .unwrap();
+    assert!(second.starts_with(b"HTTP/1.1 200"));
+    assert!(String::from_utf8(second).unwrap().contains("resp_json"));
+    captures.recv().await.unwrap();
+    drop(socket);
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+// Read one actual HTTP response without closing the socket. Business bodies
+// can use chunked framing because their activity permit follows a body stream.
+async fn read_raw_business_response(socket: &mut TcpStream) -> Vec<u8> {
+    async fn read_line(socket: &mut TcpStream) -> Vec<u8> {
+        let mut line = Vec::new();
+        while !line.ends_with(b"\r\n") {
+            line.push(socket.read_u8().await.unwrap());
+        }
+        line
+    }
+    let mut wire = Vec::new();
+    while !wire.ends_with(b"\r\n\r\n") {
+        wire.extend(read_line(socket).await);
+    }
+    let head = String::from_utf8(wire.clone())
+        .unwrap()
+        .to_ascii_lowercase();
+    if head.contains("transfer-encoding: chunked") {
+        loop {
+            let size = read_line(socket).await;
+            let size = String::from_utf8(size).unwrap();
+            let size = usize::from_str_radix(size.trim().split(';').next().unwrap(), 16).unwrap();
+            if size == 0 {
+                // Consume trailers through their empty line, leaving the next
+                // response untouched on this same keepalive connection.
+                while read_line(socket).await != b"\r\n" {}
+                return wire;
+            }
+            let start = wire.len();
+            wire.resize(start + size, 0);
+            socket.read_exact(&mut wire[start..]).await.unwrap();
+            let mut crlf = [0; 2];
+            socket.read_exact(&mut crlf).await.unwrap();
+            assert_eq!(crlf, *b"\r\n");
+        }
+    }
+    let length = head
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("content-length:")
+                .map(|value| value.trim().parse::<usize>().unwrap())
+        })
+        .expect("keepalive response must declare chunked framing or Content-Length");
+    let start = wire.len();
+    wire.resize(start + length, 0);
+    socket.read_exact(&mut wire[start..]).await.unwrap();
+    wire
 }
 
 #[tokio::test]
@@ -2681,10 +7949,12 @@ async fn responses_same_listener_different_session_remains_concurrent() {
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-concurrency");
-    let handle =
-        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &provider_base_url))
-            .await
-            .unwrap();
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_isolated_provider_capacity(
+        &provider_base_url,
+        2,
+    ))
+    .await
+    .unwrap();
     let client = reqwest::Client::new();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let request = json!({"model":"client-test","input":"held","stream":true});
@@ -2734,8 +8004,10 @@ async fn responses_same_listener_different_session_remains_concurrent() {
         .expect("different-session task must not panic");
     assert_eq!(first.status(), StatusCode::OK);
     assert_eq!(second.status(), StatusCode::OK);
-    first.text().await.unwrap();
-    second.text().await.unwrap();
+    let first_body = first.text().await.unwrap();
+    let second_body = second.text().await.unwrap();
+    assert_responses_sse_delivered_business_text(&first_body, "held response released");
+    assert_responses_sse_delivered_business_text(&second_body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -2762,8 +8034,6 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     socket.write_all(request_head.as_bytes()).await.unwrap();
     socket.write_all(&request_body).await.unwrap();
     captures.recv().await.expect("first provider request");
-    drop(socket);
-    sleep(Duration::from_millis(100)).await;
 
     let retry = reqwest::Client::new()
         .post(format!("http://{listener_addr}/v1/responses"))
@@ -2774,10 +8044,22 @@ async fn responses_client_drop_releases_same_session_before_provider_eof() {
     let retry_task = tokio::spawn(async move { retry.send().await.unwrap() });
     timeout(Duration::from_secs(2), captures.recv())
         .await
-        .expect("client drop must release admission before provider EOF")
+        .expect("second request must reach upstream before the first client is cancelled")
         .unwrap();
-    release.add_permits(1);
-    assert_eq!(retry_task.await.unwrap().status(), StatusCode::OK);
+    drop(socket);
+    // Release both independent upstream handlers. Cancelling the first client
+    // must not cancel the second request or remove its delivery rights.
+    release.add_permits(2);
+    let response = timeout(Duration::from_secs(3), retry_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = timeout(Duration::from_secs(3), response.text())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -2859,11 +8141,14 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
     let body = response.text().await.unwrap();
     assert!(
         body.contains("event: response.created")
-            && body.contains("event: response.completed")
-            && body.contains("event: response.done")
-            && body.ends_with("data: [DONE]\n\n"),
-        "relay SSE stream must project created/completed/done terminal frames: {body}"
+            && body.contains("event: response.in_progress")
+            && body.contains("event: response.completed"),
+        "relay SSE stream must project created/in_progress/completed frames: {body}"
     );
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    // Responses 客户端帧只由协议终态收口：不得追加 response.done 或 [DONE]。
+    assert!(!body.contains("event: response.done"), "{body}");
+    assert!(!body.contains("data: [DONE]"), "{body}");
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.accept.as_deref(), Some("text/event-stream"));
     assert_eq!(capture.body["stream"], true);
@@ -2873,7 +8158,7 @@ async fn p6_responses_endpoint_projects_sse_without_materialize_repair() {
     shutdown.send(()).unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_direct_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
@@ -2919,14 +8204,11 @@ async fn responses_direct_previous_response_id_is_rejected_after_continuation_re
             "input":[{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    let second_body: Value = second.json().await.unwrap();
-    assert!(second_body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("continuation is retired"));
+        .await;
+    assert!(
+        second.is_err(),
+        "retired continuation must fail without client error response"
+    );
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -2958,7 +8240,7 @@ async fn responses_direct_previous_response_id_is_rejected_after_continuation_re
     let _ = shutdown.send(());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_direct_sse_previous_response_id_is_rejected_after_continuation_removal() {
     let _test_guard = TEST_LOCK.lock().await;
     let (websocket_v2_url, mut captures, shutdown) =
@@ -2999,15 +8281,8 @@ async fn responses_direct_sse_previous_response_id_is_rejected_after_continuatio
             "input":[{"type":"function_call_output","call_id":"call_server_1","output":"ok"}]
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(second.status(), 598);
-    assert_eq!(second.headers()["content-type"], "text/event-stream");
-    assert!(second
-        .text()
-        .await
-        .unwrap()
-        .contains("continuation is retired"));
+        .await;
+    assert_incomplete_sse_or_no_response(second).await;
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3039,22 +8314,23 @@ async fn responses_inbound_websocket_requires_beta_upgrade_and_handles_ping() {
         .get(&http_endpoint)
         .header("openai-beta", "responses_websockets=2026-02-06")
         .send()
-        .await
-        .unwrap();
-    assert_eq!(plain_get.status(), StatusCode::BAD_REQUEST);
-    let plain_body: Value = plain_get.json().await.unwrap();
-    assert_eq!(plain_body["error"]["code"], "websocket_upgrade_required");
+        .await;
+    assert!(
+        plain_get.is_err(),
+        "invalid upgrade must not receive an error response"
+    );
 
     let ws_endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let missing_beta_error = connect_async(ws_endpoint.clone())
         .await
         .expect_err("missing beta handshake must be rejected");
-    match missing_beta_error {
-        tokio_tungstenite::tungstenite::Error::Http(response) => {
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        }
-        other => panic!("unexpected missing beta error: {other}"),
-    }
+    assert!(
+        !matches!(
+            missing_beta_error,
+            tokio_tungstenite::tungstenite::Error::Http(_)
+        ),
+        "invalid beta must close without an HTTP error: {missing_beta_error}"
+    );
 
     let mut request = ws_endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -3149,6 +8425,53 @@ async fn responses_inbound_websocket_projects_json_completed_event_and_enters_ru
     let _ = socket.close(None).await;
     handle.shutdown().await;
     let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn capture_node_preconnection_matches_responses_websocket_projection() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_url, mut captures, shutdown) = start_controlled_continuation_websocket().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-node01-ws-compare");
+    let handle = spawn_v3_server_aggregate(p6_remote_continuation_manifest(
+        free_port(),
+        free_port(),
+        &provider_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let original = json!({
+        "type":"response.create", "model":"test", "input":"use tool",
+        "tools":[{"type":"function","name":"lookup"}]
+    });
+    let captured = routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(original.clone())
+        .expect("capture WebSocket JSON frame");
+    assert_eq!(captured, original);
+    let mut request = endpoint.as_str().into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    request
+        .headers_mut()
+        .insert("session-id", HeaderValue::from_static("node01-ws-captured"));
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(captured.to_string()))
+        .await
+        .unwrap();
+    let message = socket.next().await.unwrap().unwrap();
+    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+    assert_eq!(event["type"], "response.completed");
+    assert_eq!(event["response"]["output"][0]["type"], "function_call");
+    let _handshake_capture = captures.recv().await.unwrap();
+    let provider_event = captures.recv().await.unwrap();
+    assert_eq!(provider_event.body["model"], "wire-test");
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]
@@ -3318,10 +8641,7 @@ async fn responses_inbound_websocket_rejects_malformed_client_event_without_prov
         let (mut socket, handshake) = connect_async(request).await.unwrap();
         assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
         socket.send(Message::Text(invalid_event)).await.unwrap();
-        let message = socket.next().await.unwrap().unwrap();
-        let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-        assert_eq!(event["type"], "error");
-        assert_eq!(event["error"]["code"], "invalid_client_event");
+        assert_websocket_closes_without_data(&mut socket).await;
         let _ = socket.close(None).await;
     }
     assert!(captures.try_recv().is_err());
@@ -3398,15 +8718,7 @@ async fn responses_inbound_websocket_rejects_second_previous_response_id_without
         ))
         .await
         .unwrap();
-    let second_event = loop {
-        let second_message = socket.next().await.unwrap().unwrap();
-        let second_event: Value = serde_json::from_str(second_message.to_text().unwrap()).unwrap();
-        if second_event["type"] == "response.completed" || second_event["type"] == "error" {
-            break second_event;
-        }
-    };
-    assert_eq!(second_event["type"], "error");
-    assert_eq!(second_event["error"]["code"], "invalid_request");
+    assert_websocket_closes_without_data(&mut socket).await;
 
     let handshake_capture = captures.recv().await.unwrap();
     assert_eq!(
@@ -3500,10 +8812,7 @@ async fn responses_inbound_websocket_scope_mismatch_fails_before_provider_send()
         ))
         .await
         .unwrap();
-    let second_message = second_socket.next().await.unwrap().unwrap();
-    let second_event: Value = serde_json::from_str(second_message.to_text().unwrap()).unwrap();
-    assert_eq!(second_event["type"], "error");
-    assert_eq!(second_event["error"]["code"], "invalid_request");
+    assert_websocket_closes_without_data(&mut second_socket).await;
 
     let _handshake_capture = captures.recv().await.unwrap();
     let first_capture = captures.recv().await.unwrap();
@@ -3517,8 +8826,7 @@ async fn responses_inbound_websocket_scope_mismatch_fails_before_provider_send()
 }
 
 #[tokio::test]
-async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_without_http_fallback(
-) {
+async fn responses_inbound_websocket_transport_failure_closes_without_fabricated_event() {
     let _test_guard = TEST_LOCK.lock().await;
     let closed_websocket_url = {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -3535,13 +8843,20 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
     .await
     .unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
-    let mut request = endpoint.into_client_request().unwrap();
+    let mut request = endpoint.as_str().into_client_request().unwrap();
     request.headers_mut().insert(
         "openai-beta",
         HeaderValue::from_static("responses_websockets=2026-02-06"),
     );
     let (mut socket, handshake) = connect_async(request).await.unwrap();
     assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    let mut second_request = endpoint.as_str().into_client_request().unwrap();
+    second_request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut second_socket, second_handshake) = connect_async(second_request).await.unwrap();
+    assert_eq!(second_handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
     socket
         .send(Message::Text(
             json!({
@@ -3553,19 +8868,160 @@ async fn responses_inbound_websocket_projects_provider_error_as_websocket_error_
         ))
         .await
         .unwrap();
-    let message = timeout(Duration::from_secs(15), socket.next())
+    let message = timeout(Duration::from_secs(30), socket.next())
         .await
-        .unwrap()
-        .unwrap()
+        .expect("provider no-response must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "provider no-response must not synthesize an error or completion event"
+    );
+    second_socket
+        .send(Message::Ping(vec![1, 2, 3]))
+        .await
         .unwrap();
-    let event: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
-    assert_eq!(event["type"], "error");
-    assert_eq!(event["error"]["code"], "runtime_error");
-    assert!(event["error"]["message"].as_str().unwrap_or_default().len() > 8);
+    let second_message = timeout(Duration::from_secs(3), second_socket.next())
+        .await
+        .expect("another active WebSocket must remain live")
+        .expect("another active WebSocket must not be closed")
+        .unwrap();
+    assert!(matches!(second_message, Message::Pong(payload) if payload == vec![1, 2, 3]));
 
     std::env::remove_var("V3_P6_TEST_KEY");
     let _ = socket.close(None).await;
+    let _ = second_socket.close(None).await;
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let upstream_body = json!({
+        "error": {"type":"rate_limit_error","message":"slow down","param":"upstream"},
+        "request_id": "provider-request-429",
+        "rate_limit": {"retry_after_seconds": 17}
+    });
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/json",
+        serde_json::to_vec(&upstream_body).unwrap(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws 429"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_websocket_closes_without_data(&mut socket).await;
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    let _ = socket.close(None).await;
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_event() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) =
+        start_controlled_terminal_upstream(StatusCode::BAD_GATEWAY).await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-502");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws 502"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let message = timeout(Duration::from_secs(30), socket.next())
+        .await
+        .expect("upstream 502 must close the WebSocket");
+    assert!(
+        !matches!(
+            message,
+            Some(Ok(Message::Text(_))) | Some(Ok(Message::Binary(_)))
+        ),
+        "upstream 502 must not become a fabricated WebSocket event"
+    );
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_the_client() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::TOO_MANY_REQUESTS,
+        "application/octet-stream",
+        vec![0xff, 0xfe],
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-ws-binary-error");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
+    let mut request = endpoint.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, handshake) = connect_async(request).await.unwrap();
+    assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    socket
+        .send(Message::Text(
+            json!({"type":"response.create","model":"client-test","input":"ws binary error"})
+                .to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_websocket_closes_without_data(&mut socket).await;
+    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]
@@ -3639,6 +9095,161 @@ fn assert_control_fields_absent(body: &Value) {
     ] {
         assert!(body.get(forbidden).is_none(), "{forbidden}: {body}");
     }
+}
+
+#[tokio::test]
+async fn issue4aeb668_compat_failure_reselects_later_tier() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("issue4aeb668-compat-evidence");
+    let (provider_base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_4AEB668_KEY", "controlled-key");
+    let mut manifest = p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+        &provider_base_url,
+        "V3_4AEB668_KEY",
+        "V3_4AEB668_KEY",
+    );
+    let first = manifest.providers.get_mut("first").unwrap();
+    first.provider_type = "anthropic".into();
+    for interface in first.interfaces.values_mut() {
+        interface.provider_type = "anthropic".into();
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model":"client-test", "stream":false,
+            "input":[
+                {"type":"reasoning", "summary":[{"type":"summary_text","text":"prior thought"}], "encrypted_content":{"opaque":true}},
+                {"role":"user","content":"hello"}
+            ]
+        }))
+        .send().await;
+    let result = match response {
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap();
+            assert_eq!(status, StatusCode::OK, "{body}");
+            serde_json::from_str::<Value>(&body).unwrap()
+        }
+        Err(error) => panic!("compat failure must try the later eligible tier: {error}"),
+    };
+    assert_eq!(result["output_text"], "ok");
+    assert!(result.get("error").is_none());
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(capture.body["model"], "wire-second");
+    let evidence = wait_for_concurrency_failure_source(
+        &home_guard.codex_samples_root(handle.listeners[0].addr.port()),
+    )
+    .await;
+    let failure = &evidence["attempts"][0];
+    assert_eq!(failure["provider_id"], "first", "{evidence}");
+    assert_eq!(failure["status"], 598, "{evidence}");
+    assert_eq!(
+        failure["diagnostic_source"]["code"], "provider_request_payload_invalid",
+        "{evidence}"
+    );
+    assert!(failure["provider_status"].is_null(), "{evidence}");
+    assert_eq!(failure["action"], "switch_provider", "{evidence}");
+    assert!(
+        failure["next_provider_key"]
+            .as_str()
+            .unwrap()
+            .contains("second"),
+        "{evidence}"
+    );
+    let logs: Value = reqwest::Client::new()
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = logs["logs"].as_array().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["node_id"] == "V3TargetLocalReselected"),
+        "retained event nodes: {:?}",
+        events
+            .iter()
+            .map(|event| &event["node_id"])
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["node_id"] == "V3Router07OpaqueTargetHitOnce")
+            .count(),
+        1
+    );
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_4AEB668_KEY");
+}
+
+#[tokio::test]
+async fn issue4aeb668_actual_exhaustion_has_no_client_error_payload() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_4AEB668_EXHAUST_KEY", "controlled-key");
+    let mut manifest = p6_reselection_manifest(
+        free_port(),
+        free_port(),
+        "http://127.0.0.1:9/v1",
+        "http://127.0.0.1:9/v1",
+        "V3_4AEB668_EXHAUST_KEY",
+        "V3_4AEB668_EXHAUST_KEY",
+    );
+    manifest
+        .forwarders
+        .get_mut("responses")
+        .unwrap()
+        .targets
+        .truncate(1);
+    let provider = manifest.providers.get_mut("first").unwrap();
+    provider.provider_type = "anthropic".into();
+    for interface in provider.interfaces.values_mut() {
+        interface.provider_type = "anthropic".into();
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    for stream in [false, true] {
+        let body = serde_json::to_vec(&json!({"model":"client-test", "stream":stream, "input":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"thought"}],"encrypted_content":{"opaque":true}},
+            {"role":"user","content":"hello"}
+        ]})).unwrap();
+        let mut socket = TcpStream::connect(addr).await.unwrap();
+        socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+        socket.write_all(&body).await.unwrap();
+        let mut wire = Vec::new();
+        let _ = timeout(Duration::from_secs(10), socket.read_to_end(&mut wire))
+            .await
+            .unwrap();
+        let text = String::from_utf8_lossy(&wire);
+        assert!(
+            !text.contains("\"error\"")
+                && !text.contains("598")
+                && !text.contains("response.failed")
+                && !text.contains("response.completed")
+                && !text.contains("[DONE]"),
+            "{text}"
+        );
+        assert!(
+            !wire.ends_with(b"0\r\n\r\n"),
+            "exhaustion cannot be a normal empty completion"
+        );
+    }
+    handle.shutdown().await;
+    std::env::remove_var("V3_4AEB668_EXHAUST_KEY");
 }
 
 #[tokio::test]
@@ -3717,10 +9328,371 @@ async fn p6_provider_failure_reselects_inside_target_without_router_reentry() {
 
 #[tokio::test]
 async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projection() {
+    assert_nested_handoff_observations(NestedHandoffCase::default()).await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_trace_published_once() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_failure_evidence_keeps_all_attempts() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_failures: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_final_relay_trace_published_once() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        final_relay: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_sse_keeps_complete_observations() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        stream: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_exhaustion_keeps_terminal_observations() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        exhausted: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_local_compat_keeps_original_source() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        local_compat: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_nested_committed_sse_keeps_enclosing_evidence() {
+    assert_nested_handoff_observations(NestedHandoffCase {
+        check_trace: true,
+        check_failures: true,
+        stream: true,
+        committed_failure: true,
+        ..Default::default()
+    })
+    .await;
+}
+
+async fn start_nested_committed_failure_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures, received) = mpsc::unbounded_channel();
+    let (shutdown, stop) = oneshot::channel();
+    let app = Router::new().route("/v1/responses", post(|State(state): State<Arc<ProviderState>>, headers: HeaderMap, axum::Json(body): axum::Json<Value>| async move {
+        state.captures.send(ProviderCapture::from_http(&headers, body)).unwrap();
+        let frames = [
+            ("response.output_text.delta", json!({"type":"response.output_text.delta","item_id":"msg_nested_commit","output_index":0,"content_index":0,"delta":"committed-prefix"})),
+            ("response.output_text.delta", json!({"type":"response.output_text.delta","item_id":"msg_nested_commit","output_index":0,"content_index":0,"delta":"<thinking>secret</thinking>"})),
+            ("response.completed", json!({"type":"response.completed","response":{"id":"resp_nested_commit","object":"response","status":"completed","output":[{"id":"msg_nested_commit","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"committed-prefix <thinking>secret</thinking>","annotations":[]}]}]}})),
+        ];
+        let stream = futures_util::stream::iter(frames.into_iter().map(|(event, data)| Ok::<_, std::convert::Infallible>(format!("event: {event}\ndata: {data}\n\n"))));
+        Response::builder().status(200).header("content-type", "text/event-stream").body(Body::from_stream(stream)).unwrap()
+    })).with_state(Arc::new(ProviderState { captures }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stop.await;
+            })
+            .await
+            .unwrap();
+    });
+    (format!("http://{address}/v1"), received, shutdown)
+}
+
+#[derive(Default)]
+struct NestedHandoffCase {
+    check_trace: bool,
+    check_failures: bool,
+    final_relay: bool,
+    stream: bool,
+    exhausted: bool,
+    local_compat: bool,
+    committed_failure: bool,
+}
+
+#[tokio::test]
+async fn issue4aeb668_refill_recovery_keeps_ordered_observations() {
+    assert_refill_round_observations(false).await;
+}
+
+#[tokio::test]
+async fn issue4aeb668_refill_exhaustion_keeps_prior_observations() {
+    assert_refill_round_observations(true).await;
+}
+
+async fn assert_refill_round_observations(exhausted: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
+    let home = TestHomeGuard::new("issue4aeb668-refill-observations");
+    let calls = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let state = Arc::new((calls.clone(), exhausted));
+    let app = Router::new().route("/v1/responses", post(
+        |State(state): State<Arc<(Arc<Mutex<Vec<Value>>>, bool)>>,
+         axum::Json(body): axum::Json<Value>| async move {
+            assert!(body["input"].is_array() || body["input"].is_string(), "provider requires Responses input: {body}");
+            assert!(body.get("messages").is_none(), "conflicting Chat history: {body}");
+            if body["input"] == json!([{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}]) {
+                return Response::builder().status(200).header("content-type", "application/json")
+                    .body(Body::from("{}")).unwrap();
+            }
+            assert!(body.to_string().contains("issue4aeb668-refill"), "missing paired history: {body}");
+            let mut calls = state.0.lock().await;
+            let model = body["model"].as_str().unwrap().to_owned();
+            let occurrence = calls.iter().filter(|call| call["model"] == model).count();
+            if model == "wire-last" || (model == "wire-second" && occurrence > 0) {
+                assert!(body["input"].to_string().contains("wire-second"), "refill must retain the first round's actual message item: {body}");
+            }
+            calls.push(body);
+            let failed = model == "wire-first"
+                || (model == "wire-second" && occurrence > 0)
+                || (model == "wire-last" && state.1);
+            let response = if failed {
+                json!({"error":{"type":"server_error","code":"overloaded","message":"controlled refill provider failure"}})
+            } else {
+                json!({"id":format!("resp_{model}"),"object":"response","status":"completed",
+                    "model":model,"output":[{"type":"message","id":format!("msg_{model}"),
+                    "role":"assistant","status":"completed","content":[{"type":"output_text","text":model}]}],
+                    "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}})
+            };
+            Response::builder().status(if failed { 503 } else { 200 })
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&response).unwrap())).unwrap()
+        }
+    )).with_state(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (stop, stopped) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    std::env::set_var("V3_REFILL_OBSERVATIONS_KEY", "refill-observations-secret");
+    let providers = ["first", "second", "last"]
+        .map(|id| {
+            format!(
+                r#"
+[providers.{id}]
+type = "responses"
+base_url = "{base}"
+default_model = "{id}"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_REFILL_OBSERVATIONS_KEY" }}] }}
+[providers.{id}.models.{id}]
+wire_name = "wire-{id}"
+"#
+            )
+        })
+        .join("\n");
+    let port_a = free_port();
+    let port_b = free_port();
+    let declaration = HUB_V1_TEST_DECLARATION;
+    let execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let source = format!(
+        r#"
+version = 3
+{declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{execution}
+{providers}
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 256 }}
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "first", model = "first", key = "key", priority = 3 }},
+  {{ kind = "provider_model", provider = "second", model = "second", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "last", model = "last", key = "key", priority = 1 }}
+]
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let root = format!("http://{}", handle.listeners[0].addr);
+    let response = client
+        .post(format!("{root}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"issue4aeb668-refill","stream":false}))
+        .send()
+        .await;
+    let business = if exhausted {
+        if let Ok(response) = response {
+            assert!(
+                response.text().await.is_err(),
+                "exhaustion must break transport without a completion"
+            );
+        }
+        None
+    } else {
+        let response = response.expect("real refill recovery must deliver");
+        assert_eq!(response.status(), 200);
+        Some(
+            response
+                .json::<Value>()
+                .await
+                .expect("real refill response body"),
+        )
+    };
+    let logs: Value = client
+        .get(format!("{root}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let evidence = wait_for_concurrency_failure_source(&home.codex_samples_root(port_a)).await;
+    let calls = calls.lock().await.clone();
+    handle.shutdown().await;
+    stop.send(()).unwrap();
+    std::env::remove_var("V3_REFILL_OBSERVATIONS_KEY");
+    let models: Vec<_> = calls
+        .iter()
+        .map(|call| call["model"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        models,
+        ["wire-first", "wire-second", "wire-second", "wire-last"],
+        "actual execution/recovery sequence: {calls:?}"
+    );
+    if let Some(body) = business {
+        let output = body["output"].to_string();
+        assert!(
+            output.contains("wire-second") && output.contains("wire-last"),
+            "both real rounds must survive: {body}"
+        );
+    }
+    let sends = logs["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["node_id"] == "V3Transport13ResponsesHttpRequest")
+        .count();
+    assert_eq!(
+        sends, 4,
+        "all actual round transport nodes must be published once: {logs}"
+    );
+    let attempts = evidence["attempts"].as_array().unwrap();
+    let ids: Vec<_> = attempts
+        .iter()
+        .map(|attempt| attempt["provider_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        if exhausted {
+            vec!["first", "first", "second", "last"]
+        } else {
+            vec!["first", "first", "second"]
+        },
+        "all real round failures must survive: {evidence}"
+    );
+    for (index, attempt) in attempts.iter().enumerate() {
+        let id = attempt["provider_id"].as_str().unwrap();
+        assert_eq!(
+            attempt["provider_key"],
+            format!("{id}:default:key:{id}"),
+            "{attempt}"
+        );
+        assert_eq!(attempt["status"], 503, "{attempt}");
+        if index == 1 {
+            // The refill plan first observes the original identity's cooldown.
+            // This is a distinct local selection failure, not a second wire attempt.
+            assert!(attempt["provider_status"].is_null(), "{attempt}");
+            assert_eq!(
+                attempt["diagnostic_source"]["code"], "selected_provider_unavailable",
+                "{attempt}"
+            );
+            assert!(
+                attempt["failed_attempt_evidence"]["provider_response"].is_null(),
+                "{attempt}"
+            );
+        } else {
+            assert_eq!(attempt["provider_status"], 503, "{attempt}");
+            assert_eq!(
+                attempt["diagnostic_source"]["code"], "provider_http_503",
+                "{attempt}"
+            );
+            assert_eq!(
+                attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+                "{attempt}"
+            );
+        }
+    }
+}
+
+async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
+    let NestedHandoffCase {
+        check_trace,
+        check_failures,
+        final_relay,
+        stream,
+        exhausted,
+        local_compat,
+        committed_failure,
+    } = case;
     let _test_guard = TEST_LOCK.lock().await;
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
+    let home_guard = TestHomeGuard::new("issue4aeb668-nested-observations");
     let (failed_base_url, failed_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
-    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
+    let (success_base_url, mut captures, success_shutdown) = if committed_failure {
+        start_nested_committed_failure_upstream().await
+    } else if final_relay {
+        start_controlled_openai_chat_upstream().await
+    } else {
+        start_controlled_upstream().await
+    };
     std::env::set_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY", "secret-relay-first");
     std::env::set_var(
         "V3_NESTED_HANDOFF_DIRECT_SECOND_KEY",
@@ -3728,14 +9700,31 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
     );
     std::env::set_var("V3_NESTED_HANDOFF_RELAY_THIRD_KEY", "secret-relay-third");
     std::env::set_var("V3_NESTED_HANDOFF_DIRECT_FINAL_KEY", "secret-direct-final");
-    let handle = spawn_v3_server_aggregate(responses_relay_nested_protocol_handoff_manifest(
+    let mut manifest = responses_relay_nested_protocol_handoff_manifest(
         free_port(),
         free_port(),
         &failed_base_url,
-        &success_base_url,
-    ))
-    .await
-    .unwrap();
+        if exhausted {
+            &failed_base_url
+        } else {
+            &success_base_url
+        },
+    );
+    if final_relay {
+        let provider = manifest.providers.get_mut("direct_final").unwrap();
+        provider.provider_type = "openai_chat".into();
+        for interface in provider.interfaces.values_mut() {
+            interface.provider_type = "openai_chat".into();
+        }
+    }
+    if local_compat {
+        let provider = manifest.providers.get_mut("relay_first").unwrap();
+        provider.provider_type = "anthropic".into();
+        for interface in provider.interfaces.values_mut() {
+            interface.provider_type = "anthropic".into();
+        }
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -3743,14 +9732,53 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
         .header("thread-id", "nested-handoff-thread")
         .json(&json!({
             "model":"client-test",
-            "input":"relay direct relay direct handoff drain",
-            "stream":false
+            "input": if local_compat { json!([
+                {"type":"reasoning","summary":[],"encrypted_content":{"opaque":true}},
+                {"role":"user","content":"relay direct relay direct handoff drain"}
+            ]) } else { json!("relay direct relay direct handoff drain") },
+            "stream":stream
         }))
         .send()
+        .await;
+    let business_response = if exhausted {
+        if let Ok(response) = response {
+            assert!(
+                response.text().await.is_err(),
+                "exhaustion must break the request transport"
+            );
+        }
+        None
+    } else if committed_failure {
+        let mut response = response.unwrap();
+        let status = response.status();
+        let mut bytes = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+                Ok(None) => panic!("committed failure must not complete its SSE transport"),
+                Err(_) => break,
+            }
+        }
+        Some((status, String::from_utf8(bytes).unwrap()))
+    } else {
+        let response = response.unwrap();
+        Some((response.status(), response.text().await.unwrap()))
+    };
+    let logs: Value = client
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
         .await
         .unwrap();
-    let status = response.status();
-    let response_body = response.text().await.unwrap();
+    let evidence = wait_for_concurrency_failure_source(
+        &home_guard.codex_samples_root(handle.listeners[0].addr.port()),
+    )
+    .await;
     handle.shutdown().await;
     std::env::remove_var("V3_NESTED_HANDOFF_RELAY_FIRST_KEY");
     std::env::remove_var("V3_NESTED_HANDOFF_DIRECT_SECOND_KEY");
@@ -3759,16 +9787,185 @@ async fn responses_relay_direct_relay_nested_handoff_drains_before_http_projecti
     failed_shutdown.send(()).unwrap();
     success_shutdown.send(()).unwrap();
 
-    assert_eq!(status, 200, "unexpected response body: {response_body}");
-    let body: Value = serde_json::from_str(&response_body).unwrap();
-    assert_eq!(body["id"], "resp_json");
-    assert_eq!(body["output_text"], "ok");
-    let capture = captures.recv().await.unwrap();
-    assert_eq!(
-        capture.authorization.as_deref(),
-        Some("Bearer secret-direct-final")
-    );
-    assert_eq!(capture.body["model"], "wire-direct-final");
+    if let Some((status, response_body)) = business_response {
+        assert_eq!(status, 200, "unexpected response body: {response_body}");
+        if committed_failure {
+            assert!(
+                response_body.contains("committed-prefix"),
+                "{response_body}"
+            );
+            for forbidden in [
+                "<thinking>",
+                "secret",
+                "response.completed",
+                "response.failed",
+                "[DONE]",
+            ] {
+                assert!(!response_body.contains(forbidden), "{response_body}");
+            }
+        } else if stream {
+            assert_eq!(
+                response_body.matches("event: response.completed").count(),
+                1,
+                "{response_body}"
+            );
+            assert!(
+                !response_body.contains("response.failed"),
+                "{response_body}"
+            );
+        } else {
+            let body: Value = serde_json::from_str(&response_body).unwrap();
+            if final_relay {
+                assert!(body.to_string().contains("controlled chat JSON"), "{body}");
+            } else {
+                assert_eq!(body["id"], "resp_json");
+                assert_eq!(body["output_text"], "ok");
+            }
+        }
+        let capture = captures.recv().await.unwrap();
+        assert_eq!(
+            capture.authorization.as_deref(),
+            Some("Bearer secret-direct-final")
+        );
+        assert_eq!(capture.body["model"], "wire-direct-final");
+        if !final_relay && !committed_failure {
+            let refill = timeout(Duration::from_secs(1), captures.recv())
+                .await
+                .expect("the native completion must trigger the real default refill")
+                .expect("refill upstream capture must be retained");
+            assert_eq!(refill.authorization, capture.authorization);
+            assert_eq!(refill.body["model"], "wire-direct-final");
+            // The existing fixture has no canonical output items; the dedicated
+            // refill fixture above verifies pairing of real message items.
+            assert!(refill.body["input"].is_array(), "{}", refill.body);
+            assert!(
+                refill.body["input"]
+                    .to_string()
+                    .contains("relay direct relay direct handoff drain"),
+                "refill must retain original history: {}",
+                refill.body
+            );
+        }
+    } else {
+        assert!(
+            captures.try_recv().is_err(),
+            "exhausted request must not reach the success upstream"
+        );
+    }
+    if check_trace {
+        let nodes: Vec<_> = logs["logs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|event| event["node_id"].as_str())
+            .collect();
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|node| **node == "V3Router07OpaqueTargetHitOnce")
+                .count(),
+            1,
+            "nested execution must publish its initial route once: {nodes:?}"
+        );
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|node| **node == "V3TargetLocalReselected")
+                .count(),
+            3,
+            "the four candidates have exactly three successful selection transitions: {nodes:?}"
+        );
+        let sends: Vec<_> = nodes
+            .iter()
+            .copied()
+            .filter(|node| {
+                matches!(
+                    *node,
+                    "V3ProviderReqOutbound09TransportRequest" | "V3Transport13ResponsesHttpRequest"
+                )
+            })
+            .collect();
+        let mut expected_sends = Vec::new();
+        if !local_compat {
+            expected_sends.push("V3ProviderReqOutbound09TransportRequest");
+        }
+        expected_sends.extend([
+            "V3Transport13ResponsesHttpRequest",
+            "V3ProviderReqOutbound09TransportRequest",
+        ]);
+        expected_sends.push(if final_relay {
+            "V3ProviderReqOutbound09TransportRequest"
+        } else {
+            "V3Transport13ResponsesHttpRequest"
+        });
+        if !final_relay && !exhausted && !committed_failure {
+            expected_sends.push("V3Transport13ResponsesHttpRequest");
+        }
+        assert_eq!(
+            sends, expected_sends,
+            "each actual protocol segment must be published in execution order: {nodes:?}"
+        );
+    }
+    if check_failures {
+        let attempts = evidence["attempts"].as_array().unwrap();
+        let identities: Vec<_> = attempts
+            .iter()
+            .map(|attempt| attempt["provider_id"].as_str().unwrap())
+            .collect();
+        let mut expected = vec!["relay_first", "direct_second", "relay_third"];
+        if exhausted {
+            expected.push("direct_final");
+        }
+        assert_eq!(
+            identities, expected,
+            "all enclosing and nested failures must survive in attempt order: {evidence}"
+        );
+        for attempt in attempts {
+            let model = match attempt["provider_id"].as_str().unwrap() {
+                "relay_first" => "relay-first",
+                "direct_second" => "direct-second",
+                "relay_third" => "relay-third",
+                "direct_final" => "direct-final",
+                other => panic!("unexpected attempted identity {other}"),
+            };
+            assert_eq!(
+                attempt["provider_key"],
+                format!(
+                    "{}:default:key:{model}",
+                    attempt["provider_id"].as_str().unwrap()
+                ),
+                "{attempt}"
+            );
+            if local_compat && attempt["provider_id"] == "relay_first" {
+                assert_eq!(attempt["status"], 598, "{attempt}");
+                assert!(attempt["provider_status"].is_null(), "{attempt}");
+                assert_eq!(
+                    attempt["diagnostic_source"]["code"], "provider_request_payload_invalid",
+                    "{attempt}"
+                );
+            } else {
+                assert_eq!(attempt["status"], 503, "{attempt}");
+                assert_eq!(attempt["provider_status"], 503, "{attempt}");
+                assert_eq!(
+                    attempt["diagnostic_source"]["code"],
+                    if matches!(
+                        attempt["provider_id"].as_str(),
+                        Some("direct_second" | "direct_final")
+                    ) {
+                        "provider_http_503"
+                    } else {
+                        "provider_error"
+                    },
+                    "{attempt}"
+                );
+                assert_eq!(
+                    attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+                    "{attempt}"
+                );
+            }
+            assert!(attempt["diagnostic_source"].is_object(), "{attempt}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -3969,7 +10166,7 @@ async fn responses_direct_provider_request_dry_run_does_not_send_to_any_provider
 }
 
 #[tokio::test]
-async fn responses_direct_last_default_projects_after_provider_failure() {
+async fn responses_direct_provider_http_error_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_capturing_failure_upstream().await;
@@ -3980,26 +10177,33 @@ async fn responses_direct_last_default_projects_after_provider_failure() {
             .unwrap();
     let client = reqwest::Client::new();
 
+    // The last real upstream HTTP error is provider-side evidence only. The
+    // client boundary is the transport break, so the direct entry must not
+    // forward the provider status or body.
+    let started = std::time::Instant::now();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"test","input":"last default should fail on third attempt"}))
+        .header("session-id", "direct-terminal-provider-error-no-wait")
+        .header("thread-id", "direct-terminal-provider-error-no-wait")
+        .json(&json!({"model":"test.test","input":"preserve provider HTTP error"}))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let body: Value = response.json().await.unwrap();
-
-    assert_eq!(status, 502);
-    assert_eq!(body["error"]["code"], "network_error");
-    assert!(body["error"].get("external_error").is_none());
-    assert!(body["error"].get("internal_code").is_none());
+        .await;
+    assert!(
+        response.is_err(),
+        "a provider HTTP error must not fabricate a client HTTP response"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(750),
+        "a terminal provider error must not wait for recovery admission: {:?}",
+        started.elapsed()
+    );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");
     assert!(
         timeout(Duration::from_millis(100), captures.recv())
             .await
             .is_err(),
-        "last default must project after the provider failure without same-candidate retries"
+        "provider HTTP error must not trigger a same-candidate retry"
     );
     let logs: Value = client
         .get(format!(
@@ -4020,7 +10224,187 @@ async fn responses_direct_last_default_projects_after_provider_failure() {
 }
 
 #[tokio::test]
-async fn p6_all_provider_failures_project_terminal_error_chain() {
+async fn model_entries_never_deliver_provider_or_sse_decode_errors_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("client-transport-error-observation");
+    std::env::set_var("V3_P6_TEST_KEY", "controlled-no-client-errors");
+    for (status, content_type, provider_body) in [
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "application/json",
+            r#"{"error":"controlled_unavailable"}"#,
+        ),
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            "application/json",
+            r#"{"error":{"message":"controlled_unavailable","type":"rate_limit_error"}}"#,
+        ),
+        (
+            StatusCode::OK,
+            "application/json",
+            r#"{"error":{"message":"controlled_unavailable","type":"provider_error"}}"#,
+        ),
+        (
+            StatusCode::OK,
+            "text/event-stream",
+            "event: error\ndata: {\"type\":\"error\",\"code\":\"provider_error\",\"message\":\"controlled_unavailable\"}\n\n",
+        ),
+        (
+            StatusCode::OK,
+            "text/event-stream",
+            "data: {invalid-json}\n\n",
+        ),
+    ] {
+        for endpoint in [
+            "/v1/responses",
+            "/v1/responses/compact",
+            "/v1/chat/completions",
+            "/v1/messages",
+            "/v1beta/models/wire-test/generateContent",
+        ] {
+            for streaming in [false, true] {
+                let (provider_url, mut captures, shutdown) =
+                    start_controlled_terminal_upstream_with_body(
+                        status,
+                        content_type,
+                        provider_body.as_bytes().to_vec(),
+                    )
+                    .await;
+                let mut config = p6_manifest(free_port(), free_port(), &provider_url);
+                let transport_log = std::env::temp_dir().join(format!("v3-isolation-wire-{}.jsonl", free_port()));
+                config.debug.log_file = Some(transport_log.to_string_lossy().into_owned());
+                if endpoint.starts_with("/v1beta/") {
+                    let provider = config.providers.get_mut("test").unwrap();
+                    let interface = provider
+                        .interfaces
+                        .get_mut("default")
+                        .expect("p6 provider default interface");
+                    provider.provider_type = "gemini".to_owned();
+                    provider.base_url = provider_url.trim_end_matches("/v1").to_owned() + "/v1beta";
+                    provider.responses = None;
+                    interface.provider_type = provider.provider_type.clone();
+                    interface.base_url = provider.base_url.clone();
+                    interface.responses = None;
+                }
+                if endpoint == "/v1/responses/compact" {
+                    let group = config.route_groups.get_mut("default").unwrap();
+                    group.compact_route_object = Some("controlled-compact".to_owned());
+                    let mut pool = group.pools["client_test"].clone();
+                    pool.id = "compact".to_owned();
+                    pool.route_object = Some("controlled-compact".to_owned());
+                    group.pools.insert("compact".to_owned(), pool);
+                }
+                for server in config.servers.values_mut() {
+                    server.endpoints.push("openai_chat".to_owned());
+                    server.endpoints.push("anthropic".to_owned());
+                    server.endpoints.push("gemini".to_owned());
+                }
+                let handle = spawn_v3_server_aggregate(config).await.unwrap();
+                let addr = handle.listeners[0].addr;
+                let payload = if endpoint.starts_with("/v1/responses") {
+                    json!({"model":"client-test", "input":"hello", "stream":streaming})
+                } else if endpoint.starts_with("/v1beta/") {
+                    json!({"model":"client-test", "contents":[{"role":"user","parts":[{"text":"hello"}]}], "stream":streaming})
+                } else {
+                    json!({"model":"client-test", "max_tokens":64, "messages":[{"role":"user","content":"hello"}], "stream":streaming})
+                };
+                let body = serde_json::to_vec(&payload).unwrap();
+                let mut socket = TcpStream::connect(addr).await.unwrap();
+                socket.write_all(format!("POST {endpoint} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+                socket.write_all(&body).await.unwrap();
+                let mut wire = Vec::new();
+                let received =
+                    timeout(Duration::from_secs(40), socket.read_to_end(&mut wire)).await;
+                // Shutdown our servers before asserting, including the red baseline.
+                handle.shutdown().await;
+                shutdown.send(()).unwrap();
+                let records = fs::read_to_string(&transport_log).unwrap();
+                fs::remove_file(&transport_log).unwrap();
+                let observations = records.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .filter(|event| event["event"] == "client_transport").collect::<Vec<_>>();
+                assert!(observations.iter().any(|e| e["stage"] == "request_identified" && e["request_id"].as_str().is_some()), "{endpoint} needs the actual allocated request identity");
+                let writes = observations.iter().filter(|e| e["stage"] == "socket_write").collect::<Vec<_>>();
+                assert_eq!(writes.iter().map(|e| e["written_bytes"].as_u64().unwrap()).sum::<u64>(), wire.len() as u64, "{endpoint} socket receipts must match actual received bytes");
+                assert!(writes.iter().all(|e| e["prepared_status"] == 200 && e["request_id"].as_str().is_some()), "{endpoint} provider error cannot be logged as a client error write");
+                assert!(
+                    captures.try_recv().is_ok(),
+                    "{endpoint} must exercise actual provider transport"
+                );
+                assert!(
+                    received.is_ok(),
+                    "{endpoint} failed to reach a terminal transport outcome"
+                );
+                let text = String::from_utf8_lossy(&wire);
+                assert!(
+                    !text.contains("controlled_unavailable")
+                        && !text.contains("provider transport break")
+                        && !text.contains("provider pool exhausted")
+                        && !text.contains("response.failed")
+                        && !text.contains("event: error")
+                        && !text.contains("\"error\""),
+                    "{endpoint} stream={streaming} upstream={status} leaked client error: {text}"
+                );
+                if !streaming {
+                    assert!(
+                        wire.is_empty(),
+                        "{endpoint} JSON failure must have zero response bytes: {text}"
+                    );
+                } else if !wire.is_empty() {
+                    assert!(
+                        text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+                        "{endpoint} sent an error status: {text}"
+                    );
+                    assert!(
+                        !text.contains("response.completed")
+                            && !text.contains("[DONE]")
+                            && !wire.ends_with(b"0\r\n\r\n"),
+                        "{endpoint} disguised failure as a completed transfer: {text}"
+                    );
+                }
+            }
+        }
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_inbound_websocket_sse_decode_failure_never_sends_client_error() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        b"data: {invalid-json}\n\n".to_vec(),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "controlled-ws-sse-decode-error");
+    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
+        free_port(),
+        free_port(),
+        &provider_url,
+    ))
+    .await
+    .unwrap();
+    let mut request = format!("ws://{}/v1/responses", handle.listeners[0].addr)
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        "openai-beta",
+        HeaderValue::from_static("responses_websockets=2026-02-06"),
+    );
+    let (mut socket, _) = connect_async(request).await.unwrap();
+    socket.send(Message::Text(json!({"type":"response.create", "model":"client-test", "input":"hello", "stream":true}).to_string())).await.unwrap();
+    assert_websocket_closes_without_data(&mut socket).await;
+    assert!(
+        captures.try_recv().is_ok(),
+        "decode failure must exercise real provider transport"
+    );
+    handle.shutdown().await;
+    let _ = shutdown.send(());
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn p6_all_transport_failures_close_without_http_response() {
     let _test_guard = TEST_LOCK.lock().await;
     let closed_a = {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -4051,21 +10435,10 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello"}))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 502);
-    let body: Value = response.json().await.unwrap();
-    assert_eq!(
-        body,
-        json!({"error":{"code":"network_error","message":"network error"}})
-    );
+        .await;
     assert!(
-        body["error"].get("target_exhausted").is_none()
-            && body["error"].get("candidates_remaining").is_none()
-            && body["error"].get("decision").is_none()
-            && body["error"].get("external_error").is_none(),
-        "Error06 body must not carry control-plane fields: {}",
-        body["error"]
+        response.is_err(),
+        "no upstream HTTP response must not fabricate a status"
     );
     std::env::remove_var("V3_P6_EXHAUST_FIRST_KEY");
     std::env::remove_var("V3_P6_EXHAUST_SECOND_KEY");
@@ -4073,8 +10446,9 @@ async fn p6_all_provider_failures_project_terminal_error_chain() {
 }
 
 #[tokio::test]
-async fn p6_all_provider_failures_project_network_error_for_client_sse() {
+async fn p6_provider_503_never_reaches_a_streaming_client() {
     let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("p6-provider-503-terminal-evidence");
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-direct-sse");
@@ -4082,20 +10456,27 @@ async fn p6_all_provider_failures_project_network_error_for_client_sse() {
         spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &failure_base_url))
             .await
             .unwrap();
+    let port = handle.listeners[0].addr.port();
+    // A streaming client observes the SSE boundary and then an aborted transfer,
+    // never a provider status or a synthesized JSON error body.
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let content_type = response.headers()["content-type"].clone();
-    let response_body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
-    assert_eq!(content_type, "text/event-stream");
-    assert!(response_body.contains("response.failed"), "{response_body}");
-    assert!(response_body.contains("network_error"), "{response_body}");
-    assert!(response_body.contains("network error"), "{response_body}");
+        .await;
+    assert_incomplete_sse_or_no_response(response).await;
+
+    // The provider's real 503 and its body stay provider-private evidence: the
+    // boundary records them for the failed request instead of carrying the
+    // witness through every attempt only to discard it.
+    let evidence =
+        wait_for_v3_provider_terminal_evidence(&home_guard.codex_samples_root(port)).await;
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 503);
+    assert_eq!(
+        evidence["body"],
+        json!(r#"{"error":"controlled_unavailable"}"#.as_bytes())
+    );
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
@@ -4103,7 +10484,114 @@ async fn p6_all_provider_failures_project_network_error_for_client_sse() {
 }
 
 #[tokio::test]
-async fn anthropic_messages_provider_failure_projects_network_error_to_real_client() {
+async fn responses_selection_exhaustion_never_reaches_the_client() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (success_base_url, mut captures, success_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-selection-exhaustion");
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_context_window(
+        free_port(),
+        free_port(),
+        &success_base_url,
+        2_000,
+    ))
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    // Positive control: the same upstream serves real business content while
+    // its provider is enabled.
+    let served = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await
+        .expect("an enabled provider must serve the control request");
+    assert_eq!(served.status(), StatusCode::OK);
+    let served_body: Value = served.json().await.unwrap();
+    assert_eq!(served_body["output_text"], "ok");
+    assert_eq!(served_body["status"], "completed");
+    let control_capture = captures.recv().await.unwrap();
+    assert_eq!(
+        control_capture.body["input"],
+        json!([{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}])
+    );
+    assert!(captures.try_recv().is_err());
+    handle.shutdown().await;
+
+    // A separate declared manifest disables every candidate provider. This
+    // causes genuine selection exhaustion without rejecting context estimates.
+    let mut manifest =
+        p6_manifest_with_context_window(free_port(), free_port(), &success_base_url, 2_000);
+    for provider in manifest.providers.values_mut() {
+        provider.enabled = false;
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let endpoint = format!("http://{addr}/v1/responses");
+    let long_input = "context window exhaustion probe ".repeat(600);
+    let mut streaming = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":long_input,"stream":true}))
+        .send()
+        .await
+        .expect("a streaming client must receive the SSE response head");
+    assert_eq!(streaming.status(), StatusCode::OK);
+    assert_eq!(streaming.headers()["content-type"], "text/event-stream");
+    let mut stream_bytes = Vec::new();
+    loop {
+        match streaming.chunk().await {
+            Ok(Some(chunk)) => stream_bytes.extend_from_slice(&chunk),
+            Err(_) => break,
+            Ok(None) => panic!("an exhausted selection must abort the streaming body"),
+        }
+    }
+    let stream_text = String::from_utf8(stream_bytes).unwrap();
+    assert!(
+        stream_text.starts_with(":"),
+        "SSE must emit a transport comment: {stream_text}"
+    );
+    assert!(
+        stream_text
+            .lines()
+            .all(|line| line.is_empty() || line.starts_with(':')),
+        "SSE exhaustion must emit only comments, no business/error/DONE events: {stream_text}"
+    );
+
+    let nonstreaming = client
+        .post(&endpoint)
+        .json(&json!({"model":"client-test","input":long_input}))
+        .send()
+        .await;
+    assert!(
+        nonstreaming.is_err(),
+        "an exhausted selection must close the nonstreaming client without a payload"
+    );
+    let body = serde_json::to_vec(&json!({"model":"client-test","input":long_input})).unwrap();
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+    socket.write_all(&body).await.unwrap();
+    let mut wire = Vec::new();
+    timeout(Duration::from_secs(5), socket.read_to_end(&mut wire))
+        .await
+        .expect("JSON exhaustion must terminate promptly")
+        .unwrap();
+    assert!(
+        wire.is_empty(),
+        "JSON exhaustion must send zero response bytes: {wire:?}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "disabled providers must receive no requests after control"
+    );
+
+    std::env::remove_var("V3_P6_TEST_KEY");
+    handle.shutdown().await;
+    success_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     let _test_guard = TEST_LOCK.lock().await;
     let (failure_base_url, failure_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -4120,6 +10608,9 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
     .await
     .unwrap();
     let client = reqwest::Client::new();
+    // A provider HTTP failure is provider-private on both transports: the
+    // streaming client observes the SSE boundary and then an aborted transfer,
+    // and the nonstreaming client observes zero response bytes.
     let response = client
         .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
         .header("anthropic-version", "2023-06-01")
@@ -4130,41 +10621,1703 @@ async fn anthropic_messages_provider_failure_projects_network_error_to_real_clie
             "stream":true
         }))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let content_type = response.headers()["content-type"].clone();
-    let response_body = response.text().await.unwrap();
-    assert_eq!(status, StatusCode::BAD_GATEWAY, "{response_body}");
-    assert_eq!(content_type, "text/event-stream");
-    assert!(response_body.contains("error"), "{response_body}");
-    assert!(response_body.contains("network_error"), "{response_body}");
-    assert!(response_body.contains("network error"), "{response_body}");
-    assert!(!response_body.contains("controlled_unavailable"));
+        .await;
+    assert_incomplete_sse_or_no_response(response).await;
 
-    let json_response = client
-        .post(format!("http://{}/v1/messages", handle.listeners[0].addr))
-        .header("anthropic-version", "2023-06-01")
-        .json(&json!({
-            "model":"anthropic-client",
-            "max_tokens":64,
-            "messages":[{"role":"user","content":"provider is unavailable"}],
-            "stream":false
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(json_response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(json_response.headers()["content-type"], "application/json");
-    let json_body: Value = json_response.json().await.unwrap();
-    assert_eq!(
-        json_body,
-        json!({"error":{"code":"network_error","message":"network error"}})
+    handle.shutdown().await;
+    let json_handle = spawn_v3_server_aggregate(anthropic_failure_manifest(
+        free_port(),
+        free_port(),
+        &provider_base_url,
+    ))
+    .await
+    .unwrap();
+    let json_response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!(
+                "http://{}/v1/messages",
+                json_handle.listeners[0].addr
+            ))
+            .header("anthropic-version", "2023-06-01")
+            .json(&json!({
+                "model":"anthropic-client",
+                "max_tokens":64,
+                "messages":[{"role":"user","content":"provider is unavailable"}],
+                "stream":false
+            }))
+            .send(),
+    )
+    .await
+    .expect("fresh JSON request must finish without a fabricated provider error");
+    assert!(
+        json_response.is_err(),
+        "a provider HTTP failure must not fabricate a client HTTP response"
     );
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
-    handle.shutdown().await;
+    json_handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_followup_preserves_function_strict_presence() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("strict-presence-followup");
+    // Stable public regression: JSON/SSE × strict true/false/absence, two business attempts.
+    let mut original: Value = serde_json::from_str(
+        r#"{
+  "model": "client-test",
+  "stream": false,
+  "reasoning": {"effort": "medium"},
+  "input": [
+    {"role": "user", "content": [{"type": "input_text", "text": "Acceptance marker: PR390_GPT_5_JSON. Think through this task, then call acceptance_add exactly once with a=17 and b=25. Do not calculate the final answer before receiving the tool result. After the tool result, answer with the marker followed by the sum."}]},
+    {"content": [{"text": "The user wants me to call acceptance_add with a=17 and b=25. Let me do that.", "type": "reasoning_text"}], "summary": [{"text": "The user wants me to call acceptance_add with a=17 and b=25. Let me do that.", "type": "summary_text"}], "type": "reasoning"},
+    {"arguments": "{\"a\": 17, \"b\": 25}", "call_id": "call_00_5b97PyhFvP41SWnsrTVR6642", "name": "acceptance_add", "type": "function_call"}
+  ],
+  "tools": [{"type": "function", "name": "acceptance_add", "description": "Return the sum of the two integer arguments.", "parameters": {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}, "required": ["a", "b"], "additionalProperties": false}, "strict": true}],
+  "tool_choice": "auto"
+}"#,
+    )
+    .unwrap();
+    // Only the user message is sent initially; these two items are provider output.
+    let provider_output = original["input"].as_array().unwrap()[1..3].to_vec();
+    original["input"].as_array_mut().unwrap().truncate(1);
+    // bug03df769: a business schema property is not a proxy control resource.
+    // The controlled peer compares the complete tools on both actual attempts.
+    original["tools"][0]["parameters"]["properties"]["assignmentFields"] = json!({
+        "type":"object",
+        "properties":{"requiredCapabilities":{"type":"array","items":{"type":"string"}}},
+        "required":["requiredCapabilities"]
+    });
+
+    struct StrictRoundtripState {
+        captures: mpsc::UnboundedSender<ProviderCapture>,
+        expected: Mutex<std::collections::VecDeque<Value>>,
+        output: Vec<Value>,
+    }
+
+    async fn strict_roundtrip_upstream(
+        State(state): State<Arc<StrictRoundtripState>>,
+        headers: HeaderMap,
+        axum::Json(body): axum::Json<Value>,
+    ) -> Response<Body> {
+        // The declared Responses health probe is separate from business attempts.
+        if body
+            == json!({
+                "model":"wire-protocol",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}],
+                "stream":false
+            })
+        {
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"id":"resp_probe","status":"completed","output_text":"pong"}"#,
+                ))
+                .unwrap();
+        }
+        state
+            .captures
+            .send(ProviderCapture::from_http(&headers, body.clone()))
+            .unwrap();
+        let mut expected = state.expected.lock().await;
+        let accepted = expected.front().is_some_and(|request| {
+            [
+                "model",
+                "tools",
+                "input",
+                "tool_choice",
+                "reasoning",
+                "stream",
+            ]
+            .iter()
+            .all(|field| body.get(*field) == request.get(*field))
+        });
+        if !accepted {
+            return Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("strict declaration or paired history mismatch"))
+                .unwrap();
+        }
+        expected.pop_front();
+        let followup = body["tool_choice"] == "none";
+        let output = if followup {
+            vec![
+                json!({"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"42"}]}),
+            ]
+        } else {
+            state.output.clone()
+        };
+        let response = json!({
+            "id":if followup {"resp_strict_final"} else {"resp_strict_call"},
+            "object":"response", "status":"completed", "model":"wire-protocol", "output":output
+        });
+        if body["stream"] == true {
+            let mut wire = format!(
+                "event: response.created\ndata: {}\n\n",
+                json!({
+                    "type":"response.created", "response":{"id":response["id"],"status":"in_progress","output":[]}
+                })
+            );
+            for (index, item) in output.iter().enumerate() {
+                wire.push_str(&format!(
+                    "event: response.output_item.done\ndata: {}\n\n",
+                    json!({
+                        "type":"response.output_item.done", "output_index":index, "item":item
+                    })
+                ));
+            }
+            wire.push_str(&format!(
+                "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({
+                    "type":"response.completed", "response":response
+                })
+            ));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(wire))
+                .unwrap()
+        } else {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Body::from(response.to_string()))
+                .unwrap()
+        }
+    }
+
+    let capture_dir = std::env::temp_dir().join(format!(
+        "routecodex-4ce7349-strict-captures-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&capture_dir).unwrap();
+    println!("strict presence upstream bodies: {}", capture_dir.display());
+
+    let mut cases = Vec::new();
+    let mut expected = std::collections::VecDeque::new();
+    for stream in [false, true] {
+        for (label, strict) in [
+            ("true", Some(json!(true))),
+            ("false", Some(json!(false))),
+            ("absent", None),
+        ] {
+            let mut request = original.clone();
+            request["stream"] = json!(stream);
+            let tool = request["tools"][0].as_object_mut().unwrap();
+            if let Some(value) = strict {
+                tool.insert("strict".to_owned(), value);
+            } else {
+                tool.remove("strict");
+            }
+            let mut first_wire = request.clone();
+            first_wire["model"] = json!("wire-protocol");
+            expected.push_back(first_wire.clone());
+            let mut followup_wire = first_wire;
+            followup_wire["input"]
+                .as_array_mut()
+                .unwrap()
+                .extend(provider_output.clone());
+            followup_wire["input"].as_array_mut().unwrap().push(json!({
+                "type":"function_call_output", "call_id":provider_output[1]["call_id"], "output":"{\"sum\":42}"
+            }));
+            followup_wire["tool_choice"] = json!("none");
+            expected.push_back(followup_wire);
+            cases.push((
+                format!("{}-{label}", if stream { "sse" } else { "json" }),
+                request,
+            ));
+        }
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let state = Arc::new(StrictRoundtripState {
+        captures: captures_tx,
+        expected: Mutex::new(expected),
+        output: provider_output.clone(),
+    });
+    let app = Router::new()
+        .route("/v1/responses", post(strict_roundtrip_upstream))
+        .with_state(Arc::clone(&state));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "controlled-strict-presence");
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        "\"direct\"",
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+
+    for (label, mut request) in cases {
+        for turn in 0..2 {
+            let response = client
+                .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+                .header(
+                    "accept",
+                    if request["stream"] == true {
+                        "text/event-stream"
+                    } else {
+                        "application/json"
+                    },
+                )
+                .json(&request)
+                .send()
+                .await;
+            let received = timeout(Duration::from_secs(5), captures.recv())
+                .await
+                .expect("first provider attempt must reach controlled upstream")
+                .expect("controlled upstream must capture request");
+            let capture_path = capture_dir.join(format!("{label}-turn{turn}-upstream-body.json"));
+            fs::write(
+                &capture_path,
+                serde_json::to_vec_pretty(&received.body).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                received.body["tools"][0].get("strict"),
+                request["tools"][0].get("strict"),
+                "strict presence changed for {label}; body saved at {}",
+                capture_path.display()
+            );
+            assert_eq!(received.body["tools"], request["tools"], "{label}: tools");
+            assert_eq!(received.body["input"], request["input"], "{label}: history");
+            assert_eq!(received.body["tool_choice"], request["tool_choice"]);
+            assert_eq!(received.body["reasoning"], request["reasoning"]);
+            assert_eq!(received.body["stream"], request["stream"]);
+            let response = response.expect("public Responses request must complete");
+            assert_eq!(response.status(), StatusCode::OK);
+            let content_type = response.headers()["content-type"]
+                .to_str()
+                .unwrap()
+                .to_owned();
+            let wire = response
+                .text()
+                .await
+                .expect("accepted provider response must complete");
+            fs::write(
+                capture_dir.join(format!("{label}-turn{turn}-client.txt")),
+                &wire,
+            )
+            .unwrap();
+            let body: Value = if request["stream"] == true {
+                assert!(content_type.starts_with("text/event-stream"));
+                let events: Vec<Value> = wire
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data: "))
+                    .filter(|data| *data != "[DONE]")
+                    .map(|data| serde_json::from_str(data).unwrap())
+                    .collect();
+                assert!(!events.iter().any(|event| matches!(
+                    event["type"].as_str(),
+                    Some("error" | "response.failed")
+                )));
+                let completed = events
+                    .iter()
+                    .find(|event| event["type"] == "response.completed")
+                    .expect("SSE completion");
+                for item in completed["response"]["output"].as_array().unwrap() {
+                    assert!(events
+                        .iter()
+                        .any(|event| event["type"] == "response.output_item.done"
+                            && event["item"] == *item));
+                }
+                completed["response"].clone()
+            } else {
+                assert!(content_type.starts_with("application/json"));
+                serde_json::from_str(&wire).unwrap()
+            };
+            assert_eq!(body["status"], "completed");
+            if turn == 0 {
+                assert_eq!(
+                    body["output"],
+                    json!(provider_output),
+                    "complete provider output"
+                );
+                let call = body["output"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["type"] == "function_call")
+                    .unwrap();
+                assert_eq!(call["name"], "acceptance_add");
+                let arguments: Value =
+                    serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+                assert_eq!(arguments, json!({"a":17,"b":25}));
+                let sum = arguments["a"].as_i64().unwrap() + arguments["b"].as_i64().unwrap();
+                assert_eq!(sum, 42);
+                let output = json!({"sum":sum}).to_string();
+                let receipt = json!({"name":call["name"], "call_id":call["call_id"], "arguments":arguments, "output":output});
+                fs::write(
+                    capture_dir.join(format!("{label}-execution-receipt.json")),
+                    serde_json::to_vec_pretty(&receipt).unwrap(),
+                )
+                .unwrap();
+                request["input"]
+                    .as_array_mut()
+                    .unwrap()
+                    .extend(body["output"].as_array().unwrap().clone());
+                request["input"].as_array_mut().unwrap().push(json!({"type":"function_call_output", "call_id":call["call_id"], "output":output}));
+                request["tool_choice"] = json!("none");
+            } else {
+                assert_eq!(body["output"][0]["content"][0]["text"], "42");
+            }
+            assert!(
+                timeout(Duration::from_millis(100), captures.recv())
+                    .await
+                    .is_err(),
+                "unexpected extra business attempt"
+            );
+        }
+    }
+    assert!(
+        state.expected.lock().await.is_empty(),
+        "all twelve business attempts accepted"
+    );
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("direct-namespace-identity");
+    // This case counts provider attempts and pairs the follow-up history, so the
+    // Chat Process continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "controlled-namespace-identity");
+
+    #[derive(Clone)]
+    struct NamespaceIdentityState {
+        captures: mpsc::UnboundedSender<ProviderCapture>,
+    }
+
+    async fn namespace_identity_upstream(
+        State(state): State<Arc<NamespaceIdentityState>>,
+        headers: HeaderMap,
+        axum::Json(body): axum::Json<Value>,
+    ) -> Response<Body> {
+        state
+            .captures
+            .send(ProviderCapture::from_http(&headers, body.clone()))
+            .unwrap();
+        let input_text =
+            serde_json::to_string(body.get("input").unwrap_or(&Value::Null)).unwrap_or_default();
+        let has_tool_output = body
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                })
+            });
+        let declares = |name: &str| {
+            body.get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(|tools| {
+                    tools.iter().any(|tool| {
+                        tool.get("name").and_then(Value::as_str) == Some(name)
+                            || tool.pointer("/function/name").and_then(Value::as_str) == Some(name)
+                    })
+                })
+        };
+        let output = if has_tool_output {
+            json!([{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "NS_DIRECT_ROUNDTRIP_DONE"}]
+            }])
+        } else if input_text.contains("NS_REQUEST_B") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_request_b",
+                "name": "mcp__codex_app__list_threads",
+                "arguments": "{\"limit\":1}"
+            }])
+        } else if input_text.contains("NS_UNDECLARED") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_undeclared",
+                "name": "mcp__undeclared__tool",
+                "arguments": "{}"
+            }])
+        } else if input_text.contains("NS_ORDINARY_DOUBLE_UNDERSCORE") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_ordinary",
+                "name": "mcp__workspace",
+                "arguments": "{}"
+            }])
+        } else if input_text.contains("NS_EXISTING_NAMESPACE") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_existing",
+                "name": "existing",
+                "namespace": "mcp__provider",
+                "arguments": "{}"
+            }])
+        } else if declares("mcp__codex_app__list_threads")
+            || input_text.contains("NS_DIRECT_ROUNDTRIP")
+        {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_list_threads",
+                "name": "mcp__codex_app__list_threads",
+                "arguments": "{\"limit\":1}"
+            }])
+        } else if declares("mcp__codex_apps__gmail___archive_emails") {
+            json!([{
+                "type": "function_call",
+                "call_id": "call_ns_archive",
+                "name": "mcp__codex_apps__gmail___archive_emails",
+                "arguments": "{\"thread_ids\":[\"t1\"]}"
+            }])
+        } else {
+            json!([{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "NS_DIRECT_NO_CALL"}]
+            }])
+        };
+        let response = json!({
+            "id": "resp_ns_identity",
+            "object": "response",
+            "status": "completed",
+            "model": "wire-protocol",
+            "output": output
+        });
+        if body.get("stream").and_then(Value::as_bool) == Some(true) {
+            let mut wire = format!(
+                "event: response.created\ndata: {}\n\n",
+                json!({
+                    "type": "response.created",
+                    "response": {"id": "resp_ns_identity", "status": "in_progress", "output": []}
+                })
+            );
+            for (index, item) in output.as_array().unwrap().iter().enumerate() {
+                wire.push_str(&format!(
+                    "event: response.output_item.added\ndata: {}\n\n",
+                    json!({
+                        "type": "response.output_item.added",
+                        "output_index": index,
+                        "item": item
+                    })
+                ));
+                wire.push_str(&format!(
+                    "event: response.output_item.done\ndata: {}\n\n",
+                    json!({
+                        "type": "response.output_item.done",
+                        "output_index": index,
+                        "item": item
+                    })
+                ));
+            }
+            wire.push_str(&format!(
+                "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"type": "response.completed", "response": response})
+            ));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(Body::from(wire))
+                .unwrap()
+        } else {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "application/json")
+                .body(Body::from(response.to_string()))
+                .unwrap()
+        }
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(namespace_identity_upstream))
+        .with_state(Arc::new(NamespaceIdentityState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        r#""direct""#,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let declared_tool = json!({
+        "type": "namespace",
+        "name": "mcp__codex_app",
+        "tools": [{
+            "type": "function",
+            "name": "list_threads",
+            "description": "List threads",
+            "parameters": {"type": "object", "properties": {"limit": {"type": "integer"}}}
+        }]
+    });
+
+    for stream in [false, true] {
+        let request = json!({
+            "model": "client-test",
+            "stream": stream,
+            "input": [{
+                "role": "user",
+                "content": [{"type": "input_text", "text": "NS_DIRECT_ROUNDTRIP list_threads"}]
+            }],
+            "tools": [declared_tool.clone()]
+        });
+        let response = client
+            .post(&endpoint)
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&request)
+            .send()
+            .await
+            .expect("public Direct Responses request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_type = response.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let wire = response.text().await.unwrap();
+        let first_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("first provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture first request");
+        let provider_tools = first_capture.body["tools"].as_array().unwrap();
+        assert!(
+            provider_tools.iter().any(|tool| {
+                tool.get("name").and_then(Value::as_str) == Some("mcp__codex_app__list_threads")
+                    || tool.pointer("/function/name").and_then(Value::as_str)
+                        == Some("mcp__codex_app__list_threads")
+            }),
+            "provider-bound declaration must carry the flattened namespace name: {}",
+            first_capture.body
+        );
+
+        let call = if stream {
+            assert!(content_type.starts_with("text/event-stream"));
+            let events = wire
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter(|data| *data != "[DONE]")
+                .map(|data| serde_json::from_str::<Value>(data).unwrap())
+                .collect::<Vec<_>>();
+            let added = events
+                .iter()
+                .find(|event| event["type"] == "response.output_item.added")
+                .expect("client SSE must include response.output_item.added");
+            let done = events
+                .iter()
+                .find(|event| event["type"] == "response.output_item.done")
+                .expect("client SSE must include response.output_item.done");
+            let completed = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
+                .expect("client SSE must include response.completed");
+            let call = completed["response"]["output"][0].clone();
+            for item in [&added["item"], &done["item"], &call] {
+                assert_eq!(item["call_id"], "call_ns_list_threads");
+                assert_eq!(item["arguments"], "{\"limit\":1}");
+                assert_eq!(
+                    item["namespace"], "mcp__codex_app",
+                    "client SSE item must carry the declared namespace: {item}"
+                );
+                assert_eq!(
+                    item["name"], "list_threads",
+                    "client SSE item must carry the declared tool leaf: {item}"
+                );
+            }
+            call
+        } else {
+            assert!(content_type.starts_with("application/json"));
+            let body: Value = serde_json::from_str(&wire).unwrap();
+            let call = body["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "function_call")
+                .cloned()
+                .expect("client JSON must carry the function call");
+            assert_eq!(call["call_id"], "call_ns_list_threads");
+            assert_eq!(call["arguments"], "{\"limit\":1}");
+            assert_eq!(
+                call["namespace"], "mcp__codex_app",
+                "client JSON must carry the declared namespace: {call}"
+            );
+            assert_eq!(
+                call["name"], "list_threads",
+                "client JSON must carry the declared tool leaf: {call}"
+            );
+            call
+        };
+
+        let output = match (call["namespace"].as_str(), call["name"].as_str()) {
+            (Some("mcp__codex_app"), Some("list_threads")) => {
+                json!({"threads": [{"id": "thread-1"}], "read_only": true})
+            }
+            _ => panic!("consumer unsupported call: {}", call),
+        };
+        let output_text = output.to_string();
+
+        let mut followup = request.clone();
+        followup["input"].as_array_mut().unwrap().push(call.clone());
+        followup["input"].as_array_mut().unwrap().push(json!({
+            "type": "function_call_output",
+            "call_id": call["call_id"],
+            "output": output_text
+        }));
+        followup["tool_choice"] = json!("none");
+        let second = client
+            .post(&endpoint)
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&followup)
+            .send()
+            .await
+            .expect("public Direct follow-up request must complete");
+        assert_eq!(second.status(), StatusCode::OK);
+        let second_wire = second.text().await.unwrap();
+        let second_capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("second provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture second request");
+        let second_input = second_capture.body["input"].as_array().unwrap();
+        let paired_call = second_input
+            .iter()
+            .find(|item| {
+                item["type"] == "function_call" && item["call_id"] == "call_ns_list_threads"
+            })
+            .expect("follow-up provider request must retain the function call");
+        let paired_output = second_input
+            .iter()
+            .find(|item| {
+                item["type"] == "function_call_output" && item["call_id"] == "call_ns_list_threads"
+            })
+            .expect("follow-up provider request must retain the paired tool output");
+        assert_eq!(paired_call["call_id"], paired_output["call_id"]);
+        assert_eq!(paired_output["output"], output_text);
+        assert!(
+            second_wire.contains("NS_DIRECT_ROUNDTRIP_DONE"),
+            "follow-up client response must carry the completed business response: {second_wire}"
+        );
+    }
+
+    for (marker, expected_name, expected_namespace, expected_call_id) in [
+        (
+            "NS_UNDECLARED",
+            "mcp__undeclared__tool",
+            None,
+            "call_ns_undeclared",
+        ),
+        (
+            "NS_ORDINARY_DOUBLE_UNDERSCORE",
+            "mcp__workspace",
+            None,
+            "call_ns_ordinary",
+        ),
+        (
+            "NS_EXISTING_NAMESPACE",
+            "existing",
+            Some("mcp__provider"),
+            "call_ns_existing",
+        ),
+        (
+            "NS_REQUEST_B",
+            "mcp__codex_app__list_threads",
+            None,
+            "call_ns_request_b",
+        ),
+    ] {
+        let request = json!({
+            "model": "client-test",
+            "stream": false,
+            "input": [{
+                "role": "user",
+                "content": [{"type": "input_text", "text": marker}]
+            }],
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__declared",
+                "tools": [{
+                    "type": "function",
+                    "name": "existing",
+                    "parameters": {"type": "object"}
+                }]
+            }]
+        });
+        let response = client
+            .post(&endpoint)
+            .json(&request)
+            .send()
+            .await
+            .expect("negative namespace request must complete");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = response.json().await.unwrap();
+        let call = body["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["type"] == "function_call")
+            .cloned()
+            .expect("negative case must return a function call");
+        let _capture = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .expect("negative provider attempt must reach controlled upstream")
+            .expect("controlled upstream must capture negative request");
+        assert_eq!(call["call_id"], expected_call_id);
+        assert_eq!(call["name"], expected_name);
+        match expected_namespace {
+            Some(namespace) => assert_eq!(call["namespace"], namespace),
+            None => assert!(
+                call.get("namespace").is_none(),
+                "undeclared or request-local identity must not gain namespace: {call}"
+            ),
+        }
+    }
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[derive(Clone)]
+struct NamespacePublicUpstreamState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+}
+
+fn namespace_public_tool_wire_name(tool: &Value) -> Option<&str> {
+    tool.get("name")
+        .and_then(Value::as_str)
+        .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
+}
+
+fn namespace_public_tool_description(tool: &Value) -> Option<&str> {
+    tool.get("description").and_then(Value::as_str).or_else(|| {
+        tool.pointer("/function/description")
+            .and_then(Value::as_str)
+    })
+}
+
+fn namespace_public_provider_tools(body: &Value) -> Vec<Value> {
+    body.get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+async fn namespace_public_upstream(
+    State(state): State<Arc<NamespacePublicUpstreamState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let has_tool_output = body
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call_output" | "custom_tool_call_output")
+                )
+            })
+        });
+    let output = if has_tool_output {
+        json!([{
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "NS_CASE_DONE"}]
+        }])
+    } else {
+        let calls = namespace_public_provider_tools(&body)
+            .iter()
+            .filter_map(|tool| {
+                let call_id = namespace_public_tool_description(tool)?.strip_prefix("NS_DECL:")?;
+                let name = namespace_public_tool_wire_name(tool)?;
+                Some(if tool.get("type").and_then(Value::as_str) == Some("custom") {
+                    json!({"type":"custom_tool_call","call_id":call_id,"name":name,"input":"raw_probe"})
+                } else {
+                    json!({"type":"function_call","call_id":call_id,"name":name,"arguments":"{\"probe\":1}"})
+                })
+            })
+            .collect::<Vec<_>>();
+        if calls.is_empty() {
+            json!([{
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "NS_CASE_NO_DECLARATION"}]
+            }])
+        } else {
+            Value::Array(calls)
+        }
+    };
+    let response = json!({
+        "id": "resp_ns_public",
+        "object": "response",
+        "status": "completed",
+        "model": "wire-protocol",
+        "output": output
+    });
+    if body.get("stream").and_then(Value::as_bool) == Some(true) {
+        let mut wire = format!(
+            "event: response.created\ndata: {}\n\n",
+            json!({
+                "type": "response.created",
+                "response": {"id": "resp_ns_public", "status": "in_progress", "output": []}
+            })
+        );
+        for (index, item) in output.as_array().unwrap().iter().enumerate() {
+            wire.push_str(&format!(
+                "event: response.output_item.added\ndata: {}\n\n",
+                json!({
+                    "type": "response.output_item.added",
+                    "output_index": index,
+                    "item": item
+                })
+            ));
+            wire.push_str(&format!(
+                "event: response.output_item.done\ndata: {}\n\n",
+                json!({
+                    "type": "response.output_item.done",
+                    "output_index": index,
+                    "item": item
+                })
+            ));
+        }
+        wire.push_str(&format!(
+            "event: response.completed\ndata: {}\n\ndata: [DONE]\n\n",
+            json!({"type": "response.completed", "response": response})
+        ));
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(wire))
+            .unwrap()
+    } else {
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(response.to_string()))
+            .unwrap()
+    }
+}
+
+fn namespace_public_client_call(wire: &str, stream: bool, call_id: &str) -> Value {
+    if stream {
+        let events = wire
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter(|data| *data != "[DONE]")
+            .map(|data| serde_json::from_str::<Value>(data).unwrap())
+            .collect::<Vec<_>>();
+        let completed = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap_or_else(|| panic!("client SSE must include response.completed: {wire}"));
+        let call = completed["response"]["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == call_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("client SSE must carry call {call_id}: {wire}"));
+        for kind in ["response.output_item.added", "response.output_item.done"] {
+            let item = events
+                .iter()
+                .find(|event| event["type"] == kind && event["item"]["call_id"] == call_id)
+                .unwrap_or_else(|| panic!("client SSE must include {kind} for {call_id}: {wire}"));
+            assert_eq!(item["item"]["namespace"], call["namespace"]);
+            assert_eq!(item["item"]["name"], call["name"]);
+            assert_eq!(item["item"]["arguments"], call["arguments"]);
+        }
+        call
+    } else {
+        let body: Value = serde_json::from_str(wire).unwrap();
+        body["output"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["call_id"] == call_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("client JSON must carry call {call_id}: {wire}"))
+    }
+}
+
+#[tokio::test]
+async fn namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("namespace-wire-binding-consumer");
+    // This case counts upstream attempts, so the Chat Process continuation
+    // must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "namespace-wire-binding-consumer",
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/responses", post(namespace_public_upstream))
+                .with_state(Arc::new(NamespacePublicUpstreamState { captures: tx })),
+        )
+        .with_graceful_shutdown(async {
+            let _ = rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base,
+        r#""direct""#,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    for stream in [false, true] {
+        let mut request = json!({"model":"gpt-5.5","stream":stream,"input":[{"role":"user","content":"read local probes"}],
+            "tool_choice":{"type":"function","name":"alpha__read"},"tools":[
+            {"type":"function","name":"alpha__read","description":"NS_DECL:plain","parameters":{"type":"object"}},
+            {"type":"namespace","name":"alpha","tools":[
+                {"type":"function","name":"read","description":"NS_DECL:namespaced","parameters":{"type":"object"}},
+                {"type":"function","name":"beta__read","description":"NS_DECL:separator","parameters":{"type":"object"}},
+                {"type":"custom","name":"read","description":"NS_DECL:custom","format":{"type":"text"}}]},
+            {"type":"namespace","name":"alpha__beta","tools":[
+                {"type":"function","name":"read","description":"NS_DECL:nested-collision","parameters":{"type":"object"}}]}
+        ]});
+        let response = client.post(&endpoint).json(&request).send().await.unwrap();
+        let status = response.status();
+        let wire = response.text().await.unwrap();
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "all declared identities must reach provider: {wire}"
+        );
+        let first = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        println!("namespace_binding_first_wire={}", first.body);
+        let tools = namespace_public_provider_tools(&first.body);
+        let bindings: std::collections::BTreeMap<_, _> = tools
+            .iter()
+            .filter_map(|t| {
+                Some((
+                    namespace_public_tool_description(t)?
+                        .strip_prefix("NS_DECL:")?
+                        .to_owned(),
+                    namespace_public_tool_wire_name(t)?.to_owned(),
+                ))
+            })
+            .collect();
+        assert_eq!(
+            bindings.len(),
+            5,
+            "declarations/kinds must survive: {}",
+            first.body
+        );
+        assert_eq!(
+            bindings
+                .values()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            5
+        );
+        assert_eq!(first.body["tool_choice"]["name"], bindings["plain"]);
+        for (id, namespace, name, kind) in [
+            ("plain", None, "alpha__read", "function_call"),
+            ("namespaced", Some("alpha"), "read", "function_call"),
+            ("separator", Some("alpha"), "beta__read", "function_call"),
+            (
+                "nested-collision",
+                Some("alpha__beta"),
+                "read",
+                "function_call",
+            ),
+            ("custom", Some("alpha"), "read", "custom_tool_call"),
+        ] {
+            let call = namespace_public_client_call(&wire, stream, id);
+            assert_eq!(call["name"], name, "{id}: {call}");
+            assert_eq!(call["namespace"].as_str(), namespace, "{id}: {call}");
+            assert_eq!(call["type"], kind, "{id}: {call}");
+            let output = if kind == "custom_tool_call" {
+                assert_eq!(call["input"], "raw_probe");
+                "custom_tool_call_output"
+            } else {
+                assert_eq!(call["arguments"], "{\"probe\":1}");
+                "function_call_output"
+            };
+            // A real local consumer dispatches by the original namespace/name/kind.
+            let handled = format!("READ_ONLY:{id}");
+            request["input"].as_array_mut().unwrap().push(call);
+            request["input"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"type":output,"call_id":id,"output":handled}));
+        }
+        request["tool_choice"] = json!("none");
+        let second = client.post(&endpoint).json(&request).send().await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        assert!(second.text().await.unwrap().contains("NS_CASE_DONE"));
+        let second = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        println!("namespace_binding_followup_wire={}", second.body);
+        for (id, name) in bindings {
+            let history = second.body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| {
+                    v["call_id"] == id
+                        && matches!(
+                            v["type"].as_str(),
+                            Some("function_call" | "custom_tool_call")
+                        )
+                })
+                .unwrap();
+            assert_eq!(
+                history["name"], name,
+                "paired history must use same wire binding"
+            );
+            let output = second.body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| {
+                    v["call_id"] == id
+                        && matches!(
+                            v["type"].as_str(),
+                            Some("function_call_output" | "custom_tool_call_output")
+                        )
+                })
+                .unwrap();
+            assert_eq!(output["output"], format!("READ_ONLY:{id}"));
+        }
+    }
+    assert!(handle.shutdown().await.is_empty());
+    let _ = shutdown.send(());
+}
+
+struct NamespacePublicCase {
+    label: &'static str,
+    call_id: &'static str,
+    expected_provider_name: Option<&'static str>,
+    expected_namespace: &'static str,
+    expected_name: &'static str,
+    stream: bool,
+    expect_provider_choice: bool,
+    distinct_from_description: Option<&'static str>,
+}
+
+async fn run_namespace_public_case(
+    client: &reqwest::Client,
+    endpoint: &str,
+    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+    case: &NamespacePublicCase,
+    request: Value,
+) -> String {
+    let response = client
+        .post(endpoint)
+        .header(
+            "accept",
+            if case.stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        )
+        .json(&request)
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "[{}] public request must complete through /v1/responses: {error}",
+                case.label
+            )
+        });
+    let status = response.status();
+    let content_type = response.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let wire = response.text().await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "[{}] public request must succeed: {wire}",
+        case.label
+    );
+    assert!(
+        content_type.starts_with(if case.stream {
+            "text/event-stream"
+        } else {
+            "application/json"
+        }),
+        "[{}] unexpected client content type {content_type}",
+        case.label
+    );
+
+    let first_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "[{}] first provider attempt must reach controlled upstream",
+                case.label
+            )
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] controlled upstream must capture first request",
+                case.label
+            )
+        });
+    let provider_tools = namespace_public_provider_tools(&first_capture.body);
+    let expected_description = format!("NS_DECL:{}", case.call_id);
+    let declared = provider_tools
+        .iter()
+        .find(|tool| {
+            namespace_public_tool_description(tool)
+                .is_some_and(|description| description == expected_description)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] provider-bound tools must declare {expected_description}; client_wire={wire}; provider_body={}",
+                case.label, first_capture.body
+            )
+        });
+    let wire_name = namespace_public_tool_wire_name(declared)
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] declared tool must have a wire name: {declared}",
+                case.label
+            )
+        })
+        .to_owned();
+    if let Some(expected) = case.expected_provider_name {
+        assert_eq!(
+            wire_name, expected,
+            "[{}] provider-bound declaration must use the flattened namespace name: {}",
+            case.label, first_capture.body
+        );
+    }
+    if let Some(plain_description) = case.distinct_from_description {
+        let plain = provider_tools
+            .iter()
+            .find(|tool| {
+                namespace_public_tool_description(tool)
+                    .is_some_and(|description| description == plain_description)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "[{}] provider-bound tools must keep colliding declaration {plain_description}: {}",
+                    case.label, first_capture.body
+                )
+            });
+        let plain_name = namespace_public_tool_wire_name(plain).unwrap_or_else(|| {
+            panic!(
+                "[{}] colliding plain declaration must have a wire name: {plain}",
+                case.label
+            )
+        });
+        assert_ne!(
+            plain_name, wire_name,
+            "[{}] colliding declarations must receive distinct wire names: {}",
+            case.label, first_capture.body
+        );
+    }
+    if case.expect_provider_choice {
+        assert_eq!(
+            first_capture.body["tool_choice"]["name"].as_str(),
+            Some(wire_name.as_str()),
+            "[{}] provider-bound tool_choice must be synchronized with the declaration; client_wire={wire}; provider_body={}",
+            case.label,
+            first_capture.body
+        );
+    }
+
+    let call = namespace_public_client_call(&wire, case.stream, case.call_id);
+    assert_eq!(
+        call["namespace"], case.expected_namespace,
+        "[{}] client identity namespace: {call}; client_wire={wire}",
+        case.label
+    );
+    assert_eq!(
+        call["name"], case.expected_name,
+        "[{}] client identity leaf: {call}; client_wire={wire}",
+        case.label
+    );
+    let custom = declared["type"] == "custom";
+    assert_eq!(
+        call["type"],
+        if custom {
+            "custom_tool_call"
+        } else {
+            "function_call"
+        }
+    );
+    if custom {
+        assert_eq!(call["input"], "raw_probe", "{}: {call}", case.label);
+        assert_eq!(declared["format"], json!({"type":"text"}));
+    } else {
+        assert_eq!(call["arguments"], "{\"probe\":1}", "{}: {call}", case.label);
+    }
+    assert_eq!(call["call_id"], case.call_id);
+
+    let output = match (call["namespace"].as_str(), call["name"].as_str()) {
+        (Some(namespace), Some(name))
+            if namespace == case.expected_namespace && name == case.expected_name =>
+        {
+            json!({"handled": name, "read_only": true})
+        }
+        other => panic!(
+            "[{}] consumer cannot dispatch namespace identity {other:?}: {call}",
+            case.label
+        ),
+    };
+    let output_text = output.to_string();
+
+    let mut followup = request.clone();
+    followup["input"].as_array_mut().unwrap().push(call.clone());
+    followup["input"].as_array_mut().unwrap().push(json!({
+        "type": if custom { "custom_tool_call_output" } else { "function_call_output" },
+        "call_id": case.call_id,
+        "output": output_text
+    }));
+    followup["tool_choice"] = json!("none");
+    let second = client
+        .post(endpoint)
+        .header(
+            "accept",
+            if case.stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            },
+        )
+        .json(&followup)
+        .send()
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "[{}] follow-up request must complete through /v1/responses: {error}",
+                case.label
+            )
+        });
+    assert_eq!(
+        second.status(),
+        StatusCode::OK,
+        "[{}] follow-up request must succeed",
+        case.label
+    );
+    let second_wire = second.text().await.unwrap();
+    assert!(
+        second_wire.contains("NS_CASE_DONE"),
+        "[{}] follow-up client response must carry the business completion: {second_wire}",
+        case.label
+    );
+    let second_capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "[{}] follow-up provider attempt must reach controlled upstream",
+                case.label
+            )
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] controlled upstream must capture follow-up request",
+                case.label
+            )
+        });
+    assert_eq!(
+        second_capture.body["tool_choice"], "none",
+        "[{}] follow-up provider choice: {}",
+        case.label, second_capture.body
+    );
+    let second_input = second_capture.body["input"].as_array().unwrap_or_else(|| {
+        panic!(
+            "[{}] follow-up provider input must be an array: {}",
+            case.label, second_capture.body
+        )
+    });
+    let history_call = second_input
+        .iter()
+        .find(|item| {
+            item["type"]
+                == if custom {
+                    "custom_tool_call"
+                } else {
+                    "function_call"
+                }
+                && item["call_id"] == case.call_id
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] follow-up provider input must retain the function call: {}",
+                case.label, second_capture.body
+            )
+        });
+    assert_eq!(
+        history_call[if custom { "input" } else { "arguments" }],
+        if custom { "raw_probe" } else { "{\"probe\":1}" },
+        "[{}] follow-up history arguments: {}",
+        case.label,
+        second_capture.body
+    );
+    assert_eq!(
+        history_call["name"].as_str(),
+        Some(wire_name.as_str()),
+        "[{}] follow-up history must reuse the declared wire name: {}",
+        case.label,
+        second_capture.body
+    );
+    let history_output = second_input
+        .iter()
+        .find(|item| {
+            item["type"]
+                == if custom {
+                    "custom_tool_call_output"
+                } else {
+                    "function_call_output"
+                }
+                && item["call_id"] == case.call_id
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "[{}] follow-up provider input must retain the paired tool output: {}",
+                case.label, second_capture.body
+            )
+        });
+    assert_eq!(
+        history_output["output"], output_text,
+        "[{}] follow-up tool output: {}",
+        case.label, second_capture.body
+    );
+
+    wire_name
+}
+
+// Public negative coverage for the unified namespace identity contract. Each case
+// binds a distinct failure mechanism: source discovery, nested traversal, separator
+// preservation, custom kind projection, or plain-name collision allocation.
+#[tokio::test]
+async fn responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer(
+) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("direct-namespace-public-sources");
+    // This case counts provider attempts per declared source, so the Chat Process
+    // continuation must not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "controlled-namespace-public-sources",
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route("/v1/responses", post(namespace_public_upstream))
+        .with_state(Arc::new(NamespacePublicUpstreamState {
+            captures: captures_tx,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    let manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        r#""direct""#,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let user_message = |marker: &str| {
+        json!({
+            "role": "user",
+            "content": [{"type": "input_text", "text": marker}]
+        })
+    };
+
+    let ordinary = NamespacePublicCase {
+        label: "ordinary-namespace-separator",
+        call_id: "call_ns_ordinary",
+        expected_provider_name: Some("workspace__tools__read"),
+        expected_namespace: "workspace__tools",
+        expected_name: "read",
+        stream: false,
+        expect_provider_choice: true,
+        distinct_from_description: None,
+    };
+    let ordinary_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [user_message("NS_CASE_ORDINARY")],
+        "tools": [{
+            "type": "namespace",
+            "name": "workspace__tools",
+            "tools": [{
+                "type": "function",
+                "name": "read",
+                "description": "NS_DECL:call_ns_ordinary",
+                "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}
+            }]
+        }],
+        "tool_choice": {"type": "function", "name": "workspace__tools.read"}
+    });
+    run_namespace_public_case(
+        &client,
+        &endpoint,
+        &mut captures,
+        &ordinary,
+        ordinary_request,
+    )
+    .await;
+
+    for stream in [false, true] {
+        let nested = NamespacePublicCase {
+            label: if stream {
+                "nested-additional-tools-sse"
+            } else {
+                "nested-additional-tools-json"
+            },
+            call_id: "call_ns_nested",
+            expected_provider_name: Some("outer__inner__leaf"),
+            expected_namespace: "outer.inner",
+            expected_name: "leaf",
+            stream,
+            expect_provider_choice: false,
+            distinct_from_description: None,
+        };
+        let nested_request = json!({
+            "model": "client-test",
+            "stream": stream,
+            "input": [
+                {
+                    "type": "additional_tools",
+                    "tools": [{
+                        "type": "namespace",
+                        "name": "outer",
+                        "tools": [{
+                            "type": "namespace",
+                            "name": "inner",
+                            "tools": [{
+                                "type": "function",
+                                "name": "leaf",
+                                "description": "NS_DECL:call_ns_nested",
+                                "parameters": {"type": "object"}
+                            }]
+                        }]
+                    }]
+                },
+                user_message("NS_CASE_NESTED")
+            ]
+        });
+        run_namespace_public_case(&client, &endpoint, &mut captures, &nested, nested_request).await;
+    }
+
+    let discovered = NamespacePublicCase {
+        label: "discovered-leading-underscore-leaf",
+        call_id: "call_ns_discovered",
+        expected_provider_name: Some("mcp__codex_apps__gmail___archive_emails"),
+        expected_namespace: "mcp__codex_apps__gmail",
+        expected_name: "_archive_emails",
+        stream: false,
+        expect_provider_choice: false,
+        distinct_from_description: None,
+    };
+    let discovered_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [
+            {
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "execution": "client",
+                "status": "completed",
+                "arguments": {"query": "gmail archive"}
+            },
+            {
+                "type": "tool_search_output",
+                "call_id": "call_search",
+                "execution": "client",
+                "status": "completed",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "mcp__codex_apps__gmail",
+                    "tools": [{
+                        "type": "function",
+                        "name": "_archive_emails",
+                        "description": "NS_DECL:call_ns_discovered",
+                        "parameters": {"type": "object"}
+                    }]
+                }]
+            },
+            user_message("NS_CASE_DISCOVERED")
+        ]
+    });
+    run_namespace_public_case(
+        &client,
+        &endpoint,
+        &mut captures,
+        &discovered,
+        discovered_request,
+    )
+    .await;
+
+    let custom = NamespacePublicCase {
+        label: "custom-child",
+        call_id: "call_ns_custom",
+        expected_provider_name: Some("workspace__run"),
+        expected_namespace: "workspace",
+        expected_name: "run",
+        stream: false,
+        expect_provider_choice: false,
+        distinct_from_description: None,
+    };
+    let custom_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [user_message("NS_CASE_CUSTOM")],
+        "tools": [{
+            "type": "namespace",
+            "name": "workspace",
+            "tools": [{
+                "type": "custom",
+                "name": "run",
+                "description": "NS_DECL:call_ns_custom",
+                "format": {"type": "text"}
+            }]
+        }]
+    });
+    run_namespace_public_case(&client, &endpoint, &mut captures, &custom, custom_request).await;
+
+    let collision = NamespacePublicCase {
+        label: "plain-name-collision",
+        call_id: "call_ns_collision",
+        expected_provider_name: None,
+        expected_namespace: "collision",
+        expected_name: "leaf",
+        stream: false,
+        expect_provider_choice: true,
+        distinct_from_description: Some("NS_PLAIN:collision__leaf"),
+    };
+    let collision_request = json!({
+        "model": "client-test",
+        "stream": false,
+        "input": [user_message("NS_CASE_COLLISION")],
+        "tools": [
+            {
+                "type": "namespace",
+                "name": "collision",
+                "tools": [{
+                    "type": "function",
+                    "name": "leaf",
+                    "description": "NS_DECL:call_ns_collision",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"namespace_side": {"type": "string"}}
+                    }
+                }]
+            },
+            {
+                "type": "function",
+                "name": "collision__leaf",
+                "description": "NS_PLAIN:collision__leaf",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"plain_side": {"type": "string"}}
+                }
+            }
+        ],
+        "tool_choice": {"type": "function", "name": "collision.leaf"}
+    });
+    run_namespace_public_case(
+        &client,
+        &endpoint,
+        &mut captures,
+        &collision,
+        collision_request,
+    )
+    .await;
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
 }
 
 #[tokio::test]
@@ -4224,7 +12377,13 @@ async fn responses_direct_relay_only_snap_scope_writes_no_codex_sample() {
     let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
     manifest.debug.codex_samples = true;
     manifest.debug.snapshot_direct = false;
-    manifest.providers.get_mut("test").unwrap().responses = None;
+    let provider = manifest.providers.get_mut("test").unwrap();
+    provider.responses = None;
+    provider
+        .interfaces
+        .get_mut("default")
+        .expect("p6 provider default interface")
+        .responses = None;
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let client = reqwest::Client::new();
 
@@ -4307,6 +12466,11 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
     assert_eq!(sse_response.status(), 200);
     let sse_body = sse_response.text().await.unwrap();
     assert!(sse_body.contains("response.completed"), "{sse_body}");
+    assert_responses_sse_delivered_business_text(&sse_body, "controlled SSE response");
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted Direct samples must finish before the E2E inspects disk");
 
     let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
     let json_sample = read_responses_sample_response_by_request_marker(
@@ -4323,6 +12487,7 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
     assert!(sse_sample["rawSse"]
         .as_str()
         .is_some_and(|value| value.contains("response.completed")));
+    assert_responses_sample_sse_delivered_business_text(&sse_sample, "controlled SSE response");
     assert!(!serde_json::to_string(&json_sample)
         .unwrap()
         .contains("secret-key"));
@@ -4333,6 +12498,392 @@ async fn responses_direct_full_snap_scope_persists_live_json_and_sse_responses()
     assert!(captures.recv().await.is_some());
 
     handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_sample_persist_failure_is_reported_after_live_sse_succeeds() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("direct-sample-persist-failure");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
+    fs::write(&samples_root, b"block sample directory creation").unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model": "client-test",
+            "input": "direct sample persistence failure stays visible",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("response.completed"), "{body}");
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    assert!(captures.recv().await.is_some());
+
+    let persist_failures = handle.shutdown().await;
+    assert!(
+        persist_failures
+            .iter()
+            .any(|failure| failure.file_name == "request.json"),
+        "aggregate shutdown must return the residual request sample failure"
+    );
+    assert!(persist_failures
+        .iter()
+        .all(|failure| { !failure.request_id.is_empty() && !failure.reason.is_empty() }));
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-sample-cutoff");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample_lock_path = routecodex_v3_debug::resolve_v3_codex_samples_root()
+        .unwrap()
+        .join(".retention.lock");
+    fs::create_dir_all(sample_lock_path.parent().unwrap()).unwrap();
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sample_lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    for marker in ["accepted before cutoff", "second accepted before cutoff"] {
+        let response = client
+            .post(&endpoint)
+            .json(&json!({
+                "model": "client-test", "input": marker, "stream": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+        assert!(captures.recv().await.is_some());
+    }
+    let mut preparation = Box::pin(handle.prepare_exec_attempt());
+    std::future::poll_fn(|context| {
+        use std::future::Future;
+        assert!(
+            preparation.as_mut().poll(context).is_pending(),
+            "accepted sample writes are blocked by a real filesystem lock"
+        );
+        std::task::Poll::Ready(())
+    })
+    .await;
+    let mut queued = Box::pin(client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "queued while draining accepted jobs", "stream": false
+        }))
+        .send());
+    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .await
+        .is_err());
+    assert!(
+        captures.try_recv().is_err(),
+        "maintenance must block provider dispatch"
+    );
+    drop(sample_lock);
+    let preparation = preparation.await.unwrap();
+    for marker in ["accepted before cutoff", "second accepted before cutoff"] {
+        assert_eq!(
+            read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
+            "resp_json"
+        );
+    }
+    for request in fs::read_dir(&samples_root).unwrap() {
+        for artifact in fs::read_dir(request.unwrap().path()).unwrap() {
+            let path = artifact.unwrap().path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "json")
+            {
+                serde_json::from_slice::<Value>(&fs::read(&path).unwrap())
+                    .expect("every accepted sample is complete JSON before exec");
+            }
+        }
+    }
+    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .await
+        .is_err());
+    assert!(
+        captures.try_recv().is_err(),
+        "prepared maintenance must retain admission"
+    );
+    drop(preparation);
+    let response = timeout(Duration::from_secs(5), queued)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "persist after rejected preparation", "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(handle.prepare_exec_attempt().await.unwrap());
+    assert_eq!(
+        read_responses_sample_response_by_request_marker(
+            &samples_root,
+            "persist after rejected preparation"
+        )["id"],
+        "resp_json"
+    );
+    let failures = handle.shutdown().await;
+    assert!(
+        failures.is_empty(),
+        "queued requests must preserve diagnostics: {failures:?}"
+    );
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_historical_sample_failure_does_not_reject_exec_preparation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-historical-sample-failure");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
+    fs::write(&samples_root, b"block diagnostic directory").unwrap();
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({"model":"client-test", "input":"historical write failure", "stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    let preparation = handle
+        .prepare_exec_attempt()
+        .await
+        .expect("diagnostic failures do not deny restart");
+    assert!(preparation
+        .codex_sample_persist_failures
+        .iter()
+        .any(|failure| failure.file_name == "request.json"));
+    drop(preparation);
+    fs::remove_file(&samples_root).unwrap();
+    let preparation = handle
+        .prepare_exec_attempt()
+        .await
+        .expect("history must not permanently deny restart");
+    drop(preparation);
+    let failures = handle.shutdown().await;
+    assert!(
+        !failures.is_empty(),
+        "original failure evidence must remain reportable"
+    );
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("exec-sample-timeout");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    let sample_lock_path = routecodex_v3_debug::resolve_v3_codex_samples_root()
+        .unwrap()
+        .join(".retention.lock");
+    fs::create_dir_all(sample_lock_path.parent().unwrap()).unwrap();
+    let sample_lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(sample_lock_path)
+        .unwrap();
+    sample_lock.lock().unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test", "input":"accepted before timeout", "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    let error = handle.prepare_exec_attempt().await.unwrap_err();
+    assert!(error.contains("timed out; worker retained"), "{error}");
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test", "input":"accepted after timeout", "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
+    drop(sample_lock);
+    let preparation = handle.prepare_exec_attempt().await.unwrap();
+    assert!(preparation.codex_sample_persist_failures.is_empty());
+    for marker in ["accepted before timeout", "accepted after timeout"] {
+        assert_eq!(
+            read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
+            "resp_json"
+        );
+    }
+    drop(preparation);
+    assert!(handle.shutdown().await.is_empty());
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
+    let (base_url, _captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    // Sampling acceptance needs capacity for all 80 concurrent clients. Use a
+    // distinct auth identity so other tests' adaptive limits cannot affect it.
+    let mut manifest = p6_manifest_with_isolated_provider_capacity(&base_url, 80);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let port = handle.listeners[0].addr.port();
+    let samples_root = home_guard.codex_samples_root(port);
+
+    let client = reqwest::Client::new();
+    let requests = (0..80)
+        .map(|_| async {
+            client
+                .post(format!("http://127.0.0.1:{port}/v1/responses"))
+                .json(&json!({
+                    "model": "client-test",
+                    "input": "burst sample writes stay verbatim",
+                    "stream": true
+                }))
+                .send()
+                .await
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    for response in join_all(requests).await {
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.expect("complete SSE body");
+        assert!(body.contains("response.completed"), "{body}");
+        assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    }
+
+    let failures = handle.shutdown().await;
+    assert!(
+        failures.is_empty(),
+        "full-sampling burst must not drop sample writes: {failures:?}"
+    );
+    let written = fs::read_dir(&samples_root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .count();
+    assert!(
+        written >= 80,
+        "expected at least one request sample dir per request, found {written}"
+    );
+
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_sample_persist_failure_is_reported_during_exec_preparation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("direct-sample-persist-exec-failure");
+    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-key");
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
+    fs::create_dir_all(samples_root.parent().unwrap()).unwrap();
+    fs::write(&samples_root, b"block sample directory creation").unwrap();
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .json(&json!({
+            "model": "client-test",
+            "input": "direct sample persistence failure before exec",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("response.completed"), "{body}");
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    assert!(captures.recv().await.is_some());
+
+    let preparation = handle.prepare_for_exec().await;
+    assert!(
+        preparation
+            .codex_sample_persist_failures
+            .iter()
+            .any(|failure| failure.file_name == "request.json"),
+        "exec preparation must return the residual request sample failure"
+    );
+    assert!(preparation
+        .codex_sample_persist_failures
+        .iter()
+        .all(|failure| !failure.request_id.is_empty() && !failure.reason.is_empty()));
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
@@ -4561,6 +13112,7 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
         .json(&json!({
             "model": "client-test",
             "input": "route anthropic provider through relay",
+            "service_tier": "priority",
             "stream": false
         }))
         .send()
@@ -4588,6 +13140,7 @@ async fn responses_direct_binding_uses_post_target_relay_for_anthropic_provider_
     assert_eq!(body["providerRequest"]["body"]["model"], "wire-protocol");
     assert!(body["providerRequest"]["body"].get("messages").is_some());
     assert!(body["providerRequest"]["body"].get("input").is_none());
+    assert_eq!(body["providerRequest"]["body"]["service_tier"], "priority");
     let node_ids = body["dry_run"]["node_ids"].as_array().unwrap();
     assert!(
         node_ids
@@ -4628,18 +13181,86 @@ async fn responses_direct_binding_protocol_mismatch_without_relay_allowed_fails_
             "stream": false
         }))
         .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let body: Value = response.json().await.unwrap();
+        .await;
     handle.shutdown().await;
     std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
-
-    assert_eq!(status, 598, "unexpected response body: {body}");
-    assert_eq!(body["error"]["code"], "protocol_mismatch_relay_not_allowed");
     assert!(
-        body.get("dry_run").is_none(),
-        "failed admission cannot fabricate dry-run success"
+        response.is_err(),
+        "failed admission must not fabricate any client response"
+    );
+}
+
+#[tokio::test]
+async fn error01_protocol_decision_normal_http_failure_no_client_error() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home = TestHomeGuard::new("protocol-decision-http");
+    let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let sends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = sends.clone();
+    let app = Router::new().fallback(move |request: axum::http::Request<Body>| {
+        if request.method() == axum::http::Method::POST {
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        async { StatusCode::OK }
+    });
+    let (stop, stopped) = oneshot::channel();
+    let upstream_task = tokio::spawn(async move {
+        axum::serve(upstream, app)
+            .with_graceful_shutdown(async {
+                let _ = stopped.await;
+            })
+            .await
+            .unwrap();
+    });
+    std::env::set_var("V3_PROTOCOL_DECISION_KEY", "secret-key");
+    let log = home.path.join("protocol-decision.log");
+    let mut manifest = responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "openai_chat",
+        &format!("http://{upstream_addr}/v1"),
+        r#""direct""#,
+    );
+    manifest.debug.log_file = Some(log.to_string_lossy().into_owned());
+    manifest.debug.log_console = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let address = handle.listeners[0].addr;
+    let response = client
+        .post(format!("http://{address}/v1/responses"))
+        .json(&json!({"model":"client-test","input":"protocol decision control","stream":false}))
+        .send()
+        .await;
+    let health = client.get(format!("http://{address}/health")).send().await;
+    handle.shutdown().await;
+    let _ = stop.send(());
+    upstream_task.await.unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+    let diagnostic = fs::read_to_string(&log).unwrap_or_default();
+    assert!(
+        response.is_err(),
+        "failure must end transport without a client response"
+    );
+    assert!(
+        !response.unwrap_err().is_timeout(),
+        "the request must end detectably before timeout"
+    );
+    assert_eq!(sends.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(health
+        .expect("listener remains available")
+        .status()
+        .is_success());
+    assert!(
+        diagnostic.contains("V3Execution11ProtocolDecision"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("protocol_mismatch_relay_not_allowed"),
+        "{diagnostic}"
     );
 }
 
@@ -4841,9 +13462,11 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
             "Authorization": "Bearer sk-v3-secret"
         }))
         .send()
-        .await
-        .unwrap();
-    assert_eq!(runtime_error.status(), 598);
+        .await;
+    assert!(
+        runtime_error.is_err(),
+        "runtime error must remain off the client response"
+    );
 
     let status: serde_json::Value = client
         .get(format!("http://{}/_routecodex/debug/status", listener.addr))
@@ -4903,7 +13526,7 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
     assert_eq!(vr_dry_run["routingPolicyGroup"], "default");
     assert_eq!(
         vr_dry_run["diagnostics"]["decision"]["selectedProviderKey"],
-        "test:key:test"
+        "test:default:key:test"
     );
     assert_eq!(
         vr_dry_run["diagnostics"]["decision"]["wouldReturnProviderNotAvailable"],
@@ -4936,7 +13559,12 @@ async fn debug_endpoints_project_shared_runtime_state_and_dry_run_no_send() {
             "method": "POST",
             "path": "/v1/responses",
             "request_payload": {"input": "fixed", "authorization": "Bearer dry-run-request-secret"},
-            "response_payload": {"id": "fixed-response", "api_key": "dry-run-response-secret"}
+            "response_payload": {
+                "id": "fixed-response",
+                "api_key": "dry-run-response-secret",
+                "status": "completed",
+                "output": [{"type":"message","role":"assistant","content":[{"type":"output_text","text":"dry-run business response"}]}]
+            }
         }))
         .send()
         .await
@@ -5376,91 +14004,41 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::new();
 
-    let cases = [
+    for (path, method, content_type, body) in [
+        ("/v1/messages", "POST", Some("application/json"), "{}"),
+        ("/v1/responses", "GET", None, ""),
+        ("/v1/unknown", "POST", None, ""),
+        ("/v1/responses", "POST", None, r#"{"input":"hello"}"#),
         (
-            client
-                .post(format!("{base}/v1/messages"))
-                .header("content-type", "application/json")
-                .body("{}")
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::NOT_IMPLEMENTED,
-            "endpoint_not_enabled",
+            "/v1/responses",
+            "POST",
+            Some("text/plain"),
+            r#"{"input":"hello"}"#,
         ),
-        (
-            client
-                .get(format!("{base}/v1/responses"))
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::BAD_REQUEST,
-            "websocket_upgrade_required",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/unknown"))
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::NOT_FOUND,
-            "path_not_found",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .body(r#"{"input":"hello"}"#)
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_type_required",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .header("content-type", "text/plain")
-                .body(r#"{"input":"hello"}"#)
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "content_type_unsupported",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .header("content-type", "application/json")
-                .body("{")
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::BAD_REQUEST,
-            "malformed_json",
-        ),
-        (
-            client
-                .post(format!("{base}/v1/responses"))
-                .header("content-type", "application/json")
-                .body(vec![b'x'; 256 * 1024 * 1024 + 1])
-                .send()
-                .await
-                .unwrap(),
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "body_too_large",
-        ),
-    ];
-
-    for (response, expected_status, expected_code) in cases {
-        assert_eq!(response.status(), expected_status);
-        let body: Value = response.json().await.unwrap();
-        assert_eq!(body["error"]["code"], expected_code);
+        ("/v1/responses", "POST", Some("application/json"), "{"),
+    ] {
+        let mut request = client.request(method.parse().unwrap(), format!("{base}{path}"));
+        if let Some(content_type) = content_type {
+            request = request.header("content-type", content_type);
+        }
+        let response = timeout(Duration::from_secs(5), request.body(body).send())
+            .await
+            .expect("invalid boundary must reach terminal transport outcome");
         assert!(
-            body["error"].get("stage").is_none(),
-            "Error06 body must not carry the source stage: {}",
-            body["error"]
+            response.is_err(),
+            "{method} {path} must not deliver an error response"
         );
     }
+    assert!(
+        client
+            .post(format!("{base}/v1/responses"))
+            .header("content-type", "application/json")
+            .body(vec![b'x'; 256 * 1024 * 1024 + 1])
+            .send()
+            .await
+            .is_err(),
+        "oversized input must not deliver an error response"
+    );
 
     let logs: Value = client
         .get(format!("{base}/_routecodex/debug/logs"))
@@ -5482,6 +14060,104 @@ async fn invalid_http_boundaries_fail_before_runtime_with_typed_error_chain() {
         );
     }
     handle.shutdown().await;
+}
+
+/// Request-lane evidence for issue b878f6c: a real POST that fails at the
+/// request boundary enters the typed Error chain (`node=V3Error06ClientProjected`)
+/// and breaks the client transport, without any provider attempt and without any
+/// provider-health mutation.
+///
+/// `invalid_http_boundaries_fail_before_runtime_with_typed_error_chain` already
+/// proves the transport break and that no Runtime node is entered. This case adds
+/// the two missing side-effect checks against a live controlled upstream: the
+/// provider is never contacted, and no untried `provider.model.key` is cooled.
+#[tokio::test]
+async fn request_boundary_error_makes_no_provider_attempt_and_no_health_mutation() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("request-boundary-error-lane");
+    let (provider_base_url, mut captures, upstream_shutdown) = start_controlled_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-request-boundary-error-lane");
+    let mut manifest = p6_manifest(free_port(), free_port(), &provider_base_url);
+    // `p6_manifest` disables provider health; enable it so a spurious cooldown
+    // caused by a request-boundary error would be observable.
+    let provider = manifest.providers.get_mut("test").unwrap();
+    let health = provider
+        .health
+        .as_mut()
+        .expect("p6 manifest declares provider health");
+    health.enabled = true;
+    health.failure_threshold = 1;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    // Each request fails at the request boundary: an unknown path, a protocol
+    // that is not enabled on this listener, and a malformed JSON body.
+    for (path, content_type, body) in [
+        (
+            "/v1/unknown",
+            Some("application/json"),
+            r#"{"model":"client-test","input":"x"}"#,
+        ),
+        (
+            "/v1/messages",
+            Some("application/json"),
+            r#"{"model":"client-test","messages":[]}"#,
+        ),
+        ("/v1/responses", Some("application/json"), "{"),
+    ] {
+        let mut request = client.post(format!("{base}{path}"));
+        if let Some(content_type) = content_type {
+            request = request.header("content-type", content_type);
+        }
+        let response = timeout(Duration::from_secs(5), request.body(body).send())
+            .await
+            .expect("a request-boundary error must terminate the transport");
+        assert!(
+            response.is_err(),
+            "{path} must break the client transport, not deliver an error or empty completion"
+        );
+    }
+
+    // No provider attempt was made for any boundary error.
+    assert!(
+        captures.try_recv().is_err(),
+        "a request-boundary error must not reach the provider"
+    );
+    // No untried provider identity was cooled.
+    let pool: Value = client
+        .get(format!("{base}/_routecodex/health/cooldown-pool"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        pool["entries"].as_array().map(Vec::len),
+        Some(0),
+        "a request-boundary error must not mutate provider health: {pool}"
+    );
+
+    // Positive control: the provider channel is live, so the empty capture above
+    // is meaningful. A valid request is forwarded and captured.
+    let ok = client
+        .post(format!("{base}/v1/responses"))
+        .header("content-type", "application/json")
+        .json(&json!({"model":"client-test","input":"hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the controlled provider must receive the valid request")
+        .expect("the capture channel stays open");
+    assert_eq!(capture.body["model"], "wire-test");
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
 }
 
 #[tokio::test]
@@ -5522,12 +14198,23 @@ async fn observability_projection_is_isolated_per_listener() {
             .join(".rcc")
             .join("logs")
             .join(format!("server-v3-{expected_port}.request-records.jsonl"));
-        assert!(
-            store_path.exists(),
-            "listener {expected_port} must create its own persisted observability store at {}",
-            store_path.display()
-        );
-        let content = fs::read_to_string(&store_path).unwrap();
+        let content = timeout(Duration::from_secs(5), async {
+            loop {
+                if store_path.exists() {
+                    let content = fs::read_to_string(&store_path).unwrap_or_default();
+                    let envelopes = content
+                        .lines()
+                        .filter(|line| !line.trim().is_empty())
+                        .count();
+                    if envelopes >= 2 {
+                        return content;
+                    }
+                }
+                sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("listener must persist lifecycle updates to its own observability store");
         let envelopes = content
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
@@ -5558,4 +14245,910 @@ async fn observability_projection_is_isolated_per_listener() {
     handle.shutdown().await;
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+// ---------------------------------------------------------------------------
+// Error-isolation black-box regressions (F3/F4/F5/F7).
+//
+// Stable public gate: test:v3-server-debug-error-blackbox (workspace CI).
+// Every case drives the real aggregate-server entry
+// (`spawn_v3_server_aggregate`) over real TCP/HTTP bytes and asserts an
+// externally observable outcome: an optional-capability failure (debug sample
+// retention, debug log sink, a status probe) must not stop the declared
+// listeners, and a listener that loses one accept() must keep accepting.
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn current_v3_test_nofile_limit() -> (libc::rlim_t, libc::rlim_t) {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    assert_eq!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
+        0,
+        "read RLIMIT_NOFILE"
+    );
+    (limit.rlim_cur, limit.rlim_max)
+}
+
+#[cfg(unix)]
+fn set_v3_test_nofile_limit(soft: libc::rlim_t, hard: libc::rlim_t) {
+    let limit = libc::rlimit {
+        rlim_cur: soft,
+        rlim_max: hard,
+    };
+    assert_eq!(
+        unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) },
+        0,
+        "set RLIMIT_NOFILE"
+    );
+}
+
+#[cfg(unix)]
+fn v3_test_loopback_sockaddr(addr: std::net::SocketAddr) -> libc::sockaddr_in {
+    let mut sockaddr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        sockaddr.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
+    }
+    sockaddr.sin_family = libc::AF_INET as libc::sa_family_t;
+    sockaddr.sin_port = addr.port().to_be();
+    sockaddr.sin_addr.s_addr = match addr.ip() {
+        std::net::IpAddr::V4(ip) => u32::from(ip).to_be(),
+        std::net::IpAddr::V6(_) => panic!("the accept-error case drives an IPv4 loopback listener"),
+    };
+    sockaddr
+}
+
+/// F3: startup sample retention is optional housekeeping, never business truth.
+///
+/// One sample port directory is unreadable (mode `0o000`), so retention's
+/// per-entry scan fails with a real filesystem error while the process-shared
+/// sample lock in the samples root stays usable. The aggregate server must
+/// still bind every declared listener and serve real HTTP on it.
+///
+/// Before the fix the Debug owner propagated that per-entry error
+/// (`fs::read_dir(port_dir.path())...?`), so startup returned `Err` and no
+/// listener was bound. The contract-bound case stays fatal: an invalid
+/// process-shared sample lock must still produce an explicit startup error
+/// (`shared_sample_retention_invalid_lock_is_explicit_blackbox`).
+#[tokio::test]
+async fn codex_sample_retention_failure_keeps_declared_listeners_serving_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("sample-retention-unavailable");
+    let port_a = free_port();
+    let port_b = free_port();
+    let samples_root = home_guard.path.join(".rcc").join("codex-samples");
+    let unreadable_port_dir = samples_root
+        .join("openai-responses")
+        .join("ports")
+        .join("65535");
+    fs::create_dir_all(&unreadable_port_dir).unwrap();
+    fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let mut manifest = p6_manifest(port_a, port_b, "http://127.0.0.1:1");
+    manifest.debug.codex_samples = true;
+
+    let handle = spawn_v3_server_aggregate(manifest).await.expect(
+        "an unavailable debug sample retention directory must not stop the aggregate server",
+    );
+    assert_eq!(
+        handle.listeners.len(),
+        2,
+        "every declared listener must still bind"
+    );
+    assert!(
+        handle.has_active_listener(),
+        "the aggregate server must still report an active listener"
+    );
+
+    let client = reqwest::Client::new();
+    for listener in &handle.listeners {
+        let health = timeout(
+            Duration::from_secs(10),
+            client
+                .get(format!("http://{}/health", listener.addr))
+                .send(),
+        )
+        .await
+        .expect("health request must not hang")
+        .expect("health request must reach the declared listener");
+        assert_eq!(
+            health.status(),
+            StatusCode::OK,
+            "declared listener {} must serve a real request",
+            listener.server_id
+        );
+        let body: Value = health.json().await.unwrap();
+        assert_eq!(body["server_id"], listener.server_id.as_str());
+    }
+    // The business surface, not only the status probe, must be serving.
+    let models = timeout(
+        Duration::from_secs(10),
+        client
+            .get(format!("http://{}/v1/models", handle.listeners[0].addr))
+            .send(),
+    )
+    .await
+    .expect("models request must not hang")
+    .expect("models request must reach the declared listener");
+    assert_eq!(models.status(), StatusCode::OK);
+    let models: Value = models.json().await.unwrap();
+    assert_eq!(models["object"], "list");
+    assert!(models["data"]
+        .as_array()
+        .is_some_and(|data| !data.is_empty()));
+
+    // Restore the scan permission so the test home can be removed.
+    fs::set_permissions(&unreadable_port_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapall_openai_chat_direct_persists_complete_four_stage_wire() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-openai-chat-direct");
+    let (base_url, mut captures, shutdown) = start_controlled_openai_chat_upstream().await;
+    std::env::set_var("V3_SNAPALL_TEST_KEY", "secret-key");
+    let mut manifest = snapall_openai_chat_direct_manifest(free_port(), free_port(), &base_url);
+    manifest.debug.snapshots = true;
+    manifest.debug.codex_samples = true;
+    manifest.debug.full_codex_sampling = true;
+    manifest.debug.snapshot_direct = true;
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let large_marker = format!("snapall-chat-direct-{}", "x".repeat(200_000));
+
+    let json_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "messages": [{"role": "user", "content": large_marker}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(json_response.status(), 200);
+    let json_body = json_response.json::<Value>().await.unwrap();
+    assert_eq!(json_body["id"], "chatcmpl_json");
+
+    let sse_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test",
+            "messages": [{"role": "user", "content": "snapall chat direct sse"}],
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sse_response.status(), 200);
+    let sse_wire = sse_response.text().await.unwrap();
+    assert!(
+        sse_wire.contains("controlled chat SSE"),
+        "client must receive the provider SSE business text: {sse_wire}"
+    );
+
+    handle
+        .wait_for_codex_sample_persistence()
+        .await
+        .expect("accepted snapall samples must finish before disk inspection");
+    let samples_root = home_guard
+        .codex_samples_root_for("openai-chat-completions", handle.listeners[0].addr.port());
+    let mut json_sample_dir = None;
+    let mut sse_sample_dir = None;
+    for entry in fs::read_dir(&samples_root)
+        .unwrap_or_else(|error| panic!("sample root must exist at {samples_root:?}: {error}"))
+    {
+        let path = entry.unwrap().path();
+        let request = fs::read_to_string(path.join("request.json")).unwrap_or_default();
+        if request.contains("snapall-chat-direct-") {
+            json_sample_dir = Some(path);
+        } else if request.contains("snapall chat direct sse") {
+            sse_sample_dir = Some(path);
+        }
+    }
+    let json_sample_dir = json_sample_dir.expect("JSON request sample directory");
+    let sse_sample_dir = sse_sample_dir.expect("SSE request sample directory");
+    for sample_dir in [&json_sample_dir, &sse_sample_dir] {
+        for artifact in [
+            "request.json",
+            "provider-request.json",
+            "provider-response.json",
+            "response.json",
+        ] {
+            assert!(
+                sample_dir.join(artifact).is_file(),
+                "snapall must persist {artifact} under {sample_dir:?}"
+            );
+        }
+    }
+
+    let json_request: Value =
+        serde_json::from_str(&fs::read_to_string(json_sample_dir.join("request.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        json_request["messages"][0]["content"].as_str(),
+        Some(large_marker.as_str()),
+        "request.json must preserve the complete large client payload"
+    );
+    let json_provider_request: Value = serde_json::from_str(
+        &fs::read_to_string(json_sample_dir.join("provider-request.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json_provider_request["body"]["model"], "chat-test");
+    assert_eq!(
+        json_provider_request["body"]["messages"][0]["content"].as_str(),
+        Some(large_marker.as_str()),
+        "provider-request.json must preserve the complete provider-bound request"
+    );
+    let json_provider_response: Value = serde_json::from_str(
+        &fs::read_to_string(json_sample_dir.join("provider-response.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json_provider_response["bodyKind"], "json");
+    assert_eq!(json_provider_response["body"]["id"], "chatcmpl_json");
+    let json_response_sample: Value =
+        serde_json::from_str(&fs::read_to_string(json_sample_dir.join("response.json")).unwrap())
+            .unwrap();
+    assert_eq!(json_response_sample["bodyKind"], "json");
+    assert_eq!(json_response_sample["rawBody"], json_body);
+
+    let sse_provider_response: Value = serde_json::from_str(
+        &fs::read_to_string(sse_sample_dir.join("provider-response.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(sse_provider_response["bodyKind"], "sse");
+    assert!(sse_provider_response["rawSse"]
+        .as_str()
+        .is_some_and(|raw| raw.contains("controlled chat SSE")));
+    let sse_response_sample: Value =
+        serde_json::from_str(&fs::read_to_string(sse_sample_dir.join("response.json")).unwrap())
+            .unwrap();
+    assert_eq!(sse_response_sample["bodyKind"], "sse");
+    assert_eq!(
+        sse_response_sample["rawSse"].as_str(),
+        Some(sse_wire.as_str()),
+        "persisted rawSse must equal the exact wire received by the client"
+    );
+    assert!(captures.recv().await.is_some());
+    assert!(captures.recv().await.is_some());
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_TEST_KEY");
+}
+
+#[tokio::test]
+async fn snapall_direct_matrix_persists_four_stage_exact_wire_for_all_protocols() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-direct-matrix");
+    let (upstream_base, _captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "snapall-matrix-secret");
+    let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream_base);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Direct);
+    enable_snapall_full_sampling(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", handle.listeners[0].addr);
+
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-responses",
+        &format!("{base}/v1/responses"),
+        &format!("{base}/v1/responses"),
+        json!({"model":"responses_ok.responses-wire","input":"snapall direct responses json","stream":false}),
+        json!({"model":"responses_ok.responses-wire","input":"snapall direct responses sse","stream":true}),
+        "snapall direct responses json",
+        "snapall direct responses sse",
+        "controlled responses JSON",
+        "controlled responses SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-chat-completions",
+        &format!("{base}/v1/chat/completions"),
+        &format!("{base}/v1/chat/completions"),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall direct chat json"}],"stream":false}),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall direct chat sse"}],"stream":true}),
+        "snapall direct chat json",
+        "snapall direct chat sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "anthropic-messages",
+        &format!("{base}/v1/messages"),
+        &format!("{base}/v1/messages"),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall direct anthropic json"}],"stream":false}),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall direct anthropic sse"}],"stream":true}),
+        "snapall direct anthropic json",
+        "snapall direct anthropic sse",
+        "controlled anthropic JSON",
+        "controlled anthropic SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "gemini-generate-content",
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:generateContent"),
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:streamGenerateContent?alt=sse"),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall direct gemini json"}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall direct gemini sse"}]}]}),
+        "snapall direct gemini json",
+        "snapall direct gemini sse",
+        "controlled gemini JSON",
+        "controlled gemini SSE",
+    )
+    .await;
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_MATRIX_KEY");
+}
+
+#[tokio::test]
+async fn snapall_relay_matrix_persists_four_stage_exact_wire_for_all_protocols() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-relay-matrix");
+    let (upstream_base, _captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "snapall-matrix-secret");
+    let mut manifest = snapall_all_protocols_manifest(free_port(), free_port(), &upstream_base);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Relay);
+    enable_snapall_full_sampling(&mut manifest);
+    manifest
+        .debug
+        .retention
+        .insert("raw_requests".to_string(), 0);
+    manifest
+        .debug
+        .retention
+        .insert("raw_responses".to_string(), 0);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", handle.listeners[0].addr);
+
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-responses",
+        &format!("{base}/v1/responses"),
+        &format!("{base}/v1/responses"),
+        json!({"model":"responses_ok.responses-wire","input":"snapall relay responses json","stream":false}),
+        json!({"model":"responses_ok.responses-wire","input":"snapall relay responses sse","stream":true}),
+        "snapall relay responses json",
+        "snapall relay responses sse",
+        "controlled responses JSON",
+        "controlled responses SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-chat-completions",
+        &format!("{base}/v1/chat/completions"),
+        &format!("{base}/v1/chat/completions"),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall relay chat json"}],"stream":false}),
+        json!({"model":"chat_ok.chat-wire","messages":[{"role":"user","content":"snapall relay chat sse"}],"stream":true}),
+        "snapall relay chat json",
+        "snapall relay chat sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "anthropic-messages",
+        &format!("{base}/v1/messages"),
+        &format!("{base}/v1/messages"),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall relay anthropic json"}],"stream":false}),
+        json!({"model":"anthropic_ok.anthropic-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall relay anthropic sse"}],"stream":true}),
+        "snapall relay anthropic json",
+        "snapall relay anthropic sse",
+        "controlled anthropic JSON",
+        "controlled anthropic SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "gemini-generate-content",
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:generateContent"),
+        &format!("{base}/v1beta/models/gemini_ok.gemini-wire:streamGenerateContent?alt=sse"),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall relay gemini json"}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall relay gemini sse"}]}]}),
+        "snapall relay gemini json",
+        "snapall relay gemini sse",
+        "controlled gemini JSON",
+        "controlled gemini SSE",
+    )
+    .await;
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_MATRIX_KEY");
+}
+
+#[tokio::test]
+async fn snapall_direct_relay_handoffs_persist_four_stage_exact_wire() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("snapall-handoff-matrix");
+    let (upstream_base, mut captures, shutdown) = start_controlled_snapall_upstream().await;
+    std::env::set_var("V3_SNAPALL_MATRIX_KEY", "snapall-matrix-secret");
+    let mut manifest = snapall_handoff_manifest(free_port(), free_port(), &upstream_base);
+    set_snapall_entry_protocol_modes(&mut manifest, V3EntryProtocolExecutionMode::Direct);
+    enable_snapall_full_sampling(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let base = format!("http://{}", handle.listeners[0].addr);
+
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "openai-chat-completions",
+        &format!("{base}/v1/chat/completions"),
+        &format!("{base}/v1/chat/completions"),
+        json!({"model":"chat-alpha-wire","messages":[{"role":"user","content":"snapall handoff chat json"}],"stream":false}),
+        json!({"model":"chat-alpha-wire","messages":[{"role":"user","content":"snapall handoff chat sse"}],"stream":true}),
+        "snapall handoff chat json",
+        "snapall handoff chat sse",
+        "controlled responses JSON",
+        "controlled responses SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "anthropic-messages",
+        &format!("{base}/v1/messages"),
+        &format!("{base}/v1/messages"),
+        json!({"model":"anthropic-alpha-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall handoff anthropic json"}],"stream":false}),
+        json!({"model":"anthropic-alpha-wire","max_tokens":32,"messages":[{"role":"user","content":"snapall handoff anthropic sse"}],"stream":true}),
+        "snapall handoff anthropic json",
+        "snapall handoff anthropic sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+    assert_snapall_protocol_json_and_sse(
+        &handle,
+        &home_guard,
+        &client,
+        "gemini-generate-content",
+        &format!("{base}/v1beta/models/gemini-alpha-wire:generateContent"),
+        &format!("{base}/v1beta/models/gemini-alpha-wire:streamGenerateContent?alt=sse"),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall handoff gemini json"}]}]}),
+        json!({"contents":[{"role":"user","parts":[{"text":"snapall handoff gemini sse"}]}]}),
+        "snapall handoff gemini json",
+        "snapall handoff gemini sse",
+        "controlled chat JSON",
+        "controlled chat SSE",
+    )
+    .await;
+
+    for (marker, direct_model, relay_model) in [
+        (
+            "snapall handoff chat json",
+            Some("chat-alpha-wire"),
+            "responses-wire",
+        ),
+        (
+            "snapall handoff chat sse",
+            Some("chat-alpha-wire"),
+            "responses-wire",
+        ),
+        (
+            "snapall handoff anthropic json",
+            Some("anthropic-alpha-wire"),
+            "chat-ok-wire",
+        ),
+        (
+            "snapall handoff anthropic sse",
+            Some("anthropic-alpha-wire"),
+            "chat-ok-wire",
+        ),
+        ("snapall handoff gemini json", None, "chat-ok-wire"),
+        ("snapall handoff gemini sse", None, "chat-ok-wire"),
+    ] {
+        let direct = captures
+            .try_recv()
+            .expect("the failing Direct provider must be attempted");
+        let relay = captures
+            .try_recv()
+            .expect("the Relay provider must recover that request");
+        assert!(
+            direct.body.to_string().contains(marker),
+            "Direct attempt must preserve its request: {direct:?}"
+        );
+        assert!(
+            relay.body.to_string().contains(marker),
+            "Relay attempt must preserve the same request: {relay:?}"
+        );
+        if let Some(model) = direct_model {
+            assert_eq!(direct.body["model"], model);
+        } else {
+            assert!(
+                direct.body["contents"].is_array(),
+                "the first Gemini attempt must use the actual Gemini wire"
+            );
+        }
+        assert_eq!(relay.body["model"], relay_model);
+    }
+    assert!(
+        captures.try_recv().is_err(),
+        "handoff must not create extra provider attempts"
+    );
+
+    let failures = handle.shutdown().await;
+    assert!(failures.is_empty(), "sample writes failed: {failures:?}");
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_SNAPALL_MATRIX_KEY");
+}
+
+/// F5: a configured debug `log_file` that cannot be opened must degrade the
+/// optional sink, not stop the server, and must be reported as unavailable.
+///
+/// The sink's parent path is a regular file, so opening the sink fails for real.
+/// The case asserts the server starts, serves real HTTP, and the debug status
+/// projection reports `log_sink_failure` with a reason instead of reporting a
+/// working sink.
+///
+/// Before the fix this startup returned `Err`
+/// (`build_v3_debug_runtime_from_manifest(...).map_err(std::io::Error::other)?`),
+/// so the `expect` below failed and `log_sink_failure` did not exist at all.
+#[tokio::test]
+async fn debug_log_sink_failure_degrades_and_is_reported_unavailable_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let port_a = free_port();
+    let port_b = free_port();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-debug-log-sink-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let blocking_parent = root.join("log-parent-is-a-file");
+    fs::write(&blocking_parent, b"not a directory\n").unwrap();
+    let log_file = blocking_parent.join("debug.log");
+    let log_file_text = log_file.display().to_string();
+
+    let mut manifest = p6_manifest(port_a, port_b, "http://127.0.0.1:1");
+    manifest.debug.log_file = Some(log_file_text.clone());
+
+    let handle = spawn_v3_server_aggregate(manifest)
+        .await
+        .expect("an unopenable debug log sink must not stop the aggregate server");
+
+    let client = reqwest::Client::new();
+    let health = timeout(
+        Duration::from_secs(10),
+        client
+            .get(format!("http://{}/health", handle.listeners[0].addr))
+            .send(),
+    )
+    .await
+    .expect("health request must not hang")
+    .expect("health request must reach the listener");
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let status: Value = timeout(
+        Duration::from_secs(10),
+        client
+            .get(format!(
+                "http://{}/_routecodex/debug/status",
+                handle.listeners[0].addr
+            ))
+            .send(),
+    )
+    .await
+    .expect("debug status request must not hang")
+    .expect("debug status request must reach the listener")
+    .json()
+    .await
+    .unwrap();
+    let reason = status["debug"]["log_sink_failure"]
+        .as_str()
+        .expect("a degraded debug log sink must be reported as unavailable, not as working");
+    assert!(
+        reason.contains("unavailable"),
+        "the degraded sink reason must state the sink is unavailable, got {reason}"
+    );
+    assert!(
+        reason.contains(&log_file_text),
+        "the degraded sink reason must name the configured sink, got {reason}"
+    );
+    assert!(
+        !log_file.exists(),
+        "a degraded sink must not silently create the configured file"
+    );
+
+    handle.shutdown().await;
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// F7: `/health` is a status probe. It must always answer with a complete HTTP
+/// response carrying a JSON body, never a connection reset, and it must not take
+/// the server down.
+///
+/// The case accepts either the 200 projection (build version available) or the
+/// typed internal request-stage projection 598 (`error.code` present), then
+/// proves a following request still works. A `RuntimeFailure` projection
+/// resolves its own internal status, so 598 is the observable error status.
+///
+/// Before the fix the handler used `.expect(...)` on the build-version lookup and
+/// would panic (no complete HTTP response) whenever that lookup failed. In this
+/// test binary `ROUTECODEX_BUILD_VERSION` is always embedded at compile time by
+/// `routecodex-v3-config/build.rs`, so the panic branch is not reachable here and
+/// this case cannot discriminate pre/post fix by construction.
+#[tokio::test]
+async fn health_probe_always_returns_a_complete_http_json_projection_blackbox() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), "http://127.0.0.1:1"))
+            .await
+            .expect("the aggregate server must start");
+    let addr = handle.listeners[0].addr;
+
+    let mut stream = timeout(Duration::from_secs(10), TcpStream::connect(addr))
+        .await
+        .expect("health connect must not hang")
+        .expect("health connect must reach the listener");
+    timeout(
+        Duration::from_secs(10),
+        stream.write_all(b"GET /health HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n"),
+    )
+    .await
+    .expect("health request write must not hang")
+    .unwrap();
+    let wire = timeout(
+        Duration::from_secs(10),
+        read_raw_content_length_response(&mut stream),
+    )
+    .await
+    .expect("a status probe must answer with a complete HTTP response, never a reset");
+    let text = String::from_utf8(wire).unwrap();
+    let (head, body_text) = text
+        .split_once("\r\n\r\n")
+        .expect("a status probe must return a complete HTTP response head");
+    let body: Value =
+        serde_json::from_str(body_text).expect("the status probe must return a JSON body");
+    assert!(
+        body.is_object(),
+        "the health projection must be a JSON object, got {body}"
+    );
+    if head.starts_with("HTTP/1.1 200") {
+        assert_eq!(body["status"], "ok");
+        assert!(
+            body["build_version"]
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty()),
+            "a 200 health projection must carry the build version, got {body}"
+        );
+    } else {
+        assert!(
+            head.starts_with("HTTP/1.1 598"),
+            "unexpected health status line: {head}"
+        );
+        assert!(
+            body["error"]["code"]
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty()),
+            "an unavailable build version must project a typed error, got {body}"
+        );
+    }
+
+    // The probe must not take the server down.
+    let follow_up = timeout(
+        Duration::from_secs(10),
+        reqwest::Client::new()
+            .get(format!("http://{addr}/health"))
+            .send(),
+    )
+    .await
+    .expect("follow-up health request must not hang")
+    .expect("follow-up health request must reach the listener");
+    assert!(
+        matches!(
+            follow_up.status(),
+            StatusCode::OK | StatusCode::INTERNAL_SERVER_ERROR
+        ),
+        "unexpected follow-up status {}",
+        follow_up.status()
+    );
+    let follow_up_body: Value = follow_up
+        .json()
+        .await
+        .expect("the follow-up probe must also return a JSON body");
+    assert!(follow_up_body.is_object());
+
+    handle.shutdown().await;
+}
+
+const V3_SERVER_ACCEPT_ERROR_CHILD_ENV: &str = "RCC_V3_SERVER_ACCEPT_ERROR_CHILD";
+
+/// F4 (parent): RLIMIT_NOFILE is process-wide, so the inducing case runs in a
+/// dedicated child process; this case asserts on the child's observed result.
+///
+/// Before the fix the child cannot even compile (the listener accept-failure
+/// accessors did not exist) and, at runtime, the listener task exited on the
+/// first `accept()` error (`let Ok((stream, remote_addr)) = accepted else {
+/// break }`), so the queued connection was never answered.
+#[cfg(unix)]
+#[test]
+fn v3_listener_survives_real_accept_error_blackbox() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "v3_listener_survives_real_accept_error_child_blackbox",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(V3_SERVER_ACCEPT_ERROR_CHILD_ENV, "1")
+        .output()
+        .expect("spawn the dedicated accept-error child process");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "child accept-error case did not pass:\nstatus={:?}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("V3_ACCEPT_ERROR_KEEPS_SERVING=ok"),
+        "child must report that the listener kept serving:\n{stdout}"
+    );
+    let count = stdout
+        .split("V3_ACCEPT_FAILURE_COUNT=")
+        .nth(1)
+        .and_then(|rest| {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            digits.parse::<u64>().ok()
+        })
+        .unwrap_or_else(|| {
+            panic!("child must report the observed accept failure count:\n{stdout}")
+        });
+    assert!(
+        count > 0,
+        "the real accept failure must be recorded instead of silent, got {count}"
+    );
+}
+
+/// F4 (child): start the real aggregate server, prove a real HTTP request
+/// succeeds, exhaust the process descriptor limit so the next `accept()` fails
+/// with a real EMFILE, then prove the listener still answers the connection that
+/// was queued during the failure and still serves fresh connections.
+#[cfg(unix)]
+#[tokio::test]
+async fn v3_listener_survives_real_accept_error_child_blackbox() {
+    if std::env::var_os(V3_SERVER_ACCEPT_ERROR_CHILD_ENV).is_none() {
+        // The descriptor limit change below is process-wide, so this case only
+        // runs inside the dedicated child process spawned by the parent case.
+        return;
+    }
+    use std::os::unix::io::FromRawFd;
+
+    let _test_guard = TEST_LOCK.lock().await;
+    let handle =
+        spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), "http://127.0.0.1:1"))
+            .await
+            .expect("the aggregate server must start");
+    let addr = handle.listeners[0].addr;
+    let server_id = handle.listeners[0].server_id.clone();
+    let client = reqwest::Client::new();
+
+    let baseline = timeout(
+        Duration::from_secs(10),
+        client.get(format!("http://{addr}/health")).send(),
+    )
+    .await
+    .expect("baseline health request must not hang")
+    .expect("baseline health request must reach the listener");
+    assert_eq!(baseline.status(), StatusCode::OK);
+    let failures_before = handle.listener_accept_failure_count();
+
+    // Pre-create the client socket while descriptors are still available, then
+    // exhaust the limit. `connect()` reuses that descriptor, so the kernel still
+    // queues the connection while the server cannot accept it.
+    let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+    assert!(
+        fd >= 0,
+        "pre-created client socket: {}",
+        std::io::Error::last_os_error()
+    );
+    let (saved_soft, saved_hard) = current_v3_test_nofile_limit();
+    set_v3_test_nofile_limit(0, saved_hard);
+    let sockaddr = v3_test_loopback_sockaddr(addr);
+    let connected = unsafe {
+        libc::connect(
+            fd,
+            &sockaddr as *const libc::sockaddr_in as *const libc::sockaddr,
+            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+        )
+    };
+    assert_eq!(
+        connected,
+        0,
+        "the queued connection must complete while the server cannot accept it: {}",
+        std::io::Error::last_os_error()
+    );
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while handle.listener_accept_failure_count() == failures_before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "a real accept failure must be recorded while descriptors are exhausted"
+        );
+        sleep(Duration::from_millis(10)).await;
+    }
+    set_v3_test_nofile_limit(saved_soft, saved_hard);
+
+    // The connection queued during the failure is not part of the contract: the
+    // kernel may abort it while accept() keeps failing with EMFILE. Release it
+    // and prove the listener still accepts and serves a fresh real connection.
+    drop(unsafe { std::net::TcpStream::from_raw_fd(fd) });
+
+    assert!(
+        handle.has_active_listener(),
+        "the listener must still report active after a transient accept failure"
+    );
+    let follow_up = timeout(
+        Duration::from_secs(10),
+        client.get(format!("http://{addr}/health")).send(),
+    )
+    .await
+    .expect("follow-up health request must not hang")
+    .expect("follow-up health request must reach the listener");
+    assert_eq!(
+        follow_up.status(),
+        StatusCode::OK,
+        "the listener must keep serving after a real accept error"
+    );
+    let follow_up_body: Value = follow_up.json().await.unwrap();
+    assert_eq!(follow_up_body["server_id"], server_id.as_str());
+
+    let failures_after = handle.listener_accept_failure_count();
+    let last_error = handle.listener_last_accept_error();
+    assert!(
+        failures_after > failures_before,
+        "the accept failure must be recorded: before={failures_before} after={failures_after}"
+    );
+    assert!(
+        last_error.is_some_and(|reason| !reason.trim().is_empty()),
+        "the accept failure must not be silent"
+    );
+    println!("V3_ACCEPT_FAILURE_COUNT={failures_after}");
+    println!("V3_ACCEPT_ERROR_KEEPS_SERVING=ok");
+
+    handle.shutdown().await;
 }

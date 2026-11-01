@@ -13,6 +13,7 @@ async fn guard_rejects_empty_sse_stream() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(result.is_err(), "empty SSE stream must fail the guard");
@@ -36,6 +37,7 @@ async fn guard_accepts_first_frame_and_replays_it() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await
     .expect("non-empty stream must pass the guard");
@@ -80,9 +82,35 @@ async fn guard_propagates_first_frame_provider_error() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(result.is_err(), "first frame error must propagate");
+}
+
+/// 响应头等待超时是 health-neutral 瞬态 transport hang；OpenAI Chat/Gemini
+/// 共享 relay 的失败构造必须保留 canonical code 供下游策略识别，不能降成
+/// 通用 provider_error 后触发全局 provider cooldown。
+#[test]
+fn shared_relay_header_wait_timeout_keeps_health_neutral_hang_code() {
+    let reason = format!(
+        "{} {}",
+        routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX,
+        "after 120000ms"
+    );
+    let failure = provider_runtime_failure(
+        V3ProviderError::Transport {
+            request_id: "req-header-timeout".to_string(),
+            provider_id: "provider-1".to_string(),
+            reason,
+        },
+        "provider-1",
+    );
+
+    assert_eq!(
+        crate::hub_v1::relay_runtime_shared::failure_error_type(&failure).as_deref(),
+        Some(routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE)
+    );
 }
 
 #[tokio::test]
@@ -99,6 +127,7 @@ async fn guard_keeps_client_disconnect_out_of_provider_failure_policy() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(matches!(
@@ -117,6 +146,7 @@ async fn guard_honors_configured_first_frame_timeout() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(1),
+        false,
     )
     .await;
     assert!(
@@ -135,6 +165,7 @@ async fn guard_rejects_zero_first_frame_timeout() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(0),
+        false,
     )
     .await;
     assert!(result.is_err(), "zero first-frame timeout must fail fast");
@@ -152,6 +183,7 @@ async fn guard_rejects_chat_shape_from_responses_provider_before_client_commit()
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     let error = match result {
@@ -174,6 +206,7 @@ async fn guard_rejects_late_malformed_responses_frame_before_client_output() {
         V3HubProviderWireProtocol::Responses,
         stream,
         Some(30_000),
+        false,
     )
     .await;
     assert!(
@@ -318,18 +351,25 @@ async fn relay_attempt_deadline_stops_continuous_non_terminal_stream() {
 #[tokio::test]
 async fn provider_raw_sse_observation_is_preserved_on_side_channel() {
     let observation = V3RuntimeStreamObservation::default();
-    let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
-        futures_util::stream::iter(vec![Ok(b"data: semantic\n\n".to_vec())]),
+    let stream: routecodex_v3_provider_responses::V3ProviderSseStream =
+        Box::pin(futures_util::stream::iter(vec![Ok(
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"semantic\"}\n\n".to_vec(),
+        )]));
+    let mut observed = observe_v3_provider_sse(
+        stream,
+        observation.clone(),
+        V3HubProviderWireProtocol::Responses,
+        "req-observation".into(),
+        "provider-observation".into(),
     );
-    let mut observed = observe_v3_provider_sse(stream, observation.clone());
 
     assert_eq!(
         observed.next().await.unwrap().unwrap(),
-        b"data: semantic\n\n"
+        b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"semantic\"}\n\n"
     );
     assert_eq!(
         observation.snapshot().unwrap().provider_raw_sse,
-        "data: semantic\n\n"
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"semantic\"}\n\n"
     );
     assert_eq!(observation.snapshot().unwrap().observation_error, None);
 }

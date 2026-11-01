@@ -29,6 +29,10 @@ pub(super) fn control_restart_plan(
     let executable_path = fs::canonicalize(executable_path).map_err(|error| {
         format!("restart executable path is not a readable executable: {error}")
     })?;
+    let executable_metadata = fs::metadata(&executable_path).map_err(|error| error.to_string())?;
+    if !executable_metadata.is_file() || executable_metadata.permissions().mode() & 0o111 == 0 {
+        return Err("restart executable is not an executable regular file".into());
+    }
     let mut declaration = record
         .as_ref()
         .and_then(|record| record.target_declaration.clone())
@@ -44,6 +48,15 @@ pub(super) fn control_restart_plan(
             "restart target declaration does not match the current managed owner".to_string(),
         );
     }
+    let lifecycle = V3ManagedLifecycle::new(PathBuf::from(&declaration.config_path))
+        .map_err(|error| error.to_string())?;
+    let (loaded, manifest) = lifecycle
+        .declaration(&executable_path)
+        .map_err(|error| format!("restart configuration preparation failed: {error}"))?;
+    if !same_instance_declaration_except_executable_path(&loaded, &declaration) {
+        return Err("restart configuration changed after target declaration preparation".into());
+    }
+    validate_auth_handles(&manifest).map_err(|error| error.to_string())?;
     let snapshot_stages = record
         .as_ref()
         .and_then(|record| record.snapshot_stages.as_ref())
@@ -54,6 +67,7 @@ pub(super) fn control_restart_plan(
     let sse_dump = record.as_ref().is_some_and(|record| record.sse_dump);
     Ok(Some(ControlRestartPlan {
         control_instance_id: current.instance_id.clone(),
+        control_start_nonce: request.start_nonce.clone(),
         declaration,
         executable_path,
         snapshots: snapshots || snapshot_stages.is_some(),

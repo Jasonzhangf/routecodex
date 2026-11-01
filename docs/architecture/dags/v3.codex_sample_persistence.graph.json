@@ -1,0 +1,15 @@
+{
+  "id": "v3.codex_sample_persistence",
+  "version": "2",
+  "inputs": [{"id": "sample-job", "schema": "Object"}],
+  "nodes": [
+    {"id": "admit_eligible_sample", "operator": "routecodex.v3.debug.V3CodexSampleStore::enqueue_persist", "operator_version": "1", "inputs": ["sample-job"], "output": {"id": "admitted-job", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": [], "writes": ["v3.debug.codex_sample_persist_queue"]}},
+    {"id": "drain_admitted_sample", "operator": "routecodex.v3.debug.run_v3_codex_sample_persist_worker", "operator_version": "1", "inputs": ["admitted-job"], "output": {"id": "persist-job", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": ["v3.debug.codex_sample_persist_queue"], "writes": []}},
+    {"id": "persist_verbatim_evidence", "operator": "routecodex.v3.debug.V3CodexSampleStore::persist", "operator_version": "1", "inputs": ["persist-job"], "output": {"id": "sample-result", "schema": "Object"}, "input_selector": {"include": [], "exclude": [], "predicate": null}, "output_selector": {"include": [], "exclude": [], "predicate": null}, "iterator": "Whole", "resources": {"reads": [], "writes": ["v3.debug.codex_sample_filesystem"]}}
+  ],
+  "edges": [
+    {"from": "admit_eligible_sample", "to": "drain_admitted_sample", "arc_id": "admitted-job"},
+    {"from": "drain_admitted_sample", "to": "persist_verbatim_evidence", "arc_id": "persist-job"}
+  ],
+  "outputs": ["sample-result"]
+}

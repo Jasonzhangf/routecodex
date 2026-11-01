@@ -31,7 +31,7 @@ function copyPath(root, relative) {
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['protocol branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'V3HubEntryProtocol::Gemini', 'V3HubEntryProtocol::Responses', /missing V3HubEntryProtocol::Gemini|forbidden.*Responses/],
-  ['side channel', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', '"metadata_center"', '"removed_center"', /missing metadata_center/],
+  ['business-name guard revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'use super::{', 'fn reject_side_channel_fields() {}\nuse super::{', /forbidden.*reject_side_channel_fields/],
   ['function response identity governance revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'fn validate_request(payload: &Value) -> Result<(), V3GeminiCodecError> {', 'fn validate_function_response_identity(functionResponse: &Value) { let _ = functionResponse; }\nfn validate_request(payload: &Value) -> Result<(), V3GeminiCodecError> {', /forbidden.*functionResponse|forbidden.*InvalidFunctionResponseIdentity/],
   ['SSE coverage', 'v3/crates/routecodex-v3-runtime/tests/hub_gemini_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
   ['shape branch helper', 'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_codec.rs', 'collect_v3_gemini_request_shape_branch_semantics', 'collect_v3_gemini_request_branch_semantics_removed', /missing collect_v3_gemini_request_shape_branch_semantics/],

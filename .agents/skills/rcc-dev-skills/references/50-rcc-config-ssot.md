@@ -6,7 +6,7 @@ Use for listener, provider, auth handle, model, route pool, install, restart, he
 
 ## Truth Order
 
-1. User-specified active V3 config; otherwise `~/.rcc/config.v3.toml`.
+1. User-specified active V3 config; otherwise verify `~/.rcc/config.toml` with `rccv3 config check -c ~/.rcc/config.toml` and `rccv3 status -c ~/.rcc/config.toml` before treating it as active.
 2. Provider files explicitly referenced by that V3 authoring.
 3. `rccv3 config check` compiled manifest/result.
 4. Installed binary identity and managed lifecycle status.
@@ -44,7 +44,20 @@ rccv3 --version
 rccv3 restart -c <active-config>
 ```
 
-5. Check every listener for expected version, identity, and readiness.
-6. Replay target entry; bind request id to provider-bound request, raw response/error, and client response.
+5. `restart` controls an existing managed instance. A `NotRunning` result does
+   not authorize `start`; a failed control exchange alone does not establish
+   whether the original service is still running. Check actual status and report
+   the failed restart separately from current availability:
+
+```bash
+rccv3 status -c <active-config>          # state must be "running"
+```
+
+   A non-zero restart exit or non-`running` status leaves this lifecycle step
+   incomplete. Diagnose before retrying; do not substitute `start`, `stop+start`
+   or another lifecycle action without its required authorization. A successful
+   command alone does not prove readiness or replay success.
+6. Check every listener for expected version, identity, and readiness.
+7. Replay target entry; bind request id to provider-bound request, raw response/error, and client response.
 
 Config check proves compilation only. Health proves listener/runtime load only. Neither proves provider selection, switching, protocol projection, or business success.

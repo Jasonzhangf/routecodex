@@ -715,7 +715,7 @@ impl V3ResponsesSseReducerState {
                 }
             }
             "response.function_call_arguments.done" => {
-                if let Some(arguments) = event.get("arguments").and_then(Value::as_str) {
+                if let Some(arguments) = event.get("arguments") {
                     if let Some(item) = self.item_mut_for_event(&metadata) {
                         item.set_function_arguments(arguments);
                     }
@@ -729,7 +729,7 @@ impl V3ResponsesSseReducerState {
                 }
             }
             "response.custom_tool_call_input.done" => {
-                if let Some(input) = event.get("input").and_then(Value::as_str) {
+                if let Some(input) = event.get("input") {
                     if let Some(item) = self.item_mut_for_event(&metadata) {
                         item.set_custom_tool_input(input);
                     }
@@ -864,16 +864,17 @@ pub enum V3ResponsesSseItemPayload {
     Reasoning {
         summary: Vec<V3ResponsesSseReasoningSummary>,
         summary_present: bool,
+        content: Option<Value>,
     },
     FunctionCall {
         call_id: Option<String>,
         name: Option<String>,
-        arguments: Option<String>,
+        arguments: Option<Value>,
     },
     CustomToolCall {
         call_id: Option<String>,
         name: Option<String>,
-        input: Option<String>,
+        input: Option<Value>,
     },
     StructuredExtensions(Vec<V3ResponsesSseExtension>),
 }
@@ -960,6 +961,7 @@ impl V3ResponsesSseOutputItem {
                     })
                     .collect(),
                 summary_present: true,
+                content: None,
             },
             extensions: self.extensions,
             rewritten_content: None,
@@ -989,6 +991,7 @@ impl V3ResponsesSseOutputItem {
                     })
                     .collect(),
                 summary_present: true,
+                content: None,
             },
             extensions: Vec::new(),
             rewritten_content: None,
@@ -1027,12 +1030,16 @@ impl V3ResponsesSseOutputItem {
             V3ResponsesSseItemPayload::Reasoning {
                 summary,
                 summary_present,
+                content,
             } => {
                 if *summary_present {
                     value.insert(
                         "summary".to_owned(),
                         Value::Array(summary.iter().map(reasoning_summary_value).collect()),
                     );
+                }
+                if let Some(content) = content {
+                    value.insert("content".to_owned(), content.clone());
                 }
             }
             V3ResponsesSseItemPayload::FunctionCall {
@@ -1047,7 +1054,7 @@ impl V3ResponsesSseOutputItem {
                     value.insert("name".to_owned(), Value::String(name.clone()));
                 }
                 if let Some(arguments) = arguments {
-                    value.insert("arguments".to_owned(), Value::String(arguments.clone()));
+                    value.insert("arguments".to_owned(), arguments.clone());
                 }
             }
             V3ResponsesSseItemPayload::CustomToolCall {
@@ -1062,7 +1069,7 @@ impl V3ResponsesSseOutputItem {
                     value.insert("name".to_owned(), Value::String(name.clone()));
                 }
                 if let Some(input) = input {
-                    value.insert("input".to_owned(), Value::String(input.clone()));
+                    value.insert("input".to_owned(), input.clone());
                 }
             }
             V3ResponsesSseItemPayload::StructuredExtensions(extensions) => {
@@ -1111,29 +1118,29 @@ impl V3ResponsesSseOutputItem {
 
     fn append_function_arguments(&mut self, delta: &str) {
         if let V3ResponsesSseItemPayload::FunctionCall { arguments, .. } = &mut self.payload {
-            arguments.get_or_insert_with(String::new).push_str(delta);
+            append_tool_text(arguments, delta);
         }
     }
 
-    fn set_function_arguments(&mut self, arguments: &str) {
+    fn set_function_arguments(&mut self, arguments: &Value) {
         if let V3ResponsesSseItemPayload::FunctionCall {
             arguments: current, ..
         } = &mut self.payload
         {
-            *current = Some(arguments.to_owned());
+            *current = Some(arguments.clone());
         }
     }
 
     fn append_custom_tool_input(&mut self, delta: &str) {
         if let V3ResponsesSseItemPayload::CustomToolCall { input, .. } = &mut self.payload {
-            input.get_or_insert_with(String::new).push_str(delta);
+            append_tool_text(input, delta);
         }
     }
 
-    fn set_custom_tool_input(&mut self, input: &str) {
+    fn set_custom_tool_input(&mut self, input: &Value) {
         if let V3ResponsesSseItemPayload::CustomToolCall { input: current, .. } = &mut self.payload
         {
-            *current = Some(input.to_owned());
+            *current = Some(input.clone());
         }
     }
 
@@ -1257,38 +1264,37 @@ pub fn classify_v3_responses_sse_output_item(
         V3ResponsesSseOutputItemKind::Reasoning => V3ResponsesSseItemPayload::Reasoning {
             summary: parse_reasoning_summary(object.get("summary"))?,
             summary_present: object.contains_key("summary"),
+            content: object.get("content").cloned(),
         },
         V3ResponsesSseOutputItemKind::FunctionCall => V3ResponsesSseItemPayload::FunctionCall {
             call_id: string_field(object, "call_id"),
             name: string_field(object, "name"),
-            arguments: string_field(object, "arguments"),
+            arguments: object.get("arguments").cloned(),
         },
         V3ResponsesSseOutputItemKind::CustomToolCall => V3ResponsesSseItemPayload::CustomToolCall {
             call_id: string_field(object, "call_id"),
             name: string_field(object, "name"),
-            input: string_field(object, "input"),
+            input: object.get("input").cloned(),
         },
         _ => V3ResponsesSseItemPayload::StructuredExtensions(event_extensions(
             object,
             &["type", "id", "output_index", "status"],
         )),
     };
-    let extensions = event_extensions(
-        object,
-        &[
-            "type",
-            "id",
-            "output_index",
-            "status",
-            "text",
-            "content",
-            "summary",
-            "call_id",
-            "name",
-            "arguments",
-            "input",
-        ],
-    );
+    // Only fields represented by this item's typed payload are consumed.
+    // In particular, message-level text is an opaque business extension,
+    // rather than the OutputText variant's typed text field.
+    let payload_fields: &[&str] = match kind {
+        V3ResponsesSseOutputItemKind::OutputText => &["text"],
+        V3ResponsesSseOutputItemKind::Message => &["content"],
+        V3ResponsesSseOutputItemKind::Reasoning => &["summary", "content"],
+        V3ResponsesSseOutputItemKind::FunctionCall => &["call_id", "name", "arguments"],
+        V3ResponsesSseOutputItemKind::CustomToolCall => &["call_id", "name", "input"],
+        _ => &[],
+    };
+    let mut consumed_fields = vec!["type", "id", "output_index", "status"];
+    consumed_fields.extend_from_slice(payload_fields);
+    let extensions = event_extensions(object, &consumed_fields);
     Ok(V3ResponsesSseOutputItem {
         kind,
         identity: V3ResponsesSseItemIdentity {
@@ -1517,6 +1523,15 @@ fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<
         .get(field)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn append_tool_text(value: &mut Option<Value>, delta: &str) {
+    // Text fragments require the string representation of any preceding value.
+    match value {
+        Some(Value::String(current)) => current.push_str(delta),
+        Some(current) => *current = Value::String(format!("{current}{delta}")),
+        None => *value = Some(Value::String(delta.to_owned())),
+    }
 }
 
 pub(crate) fn parse_response_container(

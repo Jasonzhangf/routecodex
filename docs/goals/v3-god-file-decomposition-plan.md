@@ -1,6 +1,6 @@
 # V3 巨型文件无痛拆解计划（新增模块 + 物理删除旧代码）
 
-status: design
+status: historical design; current execution follows docs/architecture/wiki/v3-module-decomposition-sop.md. Source-count, ratchet, fingerprint and per-phase authorization requirements below are retired history, not daily gates.
 owner_feature_id: v3.module_decomposition
 sop: docs/architecture/wiki/v3-module-decomposition-sop.md
 function_map_entry: docs/architecture/v3-function-map.yml (feature_id v3.module_decomposition, status design_pending)

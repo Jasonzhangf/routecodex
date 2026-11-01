@@ -52,6 +52,13 @@ pub(crate) struct V3DirectSseContentConsumer {
     pub(crate) retain_response_cipher: bool,
     pub(crate) strip_client_response_id: bool,
     pub(crate) deepseek_console_go: bool,
+    /// Configured provider-private compat profile (chat:*). When set, the
+    /// consumer routes each provider object through the single provider
+    /// response compat owner at the same point Relay applies it: after the
+    /// typed semantic projection and before Resp03 terminal admission.
+    pub(crate) provider_response_compat_profile: Option<String>,
+    pub(crate) custom_tool_function_binding:
+        Option<provider_compat_core::CustomToolFunctionBinding>,
     pub(crate) typed_hooks: V3DirectSseTypedHookCatalog,
     pub(crate) tool_thinking_enabled: bool,
     pub(crate) toolreason_client_projection: bool,
@@ -66,6 +73,9 @@ pub(crate) struct V3DirectSseContentConsumer {
     pub(crate) request_id: Option<String>,
     pub(crate) expected_model_id: Option<String>,
     pub(crate) client_responses_projection: bool,
+    /// Request-local declared tool identity inverse shared with the Direct JSON
+    /// response owner. Only the Responses provider wire protocol consumes it.
+    pub(crate) namespace_tool_identities: std::collections::HashMap<String, (String, String)>,
     pub(crate) stream_observation: Option<V3RuntimeStreamObservation>,
 }
 
@@ -271,6 +281,19 @@ impl V3DirectSseContentConsumer {
         self
     }
 
+    pub(crate) fn with_provider_response_compat_profile(mut self, profile: Option<String>) -> Self {
+        self.provider_response_compat_profile = profile;
+        self
+    }
+
+    pub(crate) fn with_custom_tool_function_binding(
+        mut self,
+        binding: Option<provider_compat_core::CustomToolFunctionBinding>,
+    ) -> Self {
+        self.custom_tool_function_binding = binding;
+        self
+    }
+
     fn next_toolreason_output_index(&self, payload: &serde_json::Value) -> usize {
         let current_item_next = payload
             .get("output_index")
@@ -424,13 +447,15 @@ impl V3DirectSseContentConsumer {
 
 pub(crate) fn build_v3_sse_transport_error_source(
     error: SseTransportError,
-) -> V3Error01SourceRaised {
+) -> Result<V3Error01SourceRaised, crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault>
+{
     let exported = SseTransportErrorExport::from(error);
-    build_v3_error_01_source_raised(
+    crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         exported.code,
         exported.message,
+        crate::operation_runner::V3Err01SourceInput::Plain,
     )
 }
 
@@ -505,6 +530,24 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
         }
         let mut rewritten =
             project_direct_client_data(original.clone(), provider_protocol, &self.typed_hooks)?;
+        // Provider-private response compat (chat:*) has exactly one owner: the
+        // provider response compat stage. Relay applies it to the projected chat
+        // chunk after the typed semantic hook and before Resp03 terminal
+        // admission; Direct must reach the same owner at the same point instead
+        // of reimplementing any rewrite. This is not a second implementation and
+        // cannot double-apply: Direct selects it only for the
+        // ProviderResponseCompat plan block, and the typed projection already
+        // ran, matching Relay's ordering exactly.
+        if let Some(profile) = self.provider_response_compat_profile.as_deref() {
+            rewritten = crate::shared::apply_direct_provider_response_compat_value(
+                rewritten,
+                profile,
+                provider_protocol,
+                self.request_id.as_deref().unwrap_or_default(),
+                self.custom_tool_function_binding.as_ref(),
+            )
+            .map_err(|error| SseObjectError::Consumer { message: error })?;
+        }
         if self.tool_thinking_enabled {
             crate::hub_v1::collect_v3_responses_sse_tool_name_at_resp03(
                 &rewritten,
@@ -614,11 +657,22 @@ impl SseObjectConsumer for V3DirectSseContentConsumer {
             self.finalize_toolreason_observation()
                 .map_err(|message| SseObjectError::Consumer { message })?;
         }
-        crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
-            &mut rewritten,
-            self.strip_client_response_id,
-            self.retain_response_cipher,
-        );
+        if provider_protocol == V3HubProviderWireProtocol::Responses {
+            crate::direct_response_hooks::apply_v3_direct_response_projection_hooks_with_identities(
+                &mut rewritten,
+                self.strip_client_response_id,
+                self.retain_response_cipher,
+                provider_protocol,
+                &self.namespace_tool_identities,
+            );
+        } else {
+            crate::direct_response_hooks::apply_v3_direct_response_projection_hooks(
+                &mut rewritten,
+                self.strip_client_response_id,
+                self.retain_response_cipher,
+                provider_protocol,
+            );
+        }
         if self.deepseek_console_go {
             rewritten = provider_compat_core::apply_deepseek_console_go_response_compat(rewritten);
         }

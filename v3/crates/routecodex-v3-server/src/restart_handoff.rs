@@ -1,4 +1,8 @@
+use crate::client_transport_observation::{
+    V3ClientResponseObservation, V3ClientTransportObservation,
+};
 use crate::restart_closeout::V3FrontTransportCloseoutState;
+use crate::session_admission::V3ServerRequestActivityPermit;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -307,6 +311,7 @@ impl V3FrontRequestLeaseRegistry {
 /// reconstructs a lease from payload/log data.
 #[derive(Debug, Clone, Default)]
 pub struct V3FrontTransportBroker {
+    observation_sink: Option<routecodex_v3_debug::V3DebugRuntime>,
     generation: Arc<Mutex<u64>>,
     next_connection_id: Arc<Mutex<u64>>,
     checkpoints: Arc<Mutex<BTreeMap<V3FrontRequestLeaseKey, V3BrokerCheckpoint>>>,
@@ -325,6 +330,7 @@ struct V3BrokerCheckpoint {
 impl V3FrontTransportBroker {
     pub fn new(generation: u64) -> Self {
         Self {
+            observation_sink: None,
             generation: Arc::new(Mutex::new(generation)),
             next_connection_id: Arc::new(Mutex::new(0)),
             checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
@@ -333,6 +339,14 @@ impl V3FrontTransportBroker {
             client_sockets: Arc::new(Mutex::new(BTreeMap::new())),
             client_connections: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    pub(crate) fn with_client_observation(
+        mut self,
+        sink: routecodex_v3_debug::V3DebugRuntime,
+    ) -> Self {
+        self.observation_sink = Some(sink);
+        self
     }
 
     pub fn generation(&self) -> u64 {
@@ -396,6 +410,98 @@ impl V3FrontTransportBroker {
             .expect("front broker accepted socket lock")
             .get(&connection)
             .cloned()
+    }
+
+    /// End only this accepted Front connection without writing HTTP headers.
+    /// A bound request stores its socket under the lease key instead of the
+    /// accepted connection identity.
+    pub fn abort_current_connection_without_response(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        if let Some(socket) = socket {
+            socket.abort_without_response();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Claim the client-visible boundary for the streaming no-response terminal.
+    ///
+    /// Called before the terminal response is returned, so a concurrent restart
+    /// replacement defers instead of closing the socket and dropping a response head
+    /// that Hyper has not even enqueued yet. Returns `false` when a restart closeout
+    /// already committed; its `503` stays the client-visible boundary then.
+    pub fn claim_current_connection_transport_break(
+        &self,
+        connection: V3FrontConnectionIdentity,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        match socket {
+            Some(socket) => socket.suppress_restart_closeout_frame(),
+            None => false,
+        }
+    }
+
+    /// Settle the streaming no-response terminal that owns its own client boundary.
+    ///
+    /// Suppresses a restart closeout that has not committed, waits up to `head_wait` for
+    /// this response head to reach the client, and then commits the restart closeout a
+    /// concurrent exec replacement deferred. Committing it keeps the restart `503`
+    /// observable when the head never reached the client, instead of leaving the client
+    /// with zero response bytes. Returns whether the restart closeout stayed the
+    /// client-visible boundary.
+    pub async fn settle_current_connection_transport_break(
+        &self,
+        connection: V3FrontConnectionIdentity,
+        head_wait: Duration,
+    ) -> bool {
+        let socket = self.front_socket(connection).or_else(|| {
+            let key = self.connection_lease(connection)?;
+            self.client_socket(&key)
+        });
+        match socket {
+            Some(socket) => {
+                socket.suppress_restart_closeout_frame();
+                let _ = tokio::time::timeout(head_wait, socket.wait_transport_wrote()).await;
+                socket.commit_deferred_restart_closeout()
+            }
+            None => false,
+        }
+    }
+
+    fn release_connection(&self, connection: V3FrontConnectionIdentity) {
+        self.front_sockets
+            .lock()
+            .expect("front broker accepted socket lock")
+            .remove(&connection);
+        if let Some(lease) = self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .remove(&connection)
+        {
+            self.client_sockets
+                .lock()
+                .expect("front broker client socket lock")
+                .remove(&lease.key);
+            self.client_connections
+                .lock()
+                .expect("front broker client connection lock")
+                .remove(&lease.key);
+            self.checkpoints
+                .lock()
+                .expect("front broker checkpoint lock")
+                .remove(&lease.key);
+        }
     }
 
     /// Bind the accepted Front connection to the complete request lease only
@@ -589,6 +695,17 @@ impl V3FrontTransportBroker {
                 captured_at: now,
             },
         );
+        drop(checkpoints);
+        for bound_lease in self
+            .connection_leases
+            .lock()
+            .expect("front broker connection lease lock")
+            .values_mut()
+        {
+            if bound_lease.key == old_key {
+                *bound_lease = lease.clone();
+            }
+        }
         let socket = self
             .client_sockets
             .lock()
@@ -696,7 +813,7 @@ impl V3FrontTransportBroker {
     }
 }
 
-fn v3_front_epoch_ms() -> u64 {
+pub(crate) fn v3_front_epoch_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u64::MAX as u128) as u64)
@@ -849,54 +966,184 @@ impl V3StableFrontConnection {
     }
 }
 
+/// Write one response frame to the client socket and record the transport write.
+///
+/// The Front write worker and its close flush share this single write path so the
+/// observation, closeout state, and error lane stay identical on both.
+async fn write_front_response_frame(
+    write_half: &mut OwnedWriteHalf,
+    observation: &V3ClientTransportObservation,
+    closeout_state: &V3FrontTransportCloseoutState,
+    frame: &[u8],
+    response_observation: &V3ClientResponseObservation,
+) -> bool {
+    if let Err(error) = write_half.write_all(frame).await {
+        observation.emit(
+            "write_failure",
+            response_observation,
+            None,
+            Some(error.to_string()),
+        );
+        closeout_state.close();
+        return false;
+    }
+    if let Err(error) = write_half.flush().await {
+        observation.emit(
+            "flush_failure",
+            response_observation,
+            None,
+            Some(error.to_string()),
+        );
+        closeout_state.close();
+        return false;
+    }
+    observation.wrote(response_observation, frame.len());
+    closeout_state.mark_transport_wrote();
+    true
+}
+
+/// Bound for writing the response frames that are already queued when a close
+/// signal arrives. The bound keeps a client that stopped reading from holding a
+/// restart replacement open.
+const V3_FRONT_CLOSE_FLUSH: std::time::Duration = std::time::Duration::from_millis(500);
+
+async fn write_front_command(
+    write_half: &mut OwnedWriteHalf,
+    observation: &V3ClientTransportObservation,
+    closeout: &V3FrontTransportCloseoutState,
+    command: V3FrontWriteCommand,
+) -> bool {
+    match command {
+        V3FrontWriteCommand::Frame(frame, response) => {
+            write_front_response_frame(write_half, observation, closeout, &frame, &response).await
+        }
+        V3FrontWriteCommand::Flush(permits, ack) => {
+            let result = write_half.flush().await;
+            let ok = result.is_ok();
+            if let Err(error) = &result {
+                observation.emit(
+                    "flush_failure",
+                    &observation.current(),
+                    None,
+                    Some(error.to_string()),
+                );
+                closeout.close();
+            }
+            // The worker owns completion even if Hyper/restart stops polling.
+            drop(permits);
+            let _ = ack.send(result);
+            ok
+        }
+    }
+}
+
 /// Production Front socket owner for the HTTP adapter.
 #[derive(Clone, Debug)]
 pub struct V3StableFrontSocket {
-    write_tx: mpsc::Sender<Vec<u8>>,
+    write_tx: mpsc::Sender<V3FrontWriteCommand>,
+    pending_activity: Arc<Mutex<Vec<V3ServerRequestActivityPermit>>>,
+    observation: Arc<V3ClientTransportObservation>,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     closeout_state: Arc<V3FrontTransportCloseoutState>,
 }
 
+#[derive(Debug)]
+enum V3FrontWriteCommand {
+    Frame(Vec<u8>, V3ClientResponseObservation),
+    Flush(
+        Vec<V3ServerRequestActivityPermit>,
+        oneshot::Sender<std::io::Result<()>>,
+    ),
+}
+
 impl V3StableFrontSocket {
-    fn spawn(mut write_half: OwnedWriteHalf) -> Self {
-        let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(32);
+    pub(crate) fn observe_request_trace(
+        &self,
+        trace: routecodex_v3_debug::V3DebugTraceScope,
+        session: String,
+    ) {
+        self.observation.bind_trace(trace, session);
+    }
+    fn spawn(
+        mut write_half: OwnedWriteHalf,
+        observation: Arc<V3ClientTransportObservation>,
+    ) -> Self {
+        let (write_tx, mut write_rx) = mpsc::channel::<V3FrontWriteCommand>(32);
+        let pending_activity = Arc::new(Mutex::new(Vec::new()));
+        let worker_pending_activity = Arc::clone(&pending_activity);
         let (close_tx, mut close_rx) = oneshot::channel();
         let closeout_state = V3FrontTransportCloseoutState::new();
         let worker_closeout_state = Arc::clone(&closeout_state);
+        let worker_observation = Arc::clone(&observation);
         tokio::spawn(async move {
             let mut close_requested = false;
+            let mut flush_queued_before_close = false;
             loop {
                 tokio::select! {
                     biased;
                     close = &mut close_rx, if !close_requested => {
                         if close.is_ok() {
-                            if let Some(frame) = worker_closeout_state.take_frame() {
-                                let _ = write_half.write_all(&frame).await;
-                                let _ = write_half.flush().await;
-                            }
+                            flush_queued_before_close = true;
                             break;
                         }
                         close_requested = true;
                     },
                     frame = write_rx.recv() => {
-                        let Some(frame) = frame else { break };
-                        if write_half.write_all(&frame).await.is_err() {
-                            worker_closeout_state.close();
-                            break;
-                        }
-                        if write_half.flush().await.is_err() {
-                            worker_closeout_state.close();
+                        let Some(command) = frame else { break };
+                        if !write_front_command(
+                            &mut write_half,
+                            &worker_observation,
+                            &worker_closeout_state,
+                            command,
+                        )
+                        .await
+                        {
                             break;
                         }
                     }
                 }
             }
+            if flush_queued_before_close {
+                // The close branch is biased, so a close signal would otherwise drop
+                // the response tail that reached the write queue but not the socket.
+                // Flush those frames under a bound, then close.
+                let _ = tokio::time::timeout(V3_FRONT_CLOSE_FLUSH, async {
+                    while let Ok(command) = write_rx.try_recv() {
+                        if !write_front_command(
+                            &mut write_half,
+                            &worker_observation,
+                            &worker_closeout_state,
+                            command,
+                        )
+                        .await
+                        {
+                            break;
+                        }
+                    }
+                })
+                .await;
+            }
+            worker_closeout_state.close();
+            worker_pending_activity
+                .lock()
+                .expect("front activity lock")
+                .clear();
             let _ = write_half.shutdown().await;
+            worker_observation.emit("socket_closed", &worker_observation.current(), None, None);
         });
         Self {
             write_tx,
+            pending_activity,
+            observation,
             close_tx: Arc::new(Mutex::new(Some(close_tx))),
             closeout_state,
+        }
+    }
+
+    pub(crate) fn hold_activity_until_flush(&self, permit: V3ServerRequestActivityPermit) {
+        let mut pending = self.pending_activity.lock().expect("front activity lock");
+        if !self.is_closed() {
+            pending.push(permit);
         }
     }
 
@@ -904,13 +1151,10 @@ impl V3StableFrontSocket {
         self.closeout_state.mark_request_started();
     }
 
-    pub(crate) fn set_exec_closeout_frame(&self, frame: Vec<u8>) {
-        self.closeout_state.set_frame(frame);
-    }
-
     fn close_for_exec_replacement(&self) {
-        self.closeout_state.close_for_exec_replacement();
-        self.signal_close();
+        if self.closeout_state.close_for_exec_replacement() {
+            self.signal_close();
+        }
     }
 
     fn signal_close(&self) {
@@ -922,6 +1166,31 @@ impl V3StableFrontSocket {
         self.signal_close();
     }
 
+    fn abort_without_response(&self) {
+        self.closeout_state.abort_without_response();
+        self.signal_close();
+    }
+
+    fn suppress_restart_closeout_frame(&self) -> bool {
+        self.closeout_state.suppress_restart_closeout_frame()
+    }
+
+    /// Commit a restart closeout that was deferred because a streaming terminal had
+    /// not written its response head yet. Signalling the closeout terminates the
+    /// transport without emitting an error frame or fabricated successful terminal.
+    fn commit_deferred_restart_closeout(&self) -> bool {
+        if self.closeout_state.commit_deferred_restart_closeout() {
+            self.signal_close();
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn wait_transport_wrote(&self) {
+        self.closeout_state.wait_transport_wrote().await;
+    }
+
     fn is_closed(&self) -> bool {
         self.closeout_state.is_closed()
     }
@@ -930,6 +1199,18 @@ impl V3StableFrontSocket {
 struct V3FrontHttpIo {
     read_half: OwnedReadHalf,
     front_socket: V3StableFrontSocket,
+    flush: Option<std::pin::Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>>>,
+    dirty: bool,
+}
+
+impl Drop for V3FrontHttpIo {
+    fn drop(&mut self) {
+        self.front_socket
+            .pending_activity
+            .lock()
+            .expect("front activity lock")
+            .clear();
+    }
 }
 
 impl AsyncRead for V3FrontHttpIo {
@@ -953,7 +1234,7 @@ impl AsyncRead for V3FrontHttpIo {
 
 impl AsyncWrite for V3FrontHttpIo {
     fn poll_write(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
         data: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
@@ -964,11 +1245,15 @@ impl AsyncWrite for V3FrontHttpIo {
             )));
         }
         self.front_socket.closeout_state.mark_response_started();
-        let sender = &self.front_socket.write_tx;
-        match sender.try_reserve() {
+        let sender = self.front_socket.write_tx.clone();
+        let result = match sender.try_reserve() {
             Ok(permit) => {
                 let length = data.len();
-                permit.send(data.to_vec());
+                permit.send(V3FrontWriteCommand::Frame(
+                    data.to_vec(),
+                    self.front_socket.observation.current(),
+                ));
+                self.dirty = true;
                 std::task::Poll::Ready(Ok(length))
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
@@ -978,21 +1263,73 @@ impl AsyncWrite for V3FrontHttpIo {
             Err(mpsc::error::TrySendError::Closed(_)) => std::task::Poll::Ready(Err(
                 std::io::Error::new(std::io::ErrorKind::BrokenPipe, "front socket is closed"),
             )),
-        }
+        };
+        result
     }
 
     fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Ready(Ok(()))
+        loop {
+            if self.flush.is_none() {
+                // Snapshot only permits whose Body EOF preceded this Hyper flush.
+                // Hyper has now submitted its body data and HTTP framing tail.
+                let permits = std::mem::take(
+                    &mut *self
+                        .front_socket
+                        .pending_activity
+                        .lock()
+                        .expect("front activity lock"),
+                );
+                if !self.dirty && permits.is_empty() {
+                    return std::task::Poll::Ready(Ok(()));
+                }
+                self.dirty = false;
+                let sender = self.front_socket.write_tx.clone();
+                self.flush = Some(Box::pin(async move {
+                    let (ack_tx, ack_rx) = oneshot::channel();
+                    sender
+                        .send(V3FrontWriteCommand::Flush(permits, ack_tx))
+                        .await
+                        .map_err(|_| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::BrokenPipe,
+                                "front writer closed before flush",
+                            )
+                        })?;
+                    ack_rx.await.map_err(|_| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            "front writer interrupted during flush",
+                        )
+                    })?
+                }));
+            }
+            match self
+                .flush
+                .as_mut()
+                .expect("pending front flush")
+                .as_mut()
+                .poll(cx)
+            {
+                std::task::Poll::Pending => return std::task::Poll::Pending,
+                std::task::Poll::Ready(result) => {
+                    self.flush = None;
+                    if let Err(error) = result {
+                        return std::task::Poll::Ready(Err(error));
+                    }
+                    // Writes/EOF after an earlier flush snapshot need another flush.
+                }
+            }
+        }
     }
 
     fn poll_shutdown(
         self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context<'_>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        std::task::Poll::Ready(Ok(()))
+        self.poll_flush(cx)
     }
 }
 
@@ -1010,8 +1347,13 @@ where
         + 'static,
     S::Future: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
 {
+    let observation = V3ClientTransportObservation::new(
+        front_transport_broker.observation_sink.clone(),
+        connection_identity,
+        stream.local_addr()?.port(),
+    );
     let (read_half, write_half) = stream.into_split();
-    let front_socket = V3StableFrontSocket::spawn(write_half);
+    let front_socket = V3StableFrontSocket::spawn(write_half, Arc::clone(&observation));
     front_transport_broker
         .register_front_socket(connection_identity, front_socket.clone())
         .map_err(std::io::Error::other)?;
@@ -1021,24 +1363,34 @@ where
         let front_socket = request_front_socket.clone();
         async move {
             front_socket.mark_request_started();
+            front_socket
+                .observation
+                .admitted(request.uri().path().to_owned());
             let (parts, body) = request.into_parts();
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(ConnectInfo(remote_addr));
             request.extensions_mut().insert(connection_identity);
-            request.extensions_mut().insert(front_socket);
-            service.call(request).await
+            request.extensions_mut().insert(front_socket.clone());
+            let response = service.call(request).await?;
+            front_socket
+                .observation
+                .prepared(response.status().as_u16(), front_socket.is_closed());
+            Ok::<_, Infallible>(response)
         }
     });
     let connection = hyper::server::conn::http1::Builder::new()
+        .automatic_error_responses(false)
         .serve_connection(
             TokioIo::new(V3FrontHttpIo {
                 read_half,
                 front_socket: front_socket.clone(),
+                flush: None,
+                dirty: false,
             }),
             hyper_service,
         )
         .with_upgrades();
-    tokio::select! {
+    let result = tokio::select! {
         _ = front_socket.closeout_state.wait_peer_disconnected() => {
             front_socket.close();
             Ok(())
@@ -1049,7 +1401,15 @@ where
             }
             result.map_err(std::io::Error::other)
         },
-    }
+    };
+    observation.emit(
+        "http_connection_end",
+        &observation.current(),
+        None,
+        result.as_ref().err().map(ToString::to_string),
+    );
+    front_transport_broker.release_connection(connection_identity);
+    result
 }
 
 #[cfg(test)]

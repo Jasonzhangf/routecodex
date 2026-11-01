@@ -5,6 +5,11 @@ use tiktoken_rs::{
     r50k_base_singleton, CoreBPE,
 };
 
+use routecodex_v3_route_classifier::{
+    project_v3_current_turn_entries_from_value, ChatTurnEntry, ChatTurnRole, GeminiTurnRole,
+    ResponsesTurnEntry, ResponsesTurnRole, V3CurrentTurnEntries,
+};
+
 use crate::nodes::detect_v3_media_kind;
 
 pub(crate) fn estimate_v3_request_tokens(body: &Value) -> u64 {
@@ -15,10 +20,152 @@ pub(crate) fn estimate_v3_request_tokens(body: &Value) -> u64 {
             total_tokens += count_v3_message_tokens(message, encoder);
         }
     }
+    if let Some(contents) = body.get("contents").and_then(Value::as_array) {
+        for content in contents {
+            if let Some(role) = content.get("role").and_then(Value::as_str) {
+                total_tokens += count_v3_text_tokens(role, encoder);
+            }
+            if let Some(parts) = content.get("parts") {
+                total_tokens += count_v3_content_tokens(parts, encoder);
+            }
+        }
+    }
     let request_extras = count_v3_request_extras_tokens(body, encoder);
     total_tokens += request_extras;
     let responses_context_tokens = count_v3_responses_context_tokens(body, encoder);
     total_tokens.max(responses_context_tokens + request_extras) as u64
+}
+
+pub(crate) fn estimate_v3_current_turn_tokens(body: &Value) -> u64 {
+    let entries = project_v3_current_turn_entries_from_value(body);
+    let mut current_turn = body.clone();
+    let Some(object) = current_turn.as_object_mut() else {
+        return 0;
+    };
+
+    match entries {
+        V3CurrentTurnEntries::Chat(entries) => {
+            let Some(messages) = body.get("messages").and_then(Value::as_array) else {
+                return 0;
+            };
+            let start = chat_current_turn_start(&entries);
+            object.remove("input");
+            object.remove("semantics");
+            object.insert(
+                "messages".to_string(),
+                Value::Array(messages[start..].to_vec()),
+            );
+        }
+        V3CurrentTurnEntries::Responses(entries) => {
+            let start = responses_current_turn_start(&entries);
+            object.remove("messages");
+            if let Some(input) = body.get("input") {
+                match input {
+                    Value::Array(items) if !items.is_empty() => {
+                        object.remove("semantics");
+                        object.insert("input".to_string(), Value::Array(items[start..].to_vec()));
+                    }
+                    Value::String(raw) if !raw.trim().is_empty() => {
+                        object.remove("semantics");
+                        match value_as_array(input) {
+                            Some(items) if !items.is_empty() => {
+                                object.insert(
+                                    "input".to_string(),
+                                    Value::Array(items[start..].to_vec()),
+                                );
+                            }
+                            Some(_) | None => {}
+                        }
+                    }
+                    _ => {
+                        let Some(items) = responses_semantic_context_input(body) else {
+                            return 0;
+                        };
+                        object.remove("semantics");
+                        object.insert("input".to_string(), Value::Array(items[start..].to_vec()));
+                    }
+                }
+            } else {
+                let Some(items) = responses_semantic_context_input(body) else {
+                    return 0;
+                };
+                object.remove("semantics");
+                object.insert("input".to_string(), Value::Array(items[start..].to_vec()));
+            };
+        }
+        V3CurrentTurnEntries::Gemini(entries) => {
+            let Some(contents) = body.get("contents").and_then(Value::as_array) else {
+                return 0;
+            };
+            let mut start = entries
+                .iter()
+                .rposition(|entry| entry.role == GeminiTurnRole::User)
+                .unwrap_or(0);
+            while start > 0 && entries[start - 1].role == GeminiTurnRole::User {
+                start -= 1;
+            }
+            object.insert(
+                "contents".to_string(),
+                Value::Array(contents[start..].to_vec()),
+            );
+        }
+        V3CurrentTurnEntries::PromptText(_) => {
+            return estimate_v3_request_tokens(body);
+        }
+        V3CurrentTurnEntries::Empty => return 0,
+    }
+
+    estimate_v3_request_tokens(&current_turn)
+}
+
+fn chat_current_turn_start(entries: &[ChatTurnEntry]) -> usize {
+    let latest_user_index = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, ChatTurnRole::User));
+    let Some(mut start) = latest_user_index else {
+        return 0;
+    };
+    while start > 0 && matches!(entries[start - 1].role, ChatTurnRole::User) {
+        start -= 1;
+    }
+    start
+}
+
+fn responses_current_turn_start(entries: &[ResponsesTurnEntry]) -> usize {
+    let latest_user_index = entries
+        .iter()
+        .rposition(|entry| matches!(entry.role, ResponsesTurnRole::User));
+    let Some(mut start) = latest_user_index else {
+        return 0;
+    };
+    while start > 0 {
+        let previous = &entries[start - 1];
+        if previous.role != ResponsesTurnRole::User {
+            break;
+        }
+        start -= 1;
+    }
+    start
+}
+
+fn value_as_array(value: &Value) -> Option<Vec<Value>> {
+    if let Some(items) = value.as_array() {
+        return Some(items.clone());
+    }
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<Value>(raw)
+        .ok()
+        .and_then(|parsed| parsed.as_array().cloned())
+}
+
+fn responses_semantic_context_input(body: &Value) -> Option<Vec<Value>> {
+    body.pointer("/semantics/responses/context/input")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty())
+        .cloned()
 }
 
 fn select_v3_request_encoder(body: &Value) -> &'static CoreBPE {
@@ -212,7 +359,12 @@ fn count_v3_content_object_tokens(
     map: &serde_json::Map<String, Value>,
     encoder: &CoreBPE,
 ) -> usize {
-    if detect_v3_media_kind(map).is_some() {
+    if detect_v3_media_kind(map).is_some()
+        || map.contains_key("inlineData")
+        || map.contains_key("inline_data")
+        || map.contains_key("fileData")
+        || map.contains_key("file_data")
+    {
         return 0;
     }
     if let Some(text) = map.get("text").and_then(Value::as_str) {
@@ -491,6 +643,97 @@ mod tests {
         assert!(
             estimate > 80_000,
             "Responses routing estimate must still count real tool output text; estimate={estimate}"
+        );
+    }
+
+    #[test]
+    fn gemini_current_turn_estimate_excludes_history_and_counts_consecutive_users() {
+        let request = json!({"contents": [
+            {"role":"user","parts":[{"text":"old history ".repeat(4000)}]},
+            {"role":"model","parts":[{"text":"old answer"}]},
+            {"role":"user","parts":[{"text":"current request ".repeat(2000)}]},
+            {"role":"user","parts":[{"text":"followup"}]}
+        ]});
+        let full = estimate_v3_request_tokens(&request);
+        let current = estimate_v3_current_turn_tokens(&request);
+        assert!(current > 1000, "current turn must be counted: {current}");
+        assert!(
+            full > current,
+            "history must count only in the full estimate: full={full} current={current}"
+        );
+    }
+
+    #[test]
+    fn v3_current_turn_estimate_excludes_completed_history() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"alpha beta gamma delta ".repeat(4_000)},
+                {"role":"assistant","content":"history response"},
+                {"role":"user","content":"short current request"}
+            ]
+        });
+
+        let full = estimate_v3_request_tokens(&request);
+        let current = estimate_v3_current_turn_tokens(&request);
+
+        assert!(full > 1_000, "full request estimate lost: {full}");
+        assert!(
+            current < 100,
+            "completed history leaked into current-turn estimate: {current}"
+        );
+    }
+
+    #[test]
+    fn v3_current_turn_estimate_counts_active_tool_segment() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"short history"},
+                {"role":"assistant","content":"history response"},
+                {"role":"user","content":"inspect the current result"},
+                {
+                    "type":"function_call",
+                    "call_id":"call_current",
+                    "name":"exec_command",
+                    "arguments":"{\"cmd\":\"cargo test\"}"
+                },
+                {
+                    "type":"function_call_output",
+                    "call_id":"call_current",
+                    "output":"alpha beta gamma delta ".repeat(4_000)
+                }
+            ]
+        });
+
+        let current = estimate_v3_current_turn_tokens(&request);
+
+        assert!(
+            current > 1_000,
+            "active current-turn tool output must count toward the estimate: {current}"
+        );
+    }
+
+    #[test]
+    fn v3_current_turn_estimate_merges_consecutive_user_messages() {
+        let request = json!({
+            "model": "gpt-5.5",
+            "input": [
+                {"role":"user","content":"search the first part ".repeat(3_000)},
+                {"role":"user","content":"and the second part"}
+            ]
+        });
+
+        let full = estimate_v3_request_tokens(&request);
+        let current = estimate_v3_current_turn_tokens(&request);
+
+        assert!(
+            current > 1_000,
+            "consecutive user messages must merge into the current-turn estimate: {current}"
+        );
+        assert!(
+            current >= full,
+            "merged current turn must not drop the earlier user message: current={current} full={full}"
         );
     }
 }

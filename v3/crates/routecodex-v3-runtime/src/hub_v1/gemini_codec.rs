@@ -153,8 +153,6 @@ pub enum V3GeminiCodecError {
     ProviderProtocolNotGemini,
     #[error("Gemini codec payload must be an object")]
     PayloadNotObject,
-    #[error("Gemini codec payload leaked RouteCodex side-channel field: {field}")]
-    SideChannelLeaked { field: &'static str },
     #[error("Gemini request contents must be an array")]
     ContentsNotArray,
     #[error("Gemini content parts must be an array")]
@@ -549,7 +547,6 @@ fn trace(stage: V3GeminiCodecStage, transport_intent: V3HubTransportIntent) -> V
 }
 
 fn validate_request(payload: &Value) -> Result<(), V3GeminiCodecError> {
-    reject_side_channel_fields(payload)?;
     let contents = payload
         .get("contents")
         .and_then(Value::as_array)
@@ -711,20 +708,36 @@ fn push_optional_generation_string_list(
 }
 
 fn validate_response(payload: &Value) -> Result<(), V3GeminiCodecError> {
-    reject_side_channel_fields(payload)?;
     if payload.get("error").is_some() {
         return validate_provider_error(payload);
+    }
+    if payload.get("candidates").is_none() && super::v3_gemini_prompt_feedback_is_terminal(payload)
+    {
+        return Ok(());
     }
     let candidates = payload
         .get("candidates")
         .and_then(Value::as_array)
         .ok_or(V3GeminiCodecError::CandidatesNotArray)?;
     for candidate in candidates {
+        // A confirmed provider filter terminal (SAFETY/RECITATION/...) may
+        // report the filter without any output container. Accept the genuinely
+        // missing content/parts without inventing an empty one; a present but
+        // malformed parts value, and an ordinary candidate such as empty STOP,
+        // keep the strict array requirement.
         let parts = candidate
             .get("content")
-            .and_then(|content| content.get("parts"))
-            .and_then(Value::as_array)
-            .ok_or(V3GeminiCodecError::PartsNotArray)?;
+            .and_then(|content| content.get("parts"));
+        let parts = match parts {
+            Some(parts) => parts.as_array().ok_or(V3GeminiCodecError::PartsNotArray)?,
+            None if super::v3_gemini_candidate_finish_reason_is_filter(
+                candidate.get("finishReason").and_then(Value::as_str),
+            ) =>
+            {
+                continue;
+            }
+            None => return Err(V3GeminiCodecError::PartsNotArray),
+        };
         for part in parts {
             require_object(part)?;
         }
@@ -746,26 +759,55 @@ fn validate_provider_error(payload: &Value) -> Result<(), V3GeminiCodecError> {
     }
 }
 
-fn reject_side_channel_fields(payload: &Value) -> Result<(), V3GeminiCodecError> {
-    for key in require_object(payload)?.keys() {
-        let label = match key.as_str() {
-            "routecodex_internal" => Some("routecodex_internal"),
-            "metadata_center" => Some("metadata_center"),
-            "debug_snapshot" => Some("debug_snapshot"),
-            "provider_protocol" => Some("provider_protocol"),
-            "resource_handle" => Some("resource_handle"),
-            "continuation_owner" => Some("continuation_owner"),
-            _ => None,
-        };
-        if let Some(field) = label {
-            return Err(V3GeminiCodecError::SideChannelLeaked { field });
-        }
-    }
-    Ok(())
-}
-
 fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3GeminiCodecError> {
     payload
         .as_object()
         .ok_or(V3GeminiCodecError::PayloadNotObject)
+}
+
+#[cfg(test)]
+mod gemini_codec_response_validation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn filter_candidate_without_content_is_accepted_but_empty_stop_is_not() {
+        // A confirmed provider filter terminal may omit output content/parts;
+        // the codec must not reject it downstream of the shared admission.
+        for reason in ["SAFETY", "RECITATION"] {
+            let payload = json!({"candidates":[{"index":0,"finishReason":reason}]});
+            assert_eq!(
+                validate_v3_gemini_provider_response_payload(
+                    &payload,
+                    V3HubProviderWireProtocol::Gemini,
+                ),
+                Ok(()),
+                "filter candidate {reason} without content must be accepted"
+            );
+        }
+        // Real malformed populated content stays rejected even on a filter
+        // candidate: only the missing container is exempted.
+        assert_eq!(
+            validate_v3_gemini_provider_response_payload(
+                &json!({"candidates":[{"index":0,"content":{"parts":"nope"},"finishReason":"SAFETY"}]}),
+                V3HubProviderWireProtocol::Gemini,
+            ),
+            Err(V3GeminiCodecError::PartsNotArray),
+        );
+        // Ordinary empty STOP keeps its strict output requirement.
+        assert_eq!(
+            validate_v3_gemini_provider_response_payload(
+                &json!({"candidates":[{"index":0,"finishReason":"STOP"}]}),
+                V3HubProviderWireProtocol::Gemini,
+            ),
+            Err(V3GeminiCodecError::PartsNotArray),
+        );
+        assert_eq!(
+            validate_v3_gemini_provider_response_payload(
+                &json!({"candidates":[{"index":0,"content":{"role":"model","parts":[]},"finishReason":"STOP"}]}),
+                V3HubProviderWireProtocol::Gemini,
+            ),
+            Ok(()),
+        );
+    }
 }

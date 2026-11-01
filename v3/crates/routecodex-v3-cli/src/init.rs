@@ -185,6 +185,7 @@ fn minimal_user_config(
     }
     Ok(V3UserConfig02RoutingSelectionParsed {
         version: 3,
+        runtime: Default::default(),
         servers: BTreeMap::from([(
             "default".to_string(),
             V3UserServerAuthoringConfig {
@@ -204,6 +205,7 @@ fn minimal_user_config(
                 routes: BTreeMap::from([(
                     "default".to_string(),
                     V3UserRoutePool {
+                        selection: Default::default(),
                         tiers: vec![vec![V3UserRouteMember::new(provider, model, None)]],
                     },
                 )]),

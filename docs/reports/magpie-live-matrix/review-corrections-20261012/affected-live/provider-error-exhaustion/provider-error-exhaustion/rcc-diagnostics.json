@@ -1,0 +1,15 @@
+{
+  "pid": 41704,
+  "ready": true,
+  "running": false,
+  "exit_receipt": {
+    "pid": 41704,
+    "kind": "exit",
+    "exit_code": 0,
+    "signal": null,
+    "at_epoch_ms": 1791841375264,
+    "error": null
+  },
+  "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/review-live-verify/provider-error-exhaustion/provider-error-exhaustion/v3-protocol-live-mock-lifecycle-FvV9fb/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        14:42:55 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:50644, 127.0.0.1:50645\u001b[0m\n[RouteCodexV3] Server started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:50644, 127.0.0.1:50645\n\u001b[38;2;240;152;92m[50644:openai_chat       ][-                   ][default:mock-chat[key1].unavailable-model] ▶ [/v1/chat/completions] 14:42:55 [#1/1]             route=default target=mock-chat[key1].unavailable-model reason=pool:default\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.unavailable-model-20261012T144255187-1-1] [virtual-router-hit]     14:42:55 req=openai-chat-router-mock.unavailable-model-20261012T144255187-1-1 event=route_selected route=default target=mock-chat[key1].unavailable-model reason=pool:default\u001b[0m\n",
+  "stderr": "\u001b[31m[50644:openai_chat       ][-                   ][default:mock-chat[key1].mock.unavailable-model] ❌ [provider-error]      14:42:55 req=openai-chat-router-mock.unavailable-model-20261012T144255187-1-1 \u001b[97mtarget=mock-chat[default].key1\u001b[31m model=mock.unavailable-model result=terminal_default_floor_exhausted next=- \u001b[97mcauseStatus=429\u001b[31m failures=1 health=healthy waitMs=1000 type=provider_http_429 external=provider \u001b[97mexternalCode=HTTP_429\u001b[31m \u001b[97mexternalStatus=429\u001b[31m message=provider returned HTTP 429\u001b[0m\nV3 Front HTTP connection failed: Custom { kind: Other, error: hyper::Error(BodyWrite, Custom { kind: BrokenPipe, error: \"front socket closed for exec replacement\" }) }\n"
+}

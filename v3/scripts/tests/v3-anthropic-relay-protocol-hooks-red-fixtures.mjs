@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = process.cwd();
 const verifier = resolve(
   repoRoot,
-  'scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs',
+  'v3/scripts/architecture/verify-v3-anthropic-relay-protocol-hooks.mjs',
 );
 const source = 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_hooks.rs';
 const tests = 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_relay_protocol_hooks.rs';
@@ -84,7 +84,7 @@ for (const [name, relative, from, to, diagnostic] of fixtures) {
     for (const directory of ['v3', 'scripts']) {
       cpSync(resolve(repoRoot, directory), join(root, directory), {
         recursive: true,
-        filter: (path) => !path.includes('/target/'),
+        filter: (path) => !path.includes('/target/') && !path.includes('/build-control/'),
       });
     }
     const target = join(root, relative);

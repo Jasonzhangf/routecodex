@@ -5,7 +5,82 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub(crate) fn pending_endpoint_after_responses_admission(
+fn persist_responses_direct_frame_error_evidence(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    path: &str,
+    request_id: &str,
+    request_payload: &Value,
+    frame: &V3Server16HttpFrame,
+) {
+    if frame.status < 400 && frame.error_chain.is_empty() {
+        return;
+    }
+    let status = (frame.status >= 400).then_some(frame.status);
+    let _ = persist_v3_error_evidence_payload(
+        state,
+        entry_protocol,
+        path,
+        request_id,
+        "request.json",
+        &state
+            .debug
+            .project_payload_verbatim(request_payload.clone()),
+        status,
+    );
+    let _ = persist_v3_error_evidence_payload(
+        state, entry_protocol, path, request_id, "error.json",
+        &state.debug.project_payload_verbatim(json!({
+            "object": "routecodex.v3.error_evidence",
+            "stage": "error",
+            "status": frame.status,
+            "request_id": request_id,
+            "endpoint": path,
+            "node_trace": frame.node_trace.clone(),
+            "error_chain": frame.error_chain.clone(),
+            "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
+        })), status,
+    );
+}
+
+pub(crate) fn finish_v3_protocol_execution_plan_failure(
+    state: &Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    entry_protocol: &str,
+    path: &str,
+    request_id: &str,
+    requested_stream: bool,
+    terminal_evidence: V3ProviderTerminalEvidence<'_>,
+    projected: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+    let projected = match projected {
+        Ok(projected) => projected,
+        Err(fault) => {
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                path,
+                request_id,
+                &[],
+                Some(&fault.policy_failure),
+                fault.original_source.as_ref(),
+            );
+            return Err(provider_terminal_response(
+                state,
+                front_connection_identity,
+                routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                requested_stream,
+                terminal_evidence,
+            ));
+        }
+    };
+    Ok(projected)
+}
+
+pub(crate) fn pending_endpoint_after_json_parse(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,
@@ -16,10 +91,11 @@ pub(crate) fn pending_endpoint_after_responses_admission(
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
     // Avoid a second poll frame for the large protocol-dispatch future.
-    Box::pin(pending_endpoint_after_responses_admission_inner(
+    Box::pin(pending_endpoint_after_json_parse_inner(
         state,
         front_connection_identity,
         request_headers,
@@ -30,11 +106,12 @@ pub(crate) fn pending_endpoint_after_responses_admission(
         execution_mode,
         pending_owner_symbol,
         request_purpose,
+        client_frame_sink,
         payload,
     ))
 }
 
-pub(crate) async fn pending_endpoint_after_responses_admission_inner(
+pub(crate) async fn pending_endpoint_after_json_parse_inner(
     state: Arc<V3ListenerState>,
     front_connection_identity: Option<V3FrontConnectionIdentity>,
     request_headers: HeaderMap,
@@ -45,6 +122,7 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     mut execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
+    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
 ) -> Response<Body> {
     let client_keepalive_interval = Some(Duration::from_millis(state.server.http_sse_keepalive_ms));
@@ -54,25 +132,34 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    // One allocation: every terminal branch records this same request identity.
+    let terminal_evidence = V3ProviderTerminalEvidence {
+        entry_protocol: &entry_protocol,
+        endpoint: &path,
+        request_id: &request_id,
+    };
     let toolreason_observation_session_id =
         resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
             .session_id;
     let responses_entry_facts =
         (entry_protocol == "responses").then(|| V3ResponsesEntryFacts::project(&payload));
-    let requested_stream = v3_request_wants_sse(&request_headers, &payload);
-    let execution_id = state.debug.next_execution_id(&state.server.id);
-    let trace_scope = match state
-        .debug
-        .start_trace(&state.server.id, &request_id, &execution_id)
-    {
-        Ok(scope) => scope,
-        Err(error) => {
-            return foundation_output_response(project_v3_debug_failure(
-                "V3Server03HttpRequestRaw",
-                error,
-            ));
-        }
-    };
+    let requested_stream = v3_request_wants_sse(&request_headers, &payload)
+        || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent"));
+    let (execution_id, trace_scope) =
+        match crate::client_transport_observation::start_v3_client_trace(
+            &state,
+            front_connection_identity,
+            &request_id,
+            toolreason_observation_session_id.clone(),
+        ) {
+            Ok(trace) => trace,
+            Err(error) => {
+                return foundation_output_response(project_v3_debug_failure(
+                    "V3Server03HttpRequestRaw",
+                    error,
+                ));
+            }
+        };
     if let Err(error) = state.debug.record_node_event(
         &trace_scope,
         "V3Server03HttpRequestRaw",
@@ -104,11 +191,12 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &state.server,
                     &path,
                     &request_id,
-                    project_v3_server_runtime_failure(
+                    project_v3_server_boundary_error_via_sdk(
+                        V3ErrorSourceKind::RuntimeFailure,
                         "V3Server03HttpRequestRaw",
                         "provider_transport_handoff_scope_incomplete",
                         message,
-                        598,
+                        Some(598),
                     ),
                     None,
                 );
@@ -126,16 +214,36 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 &state.server,
                 &path,
                 &request_id,
-                project_v3_server_runtime_failure(
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
                     "V3Server03HttpRequestRaw",
                     "provider_transport_handoff_scope_incomplete",
                     message,
-                    598,
+                    Some(598),
                 ),
                 None,
             );
         }
     };
+    let payload = match routecodex_v3_runtime::operation_runner::execute_v3_operation_runner_request_capture_client_json(payload) {
+        Ok(captured) => captured,
+        Err(error) => {
+            return error_output_response_for_server_with_project_path(
+                &state.server,
+                &path,
+                &request_id,
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3OperationRunnerCaptureClientJson",
+                    "operation_runner_capture_client_json_failed",
+                    error.to_string(),
+                    Some(598),
+                ),
+                None,
+            );
+        }
+    };
+    let mut responses_request_execution_control = None;
     let responses_protocol_plan = if entry_protocol == "responses"
         && responses_entry_facts
             .as_ref()
@@ -153,17 +261,59 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             Some(request_identity.pipeline_id.clone()),
             payload.clone(),
         );
-        let plan = match plan_v3_responses_protocol_execution_with_provider_health(
+        let plan = match plan_v3_responses_protocol_execution_with_recovery(
             &state.manifest,
             raw,
             state.provider_health.runtime_health(),
             current_epoch_ms(),
-        ) {
-            Ok(plan) => plan,
+        )
+        .await
+        {
+            Ok((plan, control)) => {
+                responses_request_execution_control = Some(control);
+                plan
+            }
             Err(failure) => {
-                let frame = build_v3_server_16_http_frame_from_v3_error_06(
+                let node_trace = failure.node_trace.clone();
+                let projected = match finish_v3_protocol_execution_plan_failure(
+                    &state,
+                    front_connection_identity,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    requested_stream,
+                    terminal_evidence,
                     project_v3_protocol_execution_plan_failure(failure),
-                );
+                ) {
+                    Ok(projected) => projected,
+                    Err(response) => return response,
+                };
+                if projected.pool_exhausted {
+                    // A selection-time pool exhaustion is a provider terminal:
+                    // no candidate was admitted, so there is no upstream
+                    // response to witness and the client boundary is the
+                    // transport break. The Error06 body stays provider-private
+                    // evidence on disk, never a client payload.
+                    if let Some(response) = persist_v3_projected_terminal_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &payload,
+                        &node_trace,
+                        &projected,
+                    ) {
+                        return response;
+                    }
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                        requested_stream,
+                        terminal_evidence,
+                    );
+                }
+                let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
                 return responses_direct_output_response(
                     project_v3_responses_error_frame_for_request_if_sse(
                         frame,
@@ -214,596 +364,69 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     };
     let request_console_project_path = resolve_v3_console_project_path(&request_headers, &payload);
     if is_provider_request_dry_run(&request_headers)
-        && entry_protocol == "responses"
-        && execution_mode == V3EntryProtocolExecutionMode::Direct
-    {
-        let fixture = V3DryRunFixture {
-            fixture_id: request_id.clone(),
-            server_id: state.server.id.clone(),
-            method,
-            path: path.clone(),
-            request_payload: payload.clone(),
-            response_payload: json!({
-                "object": "response",
-                "status": "completed",
-                "output_text": "routecodex provider-request dry-run stopped before provider send",
-                "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
-            }),
-        };
-        let output = match responses_protocol_plan.as_ref() {
-            Some(plan) => {
-                execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                    fixture,
-                    &state.manifest,
-                    &state.debug,
-                    plan,
-                )
-                .await
-            }
-            None => {
-                execute_v3_responses_direct_dry_run_runtime(fixture, &state.manifest, &state.debug)
-                    .await
-            }
-        };
-        let raw_input_items = payload
-            .get("input")
-            .and_then(Value::as_array)
-            .map_or(1, Vec::len);
-        emit_v3_dry_run_console_lines(
-            &build_v3_console_emission_context(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_identity,
-                &request_headers,
-                &payload,
+        && match entry_protocol.as_str() {
+            "responses" => matches!(
+                execution_mode,
+                V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay
             ),
-            &resolve_v3_dry_run_target_label(&state),
-            "provider-request-dry-run",
-            raw_input_items,
-            raw_input_items,
-            output.status,
-            output.node_trace.len(),
-        );
-        if v3_codex_sample_scope_allows(&state, execution_mode) {
-            if let Err(error) = persist_v3_codex_sample_payload(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_id,
-                "request.json",
-                &payload,
-            ) {
-                return foundation_output_response(project_v3_debug_failure(
-                    "V3DebugProviderRequestCaptured",
-                    V3DebugError::Sink(error),
-                ));
-            }
-            if let Err(error) = persist_v3_codex_sample_payload(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_id,
-                "response.json",
-                &output.body,
-            ) {
-                return foundation_output_response(project_v3_debug_failure(
-                    "V3DebugProviderResponseCaptured",
-                    V3DebugError::Sink(error),
-                ));
-            }
+            "anthropic" => execution_mode == V3EntryProtocolExecutionMode::Relay,
+            _ => false,
         }
-        if let Some(response) = record_v3_live_snapshot_projection(
+    {
+        return execute_v3_provider_request_dry_run_branch(
             &state,
-            &trace_scope,
-            snapshot_session_id.as_deref(),
-            output.status,
-            &output.node_trace,
-            "provider_request_dry_run",
-        ) {
-            return response;
-        }
-        if let Some(response) = capture_v3_foundation_runtime_response(
-            &state,
-            &trace_scope,
             &entry_protocol,
             execution_mode,
-            &path,
-            &request_id,
-            &output,
-        ) {
-            return response;
-        }
-        return foundation_output_response(output);
-    }
-    if is_provider_request_dry_run(&request_headers)
-        && entry_protocol == "responses"
-        && execution_mode == V3EntryProtocolExecutionMode::Relay
-    {
-        let server_tool_scope = match build_responses_relay_server_tool_scope(
+            method.clone(),
+            path.clone(),
             &request_headers,
-            Some(&payload),
-            &request_id,
-            &state.server,
-            &path,
-        ) {
-            Ok(scope) => scope,
-            Err(message) => {
-                return error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    &request_headers,
-                    Some(&payload),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
-        let output =
-            match execute_v3_responses_relay_dry_run_orchestration_outcome_with_server_tool_state(
-                &state.manifest,
-                V3ResponsesRelayRuntimeInput {
-                    server_id: state.server.id.clone(),
-                    failure_session_scope: provider_failure_session_scope.clone(),
-                    request_id: request_id.clone(),
-                    payload: payload.clone(),
-                },
-                &state.responses_relay_server_tool_state,
-                server_tool_scope,
-            )
-            .await
-            {
-                V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
-                V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
-                    let fixture = V3DryRunFixture {
-                        fixture_id: request_id.clone(),
-                        server_id: state.server.id.clone(),
-                        method: method.clone(),
-                        path: path.clone(),
-                        request_payload: handoff.request_payload,
-                        response_payload: json!({
-                            "object": "response",
-                            "status": "completed",
-                            "output_text": "routecodex provider-request dry-run stopped before provider send",
-                            "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
-                        }),
-                    };
-                    let mut output =
-                        execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                            fixture,
-                            &state.manifest,
-                            &state.debug,
-                            &handoff.plan,
-                        )
-                        .await;
-                    prepend_v3_protocol_plan_trace_to_foundation_output(
-                        &mut output,
-                        &handoff.node_trace,
-                    );
-                    output
-                }
-            };
-        let raw_input_items = payload
-            .get("input")
-            .and_then(Value::as_array)
-            .map_or(1, Vec::len);
-        emit_v3_dry_run_console_lines(
-            &build_v3_console_emission_context(
-                &state,
-                &entry_protocol,
-                &path,
-                &request_identity,
-                &request_headers,
-                &payload,
-            ),
-            &resolve_v3_dry_run_target_label(&state),
-            "provider-request-dry-run",
-            raw_input_items,
-            raw_input_items,
-            output.status,
-            output.node_trace.len(),
-        );
-        if let Some(response) = record_v3_live_snapshot_projection(
-            &state,
+            &request_identity,
+            request_id.clone(),
+            payload.clone(),
+            provider_failure_session_scope.clone(),
+            toolreason_observation_session_id.clone(),
             &trace_scope,
             snapshot_session_id.as_deref(),
-            output.status,
-            &output.node_trace,
-            "provider_request_dry_run",
-        ) {
-            return response;
-        }
-        if let Some(response) = capture_v3_foundation_runtime_response(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            execution_mode,
-            &path,
-            &request_id,
-            &output,
-        ) {
-            return response;
-        }
-        return foundation_output_response(output);
-    }
-    if is_provider_request_dry_run(&request_headers)
-        && entry_protocol == "anthropic"
-        && execution_mode == V3EntryProtocolExecutionMode::Relay
-    {
-        let client_headers = match collect_anthropic_relay_client_headers(&request_headers) {
-            Ok(headers) => headers,
-            Err(message) => {
-                return error_output_response_for_server_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
-        let output = execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
-            &state.manifest,
-            V3AnthropicRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                failure_session_scope: provider_failure_session_scope.clone(),
-                request_id: request_id.clone(),
-                toolreason_observation_session_id: Some(toolreason_observation_session_id.clone()),
-                payload: payload.clone(),
-            },
-            client_headers,
+            request_console_project_path.as_deref(),
+            responses_protocol_plan.as_ref(),
         )
         .await;
-        if let Some(response) = record_v3_live_snapshot_projection(
-            &state,
-            &trace_scope,
-            snapshot_session_id.as_deref(),
-            output.status,
-            &output.node_trace,
-            "provider_request_dry_run",
-        ) {
-            return response;
-        }
-        if let Some(response) = capture_v3_foundation_runtime_response(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            execution_mode,
-            &path,
-            &request_id,
-            &output,
-        ) {
-            return response;
-        }
-        return foundation_output_response(output);
     }
-    if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct {
-        return execute_v3_openai_chat_direct_server_outcome(
+    if entry_protocol != "responses"
+        && matches!(
+            entry_protocol.as_str(),
+            "gemini" | "anthropic" | "openai_chat"
+        )
+        && matches!(
+            execution_mode,
+            V3EntryProtocolExecutionMode::Direct | V3EntryProtocolExecutionMode::Relay
+        )
+    {
+        return execute_v3_non_responses_protocol_branch(
             &state,
+            front_connection_identity,
+            &request_headers,
             method,
             path.clone(),
             request_id.clone(),
+            &request_identity,
             execution_id,
             payload,
             provider_failure_session_scope.clone(),
-            &request_headers,
-            &request_identity,
+            execution_mode,
+            toolreason_observation_session_id.clone(),
             started_at,
-            request_console_project_path.as_deref(),
             request_purpose,
+            requested_stream,
+            terminal_evidence,
+            &trace_scope,
+            snapshot_session_id.as_deref(),
+            request_console_project_path.as_deref(),
+            &entry_protocol,
         )
         .await;
     }
-    if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let console_payload = payload.clone();
-        let console_context = build_v3_console_emission_context(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_identity,
-            &request_headers,
-            &console_payload,
-        );
-        let output =
-            match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
-                &state.manifest,
-                V3OpenAiChatRelayRuntimeInput {
-                    server_id: state.server.id.clone(),
-                    failure_session_scope: provider_failure_session_scope.clone(),
-                    request_id: request_id.clone(),
-                    payload: payload.clone(),
-                },
-                state.provider_health.runtime_health(),
-                V3HubExecutionMode::Relay,
-            )
-            .await
-            {
-                Ok(output) => output,
-                Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
-            };
-        if output.error_chain.is_some() {
-            if let Some(response) = emit_relay_error_chain_if_any(
-                &state,
-                &trace_scope,
-                &entry_protocol,
-                &path,
-                &request_id,
-                snapshot_session_id.as_deref(),
-                output.status,
-                output.error_chain.as_deref(),
-                openai_chat_error_body_for_console(&output.client_body),
-                request_console_project_path.as_deref(),
-            ) {
-                return response;
-            }
-        }
-        let mut output = output;
-        if let Some(response) = capture_v3_relay_provider_snapshots(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_id,
-            &mut output.provider_snapshots,
-        ) {
-            return response;
-        }
-        if let Some(response) = capture_v3_openai_chat_relay_response(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            &path,
-            &request_id,
-            &payload,
-            &mut output,
-        ) {
-            return response;
-        }
-        let stream_console_finalizer = match (
-            output.stream_observation.clone(),
-            output.observability.clone(),
-        ) {
-            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
-                context: console_context.clone(),
-                status: output.status,
-                node_trace: output.node_trace.clone(),
-                observability,
-                stream_observation,
-                started_at,
-            }),
-            _ => None,
-        };
-        if let Some(observability) = output.observability.as_ref() {
-            emit_v3_observability_console_lines(
-                &console_context,
-                output.status,
-                &output.node_trace,
-                observability,
-                started_at,
-                output.stream_observation.is_none(),
-            );
-        }
-        return openai_chat_relay_output_response(
-            output,
-            stream_console_finalizer,
-            Duration::from_millis(state.server.http_sse_keepalive_ms),
-            requested_stream,
-        );
-    }
-    if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let client_headers = match collect_anthropic_relay_client_headers(&request_headers) {
-            Ok(headers) => headers,
-            Err(message) => {
-                return error_output_response_for_server_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
-        let output = match execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
-            &state.manifest,
-            V3AnthropicRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                failure_session_scope: provider_failure_session_scope.clone(),
-                request_id: request_id.clone(),
-                toolreason_observation_session_id: Some(
-                    toolreason_observation_session_id.clone(),
-                ),
-                payload: payload.clone(),
-            },
-            client_headers,
-            state.provider_health.runtime_health(),
-        )
-        .await
-        {
-            Ok(output) => output,
-            Err(error) => project_v3_anthropic_relay_runtime_failure(error),
-        };
-        if let Some(response) = emit_relay_error_chain_if_any(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            &path,
-            &request_id,
-            snapshot_session_id.as_deref(),
-            output.status,
-            output.error_chain.as_deref(),
-            Some(&output.client_response),
-            request_console_project_path.as_deref(),
-        ) {
-            return response;
-        }
-        let mut output = output;
-        if let Some(response) = capture_v3_relay_provider_snapshots(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_id,
-            &mut output.provider_snapshots,
-        ) {
-            return response;
-        }
-        if let Some(response) = capture_v3_anthropic_relay_response(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_id,
-            &output,
-        ) {
-            return response;
-        }
-        let console_payload = payload.clone();
-        let console_context = build_v3_console_emission_context(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_identity,
-            &request_headers,
-            &console_payload,
-        );
-        if let Some(observability) = output.observability.as_mut() {
-            if let Err(error) = merge_v3_runtime_stream_observation(
-                observability,
-                output.stream_observation.as_ref(),
-            ) {
-                emit_v3_runtime_observability_contract_failure(
-                    &console_context,
-                    observability,
-                    error,
-                );
-            }
-        }
-        if let Err(error) =
-            emit_v3_toolreason_console_line(&console_context, output.stream_observation.as_ref())
-        {
-            emit_v3_runtime_observability_contract_failure(
-                &console_context,
-                output
-                    .observability
-                    .as_ref()
-                    .unwrap_or(&V3RuntimeObservability::default()),
-                error,
-            );
-        }
-        if let Some(observability) = output.observability.as_ref() {
-            let mut console_observability = observability.clone();
-            if let Err(error) = merge_v3_runtime_stream_observation(
-                &mut console_observability,
-                output.stream_observation.as_ref(),
-            ) {
-                emit_v3_runtime_observability_contract_failure(
-                    &console_context,
-                    &console_observability,
-                    error,
-                );
-            } else {
-                emit_v3_observability_console_lines(
-                    &console_context,
-                    output.status,
-                    &output.node_trace,
-                    &console_observability,
-                    started_at,
-                    true,
-                );
-            }
-        }
-        return anthropic_relay_output_response(output, requested_stream);
-    }
-    if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let output = match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
-            &state.manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: state.server.id.clone(),
-                failure_session_scope: provider_failure_session_scope.clone(),
-                request_id: request_id.clone(),
-                endpoint_path: path.clone(),
-                payload: payload.clone(),
-            },
-            state.provider_health.runtime_health(),
-        )
-        .await
-        {
-            Ok(output) => output,
-            Err(error) => project_v3_gemini_relay_runtime_failure(error),
-        };
-        if let Some(response) = emit_relay_error_chain_if_any(
-            &state,
-            &trace_scope,
-            &entry_protocol,
-            &path,
-            &request_id,
-            snapshot_session_id.as_deref(),
-            output.status,
-            output.error_chain.as_deref(),
-            gemini_error_body_for_console(&output.client_body),
-            request_console_project_path.as_deref(),
-        ) {
-            return response;
-        }
-        let console_payload = payload.clone();
-        let console_context = build_v3_console_emission_context(
-            &state,
-            &entry_protocol,
-            &path,
-            &request_identity,
-            &request_headers,
-            &console_payload,
-        );
-        let stream_console_finalizer = match (
-            output.stream_observation.clone(),
-            output.observability.clone(),
-        ) {
-            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
-                context: console_context.clone(),
-                status: output.status,
-                node_trace: output.node_trace.clone(),
-                observability,
-                stream_observation,
-                started_at,
-            }),
-            _ => None,
-        };
-        if let Some(observability) = output.observability.as_ref() {
-            emit_v3_observability_console_lines(
-                &console_context,
-                output.status,
-                &output.node_trace,
-                observability,
-                started_at,
-                output.stream_observation.is_none(),
-            );
-        }
-        return gemini_relay_output_response(
-            output,
-            stream_console_finalizer,
-            Duration::from_millis(state.server.http_sse_keepalive_ms),
-            requested_stream,
-        );
-    }
     if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-        let server_tool_scope = match build_responses_relay_server_tool_scope(
-            &request_headers,
-            Some(&payload),
-            &request_id,
-            &state.server,
-            &path,
-        ) {
-            Ok(scope) => scope,
-            Err(message) => {
-                return error_output_response_for_responses_request_with_project_path(
-                    &state.server,
-                    &path,
-                    &request_id,
-                    project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
-                    &request_headers,
-                    Some(&payload),
-                    request_console_project_path.as_deref(),
-                );
-            }
-        };
         let console_payload = payload.clone();
         let runtime_input = V3ResponsesRelayRuntimeInput {
             server_id: state.server.id.clone(),
@@ -825,113 +448,88 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         // errors can flush the original wire evidence even when normal debug
         // snapshot stages are disabled. Successful requests still persist only
         // explicitly enabled intermediate stages.
-        let capture_provider_request = true;
-        let capture_provider_response = true;
-        let mut output = if capture_provider_request || capture_provider_response {
-            match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope.clone(),
-                    V3ResponsesRelayProviderSnapshotCapture::new(
-                        capture_provider_request,
-                        capture_provider_response,
-                    ),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    Some(plan.decision.target.clone()),
-                    Some(plan.expanded.clone()),
-                    BTreeSet::new(),
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(mut output) => {
-                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                            &mut output,
-                            &plan.node_trace,
-                        );
-                        output
-                    }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope.clone(),
-                    V3ResponsesRelayProviderSnapshotCapture::new(
-                        capture_provider_request,
-                        capture_provider_response,
-                    ),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    None,
-                    None,
-                    BTreeSet::new(),
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
+        let plan = responses_protocol_plan.as_ref();
+        let mut output = match execute_v3_responses_relay_runtime_with_default_transport_health(
+            &state.manifest,
+            runtime_input,
+            &state.provider_health,
+            V3ResponsesRelayProviderSnapshotCapture::new(true, true),
+            Some(provider_failure_event_sink.clone()),
+            Some(route_selection_event_sink.clone()),
+            plan.map(|plan| plan.decision.target.clone()),
+            plan.map(|plan| plan.expanded.clone()),
+            BTreeSet::new(),
+            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
+                let mut seeds = plan.relay_runtime_seeds();
+                seeds.request_execution_control = responses_request_execution_control.clone();
+                seeds.client_frame_sink = client_frame_sink.clone();
+                seeds
+            }),
+        )
+        .await
+        {
+            Ok(mut output) => {
+                if let Some(plan) = plan {
+                    prepend_v3_protocol_plan_trace_to_responses_relay_output(
+                        &mut output,
+                        &plan.node_trace,
+                    );
+                }
+                output
             }
-        } else {
-            match responses_protocol_plan.as_ref() {
-                Some(plan) => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope.clone(),
-                    V3ResponsesRelayProviderSnapshotCapture::new(false, false),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    Some(plan.decision.target.clone()),
-                    Some(plan.expanded.clone()),
-                    BTreeSet::new(),
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(mut output) => {
-                        prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                            &mut output,
-                            &plan.node_trace,
-                        );
-                        output
-                    }
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
-                None => match execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state(
-                    &state.manifest,
-                    runtime_input,
-                    &state.provider_health,
-                    &state.responses_relay_server_tool_state,
-                    server_tool_scope,
-                    V3ResponsesRelayProviderSnapshotCapture::new(false, false),
-                    Some(provider_failure_event_sink.clone()),
-                    Some(route_selection_event_sink.clone()),
-                    None,
-                    None,
-                    BTreeSet::new(),
-                    None,
-                    None,
-                )
-                .await
-                {
-                    Ok(output) => output,
-                    Err(error) => project_v3_responses_relay_runtime_failure(error, None),
-                },
-            }
+            Err(error) => project_v3_responses_relay_runtime_failure(error, None),
         };
+        if output.protocol_direct_handoff.is_none() {
+            publish_v3_responses_closeout_observations(
+                &state,
+                Some(&trace_scope),
+                &entry_protocol,
+                &path,
+                &request_id,
+                &output.node_trace,
+                output.error_chain.as_deref(),
+                output.observability.as_ref(),
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
+        }
+        if let Some(disposition) = output.terminal_disposition.take() {
+            // A provider terminal disposition ends the client transport without
+            // a client payload, so this path never reaches the relay closeout
+            // below. The chain and status are still real typed facts: persist
+            // the error evidence and project the chain first, otherwise a
+            // request that really failed keeps an observability row whose every
+            // Error node reads "not_reached" and leaves no artifact on disk.
+            if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+                &state,
+                &entry_protocol,
+                &path,
+                &request_id,
+                &console_payload,
+                &output,
+            ) {
+                return response;
+            }
+            if let Some(response) = project_v3_responses_relay_error_chain(
+                &state,
+                &trace_scope,
+                &entry_protocol,
+                &path,
+                &request_id,
+                snapshot_session_id.as_deref(),
+                request_console_project_path.as_deref(),
+                &output,
+            ) {
+                return response;
+            }
+            return provider_terminal_response(
+                &state,
+                front_connection_identity,
+                disposition,
+                requested_stream,
+                terminal_evidence,
+            );
+        }
         if output.protocol_direct_handoff.is_some() {
             if let Some(response) = capture_v3_responses_relay_provider_snapshots(
                 &state,
@@ -944,7 +542,8 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             }
         }
         if let Some(handoff) = output.protocol_direct_handoff.take() {
-            let outcome = execute_responses_direct_server_outcome(
+            let relay_trace = output.node_trace.clone();
+            let mut outcome = execute_responses_direct_server_outcome(
                 &state,
                 &request_headers,
                 method,
@@ -958,51 +557,53 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
+                client_frame_sink.clone(),
                 request_purpose,
             )
             .await;
+            outcome.prepend_observations(&relay_trace, handoff.provider_failure_events);
+            outcome.publish_observations(
+                &state,
+                Some(&trace_scope),
+                &entry_protocol,
+                &path,
+                &request_id,
+            );
             match outcome {
-                V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
-                    prepend_v3_relay_handoff_trace_to_direct_frame(&mut frame, &handoff.node_trace);
-                    merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-                        &mut frame,
-                        handoff.provider_failure_events,
-                    );
-                    // Recovered provider failures are not terminal client errors; only the
-                    // Error06/status truth may create error.json after a successful handoff.
-                    if frame.status >= 400 || !frame.error_chain.is_empty() {
-                        let _ = persist_v3_error_evidence_payload(
-                            &state,
-                            &entry_protocol,
-                            &path,
-                            &request_id,
-                            "request.json",
-                            &state
-                                .debug
-                                .project_payload_verbatim(handoff.request_payload.clone()),
-                            (frame.status >= 400).then_some(frame.status),
-                        );
-                        let _ = persist_v3_error_evidence_payload(
-                            &state,
-                            &entry_protocol,
-                            &path,
-                            &request_id,
-                            "error.json",
-                            &state
-                                .debug
-                                .project_payload_verbatim(json!({
-                                    "object": "routecodex.v3.error_evidence",
-                                    "stage": "error",
-                                    "status": frame.status,
-                                    "request_id": request_id,
-                                    "endpoint": path,
-                                    "node_trace": frame.node_trace.clone(),
-                                    "error_chain": frame.error_chain.clone(),
-                                    "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
-                                })),
-                            (frame.status >= 400).then_some(frame.status),
+                V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
+                    if record_v3_live_snapshot_projection(
+                        &state,
+                        &trace_scope,
+                        snapshot_session_id.as_deref(),
+                        terminal.status,
+                        &terminal.node_trace,
+                        "live_response",
+                    )
+                    .is_some()
+                    {
+                        eprintln!(
+                            "V3 terminal snapshot capture failed; retaining the runtime outcome"
                         );
                     }
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        terminal.disposition,
+                        requested_stream,
+                        terminal_evidence,
+                    );
+                }
+                V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
+                    // Recovered provider failures are not terminal client errors; only the
+                    // Error06/status truth may create error.json after a successful handoff.
+                    persist_responses_direct_frame_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &handoff.request_payload,
+                        &frame,
+                    );
                     if let Some(response) = capture_v3_responses_direct_response(
                         &state,
                         &entry_protocol,
@@ -1022,25 +623,64 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     ) {
                         return response;
                     }
+                    let client_response_capture =
+                        V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+                            &state,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            &frame,
+                        );
                     let stream_console_finalizer =
                         emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
                     let frame =
                         project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-                    return responses_direct_output_response_with_console(
+                    let response = responses_direct_output_response_with_console(
                         frame,
                         stream_console_finalizer,
                         client_keepalive_interval,
                     );
+                    return match client_response_capture {
+                        Some(capture) => capture.defer_into(response),
+                        None => response,
+                    };
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
-                    prepend_v3_protocol_plan_trace_to_responses_relay_output(
-                        &mut relay_output,
-                        &handoff.node_trace,
-                    );
-                    merge_v3_direct_handoff_provider_failure_events(
-                        &mut relay_output,
-                        handoff.provider_failure_events,
-                    );
+                    if let Some(disposition) = relay_output.terminal_disposition.take() {
+                        // Same entry, same defect as the branch below: a
+                        // provider terminal disposition bypasses the relay
+                        // closeout, so the real typed chain and the on-disk
+                        // evidence have to be recorded here as well.
+                        if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+                            &state,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            &console_payload,
+                            &relay_output,
+                        ) {
+                            return response;
+                        }
+                        if let Some(response) = project_v3_responses_relay_error_chain(
+                            &state,
+                            &trace_scope,
+                            &entry_protocol,
+                            &path,
+                            &request_id,
+                            snapshot_session_id.as_deref(),
+                            request_console_project_path.as_deref(),
+                            &relay_output,
+                        ) {
+                            return response;
+                        }
+                        return provider_terminal_response(
+                            &state,
+                            front_connection_identity,
+                            disposition,
+                            requested_stream,
+                            terminal_evidence,
+                        );
+                    }
                     return finalize_v3_responses_relay_server_output(
                         &state,
                         &trace_scope,
@@ -1099,49 +739,53 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                 .as_ref()
                 .map(V3MetadataCenterExecutionPlan::protocol_plan),
             None,
-            None,
+            responses_request_execution_control,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
+            client_frame_sink,
             request_purpose,
         )
         .await;
+        outcome.publish_observations(
+            &state,
+            Some(&trace_scope),
+            &entry_protocol,
+            &path,
+            &request_id,
+        );
         match outcome {
+            V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
+                if record_v3_live_snapshot_projection(
+                    &state,
+                    &trace_scope,
+                    snapshot_session_id.as_deref(),
+                    terminal.status,
+                    &terminal.node_trace,
+                    "live_response",
+                )
+                .is_some()
+                {
+                    eprintln!("V3 terminal snapshot capture failed; retaining the runtime outcome");
+                }
+                provider_terminal_response(
+                    &state,
+                    front_connection_identity,
+                    terminal.disposition,
+                    requested_stream,
+                    terminal_evidence,
+                )
+            }
             V3ResponsesDirectServerOutcome::DirectFrame(mut frame) => {
                 // Recovered provider attempts are observability events, not a terminal
                 // client error. Only status/Error06 truth creates error.json.
-                if frame.status >= 400 || !frame.error_chain.is_empty() {
-                    let _ = persist_v3_error_evidence_payload(
-                        &state,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
-                        "request.json",
-                        &state
-                            .debug
-                            .project_payload_verbatim(raw_request_payload.clone()),
-                        (frame.status >= 400).then_some(frame.status),
-                    );
-                    let _ = persist_v3_error_evidence_payload(
-                        &state,
-                        &entry_protocol,
-                        &path,
-                        &request_id,
-                        "error.json",
-                        &state
-                            .debug
-                            .project_payload_verbatim(json!({
-                                "object": "routecodex.v3.error_evidence",
-                                "stage": "error",
-                                "status": frame.status,
-                                "request_id": request_id,
-                                "endpoint": path,
-                                "node_trace": frame.node_trace.clone(),
-                                "error_chain": frame.error_chain.clone(),
-                                "observability": frame.observability.as_ref().map(project_v3_runtime_observability_debug),
-                            })),
-                        (frame.status >= 400).then_some(frame.status),
-                    );
-                }
+                persist_responses_direct_frame_error_evidence(
+                    &state,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    &raw_request_payload,
+                    &frame,
+                );
                 if let Some(response) = capture_v3_responses_direct_response(
                     &state,
                     &entry_protocol,
@@ -1168,6 +812,13 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                     &request_identity,
                     &request_headers,
                     &console_payload,
+                );
+                let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+                    &state,
+                    &entry_protocol,
+                    &path,
+                    &request_id,
+                    &frame,
                 );
                 let stream_console_finalizer =
                     emit_v3_direct_frame_console_lines(&console_context, &frame, started_at);
@@ -1198,13 +849,52 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
                         &request_id,
                     ));
                 }
-                responses_direct_output_response_with_console(
+                let response = responses_direct_output_response_with_console(
                     frame,
                     stream_console_finalizer,
                     client_keepalive_interval,
-                )
+                );
+                match client_response_capture {
+                    Some(capture) => capture.defer_into(response),
+                    None => response,
+                }
             }
             V3ResponsesDirectServerOutcome::RelayOutput(output) => {
+                if let Some(disposition) = output.terminal_disposition.clone() {
+                    // Third and last Responses terminal-disposition site: same
+                    // entry, same defect, so the real typed chain and the
+                    // on-disk evidence are recorded before the client transport
+                    // is broken without a payload.
+                    if let Some(response) = persist_v3_responses_relay_terminal_error_evidence(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        &raw_request_payload,
+                        &output,
+                    ) {
+                        return response;
+                    }
+                    if let Some(response) = project_v3_responses_relay_error_chain(
+                        &state,
+                        &trace_scope,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        snapshot_session_id.as_deref(),
+                        request_console_project_path.as_deref(),
+                        &output,
+                    ) {
+                        return response;
+                    }
+                    return provider_terminal_response(
+                        &state,
+                        front_connection_identity,
+                        disposition,
+                        requested_stream,
+                        terminal_evidence,
+                    );
+                }
                 finalize_v3_responses_relay_server_output(
                     &state,
                     &trace_scope,
@@ -1240,10 +930,10 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
         let output = execute_v3_foundation_pending_runtime(
             V3FoundationRuntimeInput {
                 server_id: state.server.id.clone(),
-                request_id,
+                request_id: request_id.clone(),
                 execution_id,
                 method,
-                path,
+                path: path.clone(),
                 payload,
             },
             &state.debug,
@@ -1259,8 +949,11 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
             return response;
         }
         pending_binding_output_response(
+            &state,
             output,
             &entry_protocol,
+            &path,
+            &request_id,
             pending_not_implemented,
             &pending_owner,
         )
@@ -1281,92 +974,758 @@ pub(crate) async fn pending_endpoint_after_responses_admission_inner(
     }
 }
 
-pub(crate) fn is_provider_request_dry_run(headers: &HeaderMap) -> bool {
-    headers
-        .get("x-routecodex-dry-run")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("provider-request"))
+#[inline(never)]
+fn execute_v3_provider_request_dry_run_branch<'a>(
+    state: &'a Arc<V3ListenerState>,
+    entry_protocol: &'a str,
+    execution_mode: V3EntryProtocolExecutionMode,
+    method: String,
+    path: String,
+    request_headers: &'a HeaderMap,
+    request_identity: &'a V3AllocatedRequestIdentity,
+    request_id: String,
+    payload: Value,
+    provider_failure_session_scope: V3ProviderFailureSessionScope,
+    toolreason_observation_session_id: String,
+    trace_scope: &'a V3DebugTraceScope,
+    snapshot_session_id: Option<&'a str>,
+    request_console_project_path: Option<&'a str>,
+    responses_protocol_plan: Option<&'a V3MetadataCenterExecutionPlan>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send + 'a>> {
+    Box::pin(async move {
+        if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+            let fixture = V3DryRunFixture {
+                fixture_id: request_id.clone(),
+                server_id: state.server.id.clone(),
+                method,
+                path: path.clone(),
+                request_payload: payload.clone(),
+                response_payload: json!({
+                    "object": "response",
+                    "status": "completed",
+                    "output_text": "routecodex provider-request dry-run stopped before provider send",
+                    "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
+                }),
+            };
+            let output = match responses_protocol_plan {
+                Some(plan) => {
+                    execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                        fixture,
+                        &state.manifest,
+                        &state.debug,
+                        plan,
+                    )
+                    .await
+                }
+                None => {
+                    execute_v3_responses_direct_dry_run_runtime(
+                        fixture,
+                        &state.manifest,
+                        &state.debug,
+                    )
+                    .await
+                }
+            };
+            let raw_input_items = payload
+                .get("input")
+                .and_then(Value::as_array)
+                .map_or(1, Vec::len);
+            emit_v3_dry_run_console_lines(
+                &build_v3_console_emission_context(
+                    state,
+                    entry_protocol,
+                    &path,
+                    request_identity,
+                    request_headers,
+                    &payload,
+                ),
+                &resolve_v3_dry_run_target_label(state),
+                "provider-request-dry-run",
+                raw_input_items,
+                raw_input_items,
+                output.status,
+                output.node_trace.len(),
+            );
+            if v3_codex_sample_scope_allows(state, execution_mode) {
+                if let Err(error) = persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    &path,
+                    &request_id,
+                    "request.json",
+                    &payload,
+                ) {
+                    return foundation_output_response(project_v3_debug_failure(
+                        "V3DebugProviderRequestCaptured",
+                        V3DebugError::Sink(error),
+                    ));
+                }
+                if let Err(error) = persist_v3_codex_sample_payload(
+                    state,
+                    entry_protocol,
+                    &path,
+                    &request_id,
+                    "response.json",
+                    &output.body,
+                ) {
+                    return foundation_output_response(project_v3_debug_failure(
+                        "V3DebugProviderResponseCaptured",
+                        V3DebugError::Sink(error),
+                    ));
+                }
+            }
+            if let Some(response) = record_v3_live_snapshot_projection(
+                state,
+                trace_scope,
+                snapshot_session_id,
+                output.status,
+                &output.node_trace,
+                "provider_request_dry_run",
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_foundation_runtime_response(
+                state,
+                trace_scope,
+                entry_protocol,
+                execution_mode,
+                &path,
+                &request_id,
+                &output,
+            ) {
+                return response;
+            }
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &[],
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
+            return foundation_output_response(output);
+        }
+        if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
+            let output = match execute_v3_responses_relay_dry_run_orchestration_outcome(
+                &state.manifest,
+                V3ResponsesRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    failure_session_scope: provider_failure_session_scope,
+                    request_id: request_id.clone(),
+                    payload: payload.clone(),
+                },
+            )
+            .await
+            {
+                V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
+                V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
+                    let fixture = V3DryRunFixture {
+                        fixture_id: request_id.clone(),
+                        server_id: state.server.id.clone(),
+                        method: method.clone(),
+                        path: path.clone(),
+                        request_payload: handoff.request_payload,
+                        response_payload: json!({
+                            "object": "response",
+                            "status": "completed",
+                            "output_text": "routecodex provider-request dry-run stopped before provider send",
+                            "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
+                        }),
+                    };
+                    let mut output =
+                        execute_v3_responses_direct_dry_run_runtime_with_initial_target(
+                            fixture,
+                            &state.manifest,
+                            &state.debug,
+                            &handoff.plan,
+                        )
+                        .await;
+                    prepend_v3_protocol_plan_trace_to_foundation_output(
+                        &mut output,
+                        &handoff.node_trace,
+                    );
+                    output
+                }
+            };
+            let raw_input_items = payload
+                .get("input")
+                .and_then(Value::as_array)
+                .map_or(1, Vec::len);
+            emit_v3_dry_run_console_lines(
+                &build_v3_console_emission_context(
+                    state,
+                    entry_protocol,
+                    &path,
+                    request_identity,
+                    request_headers,
+                    &payload,
+                ),
+                &resolve_v3_dry_run_target_label(state),
+                "provider-request-dry-run",
+                raw_input_items,
+                raw_input_items,
+                output.status,
+                output.node_trace.len(),
+            );
+            if let Some(response) = record_v3_live_snapshot_projection(
+                state,
+                trace_scope,
+                snapshot_session_id,
+                output.status,
+                &output.node_trace,
+                "provider_request_dry_run",
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_foundation_runtime_response(
+                state,
+                trace_scope,
+                entry_protocol,
+                execution_mode,
+                &path,
+                &request_id,
+                &output,
+            ) {
+                return response;
+            }
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &[],
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
+            return foundation_output_response(output);
+        }
+        if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
+            let client_headers = match collect_anthropic_relay_client_headers(request_headers) {
+                Ok(headers) => headers,
+                Err(message) => {
+                    return error_output_response_for_server_with_project_path(
+                        &state.server,
+                        &path,
+                        &request_id,
+                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                        request_console_project_path,
+                    );
+                }
+            };
+            let output = execute_v3_anthropic_relay_dry_run_runtime_with_client_headers(
+                &state.manifest,
+                V3AnthropicRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    failure_session_scope: provider_failure_session_scope,
+                    request_id: request_id.clone(),
+                    toolreason_observation_session_id: Some(
+                        toolreason_observation_session_id.clone(),
+                    ),
+                    payload: payload.clone(),
+                },
+                client_headers,
+            )
+            .await;
+            if let Some(response) = record_v3_live_snapshot_projection(
+                state,
+                trace_scope,
+                snapshot_session_id,
+                output.status,
+                &output.node_trace,
+                "provider_request_dry_run",
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_foundation_runtime_response(
+                state,
+                trace_scope,
+                entry_protocol,
+                execution_mode,
+                &path,
+                &request_id,
+                &output,
+            ) {
+                return response;
+            }
+            persist_v3_chat_failure_evidence_sources(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &[],
+                output.diagnostic_source.as_ref(),
+                output.diagnostic_cause.as_ref(),
+            );
+            return foundation_output_response(output);
+        }
+        unreachable!("provider-request dry-run branch requires a supported protocol")
+    })
 }
 
-fn resolve_v3_dry_run_target_label(state: &V3ListenerState) -> String {
-    state
-        .manifest
-        .providers
-        .values()
-        .find_map(|provider| {
-            let auth_alias = provider.auth.entries.first()?.alias.as_str();
-            let model = provider.models.values().next()?;
-            Some(format!(
-                "{}[{}].{}",
-                provider.id, auth_alias, model.wire_name
-            ))
-        })
-        .unwrap_or_else(|| "-".to_string())
+#[inline(never)]
+fn execute_v3_non_responses_protocol_branch<'a>(
+    state: &'a Arc<V3ListenerState>,
+    front_connection_identity: Option<V3FrontConnectionIdentity>,
+    request_headers: &'a HeaderMap,
+    method: String,
+    path: String,
+    request_id: String,
+    request_identity: &'a V3AllocatedRequestIdentity,
+    execution_id: String,
+    payload: Value,
+    provider_failure_session_scope: V3ProviderFailureSessionScope,
+    execution_mode: V3EntryProtocolExecutionMode,
+    toolreason_observation_session_id: String,
+    started_at: Instant,
+    request_purpose: V3RequestPurpose,
+    requested_stream: bool,
+    terminal_evidence: V3ProviderTerminalEvidence<'a>,
+    trace_scope: &'a V3DebugTraceScope,
+    snapshot_session_id: Option<&'a str>,
+    request_console_project_path: Option<&'a str>,
+    entry_protocol: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send + 'a>> {
+    Box::pin(async move {
+        if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+            return execute_v3_gemini_direct_server_outcome(
+                state,
+                front_connection_identity,
+                method,
+                path.clone(),
+                request_id.clone(),
+                execution_id,
+                payload,
+                provider_failure_session_scope.clone(),
+                request_headers,
+                request_identity,
+                started_at,
+                request_purpose,
+            )
+            .await;
+        }
+        if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Direct {
+            return execute_v3_anthropic_direct_server_outcome(
+                state,
+                front_connection_identity,
+                method,
+                path.clone(),
+                request_id.clone(),
+                execution_id,
+                payload,
+                provider_failure_session_scope.clone(),
+                request_headers,
+                request_identity,
+                started_at,
+                request_purpose,
+            )
+            .await;
+        }
+        if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Direct
+        {
+            return execute_v3_openai_chat_direct_server_outcome(
+                state,
+                front_connection_identity,
+                method,
+                path.clone(),
+                request_id.clone(),
+                execution_id,
+                payload,
+                provider_failure_session_scope.clone(),
+                request_headers,
+                request_identity,
+                started_at,
+                request_console_project_path,
+                request_purpose,
+            )
+            .await;
+        }
+        if entry_protocol == "openai_chat" && execution_mode == V3EntryProtocolExecutionMode::Relay
+        {
+            let console_payload = payload.clone();
+            let console_context = build_v3_console_emission_context(
+                state,
+                entry_protocol,
+                &path,
+                request_identity,
+                request_headers,
+                &console_payload,
+            );
+            let output =
+                match execute_v3_openai_chat_relay_runtime_with_default_transport_provider_health_and_execution_mode(
+                    &state.manifest,
+                    V3OpenAiChatRelayRuntimeInput {
+                        server_id: state.server.id.clone(),
+                        failure_session_scope: provider_failure_session_scope.clone(),
+                        request_id: request_id.clone(),
+                        payload: payload.clone(),
+                    },
+                    state.provider_health.runtime_health(),
+                    V3HubExecutionMode::Relay,
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(error) => project_v3_openai_chat_relay_runtime_failure(error),
+                };
+            persist_v3_chat_failure_evidence(state, entry_protocol, &path, &request_id, &output);
+            if let Some(disposition) = output.terminal_disposition.clone() {
+                return provider_terminal_response(
+                    state,
+                    front_connection_identity,
+                    disposition,
+                    requested_stream,
+                    terminal_evidence,
+                );
+            }
+            if output.error_chain.is_some() {
+                if let Some(response) = emit_relay_error_chain_if_any(
+                    state,
+                    trace_scope,
+                    entry_protocol,
+                    &path,
+                    &request_id,
+                    snapshot_session_id,
+                    output.status,
+                    output.error_chain.as_deref(),
+                    openai_chat_error_body_for_console(&output.client_body),
+                    request_console_project_path,
+                ) {
+                    return response;
+                }
+            }
+            let mut output = output;
+            if let Some(response) = capture_v3_relay_provider_snapshots(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output.provider_snapshots,
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_openai_chat_relay_response(
+                state,
+                trace_scope,
+                entry_protocol,
+                &path,
+                &request_id,
+                &payload,
+                &mut output,
+            ) {
+                return response;
+            }
+            let stream_console_finalizer = match (
+                output.stream_observation.clone(),
+                output.observability.clone(),
+            ) {
+                (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                    context: console_context.clone(),
+                    status: output.status,
+                    node_trace: output.node_trace.clone(),
+                    observability,
+                    stream_observation,
+                    started_at,
+                }),
+                _ => None,
+            };
+            if let Some(observability) = output.observability.as_ref() {
+                emit_v3_observability_console_lines(
+                    &console_context,
+                    output.status,
+                    &output.node_trace,
+                    observability,
+                    started_at,
+                    output.stream_observation.is_none(),
+                );
+            }
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_openai_chat_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
+            let response = openai_chat_relay_output_response(
+                output,
+                stream_console_finalizer,
+                Duration::from_millis(state.server.http_sse_keepalive_ms),
+                requested_stream,
+            );
+            return match client_response_capture {
+                Some(capture) => capture.defer_into(response),
+                None => response,
+            };
+        }
+        if entry_protocol == "anthropic" && execution_mode == V3EntryProtocolExecutionMode::Relay {
+            let client_headers = match collect_anthropic_relay_client_headers(request_headers) {
+                Ok(headers) => headers,
+                Err(message) => {
+                    return error_output_response_for_server_with_project_path(
+                        &state.server,
+                        &path,
+                        &request_id,
+                        project_http_input_error(V3HttpBoundaryErrorKind::MalformedJson, message),
+                        request_console_project_path,
+                    );
+                }
+            };
+            let output = match execute_v3_anthropic_relay_runtime_with_default_transport_client_headers_provider_health(
+                &state.manifest,
+                V3AnthropicRelayRuntimeInput {
+                    server_id: state.server.id.clone(),
+                    failure_session_scope: provider_failure_session_scope.clone(),
+                    request_id: request_id.clone(),
+                    toolreason_observation_session_id: Some(
+                        toolreason_observation_session_id.clone(),
+                    ),
+                    payload: payload.clone(),
+                },
+                client_headers,
+                state.provider_health.runtime_health(),
+            )
+            .await
+            {
+                Ok(output) => output,
+                Err(error) => project_v3_anthropic_relay_runtime_failure(error),
+            };
+            persist_v3_anthropic_relay_failure_evidence(state, &path, &request_id, &output);
+            if let Some(disposition) = output.terminal_disposition.clone() {
+                return provider_terminal_response(
+                    state,
+                    front_connection_identity,
+                    disposition,
+                    requested_stream,
+                    terminal_evidence,
+                );
+            }
+            if let Some(response) = emit_relay_error_chain_if_any(
+                state,
+                trace_scope,
+                entry_protocol,
+                &path,
+                &request_id,
+                snapshot_session_id,
+                output.status,
+                output.error_chain.as_deref(),
+                Some(&output.client_response),
+                request_console_project_path,
+            ) {
+                return response;
+            }
+            let mut output = output;
+            if let Some(response) = capture_v3_relay_provider_snapshots(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output.provider_snapshots,
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_anthropic_relay_response(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output,
+            ) {
+                return response;
+            }
+            let console_payload = payload.clone();
+            let console_context = build_v3_console_emission_context(
+                state,
+                entry_protocol,
+                &path,
+                request_identity,
+                request_headers,
+                &console_payload,
+            );
+            if let Some(observability) = output.observability.as_mut() {
+                if let Err(error) = merge_v3_runtime_stream_observation(
+                    observability,
+                    output.stream_observation.as_ref(),
+                ) {
+                    emit_v3_runtime_observability_contract_failure(
+                        &console_context,
+                        observability,
+                        error,
+                    );
+                }
+            }
+            if let Err(error) = emit_v3_toolreason_console_line(
+                &console_context,
+                output.stream_observation.as_ref(),
+            ) {
+                emit_v3_runtime_observability_contract_failure(
+                    &console_context,
+                    output
+                        .observability
+                        .as_ref()
+                        .unwrap_or(&V3RuntimeObservability::default()),
+                    error,
+                );
+            }
+            if let Some(observability) = output.observability.as_ref() {
+                let mut console_observability = observability.clone();
+                if let Err(error) = merge_v3_runtime_stream_observation(
+                    &mut console_observability,
+                    output.stream_observation.as_ref(),
+                ) {
+                    emit_v3_runtime_observability_contract_failure(
+                        &console_context,
+                        &console_observability,
+                        error,
+                    );
+                } else {
+                    emit_v3_observability_console_lines(
+                        &console_context,
+                        output.status,
+                        &output.node_trace,
+                        &console_observability,
+                        started_at,
+                        true,
+                    );
+                }
+            }
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
+            let response = anthropic_relay_output_response(output, requested_stream);
+            return match client_response_capture {
+                Some(capture) => capture.defer_into(response),
+                None => response,
+            };
+        }
+        if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {
+            let mut output =
+                match execute_v3_gemini_relay_runtime_with_default_transport_provider_health(
+                    &state.manifest,
+                    V3GeminiRelayRuntimeInput {
+                        server_id: state.server.id.clone(),
+                        failure_session_scope: provider_failure_session_scope.clone(),
+                        request_id: request_id.clone(),
+                        endpoint_path: path.clone(),
+                        payload: payload.clone(),
+                    },
+                    state.provider_health.runtime_health(),
+                )
+                .await
+                {
+                    Ok(output) => output,
+                    Err(error) => project_v3_gemini_relay_runtime_failure(error),
+                };
+            persist_v3_gemini_relay_failure_evidence(state, &path, &request_id, &output);
+            if let Some(disposition) = output.terminal_disposition.clone() {
+                return provider_terminal_response(
+                    state,
+                    front_connection_identity,
+                    disposition,
+                    requested_stream,
+                    terminal_evidence,
+                );
+            }
+            if let Some(response) = emit_relay_error_chain_if_any(
+                state,
+                trace_scope,
+                entry_protocol,
+                &path,
+                &request_id,
+                snapshot_session_id,
+                output.status,
+                output.error_chain.as_deref(),
+                gemini_error_body_for_console(&output.client_body),
+                request_console_project_path,
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_relay_provider_snapshots(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output.provider_snapshots,
+            ) {
+                return response;
+            }
+            if let Some(response) = capture_v3_gemini_relay_response(
+                state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &mut output,
+            ) {
+                return response;
+            }
+            let console_payload = payload.clone();
+            let console_context = build_v3_console_emission_context(
+                state,
+                entry_protocol,
+                &path,
+                request_identity,
+                request_headers,
+                &console_payload,
+            );
+            let stream_console_finalizer = match (
+                output.stream_observation.clone(),
+                output.observability.clone(),
+            ) {
+                (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {
+                    context: console_context.clone(),
+                    status: output.status,
+                    node_trace: output.node_trace.clone(),
+                    observability,
+                    stream_observation,
+                    started_at,
+                }),
+                _ => None,
+            };
+            if let Some(observability) = output.observability.as_ref() {
+                emit_v3_observability_console_lines(
+                    &console_context,
+                    output.status,
+                    &output.node_trace,
+                    observability,
+                    started_at,
+                    output.stream_observation.is_none(),
+                );
+            }
+            let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_gemini_relay(
+                &state,
+                entry_protocol,
+                &path,
+                &request_id,
+                &output,
+            );
+            let response = gemini_relay_output_response(
+                output,
+                stream_console_finalizer,
+                Duration::from_millis(state.server.http_sse_keepalive_ms),
+                requested_stream,
+            );
+            return match client_response_capture {
+                Some(capture) => capture.defer_into(response),
+                None => response,
+            };
+        }
+        unreachable!("non-Responses branch requires a supported protocol and execution mode")
+    })
 }
 
-pub(crate) fn merge_v3_protocol_plan_trace(
-    mut plan_trace: Vec<&'static str>,
-    runtime_trace: Vec<&'static str>,
-) -> Vec<&'static str> {
-    plan_trace.extend(runtime_trace);
-    plan_trace
-}
-
-pub(crate) fn prepend_v3_protocol_plan_trace_to_foundation_output(
-    output: &mut V3FoundationRuntimeOutput,
-    plan_trace: &[&'static str],
-) {
-    let merged = merge_v3_protocol_plan_trace(plan_trace.to_vec(), output.node_trace.clone());
-    output.node_trace = merged.clone();
-    if let Some(dry_run) = output
-        .body
-        .get_mut("dry_run")
-        .and_then(Value::as_object_mut)
-    {
-        dry_run.insert("node_ids".to_string(), json!(merged));
-    }
-}
-
-pub(crate) fn prepend_v3_protocol_plan_trace_to_responses_relay_output(
-    output: &mut V3ResponsesRelayRuntimeOutput,
-    plan_trace: &[&'static str],
-) {
-    output.node_trace =
-        merge_v3_protocol_plan_trace(plan_trace.to_vec(), output.node_trace.clone());
-}
-
-pub(crate) fn prepend_v3_relay_handoff_trace_to_direct_frame(
-    frame: &mut V3Server16HttpFrame,
-    relay_trace: &[&'static str],
-) {
-    frame.node_trace = merge_v3_protocol_plan_trace(relay_trace.to_vec(), frame.node_trace.clone());
-}
-
-pub(crate) fn merge_v3_direct_handoff_provider_failure_events(
-    output: &mut V3ResponsesRelayRuntimeOutput,
-    direct_events: Vec<V3RuntimeProviderFailureObservation>,
-) {
-    if direct_events.is_empty() {
-        return;
-    }
-    let observability = output.observability.get_or_insert_with(Default::default);
-    let mut merged = direct_events;
-    merged.append(&mut observability.provider_failure_events);
-    observability.provider_failure_events = merged;
-}
-
-pub(crate) fn merge_v3_relay_handoff_provider_failure_events_into_direct_frame(
-    frame: &mut V3Server16HttpFrame,
-    relay_events: Vec<V3RuntimeProviderFailureObservation>,
-) {
-    if relay_events.is_empty() {
-        return;
-    }
-    let observability = frame.observability.get_or_insert_with(Default::default);
-    let mut merged = relay_events;
-    merged.append(&mut observability.provider_failure_events);
-    observability.provider_failure_events = merged;
-}
+#[path = "endpoint_trace.rs"]
+mod endpoint_trace;
+use endpoint_trace::resolve_v3_dry_run_target_label;
+pub(crate) use endpoint_trace::{
+    is_provider_request_dry_run, merge_v3_direct_handoff_provider_failure_events,
+    merge_v3_protocol_plan_trace, merge_v3_relay_handoff_provider_failure_events_into_direct_frame,
+    prepend_v3_protocol_plan_trace_to_foundation_output,
+    prepend_v3_protocol_plan_trace_to_responses_relay_output,
+    prepend_v3_relay_handoff_trace_to_direct_frame,
+};
 
 #[path = "request_identity.rs"]
 mod request_identity;

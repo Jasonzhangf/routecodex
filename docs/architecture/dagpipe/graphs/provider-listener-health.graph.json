@@ -1,0 +1,11 @@
+{
+  "id":"v3.provider_listener_health.construction","version":"1",
+  "inputs":[{"id":"listener-manifest","schema":"Any","schema_ref":"v3.provider_listener_health.arc.listener_manifest"}],
+  "nodes":[
+    {"id":"construct_listener_health","operator":"routecodex.v3.runtime.construct_listener_health","operator_version":"1","inputs":["listener-manifest"],"output":{"id":"listener-health","schema":"Any","schema_ref":"v3.provider_listener_health.arc.health_handle"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":[],"writes":["v3.provider.health_state","v3.provider.global_cooldown_persistence"]}},
+    {"id":"bind_listener_and_recovery_owner","operator":"routecodex.v3.server.bind_listener_and_recovery_owner","operator_version":"1","inputs":["listener-health"],"output":{"id":"listener-custody","schema":"Any","schema_ref":"v3.provider_listener_health.arc.listener_custody"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.health_state"],"writes":[]}},
+    {"id":"publish_aggregate_custody","operator":"routecodex.v3.server.publish_aggregate_custody","operator_version":"1","inputs":["listener-custody"],"output":{"id":"aggregate-custody","schema":"Any","schema_ref":"v3.provider_listener_health.arc.aggregate_custody"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.health_state","v3.provider.global_cooldown_persistence"],"writes":[]}}
+  ],
+  "edges":[{"from":"construct_listener_health","to":"bind_listener_and_recovery_owner","arc_id":"listener-health"},{"from":"bind_listener_and_recovery_owner","to":"publish_aggregate_custody","arc_id":"listener-custody"}],
+  "outputs":["aggregate-custody"]
+}

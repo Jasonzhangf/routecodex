@@ -7,7 +7,7 @@ use crate::{
     compile_v3_config_05_manifest, provider_directory::V3Config02AuthoringResolved,
     store::build_v3_config_loaded_snapshot, store::source_closure_sha256, validation,
     V3Config02AuthoringParsed, V3Config05ManifestPublished, V3ConfigError, V3ConfigLoadedSnapshot,
-    V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind, V3SelectionPolicy, V3SelectionStrategy,
+    V3RoutePoolTargetAuthoringConfig, V3RouteTargetKind, V3SelectionPolicy,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,6 +38,11 @@ pub struct V3UserConfig02RoutingSelectionParsed {
     pub version: u16,
     #[serde(default)]
     pub servers: BTreeMap<String, V3UserServerAuthoringConfig>,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::V3RuntimeAuthoringConfig::is_default"
+    )]
+    pub runtime: crate::V3RuntimeAuthoringConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -77,7 +82,18 @@ fn default_all_entry_protocols() -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3UserRoutePool {
+    #[serde(default, skip_serializing_if = "V3SelectionPolicy::is_default")]
+    pub selection: V3SelectionPolicy,
     pub tiers: Vec<Vec<V3UserRouteMember>>,
+}
+
+impl Default for V3UserRoutePool {
+    fn default() -> Self {
+        Self {
+            selection: V3SelectionPolicy::default(),
+            tiers: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -187,6 +203,15 @@ impl V3UserConfigStore {
                 authoring.debug.log_file = Some(config_dir.join(log_file).display().to_string());
             }
         }
+        // 独立的 stage-3 投影丢弃日志：显式配置时按 config 目录解析相对路径；
+        // 未配置时默认落在已解析 debug log 同目录的 projection-drops.jsonl，
+        // 没有 debug log 时落在 config 目录，保证丢弃证据始终有独立持久落点且
+        // 不混入 debug 日志。
+        authoring.debug.projection_drop_log_file = resolve_v3_projection_drop_log_file(
+            authoring.debug.projection_drop_log_file.as_deref(),
+            authoring.debug.log_file.as_deref(),
+            config_dir,
+        );
         authoring.providers = providers;
         Ok(V3Config02AuthoringResolved {
             authoring,
@@ -286,6 +311,7 @@ pub fn project_v3_user_config_03_authoring(
     provider_catalogue: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<V3Config02AuthoringParsed, V3ConfigError> {
     let user = validate_v3_user_config_02_routing(user)?;
+    internal.runtime = user.runtime;
     let template = internal
         .route_groups
         .get("routecodex_v3_4444")
@@ -332,16 +358,20 @@ pub fn project_v3_user_config_03_authoring(
         )?;
         let mut group = template.clone();
         for (pool_id, pool) in &mut group.pools {
-            pool.selection = V3SelectionPolicy {
-                strategy: V3SelectionStrategy::Priority,
-            };
-            pool.targets = match server.routes.get(pool_id) {
-                Some(user_pool) => compile_pool_targets(
+            let user_pool = server.routes.get(pool_id);
+            pool.selection = user_pool
+                .map(|pool| pool.selection.clone())
+                .unwrap_or_default();
+            pool.targets = if pool_id == "default" {
+                default_targets.clone()
+            } else if let Some(user_pool) = user_pool {
+                compile_pool_targets(
                     user_pool.clone(),
                     provider_catalogue,
                     &server.provider_priority_schedule,
-                )?,
-                None => default_targets.clone(),
+                )?
+            } else {
+                Vec::new()
             };
         }
         internal.route_groups.insert(server_id.clone(), group);
@@ -359,14 +389,6 @@ pub fn project_v3_user_config_03_authoring(
                 provider_priority_schedule: server.provider_priority_schedule,
             },
         );
-    }
-
-    for group in internal.route_groups.values_mut() {
-        for pool in group.pools.values_mut() {
-            if pool.targets.is_empty() {
-                return Err(validation("user config route pool compiled empty"));
-            }
-        }
     }
 
     internal.servers = combined_servers;
@@ -422,6 +444,7 @@ fn compile_pool_targets(
                 provider: Some(member.provider),
                 model: Some(member.model),
                 key: None,
+                interface: None,
                 priority: Some(priority),
                 weight: member.weight.or(equal_weight.then_some(1)),
             });
@@ -459,7 +482,7 @@ fn validate_pool(
             "user config server {server_id:?} contains an empty pool id"
         )));
     }
-    if pool.tiers.is_empty() {
+    if pool.tiers.is_empty() && pool_id == "default" {
         return Err(validation(format!(
             "user config pool {server_id}.{pool_id} must contain at least one tier"
         )));
@@ -518,4 +541,75 @@ fn parse_provider_model_ref(value: &str) -> Result<(&str, &str), &'static str> {
         return Err("provider id and model id must both be non-empty");
     }
     Ok((provider, model))
+}
+
+/// 解析 stage-3 投影丢弃日志路径：显式配置的相对路径相对 config 目录；未配置时
+/// 默认落在已解析 debug log 同目录，没有 debug log 时落在 config 目录。
+fn resolve_v3_projection_drop_log_file(
+    configured: Option<&str>,
+    resolved_log_file: Option<&str>,
+    config_dir: &Path,
+) -> Option<String> {
+    if let Some(configured) = configured {
+        let path = Path::new(configured);
+        return Some(if path.is_relative() {
+            config_dir.join(path).display().to_string()
+        } else {
+            configured.to_string()
+        });
+    }
+    let parent = resolved_log_file
+        .and_then(|log_file| Path::new(log_file).parent())
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(config_dir);
+    Some(parent.join("projection-drops.jsonl").display().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_v3_projection_drop_log_file;
+    use std::path::Path;
+
+    #[test]
+    fn projection_drop_log_defaults_beside_resolved_debug_log() {
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(
+                None,
+                Some("/var/log/rcc/debug.log"),
+                Path::new("/etc/rcc"),
+            )
+            .as_deref(),
+            Some("/var/log/rcc/projection-drops.jsonl")
+        );
+    }
+
+    #[test]
+    fn projection_drop_log_defaults_to_config_dir_without_debug_log() {
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(None, None, Path::new("/etc/rcc")).as_deref(),
+            Some("/etc/rcc/projection-drops.jsonl")
+        );
+    }
+
+    #[test]
+    fn projection_drop_log_resolves_relative_config_and_keeps_absolute() {
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(
+                Some("drops/projection.jsonl"),
+                None,
+                Path::new("/etc/rcc"),
+            )
+            .as_deref(),
+            Some("/etc/rcc/drops/projection.jsonl")
+        );
+        assert_eq!(
+            resolve_v3_projection_drop_log_file(
+                Some("/var/log/rcc/drops.jsonl"),
+                None,
+                Path::new("/etc/rcc"),
+            )
+            .as_deref(),
+            Some("/var/log/rcc/drops.jsonl")
+        );
+    }
 }

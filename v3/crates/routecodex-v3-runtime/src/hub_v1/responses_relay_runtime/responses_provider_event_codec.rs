@@ -174,30 +174,6 @@ fn apply_v3_typed_responses_event(
             format!("V3 Responses Relay response event type {event_type} is unsupported"),
         ));
     }
-    if event.get("type").and_then(Value::as_str) == Some("response.incomplete") {
-        let reason = event
-            .pointer("/response/incomplete_details/reason")
-            .or_else(|| event.pointer("/incomplete_details/reason"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if !matches!(reason, Some("max_output_tokens" | "content_filter")) {
-            return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-                "Responses SSE response.incomplete requires supported incomplete_details.reason"
-                    .to_owned(),
-            ));
-        }
-        let failure =
-            classify_v3_provider_terminal_admission(V3HubProviderWireProtocol::Responses, event)
-                .expect("response.incomplete was validated before terminal admission");
-        return Err(
-            V3ResponsesRelayRuntimeError::ProviderResponseSemanticFailure {
-                status: 200,
-                code: failure.code,
-                message: failure.message,
-            },
-        );
-    }
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
     })?;
@@ -322,6 +298,12 @@ fn build_typed_responses_terminal_response(
         } else {
             output.push(item);
         }
+    }
+    // A provider may send text deltas without output_item events, then close
+    // with an empty output array. Retain that accumulated business text in the
+    // canonical output consumed by response projection.
+    if output.is_empty() && !reducer.output_text.is_empty() {
+        output.push(json!({"type":"output_text", "text":reducer.output_text}));
     }
     object.insert("output".to_owned(), Value::Array(output));
     let usage = object
@@ -651,9 +633,9 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
-    fn response_incomplete_is_provider_error_not_terminal_response() {
+    fn response_incomplete_at_the_relay_codec_boundary_is_terminal_incomplete() {
         let mut reducer = V3ResponsesSseReducerState::default();
-        let error = apply_v3_typed_responses_event(
+        let terminal = apply_v3_typed_responses_event(
             &json!({
                 "type": "response.incomplete",
                 "response": {
@@ -665,13 +647,9 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
             }),
             &mut reducer,
         )
-        .expect_err("response.incomplete must enter the provider error chain");
-        assert!(
-            error
-                .to_string()
-                .contains("provider response ended before completion"),
-            "unexpected error: {error}"
-        );
+        .expect("an output-cap response.incomplete is valid partial output")
+        .expect("response.incomplete must project a terminal response");
+        assert_eq!(terminal["status"], "incomplete", "{terminal}");
     }
 
     #[test]
@@ -693,22 +671,76 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
-    fn response_incomplete_without_or_unknown_reason_fails_fast() {
+    fn response_incomplete_output_cap_is_terminal_incomplete_not_provider_error() {
+        // `max_output_tokens` is the output-cap terminal: valid partial output,
+        // admitted so the reducer materializes `status: incomplete` instead of
+        // sending the attempt into the provider failure/cooldown path.
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let terminal = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete_cap",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "max_output_tokens"},
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                }
+            }),
+            &mut reducer,
+        )
+        .expect("output-cap incomplete terminal must be admitted")
+        .expect("response.incomplete must be terminal");
+        assert_eq!(terminal["status"], "incomplete", "{terminal}");
+        assert_eq!(
+            terminal["incomplete_details"]["reason"], "max_output_tokens",
+            "{terminal}"
+        );
+        assert_eq!(terminal["usage"]["output_tokens"], json!(5), "{terminal}");
+    }
+
+    #[test]
+    fn response_incomplete_content_filter_preserves_terminal() {
+        let mut reducer = V3ResponsesSseReducerState::default();
+        let response = apply_v3_typed_responses_event(
+            &json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_incomplete_filtered",
+                    "status": "incomplete",
+                    "incomplete_details": {"reason": "content_filter"},
+                    "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+                }
+            }),
+            &mut reducer,
+        )
+        .expect("content_filter is representable")
+        .expect("incomplete is terminal");
+        assert_eq!(response["status"], "incomplete");
+        assert_eq!(response["incomplete_details"]["reason"], "content_filter");
+        assert_eq!(response["usage"]["output_tokens"], json!(5));
+    }
+
+    #[test]
+    fn response_incomplete_preserves_unknown_reason() {
         for payload in [
             json!({
                 "type": "response.incomplete",
-                "response": {"id": "resp_bad_1", "status": "incomplete"}
+                "response": {"id": "resp_unknown_1", "status": "incomplete", "incomplete_details":{"reason":"provider_specific_reason"}}
             }),
             json!({
                 "type": "response.incomplete",
-                "incomplete_details": {"reason": "internal_error"},
-                "response": {"id": "resp_bad_2", "status": "incomplete"}
+                "response": {"id": "resp_unknown_2", "status": "incomplete", "incomplete_details":{"reason":"internal_error"}}
             }),
         ] {
             let mut reducer = V3ResponsesSseReducerState::default();
-            let error = apply_v3_typed_responses_event(&payload, &mut reducer)
-                .expect_err("malformed/unknown incomplete terminal must fail fast");
-            assert!(error.to_string().contains("response.incomplete"));
+            let response = apply_v3_typed_responses_event(&payload, &mut reducer)
+                .expect("reason is opaque business data")
+                .expect("incomplete is terminal");
+            assert_eq!(response["status"], "incomplete");
+            assert_eq!(
+                response["incomplete_details"],
+                payload["response"]["incomplete_details"]
+            );
         }
     }
 

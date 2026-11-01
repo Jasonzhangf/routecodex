@@ -1,12 +1,25 @@
+pub(crate) use super::common::V3ChatProcessRefillDisposition;
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
+use crate::operation_runner::{
+    run_v3_single_node_operator, OperationRunnerError, V3OperationGraph,
+};
+use crate::tool_markup_parser::{
+    scan_tool_markup, ParsedToolCall, ToolMarkupDeclarations, ToolMarkupIdentity, ToolMarkupKind,
+    ToolMarkupParamKind, ToolMarkupSegment,
+};
+use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde::Deserializer;
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, OnceLock};
+
+#[path = "resp_chat_process_tool_markup.rs"]
+mod tool_markup;
+pub(crate) use tool_markup::harvest_chat_text;
 
 include!("resp_chat_process_03_governed_provider_identity.rs");
 
@@ -228,7 +241,7 @@ fn parse_v3_toolreason_fields_at_resp03(reason: &str) -> Option<V3ToolreasonFiel
     parse_v3_tool_thinking_fields_from_object_at_resp03(object).ok()
 }
 
-fn json_object_has_duplicate_keys_at_resp03(raw: &str) -> bool {
+pub(crate) fn json_object_has_duplicate_keys_at_resp03(raw: &str) -> bool {
     struct DuplicateKeyVisitor<'a> {
         duplicate: &'a mut bool,
     }
@@ -386,8 +399,25 @@ fn v3_custom_tool_thinking_wrapper_at_resp03(
     };
     let wrapper = wrapper.as_object()?;
     let fields = parse_v3_tool_thinking_fields_from_object_at_resp03(wrapper).ok()?;
-    let native_input = wrapper.get("input")?.as_str()?.to_string();
+    let native_input = recognized_v3_custom_tool_wrapper_input_at_resp03(wrapper)?.to_string();
     Some((fields, native_input))
+}
+
+/// The complete registered custom wrapper boundary. Unknown business fields
+/// make the whole value opaque; they never authorize an inner-input inverse.
+/// Auxiliary-field semantics remain owned by the Tool-Thinking parser.
+pub(super) fn recognized_v3_custom_tool_wrapper_input_at_resp03(
+    wrapper: &Map<String, Value>,
+) -> Option<&str> {
+    if wrapper.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "input" | "reason" | "goal_alignment_confidence" | "model_id"
+        )
+    }) {
+        return None;
+    }
+    wrapper.get("input")?.as_str()
 }
 
 fn v3_tool_thinking_raw_parameter_from_tool_call_at_resp03(
@@ -693,7 +723,6 @@ pub struct V3HubRespChatProcess03Governed {
     pub(crate) previous: V3HubRespInbound02Normalized,
     pub(crate) terminality: V3HubResponseTerminality,
     pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
-    pub(crate) servertool_action: V3HubServertoolResponseAction,
 }
 
 pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
@@ -703,7 +732,6 @@ pub fn build_v3_hub_resp_chat_process_03_from_v3_hub_resp_inbound_02(
         previous: input,
         terminality: V3HubResponseTerminality::Terminal,
         tool_calls: Vec::new(),
-        servertool_action: V3HubServertoolResponseAction::None,
     }
 }
 
@@ -718,15 +746,32 @@ fn strip_v3_resp03_encrypted_reasoning_content(
     retain_response_cipher: bool,
 ) -> V3HubRespInbound02Normalized {
     if !retain_response_cipher {
-        // 非单一 gpt provider（retain=false）时，响应里出现的 Codex 密文
-        // （encrypted_content 以 `rsn_` / `gAAAA` 开头）一律丢弃，客户端透明无感知
-        // （响应只携带明文 summary/content）。anthropic 链的 thinking signature 载体
-        // （redacted_thinking.data / thinking.signature，值不是 rsn_/gAAAA 前缀）不是
-        // Codex 密文，必须保留给客户端做签名校验。
+        // Anthropic signature 是否保留只由 raw provider source witness 决定；
+        // 不根据密文文本形状猜测协议来源。
         // 唯一密文剥离 hook（provider-responses）：direct 与 relay 响应侧共用，
         // 保证"只有单 gpt provider 才进客户端"的密文策略单一实现。
+        let source_provider_protocol = input.provider_raw().source_provider_protocol;
         let payload = std::sync::Arc::make_mut(&mut input.previous.previous.payload.0);
-        routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false);
+        match source_provider_protocol {
+            // Anthropic signature 由 typed raw source witness 保留。
+            V3HubProviderWireProtocol::Anthropic => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, true,
+                );
+            }
+            // Responses wire 全剥非工具密文（fe1ec4b 契约），function_call_output 保留。
+            V3HubProviderWireProtocol::Responses => {
+                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
+                    payload, false, false,
+                );
+            }
+            // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）。
+            V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+                routecodex_v3_provider_responses::apply_v3_chat_reasoning_cipher_policy(
+                    payload, false,
+                );
+            }
+        }
     }
     input
 }
@@ -752,10 +797,6 @@ impl V3HubRespChatProcess03Governed {
         self.tool_calls.len()
     }
 
-    pub fn servertool_action(&self) -> V3HubServertoolResponseAction {
-        self.servertool_action
-    }
-
     pub fn tool_call_kinds(&self) -> Vec<V3HubRelayToolKind> {
         self.tool_calls
             .iter()
@@ -767,31 +808,11 @@ impl V3HubRespChatProcess03Governed {
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRespChatProcess03Outcome {
     data: V3HubRespChatProcess03Governed,
-    web_search_transition: Option<V3WebSearchCenterState>,
-    web_search_hook_outcome: V3WebSearchHookOutcome,
 }
 
 impl V3HubRespChatProcess03Outcome {
-    pub fn into_parts(
-        self,
-    ) -> (
-        V3HubRespChatProcess03Governed,
-        Option<V3WebSearchCenterState>,
-        V3WebSearchHookOutcome,
-    ) {
-        (
-            self.data,
-            self.web_search_transition,
-            self.web_search_hook_outcome,
-        )
-    }
-
-    pub fn web_search_transition(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_transition.as_ref()
-    }
-
-    pub fn web_search_hook_outcome(&self) -> &V3WebSearchHookOutcome {
-        &self.web_search_hook_outcome
+    pub fn into_governed(self) -> V3HubRespChatProcess03Governed {
+        self.data
     }
 }
 
@@ -803,11 +824,815 @@ impl Deref for V3HubRespChatProcess03Outcome {
     }
 }
 
+/// Source-explicit non-empty summary fact for refill gating.
+///
+/// Provenance contract: only a provider-mapped explicit summary field counts.
+/// The fact is recognized in the two provider-native shapes that the runtime
+/// reads before governance:
+/// - Responses canonical: `output[]` items of type `reasoning` whose `summary[]`
+///   entries carry a non-empty `text`.
+/// - OpenAI Chat native: `choices[].message.reasoning.summary[]` entries with a
+///   non-empty `text`.
+/// RCC-synthesized reasoning/toolreason content, ordinary assistant body text
+/// (`output_text`, `content[].text`, `reasoning_content`, provider `thinking`),
+/// native full-reasoning `reasoning.content`, and request-side summary policy
+/// never count.
+pub(crate) fn has_v3_source_explicit_nonempty_summary(payload: &Value) -> bool {
+    has_responses_source_explicit_summary(payload)
+        || has_openai_chat_source_explicit_summary(payload)
+}
+
+fn has_nonempty_summary_text(summaries: Option<&Value>) -> bool {
+    summaries
+        .and_then(Value::as_array)
+        .map(|summaries| {
+            summaries.iter().any(|summary| {
+                summary
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(|text| !text.trim().is_empty())
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_responses_source_explicit_summary(payload: &Value) -> bool {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("reasoning")
+                    && has_nonempty_summary_text(item.get("summary"))
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn has_openai_chat_source_explicit_summary(payload: &Value) -> bool {
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .map(|choices| {
+            choices.iter().any(|choice| {
+                let reasoning = choice
+                    .get("message")
+                    .and_then(|message| message.get("reasoning"));
+                // Only the explicit `summary` field counts. Native full
+                // reasoning (`reasoning.content`), `reasoning_content` and
+                // `reasoning_text` are not summaries.
+                has_nonempty_summary_text(reasoning.and_then(|reasoning| reasoning.get("summary")))
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// The single shared refill policy for Direct-registered hooks and Relay.
+/// Contract: no governed tool call AND no source-explicit non-empty summary AND
+/// a remaining consecutive-refill budget ask for one more execution. A real
+/// error never reaches this decision (it is handled by the Error chain first).
+/// 0 disables refill; N allows at most N new executions beyond the original.
+pub(crate) fn decide_v3_chat_process_refill(
+    tool_calls: &[V3HubResponseToolCall],
+    has_source_summary: bool,
+    response_completed: bool,
+    refill_used: u32,
+    max_consecutive_refills: u32,
+) -> V3ChatProcessRefillDisposition {
+    if !response_completed
+        || !tool_calls.is_empty()
+        || has_source_summary
+        || refill_used >= max_consecutive_refills
+    {
+        V3ChatProcessRefillDisposition::Deliver
+    } else {
+        V3ChatProcessRefillDisposition::RequestRefill
+    }
+}
+
+/// Map a Responses canonical output item type to its governed tool-call kind.
+///
+/// This is the single structural classifier used by the Direct refill fact
+/// extractor. It accepts the complete call item types produced by the
+/// Responses wire contract and the `*_call` suffix for opaque hosted call
+/// shapes. Output items (`*_output`) are explicitly rejected even when they
+/// carry a `call_id`, because an output is not a new tool call.
+fn v3_governed_tool_call_kind(item_type: &str) -> Option<V3HubRelayToolKind> {
+    match item_type {
+        "function_call" | "function" => Some(V3HubRelayToolKind::Function),
+        "custom_tool_call" | "custom" => Some(V3HubRelayToolKind::Custom),
+        "tool_search_call" | "tool_search" | "web_search_call" | "web_search" => {
+            Some(V3HubRelayToolKind::Native)
+        }
+        "mcp_call" | "mcp" => Some(V3HubRelayToolKind::Mcp),
+        "computer_call"
+        | "computer"
+        | "code_interpreter_call"
+        | "code_interpreter"
+        | "local_shell_call"
+        | "local_shell"
+        | "image_generation_call"
+        | "image_generation" => Some(V3HubRelayToolKind::Native),
+        other if other.ends_with("_call") => Some(V3HubRelayToolKind::Native),
+        _ => None,
+    }
+}
+
+/// Structural tool-call facts for Direct response payloads.
+///
+/// Direct does not run the Relay `Resp03` governance stage, so the refill
+/// decision still needs one source for "has a real tool call". Only emptiness
+/// is consumed by the policy; call identity fields are populated for the
+/// shared `V3HubResponseToolCall` shape and must not be projected into any
+/// business payload.
+pub(crate) fn collect_v3_governed_response_tool_calls(
+    payload: &Value,
+) -> Vec<V3HubResponseToolCall> {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let item_type = item.get("type").and_then(Value::as_str)?;
+                    if item_type.ends_with("_output") {
+                        return None;
+                    }
+                    let kind = v3_governed_tool_call_kind(item_type)?;
+                    let call_id = item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_default()
+                        .to_string();
+                    let name = item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or(item_type)
+                        .to_string();
+                    Some(V3HubResponseToolCall {
+                        call_id,
+                        name,
+                        kind,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The explicit continuation instruction appended as the last user turn of a
+/// bounded refill request. It asks the model to keep going and to call a tool
+/// when the task still needs one, so a silent stop can recover without the
+/// proxy inventing any business content.
+pub(crate) const V3_CHAT_PROCESS_REFILL_INSTRUCTION: &str =
+    "继续执行尚未完成的任务；需要工具时直接调用工具；如果任务已完成，请给出完成总结。";
+
+/// Compiled request-local refill budget. This is the single runtime accessor so
+/// the selection decision and the launch decision cannot drift. The compiled
+/// `internal.toml` value is the only production source; the config crate's
+/// effective accessor exists so public-entry tests can inject the same typed
+/// policy input.
+pub(crate) fn v3_chat_process_refill_max_consecutive() -> u32 {
+    routecodex_v3_config::internal::v3_effective_chat_process_refill_max()
+}
+
+/// Facts the Chat Process owner hands back to the Relay response-hook caller so
+/// Runtime can apply the shared refill policy without re-reading the governed
+/// payload or duplicating a decision.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct V3ChatProcessGovernedFacts {
+    pub(crate) tool_calls: Vec<V3HubResponseToolCall>,
+    /// Source-explicit non-empty summary captured BEFORE governance could
+    /// synthesize RCC reasoning/toolreason summary content.
+    pub(crate) has_source_summary: bool,
+}
+
+/// Build the standard continuation request for one refill execution.
+///
+/// The original payload is cloned and every unrelated field is kept verbatim
+/// (model, instructions, tools, tool_choice, reasoning, parallel tool calls and
+/// unknown business extensions). The entry protocol decides which field carries
+/// the conversation history: `messages` for Chat and Anthropic, `input` for
+/// Responses, `contents` for Gemini. That is the same field the next execution's
+/// inbound canonicalization reads, so the appended history actually becomes the
+/// next provider request. Each collected business item of the just-finished
+/// execution is appended as an assistant turn; a provider-origin reasoning item
+/// with real identity and opaque continuation material is appended verbatim
+/// because the target protocol can express it, while RCC-synthesized reasoning
+/// is not replayable source material and is omitted. The refill instruction is
+/// appended as a new user turn. No counter, state or control field ever enters
+/// the payload.
+pub(crate) fn build_v3_chat_process_refill_continuation_request(
+    entry_protocol: V3HubEntryProtocol,
+    original_request_payload: &Value,
+    current_execution_finalized_response: &Value,
+) -> Result<Value, String> {
+    let mut payload = original_request_payload.clone();
+    let Some(payload_object) = payload.as_object_mut() else {
+        return Err("refill continuation requires an object request payload".to_string());
+    };
+    // Inbound canonicalization owns the representation decision, including the
+    // Responses entry that carries the Chat shape. Ask it instead of sniffing
+    // field names: extending a field the next execution will not read leaves
+    // the provider request unchanged, and writing a second history form makes
+    // canonicalization fail on conflicting histories.
+    let history_field = super::req_inbound_02_normalized::v3_hub_inbound_history_field(
+        entry_protocol,
+        original_request_payload,
+    );
+    // `ResponsesDual` means the request carried both `input` and a `messages`
+    // twin. Which side owns the history is not decidable from field presence:
+    // inbound merges the decoded `input` with the twin, and the merge is a
+    // single complete history that carries business extensions contributed by
+    // either side (for example a provider-origin reasoning id and encrypted
+    // content on the input side, or a `routecodex_chat_extension` carried only
+    // by the messages twin). Use that accepted merged history when inbound
+    // accepts it. When the twins are not equivalent (the Responses Direct
+    // entry decodes `input` only and never merges), keep `input` as the single
+    // owner and drop the derived twin; extending one raw field while the
+    // other still exists would make the next inbound reject the request.
+    let mut use_messages_history =
+        history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Messages;
+    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::ResponsesDual {
+        match super::req_inbound_02_normalized::v3_hub_responses_accepted_chat_contribution(
+            original_request_payload,
+        ) {
+            Ok(contribution) => {
+                payload_object.remove("input");
+                payload_object.insert("messages".to_string(), Value::Array(contribution.messages));
+                // The decoded `input` can lift tool declarations that only its
+                // items carry (for example `additional_tools`) into the
+                // canonical tool set, with the same refresh priority a root
+                // declaration has for the next execution. Dropping `input`
+                // must not drop that contribution.
+                if let Some(tools) = contribution.tools {
+                    payload_object.insert("tools".to_string(), tools);
+                }
+                use_messages_history = true;
+            }
+            Err(_) => {
+                payload_object.remove("messages");
+            }
+        }
+    }
+    if use_messages_history {
+        let messages = payload_object
+            .get_mut("messages")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| "refill continuation messages must be an array".to_string())?;
+        // Fold same-turn provider reasoning and assistant content exactly like
+        // the inbound Responses->Chat canonicalizer. A standalone reasoning
+        // carrier row would otherwise project an extra empty assistant message
+        // and split one assistant turn into several messages.
+        let mut pending_tool_message_index: Option<usize> = None;
+        let mut pending_tool_adjacent_deferred_messages: Vec<Value> = Vec::new();
+        let mut turn_assistant_tail_index: Option<usize> = None;
+        for item in
+            collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+                .into_iter()
+                .map(v3_chat_process_refill_history_item)
+        {
+            match item.get("type").and_then(Value::as_str) {
+                Some("message") => {
+                    let message = crate::hub_v1::
+                        build_v3_chat_assistant_message_from_responses_output_item(&item)
+                        .map_err(|error| {
+                            format!(
+                                "refill continuation cannot convert a business Responses message to a Chat assistant message: {error}"
+                            )
+                        })?;
+                    crate::hub_v1::responses_openai_codec::
+                        append_v3_openai_chat_message_preserving_tool_adjacency(
+                            messages,
+                            &mut pending_tool_message_index,
+                            &mut pending_tool_adjacent_deferred_messages,
+                            message,
+                            turn_assistant_tail_index,
+                        )?;
+                    turn_assistant_tail_index = Some(messages.len() - 1);
+                }
+                // A provider-origin reasoning item carries the real `id` and
+                // opaque fields such as `encrypted_content`. RCC-synthesized
+                // reasoning (`rcc_reason_*`) has no provider identity and must
+                // not be replayed as if it were source material.
+                Some("reasoning")
+                    if item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| {
+                            !id.trim().is_empty() && !id.starts_with("rcc_reason_")
+                        }) =>
+                {
+                    if let Some(message) = crate::hub_v1::
+                        build_v3_chat_assistant_reasoning_message_from_responses_output_item(
+                            &item,
+                        )
+                    {
+                        crate::hub_v1::responses_openai_codec::
+                            append_v3_openai_chat_message_preserving_tool_adjacency(
+                                messages,
+                                &mut pending_tool_message_index,
+                                &mut pending_tool_adjacent_deferred_messages,
+                                message,
+                                turn_assistant_tail_index,
+                            )?;
+                        turn_assistant_tail_index = Some(messages.len() - 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        messages.extend(std::mem::take(&mut pending_tool_adjacent_deferred_messages));
+        messages.push(json!({
+            "role": "user",
+            "content": V3_CHAT_PROCESS_REFILL_INSTRUCTION,
+        }));
+        return Ok(payload);
+    }
+    // A Gemini client request carries its history under `contents`, and the
+    // Gemini inbound canonicalization rebuilds `messages` from `contents`
+    // only. The continuation must therefore extend that same representation;
+    // writing `input` here would leave the next provider request identical to
+    // the first one, without the answer and without the instruction.
+    if history_field == super::req_inbound_02_normalized::V3HubInboundHistoryField::Contents {
+        let contents = payload_object
+            .get_mut("contents")
+            .and_then(Value::as_array_mut)
+            .ok_or_else(|| "refill continuation contents must be an array".to_string())?;
+        let mut model_parts: Vec<Value> = Vec::new();
+        for item in
+            collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+                .into_iter()
+                .map(v3_chat_process_refill_history_item)
+        {
+            // Refill only runs when the round produced no real tool call, so
+            // the replayable business content is the assistant message parts.
+            if item.get("type").and_then(Value::as_str) != Some("message") {
+                continue;
+            }
+            model_parts.extend(v3_chat_process_refill_gemini_parts(&item));
+        }
+        if !model_parts.is_empty() {
+            contents.push(json!({"role": "model", "parts": model_parts}));
+        }
+        contents.push(json!({
+            "role": "user",
+            "parts": [{"text": V3_CHAT_PROCESS_REFILL_INSTRUCTION}],
+        }));
+        return Ok(payload);
+    }
+    let mut input = match payload_object.get("input") {
+        Some(Value::Array(_)) => payload_object
+            .get("input")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+        Some(Value::String(text)) => json!([{
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": text}],
+        }]),
+        None => Value::Array(Vec::new()),
+        Some(_) => {
+            return Err("refill continuation input must be a string or an input array".to_string())
+        }
+    };
+    let input_array = input
+        .as_array_mut()
+        .ok_or_else(|| "refill continuation input must normalize to an array".to_string())?;
+    for item in collect_v3_chat_process_business_output_items(current_execution_finalized_response)
+        .into_iter()
+        .map(v3_chat_process_refill_history_item)
+    {
+        let Some(item_type) = item.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        if item_type != "message" {
+            // A provider-origin reasoning item carries the real `id` and
+            // opaque fields such as `encrypted_content`, so it is valid
+            // continuation input for the target protocol. RCC-synthesized
+            // reasoning (`rcc_reason_*`) has no provider identity and must not
+            // be replayed as if it were source material. Tool calls stay out:
+            // their result belongs to the client's next turn, not to this
+            // message-only continuation.
+            let provider_origin_id = item
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty() && !id.starts_with("rcc_reason_"));
+            if item_type == "reasoning" && provider_origin_id.is_some() {
+                input_array.push(item.clone());
+            }
+            continue;
+        }
+        let Some(content) = item
+            .get("content")
+            .filter(|value| value.is_array())
+            .cloned()
+        else {
+            continue;
+        };
+        input_array.push(json!({
+            "type": "message",
+            "role": "assistant",
+            "content": content,
+        }));
+    }
+    input_array.push(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": V3_CHAT_PROCESS_REFILL_INSTRUCTION}],
+    }));
+    payload_object.insert("input".to_string(), input);
+    Ok(payload)
+}
+
+/// Native Gemini business parts the governed projection keeps verbatim.
+const V3_GEMINI_NATIVE_PART_KEYS: [&str; 4] = [
+    "inlineData",
+    "fileData",
+    "executableCode",
+    "codeExecutionResult",
+];
+
+/// Project one governed business message into representable Gemini `Parts`.
+///
+/// Governance keeps the provider's parts and only adds canonical framing: a
+/// text part arrives as `output_text` while still carrying its native siblings
+/// (for example `thoughtSignature`), and a native part such as `inlineData`
+/// arrives verbatim. Only the canonical framing field is removed. Dropping the
+/// native parts would silently shrink the continuation history of a round that
+/// delivered multimodal business content, and an empty text part is not a valid
+/// Gemini Part.
+fn v3_chat_process_refill_gemini_parts(business_message: &Value) -> Vec<Value> {
+    let mut parts = Vec::new();
+    for part in business_message
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(row) = part.as_object() else {
+            continue;
+        };
+        if matches!(
+            row.get("type").and_then(Value::as_str),
+            Some("output_text" | "text")
+        ) {
+            let text = row.get("text").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() {
+                // A sibling native part in the same message still carries the
+                // real business content, so skip only this empty Part.
+                continue;
+            }
+            let mut part = row.clone();
+            part.remove("type");
+            parts.push(Value::Object(part));
+            continue;
+        }
+        if V3_GEMINI_NATIVE_PART_KEYS
+            .iter()
+            .any(|key| row.contains_key(*key))
+        {
+            parts.push(part.clone());
+        }
+    }
+    parts
+}
+
+/// Collect the business output items of one execution response, in order.
+///
+/// Every item shape is kept verbatim, including reasoning items: an earlier
+/// round's reasoning is real business content that the final standard result
+/// must still carry. Only the continuation *request* replays messages (see
+/// `build_v3_chat_process_refill_continuation_request`), because a provider
+/// regenerates its own reasoning for the next round and cannot accept an
+/// invented reasoning item without source identity.
+pub(crate) fn collect_v3_chat_process_business_output_items(
+    finalized_response: &Value,
+) -> Vec<Value> {
+    finalized_response
+        .get("output")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Fold one round's business item into the assistant-message shape the
+/// continuation replay reads.
+///
+/// A canonical shape can carry assistant text as a bare `output_text` item:
+/// that is what the OpenAI Chat provider canonicalization produces for
+/// `message.content`, and the same row the Responses, Gemini and Anthropic
+/// canonical shapes wrap inside a `message` item's `content`. The replay folds
+/// assistant business content from `message` items, so leaving the bare form
+/// untouched silently drops the answer that the next round has to continue.
+/// Normalizing here keeps that rule in its single owner rather than teaching
+/// every history branch a second item shape.
+fn v3_chat_process_refill_history_item(item: Value) -> Value {
+    match item.get("type").and_then(Value::as_str) {
+        Some("output_text") => json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [item],
+        }),
+        _ => item,
+    }
+}
+
+/// Fold prior-round business items and the summed usage into this execution's
+/// governed payload, before it is projected to the client protocol.
+///
+/// Only a refill round calls this: the continuation decision already proved
+/// this execution produced no real tool call, so prior rounds carry message
+/// business content only. The last execution stays authoritative for its own
+/// item order, status and terminal fields; prior items only extend the front of
+/// `output`.
+pub(crate) fn apply_v3_chat_process_refill_accumulation(
+    finalized_response: &mut Value,
+    accumulated_items: &[Value],
+    accumulated_usage: Option<&V3RuntimeUsageSummary>,
+) {
+    if accumulated_items.is_empty() {
+        return;
+    }
+    // The delivered total must cover every round, so the final execution's own
+    // usage is folded in here before write-back.
+    let mut total = accumulated_usage.cloned();
+    accumulate_v3_chat_process_refill_usage(
+        &mut total,
+        super::responses_relay_runtime::extract_v3_runtime_usage_summary(finalized_response),
+    );
+    merge_v3_chat_process_refill_output_items(finalized_response, accumulated_items);
+    if let Some(total) = total.as_ref() {
+        write_v3_chat_process_refill_usage(finalized_response, total);
+    }
+}
+
+/// Merge prior-round business items in front of the last execution's output.
+///
+/// The last execution stays authoritative for its own item order, ids, status
+/// and terminal fields; accumulated items only extend the front of `output`.
+/// A missing or non-array `output` is left untouched.
+pub(crate) fn merge_v3_chat_process_refill_output_items(
+    finalized_response: &mut Value,
+    accumulated: &[Value],
+) {
+    let Some(output) = finalized_response
+        .get_mut("output")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    if accumulated.is_empty() {
+        return;
+    }
+    let existing = std::mem::take(output);
+    output.extend(accumulated.iter().cloned());
+    output.extend(existing);
+    rebase_v3_chat_process_refill_candidate_output_indices(finalized_response, accumulated.len());
+}
+
+/// Keep the native Gemini candidate association valid after the merge.
+///
+/// A Gemini provider response records which `output` positions each candidate
+/// produced (`gemini_candidate_outcomes[].output_indices`), and the native
+/// Gemini client projection emits business content by following those
+/// positions. Prepending prior rounds therefore has two consequences: every
+/// index of this round moves past the prepended prefix, and the prefix itself
+/// must stay reachable or the earlier rounds would never reach the client.
+/// The prefix joins the first candidate, which is the candidate a Gemini
+/// client reads as the answer.
+fn rebase_v3_chat_process_refill_candidate_output_indices(
+    finalized_response: &mut Value,
+    prepended: usize,
+) {
+    if prepended == 0 {
+        return;
+    }
+    let Some(outcomes) = finalized_response
+        .get_mut("gemini_candidate_outcomes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for (position, outcome) in outcomes.iter_mut().enumerate() {
+        let Some(indices) = outcome
+            .get_mut("output_indices")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        let mut rebased: Vec<Value> = if position == 0 {
+            (0..prepended).map(|index| json!(index)).collect()
+        } else {
+            Vec::new()
+        };
+        rebased.extend(indices.iter().filter_map(|index| {
+            index
+                .as_u64()
+                .map(|value| json!(value as usize + prepended))
+        }));
+        *indices = rebased;
+    }
+}
+
+/// Accumulate one completed refill round's usage into the running summary.
+///
+/// Missing stays missing: a field absent in any merged round becomes `None`
+/// and is never fabricated as 0.
+///
+/// `None` therefore never means "the chain has no usage": it only means no
+/// completed round has been merged yet. A round that completed with no usage
+/// evidence at all still marks the chain as observed, so a later round's
+/// numbers cannot be read as the whole chain's totals.
+pub(crate) fn accumulate_v3_chat_process_refill_usage(
+    accumulated: &mut Option<V3RuntimeUsageSummary>,
+    round: Option<V3RuntimeUsageSummary>,
+) {
+    let Some(round) = round else {
+        // One completed round was observed and carried no usage evidence: every
+        // field is unknown for the chain. Keeping `Some(default)` records that
+        // fact instead of leaving the state indistinguishable from "not
+        // started", which would let the next round be adopted as round one.
+        *accumulated = Some(V3RuntimeUsageSummary::default());
+        return;
+    };
+    let Some(accumulated) = accumulated.as_mut() else {
+        *accumulated = Some(round);
+        return;
+    };
+    for (current, value) in [
+        (&mut accumulated.input_tokens, round.input_tokens),
+        (&mut accumulated.output_tokens, round.output_tokens),
+        (&mut accumulated.total_tokens, round.total_tokens),
+        (&mut accumulated.cached_tokens, round.cached_tokens),
+        (
+            &mut accumulated.cache_read_input_tokens,
+            round.cache_read_input_tokens,
+        ),
+        (
+            &mut accumulated.cache_creation_input_tokens,
+            round.cache_creation_input_tokens,
+        ),
+    ] {
+        *current = match (*current, value) {
+            (Some(current), Some(value)) => Some(current.saturating_add(value)),
+            _ => None,
+        };
+    }
+}
+
+/// Write an accumulated usage summary into a finalized response.
+///
+/// Only fields that are actually `Some` are written. The object is rebuilt from
+/// the accumulated evidence so a field missing in any round never reappears
+/// from the last round's usage.
+pub(crate) fn write_v3_chat_process_refill_usage(
+    finalized_response: &mut Value,
+    usage: &V3RuntimeUsageSummary,
+) {
+    let Some(response_object) = finalized_response.as_object_mut() else {
+        return;
+    };
+    let mut usage_object = Map::new();
+    if let Some(value) = usage.input_tokens {
+        usage_object.insert("input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.output_tokens {
+        usage_object.insert("output_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.total_tokens {
+        usage_object.insert("total_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.cached_tokens {
+        usage_object.insert(
+            "input_tokens_details".to_string(),
+            json!({"cached_tokens": value}),
+        );
+    }
+    if let Some(value) = usage.cache_read_input_tokens {
+        usage_object.insert("cache_read_input_tokens".to_string(), Value::from(value));
+    }
+    if let Some(value) = usage.cache_creation_input_tokens {
+        usage_object.insert(
+            "cache_creation_input_tokens".to_string(),
+            Value::from(value),
+        );
+    }
+    if usage_object.is_empty() {
+        // No observed field: keep usage absent rather than fabricating 0s.
+        response_object.remove("usage");
+    } else {
+        response_object.insert("usage".to_string(), Value::Object(usage_object));
+    }
+}
+
+/// Exact-attempt tool declaration view consumed by the Relay serialized-tool
+/// harvest. It is built only from the request-local namespace registry and its
+/// bound wire inverse; it never reads response text, metadata or logs.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct V3RelaySerializedToolIdentity {
+    namespace: Option<String>,
+    leaf: String,
+    kind: ToolMarkupKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct V3HubRelaySerializedToolContext {
+    declarations: ToolMarkupDeclarations,
+    identities: HashMap<String, V3RelaySerializedToolIdentity>,
+}
+
+fn relay_declared_parameter_kinds(source: &Value) -> HashMap<String, ToolMarkupParamKind> {
+    source
+        .get("parameters")
+        .or_else(|| source.pointer("/function/parameters"))
+        .and_then(|parameters| parameters.get("properties"))
+        .and_then(Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter_map(|(name, schema)| {
+                    schema
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .map(|kind| (name.clone(), ToolMarkupParamKind::declared(kind)))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl V3HubRelaySerializedToolContext {
+    /// Build the parser declaration view and exact wire-name identity from the
+    /// request-local registry. Duplicate keys are dropped rather than guessed.
+    pub(crate) fn from_registry(
+        registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+    ) -> Self {
+        let inverse = registry.restore_identities();
+        let mut context = Self::default();
+        let mut ambiguous: HashSet<String> = HashSet::new();
+        for identity in registry.identities() {
+            let namespace = identity
+                .is_namespaced()
+                .then(|| identity.client_namespace());
+            let resolved = V3RelaySerializedToolIdentity {
+                namespace: namespace.clone(),
+                leaf: identity.leaf_name.clone(),
+                kind: match identity.kind {
+                    provider_compat_core::namespace_tools::ToolKind::Function => {
+                        ToolMarkupKind::Function
+                    }
+                    provider_compat_core::namespace_tools::ToolKind::Custom => {
+                        ToolMarkupKind::Custom
+                    }
+                },
+            };
+            let declaration = ToolMarkupIdentity {
+                kind: resolved.kind,
+                parameter_kinds: relay_declared_parameter_kinds(&identity.source),
+            };
+            let keys = std::iter::once(identity.actual_wire_name.clone())
+                .chain(std::iter::once(identity.leaf_name.clone()))
+                .chain(
+                    inverse
+                        .iter()
+                        .filter(|(_, (ns, leaf))| {
+                            leaf == &identity.leaf_name
+                                && Some(ns.as_str()) == namespace.as_deref().or(Some(""))
+                        })
+                        .map(|(wire, _)| wire.clone()),
+                );
+            for key in keys {
+                if context
+                    .identities
+                    .get(&key)
+                    .is_some_and(|old| old != &resolved)
+                {
+                    ambiguous.insert(key.clone());
+                }
+                context.identities.insert(key.clone(), resolved.clone());
+                context.declarations.insert(key, declaration.clone());
+            }
+        }
+        for name in ambiguous {
+            context.identities.remove(&name);
+            context.declarations.remove(&name);
+        }
+        context
+    }
+
+    fn identity(&self, wire_name: &str) -> Option<&V3RelaySerializedToolIdentity> {
+        self.identities.get(wire_name)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct V3HubRelayResponseHookProfile {
-    servertool_names: BTreeSet<String>,
-    web_search_execution_mode: Option<routecodex_v3_config::V3WebSearchExecutionMode>,
-    web_search_center_state: Option<V3WebSearchCenterState>,
     /// 请求侧 VR 路由决策时算好的"该请求是否保留响应密文"标记：仅当目标是 gpt 模型
     /// **且该模型只有单一 provider 候选**时，响应里的 `encrypted_content` 才原样透传给
     /// Codex 客户端（客户端用自己的密文重建 reasoning 历史）；其余情况 Resp03 一律剥离。
@@ -820,21 +1645,13 @@ pub struct V3HubRelayResponseHookProfile {
     toolreason_observation_session_id: Option<String>,
     toolreason_observation_request_id: Option<String>,
     tool_thinking_original_custom_tool_names: BTreeSet<String>,
+    serialized_tool_context: V3HubRelaySerializedToolContext,
+    complete_provider_attempt: bool,
 }
 
 impl V3HubRelayResponseHookProfile {
-    pub fn new<I, S>(servertool_names: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
+    pub fn empty() -> Self {
         Self {
-            servertool_names: servertool_names
-                .into_iter()
-                .map(|name| name.as_ref().to_owned())
-                .collect(),
-            web_search_execution_mode: None,
-            web_search_center_state: None,
             retain_response_cipher: false,
             tool_thinking: false,
             toolreason_client_projection: true,
@@ -843,38 +1660,25 @@ impl V3HubRelayResponseHookProfile {
             toolreason_observation_session_id: None,
             toolreason_observation_request_id: None,
             tool_thinking_original_custom_tool_names: BTreeSet::new(),
+            serialized_tool_context: V3HubRelaySerializedToolContext::default(),
+            complete_provider_attempt: false,
         }
     }
 
-    pub fn empty() -> Self {
-        Self::new(std::iter::empty::<&'static str>())
-    }
-
-    pub fn with_servertool_name(mut self, name: impl Into<String>) -> Self {
-        self.servertool_names.insert(name.into());
-        self
-    }
-
-    pub(crate) fn is_servertool_name(&self, name: &str) -> bool {
-        self.servertool_names.contains(name)
-    }
-
-    pub fn with_web_search_execution_mode(
+    pub(crate) fn with_serialized_tool_context(
         mut self,
-        mode: routecodex_v3_config::V3WebSearchExecutionMode,
+        context: V3HubRelaySerializedToolContext,
     ) -> Self {
-        self.web_search_execution_mode = Some(mode);
+        self.serialized_tool_context = context;
         self
     }
 
-    pub fn web_search_execution_mode(
-        &self,
-    ) -> Option<routecodex_v3_config::V3WebSearchExecutionMode> {
-        self.web_search_execution_mode
+    fn serialized_tool_context(&self) -> &V3HubRelaySerializedToolContext {
+        &self.serialized_tool_context
     }
 
-    pub fn with_web_search_center_state(mut self, state: V3WebSearchCenterState) -> Self {
-        self.web_search_center_state = Some(state);
+    pub(crate) fn with_complete_provider_attempt(mut self, complete: bool) -> Self {
+        self.complete_provider_attempt = complete;
         self
     }
 
@@ -899,7 +1703,7 @@ impl V3HubRelayResponseHookProfile {
 
     pub(crate) fn with_tool_thinking_turn_context(
         mut self,
-        context: &super::servertool_hooks::V3ToolThinkingTurnContext,
+        context: &super::tool_thinking_hooks::V3ToolThinkingTurnContext,
     ) -> Self {
         self.tool_thinking_original_custom_tool_names = context
             .original_custom_tool_names()
@@ -956,21 +1760,6 @@ impl V3HubRelayResponseHookProfile {
     pub fn toolreason_observation_request_id(&self) -> Option<&str> {
         self.toolreason_observation_request_id.as_deref()
     }
-
-    pub fn web_search_center_state(&self) -> Option<&V3WebSearchCenterState> {
-        self.web_search_center_state.as_ref()
-    }
-
-    /// Mode B：本地 ServerToolCenter 治理的 web_search 需在 Resp03 拦截并
-    /// 本地执行，而不是投影为客户端 exec_command。
-    pub fn web_search_local_surface_active(&self) -> bool {
-        self.web_search_execution_mode.is_some_and(
-            routecodex_v3_config::V3WebSearchExecutionMode::is_metadata_center_local_search,
-        ) && self
-            .web_search_center_state
-            .as_ref()
-            .is_some_and(|state| state.phase() == V3WebSearchCenterPhase::LocalToolSurfaceActive)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -979,24 +1768,14 @@ pub enum V3HubRelayResponseError {
     ExecutionModeNotRelay,
     #[error("provider response must be an object")]
     ProviderResponseNotObject,
-    #[error("provider response leaked RouteCodex side-channel field: {key}")]
-    SideChannelLeaked { key: &'static str },
     #[error("provider response output must be an array")]
     ProviderResponseOutputNotArray,
     #[error("malformed tool call at output index {index}: {reason}")]
     MalformedToolCall { index: usize, reason: &'static str },
-    #[error("web_search ServerTool activation missing at Resp03 interception")]
-    MissingWebSearchActivation,
-    #[error("web_search ServerTool state transition failed at Resp03: {reason}")]
-    WebSearchStateTransitionFailed { reason: String },
-    #[error("web_search typed hook contract failed at Resp03: {reason}")]
-    WebSearchHookContractFailed { reason: String },
     #[error("provider response status is required")]
     MissingStatus,
     #[error("unsupported provider response status: {status}")]
     UnsupportedStatus { status: String },
-    #[error("provider response incomplete_details.reason is invalid: {reason}")]
-    InvalidIncompleteDetails { reason: String },
     #[error("{protocol} provider response is malformed at Resp03: {reason}")]
     ProviderProtocolResponseMalformed {
         protocol: &'static str,
@@ -1004,18 +1783,30 @@ pub enum V3HubRelayResponseError {
     },
     #[error("provider response compat failed: {reason}")]
     ProviderCompatFailed { reason: String },
+    #[error("provider response contained no deliverable business content after Relay governance")]
+    GovernedAttemptEmpty,
+    #[error("provider response contains a recognized incomplete tool invocation")]
+    UnharvestableToolMarkup,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct V3HubRelayResponseHookRegistry {
     normalize: fn(
         V3ProviderRespInbound01Raw,
+        Option<&Value>,
+        Option<&str>,
     ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError>,
     govern: fn(
         V3HubRespInbound02Normalized,
         &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>,
     typed_sse_catalog: V3RelaySseHookCatalog,
+    complete_chat_sse:
+        fn(
+            &[Vec<u8>],
+            Option<usize>,
+            &V3HubRelaySerializedToolContext,
+        ) -> Result<Option<(Vec<Vec<u8>>, usize)>, super::V3RelayCompleteResponseError>,
 }
 
 impl V3HubRelayResponseHookRegistry {
@@ -1023,7 +1814,16 @@ impl V3HubRelayResponseHookRegistry {
         &self,
         input: V3ProviderRespInbound01Raw,
     ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
-        (self.normalize)(input)
+        self.normalize_with_context(input, None, None)
+    }
+
+    pub(crate) fn normalize_with_context(
+        &self,
+        input: V3ProviderRespInbound01Raw,
+        chat_request: Option<&Value>,
+        request_id: Option<&str>,
+    ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
+        (self.normalize)(input, chat_request, request_id)
     }
 
     pub fn govern(
@@ -1031,11 +1831,23 @@ impl V3HubRelayResponseHookRegistry {
         input: V3HubRespInbound02Normalized,
         profile: &V3HubRelayResponseHookProfile,
     ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
-        (self.govern)(input, profile)
+        govern_v3_hub_relay_response_via_operator(input, profile, self.govern)
     }
 
     pub(crate) fn typed_sse_catalog(&self) -> V3RelaySseHookCatalog {
         self.typed_sse_catalog
+    }
+
+    pub(crate) fn govern_complete_chat_sse(
+        &self,
+        builder: &mut crate::execution_control::V3CommittedClientSseBuilder,
+        namespace_registry: &provider_compat_core::namespace_tools::NamespaceToolIdentityRegistry,
+    ) -> Result<(), super::V3RelayCompleteResponseError> {
+        let source_terminal = builder.last_marked_terminal_frame_index();
+        let context = V3HubRelaySerializedToolContext::from_registry(namespace_registry);
+        builder.rewrite_complete_attempt(|frames| {
+            (self.complete_chat_sse)(frames, source_terminal, &context)
+        })
     }
 }
 
@@ -1044,20 +1856,21 @@ pub fn compile_v3_hub_relay_response_hooks() -> V3HubRelayResponseHookRegistry {
         normalize: normalize_v3_hub_relay_response,
         govern: govern_v3_hub_relay_response,
         typed_sse_catalog: V3RelaySseHookCatalog::new(),
+        complete_chat_sse:
+            super::resp_chat_process_complete_chat_sse::govern_complete_chat_sse_with_context,
     }
 }
 
 fn normalize_v3_hub_relay_response(
     input: V3ProviderRespInbound01Raw,
+    chat_request: Option<&Value>,
+    request_id: Option<&str>,
 ) -> Result<V3HubRespInbound02Normalized, V3HubRelayResponseError> {
     if input.execution != V3HubExecutionMode::Relay {
         return Err(V3HubRelayResponseError::ExecutionModeNotRelay);
     }
     if !input.payload.0.is_object() {
         return Err(V3HubRelayResponseError::ProviderResponseNotObject);
-    }
-    if let Some(key) = find_v3_hub_side_channel_key(&input.payload.0) {
-        return Err(V3HubRelayResponseError::SideChannelLeaked { key });
     }
     let compat =
         build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(input).map_err(|error| {
@@ -1066,8 +1879,12 @@ fn normalize_v3_hub_relay_response(
             }
         })?;
     Ok(
-        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
-            .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request_and_request_id(
+            compat,
+            chat_request,
+            request_id,
+        )
+        .map_err(|error| V3HubRelayResponseError::ProviderCompatFailed { reason: error })?,
     )
 }
 
@@ -1113,24 +1930,22 @@ fn govern_v3_hub_relay_response(
             profile.toolreason_client_projection_enabled(),
         );
     }
-    let input = complete_or_repair_v3_resp03_tool_frames(input);
-    let _identified_servertool_tool = super::servertool_hooks::inspect_v3_servertool_response_tool(
-        input.provider_payload().as_ref(),
-    );
+    if profile.serialized_tool_context().identities.is_empty()
+        && (profile.complete_provider_attempt
+            || input.normalized_kind() == super::V3HubResponseNormalizedKind::Json)
+    {
+        govern_v3_relay_control_markers_at_resp03(&mut input)?;
+    } else if !profile.serialized_tool_context().identities.is_empty() {
+        tool_markup::govern(&mut input, profile.serialized_tool_context())?;
+    }
+    if profile.complete_provider_attempt {
+        tool_markup::govern_thinking(&mut input);
+    }
     let governance = build_v3_resp03_protocol_governance(&input)?;
     let branch = inspect_v3_resp03_finish_reason(&input, &governance);
-    let mut web_search_center_state = None;
-    let mut web_search_hook_outcome = V3WebSearchHookOutcome::NotApplicable;
     let (input, governance) = match branch {
         V3Resp03FinishReasonBranch::ToolCall => {
-            let tool_call_hook = apply_v3_tool_call_servertool_hook_at_resp03(input, profile)?;
-            web_search_center_state = tool_call_hook.web_search_state;
-            web_search_hook_outcome = tool_call_hook.web_search_hook_outcome;
-            let mut input = if tool_call_hook.intercepted {
-                tool_call_hook.input
-            } else {
-                project_v3_apply_patch_freeform_calls_at_resp03(tool_call_hook.input)
-            };
+            let mut input = project_v3_apply_patch_freeform_calls_at_resp03(input);
             restore_v3_tool_thinking_custom_calls_at_resp03(
                 &mut input,
                 profile.tool_thinking_original_custom_tool_names(),
@@ -1144,15 +1959,15 @@ fn govern_v3_hub_relay_response(
         }
         V3Resp03FinishReasonBranch::Other => (input, governance),
     };
-    let servertool_tool_call_followup = governance
-        .tool_calls
-        .iter()
-        .any(|tool_call| profile.is_servertool_name(&tool_call.name));
-    let servertool_action = if servertool_tool_call_followup {
-        V3HubServertoolResponseAction::FollowupRequired
-    } else {
-        V3HubServertoolResponseAction::None
-    };
+    // Only the complete post-governance result authorizes client delivery.
+    if profile.complete_provider_attempt
+        && !super::v3_provider_attempt_has_deliverable_business_content(
+            input.semantic_protocol(),
+            input.provider_payload().as_ref(),
+        )
+    {
+        return Err(V3HubRelayResponseError::GovernedAttemptEmpty);
+    }
     let terminality = if governance.tool_calls.is_empty() {
         governance.status_terminality
     } else {
@@ -1163,11 +1978,130 @@ fn govern_v3_hub_relay_response(
             previous: input,
             terminality,
             tool_calls: governance.tool_calls,
-            servertool_action,
         },
-        web_search_transition: web_search_center_state,
-        web_search_hook_outcome,
     })
+}
+
+type V3HubRelayResponseGovernFn =
+    fn(
+        V3HubRespInbound02Normalized,
+        &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError>;
+
+struct GovernChatResponseOperator {
+    input: V3HubRespInbound02Normalized,
+    profile: V3HubRelayResponseHookProfile,
+    govern: V3HubRelayResponseGovernFn,
+    side_output: Arc<Mutex<Option<GovernedResponseSideOutput>>>,
+}
+
+#[derive(Debug)]
+enum GovernedResponseSideOutput {
+    Complete(Box<V3HubRespChatProcess03Outcome>),
+    Error(V3HubRelayResponseError),
+}
+
+impl GovernChatResponseOperator {
+    fn new(
+        input: V3HubRespInbound02Normalized,
+        profile: &V3HubRelayResponseHookProfile,
+        govern: V3HubRelayResponseGovernFn,
+        side_output: Arc<Mutex<Option<GovernedResponseSideOutput>>>,
+    ) -> Self {
+        Self {
+            input,
+            profile: profile.clone(),
+            govern,
+            side_output,
+        }
+    }
+}
+
+impl Operator for GovernChatResponseOperator {
+    fn name(&self) -> &'static str {
+        "routecodex.v3.operation.govern_chat_response"
+    }
+
+    fn version(&self) -> &'static str {
+        "1"
+    }
+
+    fn input_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _: &OperatorContext) -> Result<Value, String> {
+        let mut captured = self.input.clone();
+        *captured.provider_payload_mut() = Arc::new(input);
+        match (self.govern)(captured, &self.profile) {
+            Ok(governed) => {
+                *self.side_output.lock().map_err(|_| {
+                    "response governance side-output holder is poisoned".to_string()
+                })? = Some(GovernedResponseSideOutput::Complete(Box::new(
+                    governed.clone(),
+                )));
+                Ok(governed.finalized_payload().clone())
+            }
+            Err(error) => {
+                let error_message = error.to_string();
+                *self.side_output.lock().map_err(|_| {
+                    "response governance side-output holder is poisoned".to_string()
+                })? = Some(GovernedResponseSideOutput::Error(error));
+                Err(error_message)
+            }
+        }
+    }
+}
+
+fn govern_v3_hub_relay_response_via_operator(
+    input: V3HubRespInbound02Normalized,
+    profile: &V3HubRelayResponseHookProfile,
+    govern: V3HubRelayResponseGovernFn,
+) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+    let side_output = Arc::new(Mutex::new(None));
+    let operator =
+        GovernChatResponseOperator::new(input.clone(), profile, govern, side_output.clone());
+    let executed = run_v3_single_node_operator(
+        V3OperationGraph::Response,
+        "govern_chat_response",
+        input.provider_payload().as_ref().clone(),
+        operator,
+    );
+    let captured = side_output
+        .lock()
+        .map_err(|_| V3HubRelayResponseError::ProviderCompatFailed {
+            reason: "response governance side-output holder is poisoned".to_string(),
+        })?
+        .take();
+    resolve_governed_response_execution(executed, captured)
+}
+
+fn resolve_governed_response_execution(
+    executed: Result<Value, OperationRunnerError>,
+    captured: Option<GovernedResponseSideOutput>,
+) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+    match (executed, captured) {
+        (Err(_), Some(GovernedResponseSideOutput::Error(error))) => Err(error),
+        (Err(runner_error), _) => Err(operation_runner_response_error(runner_error)),
+        (Ok(executed), Some(GovernedResponseSideOutput::Complete(mut outcome))) => {
+            *outcome.data.previous.provider_payload_mut() = Arc::new(executed);
+            Ok(*outcome)
+        }
+        (Ok(_), Some(GovernedResponseSideOutput::Error(error))) => Err(error),
+        (Ok(_), None) => Err(V3HubRelayResponseError::ProviderCompatFailed {
+            reason: "response governance operator omitted typed side output".to_string(),
+        }),
+    }
+}
+
+fn operation_runner_response_error(error: OperationRunnerError) -> V3HubRelayResponseError {
+    V3HubRelayResponseError::ProviderCompatFailed {
+        reason: format!("canonical response governance failed: {error}"),
+    }
 }
 
 fn restore_v3_tool_thinking_custom_calls_at_resp03(
@@ -1264,15 +2198,7 @@ fn parse_v3_custom_tool_wrapper_for_resp03(
     let Value::Object(wrapper) = serde_json::from_str::<Value>(arguments).ok()? else {
         return None;
     };
-    if wrapper.keys().any(|key| {
-        !matches!(
-            key.as_str(),
-            "input" | "reason" | "goal_alignment_confidence" | "model_id"
-        )
-    }) {
-        return None;
-    }
-    let native_input = wrapper.get("input")?.as_str()?.to_owned();
+    let native_input = recognized_v3_custom_tool_wrapper_input_at_resp03(&wrapper)?.to_owned();
     wrapper.get("reason")?.as_str()?;
     let fields = ["reason", "goal_alignment_confidence", "model_id"]
         .into_iter()
@@ -1296,67 +2222,6 @@ enum V3Resp03FinishReasonBranch {
 struct V3Resp03ProtocolGovernance {
     status_terminality: V3HubResponseTerminality,
     tool_calls: Vec<V3HubResponseToolCall>,
-}
-
-fn complete_or_repair_v3_resp03_tool_frames(
-    mut input: V3HubRespInbound02Normalized,
-) -> V3HubRespInbound02Normalized {
-    if input.semantic_protocol() != V3HubProviderWireProtocol::Responses {
-        return input;
-    }
-    let mut next = input.provider_payload().as_ref().clone();
-    let Some(object) = next.as_object_mut() else {
-        return input;
-    };
-    let has_tool_call = object
-        .get("output")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|item| {
-            matches!(
-                item.get("type").and_then(Value::as_str),
-                Some("function_call" | "custom_tool_call" | "tool_call")
-            )
-        });
-    if !has_tool_call {
-        return input;
-    }
-    let Some(status) = object.get("status").and_then(Value::as_str) else {
-        return input;
-    };
-    if !matches!(
-        status,
-        "completed" | "requires_action" | "in_progress" | "queued"
-    ) {
-        return input;
-    }
-    let mut changed = false;
-    if status == "completed" {
-        object.insert(
-            "status".to_string(),
-            Value::String("requires_action".to_string()),
-        );
-        changed = true;
-    }
-    for key in ["finish_reason", "finishReason", "stop_reason", "stopReason"] {
-        if object.contains_key(key) && object.get(key).and_then(Value::as_str) != Some("tool_calls")
-        {
-            object.insert(key.to_string(), Value::String("tool_calls".to_string()));
-            changed = true;
-        }
-    }
-    if !object.contains_key("finish_reason") {
-        object.insert(
-            "finish_reason".to_string(),
-            Value::String("tool_calls".to_string()),
-        );
-        changed = true;
-    }
-    if changed {
-        *input.provider_payload_mut() = Arc::new(next);
-    }
-    input
 }
 
 fn inspect_v3_resp03_finish_reason(
@@ -1470,23 +2335,7 @@ fn build_v3_responses_resp03_protocol_governance(
         .and_then(Value::as_str)
         .ok_or(V3HubRelayResponseError::MissingStatus)?;
     let status_terminality = match status {
-        "completed" => V3HubResponseTerminality::Terminal,
-        "incomplete" => {
-            let reason = object
-                .get("incomplete_details")
-                .and_then(Value::as_object)
-                .and_then(|details| details.get("reason"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| V3HubRelayResponseError::InvalidIncompleteDetails {
-                    reason: "missing non-empty reason".to_string(),
-                })?;
-            if !matches!(reason, "max_output_tokens" | "content_filter") {
-                return Err(V3HubRelayResponseError::InvalidIncompleteDetails {
-                    reason: format!("unsupported value '{reason}'"),
-                });
-            }
-            V3HubResponseTerminality::Terminal
-        }
+        "completed" | "incomplete" => V3HubResponseTerminality::Terminal,
         "requires_action" | "in_progress" | "queued" => V3HubResponseTerminality::NonTerminal,
         _ => {
             return Err(V3HubRelayResponseError::UnsupportedStatus {
@@ -1504,7 +2353,6 @@ fn collect_v3_resp03_responses_tool_calls(
     output: &[Value],
 ) -> Result<Vec<V3HubResponseToolCall>, V3HubRelayResponseError> {
     let mut tool_calls = Vec::new();
-    let mut seen_call_ids = BTreeSet::new();
     for (index, item) in output.iter().enumerate() {
         let Some(item) = item.as_object() else {
             continue;
@@ -1522,12 +2370,6 @@ fn collect_v3_resp03_responses_tool_calls(
                 index,
                 reason: "missing call_id/id",
             })?;
-        if !seen_call_ids.insert(call_id.to_owned()) {
-            return Err(V3HubRelayResponseError::MalformedToolCall {
-                index,
-                reason: "duplicate call_id/id",
-            });
-        }
         let name = item
             .get("name")
             .and_then(Value::as_str)
@@ -1585,6 +2427,15 @@ fn build_v3_gemini_resp03_protocol_governance(
     payload: &Value,
     transport_intent: V3HubTransportIntent,
 ) -> Result<V3Resp03ProtocolGovernance, V3HubRelayResponseError> {
+    // Gemini may report a prompt-level block without creating any candidates.
+    // Read that real business terminal without inventing an output container.
+    if payload.get("candidates").is_none() && super::v3_gemini_prompt_feedback_is_terminal(payload)
+    {
+        return Ok(V3Resp03ProtocolGovernance {
+            status_terminality: V3HubResponseTerminality::Terminal,
+            tool_calls: Vec::new(),
+        });
+    }
     let candidates = payload.get("candidates").and_then(Value::as_array).ok_or(
         V3HubRelayResponseError::ProviderProtocolResponseMalformed {
             protocol: "gemini",
@@ -1614,11 +2465,12 @@ fn build_v3_gemini_resp03_protocol_governance(
             output.push(json!({"type":"function_call","call_id":name,"name":name}));
         }
     }
-    let terminal = candidates.iter().any(|candidate| {
-        candidate
-            .get("finishReason")
-            .is_some_and(|value| !value.is_null())
-    });
+    let terminal = super::v3_gemini_prompt_feedback_is_terminal(payload)
+        || candidates.iter().any(|candidate| {
+            candidate
+                .get("finishReason")
+                .is_some_and(|value| !value.is_null())
+        });
     let status_terminality = if transport_intent == V3HubTransportIntent::Sse && !terminal {
         V3HubResponseTerminality::NonTerminal
     } else {
@@ -1636,9 +2488,6 @@ pub(crate) fn classify_v3_hub_relay_tool_kind(raw_kind: &str, name: &str) -> V3H
     }
     if raw_kind == "custom_tool_call" {
         return V3HubRelayToolKind::Custom;
-    }
-    if name.strip_prefix("servertool.").is_some() || name.strip_prefix("servertool__").is_some() {
-        return V3HubRelayToolKind::Servertool;
     }
     if name.strip_prefix("mcp.").is_some() || name.strip_prefix("mcp__").is_some() {
         return V3HubRelayToolKind::Mcp;
@@ -1665,14 +2514,203 @@ fn harvest_v3_think_blocks_at_resp03(
     input
 }
 
+/// Remove only declared standalone control labels from the semantic response
+/// carriers. This increment does not harvest serialized invocations: a parsed
+/// call segment is restored from its original envelope text so its payload
+/// bytes, order and association remain unchanged.
+fn govern_v3_relay_control_markers_at_resp03(
+    input: &mut V3HubRespInbound02Normalized,
+) -> Result<(), V3HubRelayResponseError> {
+    let declarations = ToolMarkupDeclarations::default();
+    let mut next = input.provider_payload().as_ref().clone();
+    let changed = match input.semantic_protocol() {
+        V3HubProviderWireProtocol::Responses => {
+            strip_v3_responses_control_markers(&mut next, &declarations)?
+        }
+        V3HubProviderWireProtocol::OpenAiChat => {
+            strip_v3_openai_chat_control_markers(&mut next, &declarations)?
+        }
+        V3HubProviderWireProtocol::Gemini | V3HubProviderWireProtocol::Anthropic => false,
+    };
+    if changed {
+        *input.provider_payload_mut() = Arc::new(next);
+    }
+    Ok(())
+}
+
+fn strip_v3_relay_control_marker_text(
+    text: &str,
+    declarations: &ToolMarkupDeclarations,
+) -> Result<Option<String>, V3HubRelayResponseError> {
+    let scan = scan_tool_markup(text, declarations);
+    if scan.incomplete_tool_invocation {
+        return Err(V3HubRelayResponseError::UnharvestableToolMarkup);
+    }
+    if !scan.removed_label {
+        return Ok(None);
+    }
+    let mut visible = String::with_capacity(text.len());
+    for segment in scan.segments {
+        match segment {
+            ToolMarkupSegment::Text(text) => visible.push_str(text),
+            // This increment keeps every serialized invocation opaque. Calls
+            // in one envelope share the envelope span; restore it once.
+            ToolMarkupSegment::Calls(calls) => {
+                if let Some(call) = calls.first() {
+                    visible.push_str(call.envelope);
+                }
+            }
+        }
+    }
+    Ok(Some(visible))
+}
+
+fn strip_v3_relay_control_marker_string(
+    value: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> Result<bool, V3HubRelayResponseError> {
+    let Some(text) = value.as_str() else {
+        return Ok(false);
+    };
+    let Some(stripped) = strip_v3_relay_control_marker_text(text, declarations)? else {
+        return Ok(false);
+    };
+    *value = Value::String(stripped);
+    Ok(true)
+}
+
+fn strip_v3_relay_control_marker_content(
+    value: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> Result<bool, V3HubRelayResponseError> {
+    match value {
+        Value::String(_) => strip_v3_relay_control_marker_string(value, declarations),
+        Value::Array(parts) => {
+            let mut changed = false;
+            for part in parts {
+                match part {
+                    Value::String(_) => {
+                        changed |= strip_v3_relay_control_marker_string(part, declarations)?;
+                    }
+                    Value::Object(object) => {
+                        let text_part =
+                            object
+                                .get("type")
+                                .and_then(Value::as_str)
+                                .is_none_or(|kind| {
+                                    matches!(
+                                        kind,
+                                        "text" | "output_text" | "input_text" | "refusal"
+                                    )
+                                });
+                        if !text_part {
+                            continue;
+                        }
+                        if let Some(text) = object.get_mut("text") {
+                            changed |= strip_v3_relay_control_marker_string(text, declarations)?;
+                        }
+                        if let Some(refusal) = object.get_mut("refusal") {
+                            changed |= strip_v3_relay_control_marker_string(refusal, declarations)?;
+                        }
+                    }
+                    Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {}
+                }
+            }
+            Ok(changed)
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Object(_) => Ok(false),
+    }
+}
+
+fn strip_v3_openai_chat_control_markers(
+    payload: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> Result<bool, V3HubRelayResponseError> {
+    let mut changed = false;
+    let Some(choices) = payload.get_mut("choices").and_then(Value::as_array_mut) else {
+        return Ok(false);
+    };
+    for choice in choices {
+        // The same declared label grammar governs both materialized Chat
+        // messages and projected Chat SSE delta carriers. Tool arguments,
+        // reasoning and opaque fields are not text carriers here.
+        for carrier in ["message", "delta"] {
+            let Some(object) = choice.get_mut(carrier).and_then(Value::as_object_mut) else {
+                continue;
+            };
+            if let Some(content) = object.get_mut("content") {
+                changed |= strip_v3_relay_control_marker_content(content, declarations)?;
+            }
+        }
+    }
+    Ok(changed)
+}
+
+fn strip_v3_responses_control_markers(
+    payload: &mut Value,
+    declarations: &ToolMarkupDeclarations,
+) -> Result<bool, V3HubRelayResponseError> {
+    let mut changed = false;
+    if let Some(output_text) = payload.get_mut("output_text") {
+        changed |= strip_v3_relay_control_marker_string(output_text, declarations)?;
+    }
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return Ok(changed);
+    };
+    for item in output {
+        match item {
+            Value::String(_) => {
+                changed |= strip_v3_relay_control_marker_string(item, declarations)?;
+            }
+            Value::Object(object) => match object.get("type").and_then(Value::as_str) {
+                Some("message") => {
+                    if let Some(text) = object.get_mut("text") {
+                        changed |= strip_v3_relay_control_marker_string(text, declarations)?;
+                    }
+                    if let Some(content) = object.get_mut("content") {
+                        changed |= strip_v3_relay_control_marker_content(content, declarations)?;
+                    }
+                }
+                Some("output_text" | "refusal") => {
+                    if let Some(text) = object.get_mut("text") {
+                        changed |= strip_v3_relay_control_marker_string(text, declarations)?;
+                    }
+                    if let Some(refusal) = object.get_mut("refusal") {
+                        changed |= strip_v3_relay_control_marker_string(refusal, declarations)?;
+                    }
+                }
+                _ => {}
+            },
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) => {}
+        }
+    }
+    Ok(changed)
+}
+
 #[derive(Default)]
-struct V3ThinkHarvest {
+pub(crate) struct V3ThinkHarvest {
     visible_text: String,
     reasoning_segments: Vec<String>,
     changed: bool,
 }
 
-fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
+impl V3ThinkHarvest {
+    /// Visible text left after harvesting, for the committed-projection parity
+    /// gate.
+    pub(crate) fn visible_text(&self) -> &str {
+        &self.visible_text
+    }
+
+    /// Harvested reasoning segments, in order.
+    pub(crate) fn reasoning_segments(&self) -> &[String] {
+        &self.reasoning_segments
+    }
+}
+
+/// Whole-attempt owner of the `think` block rule. The committed Relay client
+/// projection applies the same rule while the text arrives, so this function and
+/// `relay_client_frames` are bound by a parity gate.
+pub(crate) fn harvest_v3_think_text(text: &str) -> V3ThinkHarvest {
     let mut output = String::new();
     let mut reasoning_segments = Vec::new();
     let mut cursor = 0usize;
@@ -1730,6 +2768,42 @@ fn v3_resp03_reasoning_item(reasoning_segments: Vec<String>) -> Value {
     })
 }
 
+/// Each final output lists the pre-transformation positions it derives from.
+/// Update the sole candidate business extension at the transformation owner;
+/// no identity markers or copied responses travel through the payload.
+pub(crate) fn remap_v3_response_candidate_output_indices(
+    payload: &mut Value,
+    output_sources: &[Vec<usize>],
+) {
+    let Some(outcomes) = payload
+        .get_mut("gemini_candidate_outcomes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for outcome in outcomes {
+        let Some(indices) = outcome
+            .get_mut("output_indices")
+            .and_then(Value::as_array_mut)
+        else {
+            continue;
+        };
+        let final_indices = output_sources
+            .iter()
+            .enumerate()
+            .filter(|(_, sources)| {
+                sources.iter().any(|source| {
+                    indices
+                        .iter()
+                        .any(|index| index.as_u64() == Some(*source as u64))
+                })
+            })
+            .map(|(index, _)| json!(index))
+            .collect();
+        *indices = final_indices;
+    }
+}
+
 fn harvest_v3_responses_think_blocks(payload: &mut Value) -> bool {
     let Some(object) = payload.as_object_mut() else {
         return false;
@@ -1739,18 +2813,21 @@ fn harvest_v3_responses_think_blocks(payload: &mut Value) -> bool {
     };
     let mut changed = false;
     let mut next_output = Vec::with_capacity(output.len());
+    let mut output_sources = Vec::with_capacity(output.len());
     let mut aggregate_output_text = String::new();
-    for mut item in std::mem::take(output) {
+    for (source, mut item) in std::mem::take(output).into_iter().enumerate() {
         let mut reasoning_segments = Vec::new();
         if harvest_v3_responses_output_item_think_blocks(&mut item, &mut reasoning_segments) {
             changed = true;
             if !reasoning_segments.is_empty() {
                 next_output.push(v3_resp03_reasoning_item(reasoning_segments));
+                output_sources.push(vec![source]);
             }
         }
         if !is_v3_resp03_empty_visible_text_item(&item) {
             append_v3_resp03_output_text_segments(&mut aggregate_output_text, &item);
             next_output.push(item);
+            output_sources.push(vec![source]);
         } else {
             changed = true;
         }
@@ -1765,6 +2842,7 @@ fn harvest_v3_responses_think_blocks(payload: &mut Value) -> bool {
                 Value::String(aggregate_output_text),
             );
         }
+        remap_v3_response_candidate_output_indices(payload, &output_sources);
     }
     changed
 }
@@ -2116,10 +3194,12 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
             }
         }
     }
+    let mut transformed_output_sources = None;
     if let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) {
-        let tool_names = output
+        let (contributors, tool_names): (Vec<_>, Vec<_>) = output
             .iter()
-            .filter_map(|item| {
+            .enumerate()
+            .filter_map(|(index, item)| {
                 if !matches!(
                     item.get("type").and_then(Value::as_str),
                     Some("function_call" | "tool_call" | "custom_tool_call")
@@ -2128,15 +3208,21 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                 }
                 item.as_object()
                     .and_then(toolreason_display_name_from_object)
+                    .map(|name| (index, name))
             })
-            .collect::<Vec<_>>();
+            .unzip();
         let reasoning_toolreason = json_reasons
             .first()
             .and_then(|reason| format_toolreason_reasoning_from_reason(&tool_names, reason));
         if project_to_client {
             if let Some(reasoning) = reasoning_toolreason {
+                let mut output_sources = (0..output.len())
+                    .map(|index| vec![index])
+                    .collect::<Vec<_>>();
+                // The existing aggregate summary names these calls. Both its
+                // reasoning and visible mirror derive from all those calls.
                 let mut merged = false;
-                for item in output.iter_mut() {
+                for (index, item) in output.iter_mut().enumerate() {
                     if item.get("type").and_then(Value::as_str) != Some("reasoning") {
                         continue;
                     }
@@ -2155,6 +3241,7 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                             "text": reasoning
                         }));
                     }
+                    output_sources[index].extend_from_slice(&contributors);
                     merged = true;
                     break;
                 }
@@ -2177,10 +3264,21 @@ fn map_v3_toolreason_to_reasoning_content_at_resp03_impl(
                             "summary": [{"type": "summary_text", "text": reasoning}]
                         }),
                     );
+                    output_sources.insert(insert_at, contributors.clone());
                 }
-                append_v3_toolreason_visible_text_item_at_resp03(output, &reasoning);
+                let (index, inserted) =
+                    append_v3_toolreason_visible_text_item_at_resp03(output, &reasoning);
+                if inserted {
+                    output_sources.insert(index, contributors);
+                } else {
+                    output_sources[index].extend(contributors);
+                }
+                transformed_output_sources = Some(output_sources);
             }
         }
+    }
+    if let Some(sources) = transformed_output_sources {
+        remap_v3_response_candidate_output_indices(payload, &sources);
     }
     if let Some(content) = payload.get_mut("content").and_then(Value::as_array_mut) {
         let tool_names = content
@@ -3979,14 +5077,17 @@ fn append_v3_toolreason_reasoning_item_at_resp03(
     );
 }
 
-fn append_v3_toolreason_visible_text_item_at_resp03(output: &mut Vec<Value>, reasoning: &str) {
-    if output.iter().any(|item| {
+fn append_v3_toolreason_visible_text_item_at_resp03(
+    output: &mut Vec<Value>,
+    reasoning: &str,
+) -> (usize, bool) {
+    if let Some(index) = output.iter().position(|item| {
         item.get("type").and_then(Value::as_str) == Some("message")
             && item.get("role").and_then(Value::as_str) == Some("assistant")
             && item.pointer("/content/0/type").and_then(Value::as_str) == Some("output_text")
             && item.pointer("/content/0/text").and_then(Value::as_str) == Some(reasoning)
     }) {
-        return;
+        return (index, false);
     }
     let insert_at = output
         .iter()
@@ -4005,6 +5106,7 @@ fn append_v3_toolreason_visible_text_item_at_resp03(output: &mut Vec<Value>, rea
             "content": [{"type": "output_text", "text": reasoning}]
         }),
     );
+    (insert_at, true)
 }
 
 pub(crate) fn build_v3_toolreason_reasoning_done_projection_at_resp03(
@@ -4488,13 +5590,10 @@ fn project_v3_apply_patch_freeform_output_item_at_resp03(row: &mut Map<String, V
         return false;
     }
     if item_type == "custom_tool_call" {
-        if let Some(Value::String(input)) = row.get_mut("input") {
-            let normalized = normalize_v3_apply_patch_freeform_input_for_client(input);
-            if normalized != *input {
-                *input = normalized;
-                return true;
-            }
-        }
+        // The input of a native custom tool call is already freeform client
+        // input. A JSON-looking patch is still native input, not a wrapper.
+        // Tool-thinking extraction owns explicit wrappers; this projection
+        // owns only legacy function calls.
         return false;
     }
 
@@ -4572,3 +5671,241 @@ mod resp_chat_process_03_governed_tests;
 #[cfg(test)]
 #[path = "resp_chat_process_03_governed_inline_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod canonical_govern_registry_tests {
+    use super::*;
+
+    fn resp02(payload: Value) -> V3HubRespInbound02Normalized {
+        let resp01 = build_v3_provider_resp_inbound_01_raw(
+            payload,
+            V3HubEntryProtocol::Responses,
+            V3HubProviderWireProtocol::Responses,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)
+            .expect("Resp01 must normalize");
+        build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat)
+            .expect("Resp02 must build")
+    }
+
+    fn success_payload() -> Value {
+        json!({
+            "id": "resp_registry_sidecar",
+            "model": "client-visible-model",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "<think>typed sidecar</think>visible"
+                    }]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_registry_web_search",
+                    "name": "web_search",
+                    "arguments": "{\"query\":\"registry\"}"
+                },
+                {
+                    "type": "function_call",
+                    "call_id": "call_registry_followup",
+                    "name": "registry_followup",
+                    "arguments": "{\"item\":\"preserved\"}"
+                }
+            ]
+        })
+    }
+
+    fn success_profile() -> V3HubRelayResponseHookProfile {
+        V3HubRelayResponseHookProfile::empty()
+    }
+
+    #[test]
+    fn canonical_registry_govern_returns_transformation_and_typed_side_outputs() {
+        let profile = success_profile();
+        let expected = govern_v3_hub_relay_response(resp02(success_payload()), &profile)
+            .expect("direct governance must succeed")
+            .finalized_payload()
+            .clone();
+        assert_eq!(
+            expected["output"][0]["summary"][0]["text"],
+            json!("typed sidecar")
+        );
+        assert!(!expected.to_string().contains("<think>"));
+        assert!(expected.to_string().contains("call_registry_web_search"));
+        assert!(expected.to_string().contains("call_registry_followup"));
+        assert!(expected.to_string().contains("preserved"));
+
+        let outcome = compile_v3_hub_relay_response_hooks()
+            .govern(resp02(success_payload()), &profile)
+            .expect("public registry governance must succeed");
+
+        assert_eq!(outcome.finalized_payload(), &expected);
+        assert_eq!(outcome.terminality(), V3HubResponseTerminality::NonTerminal);
+    }
+
+    #[test]
+    fn canonical_registry_govern_preserves_the_original_typed_error() {
+        let expected = V3HubRelayResponseError::UnsupportedStatus {
+            status: "typed-registry-error".to_string(),
+        };
+        let error = compile_v3_hub_relay_response_hooks()
+            .govern(
+                resp02(json!({
+                    "id": "resp_registry_error",
+                    "status": "typed-registry-error",
+                    "output": []
+                })),
+                &V3HubRelayResponseHookProfile::empty(),
+            )
+            .expect_err("typed governance failure must remain an error");
+
+        assert_eq!(error, expected);
+    }
+
+    fn assert_sdk_payload(
+        input: V3HubRespInbound02Normalized,
+        _: &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+        assert_eq!(input.provider_payload().as_ref()["id"], "sdk-input-truth");
+        Err(V3HubRelayResponseError::UnsupportedStatus {
+            status: "sdk-input-observed".to_string(),
+        })
+    }
+
+    #[test]
+    fn canonical_govern_operator_consumes_sdk_input_not_captured_payload() {
+        let side_output = Arc::new(Mutex::new(None));
+        let operator = GovernChatResponseOperator::new(
+            resp02(json!({
+                "id": "captured-payload-must-not-run",
+                "status": "completed",
+                "output": []
+            })),
+            &V3HubRelayResponseHookProfile::empty(),
+            assert_sdk_payload,
+            side_output.clone(),
+        );
+        let context = OperatorContext {
+            identity: pipeline_runtime::Identity {
+                project_id: "routecodex-v3".to_string(),
+                graph_id: "registry-test".to_string(),
+                graph_version: "1".to_string(),
+                execution_id: "sdk-input-test".to_string(),
+                attempt_id: "client-entry".to_string(),
+            },
+            node_id: "govern_chat_response".to_string(),
+        };
+
+        let error = operator
+            .execute(
+                json!({
+                    "id": "sdk-input-truth",
+                    "status": "completed",
+                    "output": []
+                }),
+                &context,
+            )
+            .expect_err("typed governance failure must not return empty business success");
+
+        assert_eq!(
+            error,
+            "unsupported provider response status: sdk-input-observed"
+        );
+        let captured = side_output.lock().expect("side-output must lock");
+        match captured.as_ref() {
+            Some(GovernedResponseSideOutput::Error(
+                V3HubRelayResponseError::UnsupportedStatus { status },
+            )) => assert_eq!(status, "sdk-input-observed"),
+            other => panic!("expected typed governance error sidecar, found {other:?}"),
+        }
+    }
+
+    fn typed_success_from_sdk_input(
+        mut input: V3HubRespInbound02Normalized,
+        _: &V3HubRelayResponseHookProfile,
+    ) -> Result<V3HubRespChatProcess03Outcome, V3HubRelayResponseError> {
+        assert_eq!(input.provider_payload().as_ref()["id"], "sdk-input-truth");
+        let mut payload = input.provider_payload().as_ref().clone();
+        payload["transformed_by"] = json!("sdk-output");
+        *input.provider_payload_mut() = Arc::new(payload);
+        Ok(V3HubRespChatProcess03Outcome {
+            data: V3HubRespChatProcess03Governed {
+                previous: input,
+                terminality: V3HubResponseTerminality::Terminal,
+                tool_calls: Vec::new(),
+            },
+        })
+    }
+
+    #[test]
+    fn canonical_govern_operator_uses_sdk_output_as_business_payload() {
+        let side_output = Arc::new(Mutex::new(None));
+        let operator = GovernChatResponseOperator::new(
+            resp02(json!({
+                "id": "captured-payload-must-not-run",
+                "status": "completed",
+                "output": []
+            })),
+            &V3HubRelayResponseHookProfile::empty(),
+            typed_success_from_sdk_input,
+            side_output.clone(),
+        );
+        let context = OperatorContext {
+            identity: pipeline_runtime::Identity {
+                project_id: "routecodex-v3".to_string(),
+                graph_id: "registry-test".to_string(),
+                graph_version: "1".to_string(),
+                execution_id: "sdk-output-test".to_string(),
+                attempt_id: "client-entry".to_string(),
+            },
+            node_id: "govern_chat_response".to_string(),
+        };
+
+        let output = operator
+            .execute(
+                json!({
+                    "id": "sdk-input-truth",
+                    "status": "completed",
+                    "output": []
+                }),
+                &context,
+            )
+            .expect("successful typed governance must complete the SDK node");
+
+        assert_eq!(output["id"], "sdk-input-truth");
+        assert_eq!(output["transformed_by"], "sdk-output");
+        assert!(!output
+            .as_object()
+            .expect("output must be an object")
+            .is_empty());
+        let captured = side_output.lock().expect("side-output must lock");
+        assert!(matches!(
+            captured.as_ref(),
+            Some(GovernedResponseSideOutput::Complete(outcome))
+                if outcome.finalized_payload()["transformed_by"] == "sdk-output"
+        ));
+    }
+
+    #[test]
+    fn govern_execution_preserves_runner_error_when_no_typed_error_was_captured() {
+        let runner_error = OperationRunnerError {
+            message: "runner failed before operator execution".to_string(),
+        };
+        let error = resolve_governed_response_execution(Err(runner_error), None)
+            .expect_err("runner failure must remain an error");
+
+        assert_eq!(
+            error,
+            V3HubRelayResponseError::ProviderCompatFailed {
+                reason:
+                    "canonical response governance failed: runner failed before operator execution"
+                        .to_string(),
+            }
+        );
+    }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "v3.opencode_zen_tcm.request", "version": "1",
+  "inputs": [{"id":"projected-request","schema":"Object","schema_ref":"v3.opencode_zen_tcm.chat_request"}],
+  "nodes": [
+    {"id":"zen_req_binding","operator":"compile_opencode_zen_tcm_bridge","operator_version":"1","inputs":["projected-request"],"output":{"id":"bound-request","schema":"Object","schema_ref":"v3.opencode_zen_tcm.bound_request"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":[],"writes":["v3.provider_compat.opencode_zen_tcm_bridge"]}},
+    {"id":"zen_req_compat","operator":"apply_opencode_zen_tcm_request","operator_version":"1","inputs":["bound-request"],"output":{"id":"provider-request","schema":"Object","schema_ref":"v3.opencode_zen_tcm.provider_request"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider_compat.opencode_zen_tcm_bridge"],"writes":[]}}
+  ],
+  "edges":[{"from":"zen_req_binding","to":"zen_req_compat","arc_id":"bound-request"}],
+  "outputs":["provider-request"]
+}

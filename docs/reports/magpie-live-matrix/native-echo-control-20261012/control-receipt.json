@@ -1,0 +1,761 @@
+{
+  "command": [
+    "node",
+    "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/control.mjs",
+    "--repo",
+    "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012",
+    "--binary",
+    "/Users/fanzhang/.local/bin/rccv3"
+  ],
+  "started_at_iso": "2026-10-12T17:48:18.831Z",
+  "fixture": {
+    "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/direct-chat-echo-control.json",
+    "case_id": "direct-chat-echo-control",
+    "sha256": "ac0fdb4536c44ab26164f95d0f24aaeeab75621152d336129a097c255bf65327"
+  },
+  "binary": {
+    "path": "/Users/fanzhang/.local/bin/rccv3",
+    "version": "rccv3 0.90.4887 (crate 0.1.0)",
+    "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+    "version_stderr": "",
+    "exit_code": 0,
+    "signal": null,
+    "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+    "size": 35945136,
+    "mtime_ms": 1791826625740.5696,
+    "error": null
+  },
+  "source_hashes": {
+    "lifecycle.mjs": "a0b6155b97b9c42fe635ac8f803d701f584106ef7ac6213202c10890b65a841f",
+    "mock-provider.mjs": "7a9cea601dd9709070d2dc0aceb5e200774ac2bd1b01da1d9ba9363f33935176",
+    "case-runner.mjs": "20cee0cbb8fa921af6730c1aeded8dab3ce5fd21d6bab134b41219751b867713",
+    "tool-consumer.mjs": "760f3eb63c0efe781d7de97cbdf46f398af581452aa9ba7c7b238dc385ebcc47",
+    "protocol-semantics.mjs": "57b41ee90628b7a91786772e1560350063c70c525a3eafa12653e4a617ca05ed"
+  },
+  "mock_address": "http://127.0.0.1:53298",
+  "config": {
+    "path": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/v3-protocol-live-mock-lifecycle-A0AZdf/config.toml",
+    "state": "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/v3-protocol-live-mock-lifecycle-A0AZdf/state",
+    "listeners": [
+      {
+        "role": "primary",
+        "server_id": "loopback",
+        "host": "127.0.0.1",
+        "port": 53299
+      },
+      {
+        "role": "admin_webui",
+        "server_id": "admin_webui",
+        "host": "127.0.0.1",
+        "port": 53300
+      }
+    ],
+    "env": {
+      "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:53300"
+    },
+    "mode": "direct",
+    "mode_receipt": {
+      "field": "servers.loopback.execution.allowed_modes",
+      "allowed_modes": [
+        "direct"
+      ],
+      "config_sha256": "4d94194550637f257fa1ddc5ae266f24ff6e66312c49ae9e0a595d8e0b4d4855"
+    },
+    "config_sha256": "4d94194550637f257fa1ddc5ae266f24ff6e66312c49ae9e0a595d8e0b4d4855",
+    "provider_sha256": "6d388461f144a7b42418a5df0260f6bea511068c7d04f33f0c09e9fe77438cf3"
+  },
+  "bind_diagnosis": {
+    "addresses": [
+      {
+        "role": "primary",
+        "server_id": "loopback",
+        "host": "127.0.0.1",
+        "port": 53299,
+        "bound": true,
+        "released": true,
+        "address": {
+          "address": "127.0.0.1",
+          "port": 53299
+        },
+        "error": null,
+        "release_error": null
+      },
+      {
+        "role": "admin_webui",
+        "server_id": "admin_webui",
+        "host": "127.0.0.1",
+        "port": 53300,
+        "bound": true,
+        "released": true,
+        "address": {
+          "address": "127.0.0.1",
+          "port": 53300
+        },
+        "error": null,
+        "release_error": null
+      }
+    ],
+    "all_bound": true,
+    "all_released": true,
+    "first_failure": null
+  },
+  "config_check": {
+    "command": [
+      "/Users/fanzhang/.local/bin/rccv3",
+      "config",
+      "check",
+      "-c",
+      "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/v3-protocol-live-mock-lifecycle-A0AZdf/config.toml"
+    ],
+    "exit_code": 0,
+    "signal": null,
+    "stdout": "config ok: version=3 servers=1\n",
+    "stderr": "",
+    "error": null
+  },
+  "start_command": [
+    "/Users/fanzhang/.local/bin/rccv3",
+    "server",
+    "start",
+    "--foreground",
+    "--config",
+    "/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/v3-protocol-live-mock-lifecycle-A0AZdf/config.toml"
+  ],
+  "pid": 89288,
+  "health": {
+    "url": "http://127.0.0.1:53299/health",
+    "method": "GET",
+    "request_headers": {},
+    "status": 200,
+    "status_text": "OK",
+    "headers": {
+      "content-type": "application/json",
+      "content-length": "131",
+      "connection": "close",
+      "date": "Mon, 12 Oct 2026 17:48:19 GMT"
+    },
+    "raw_headers": [
+      "content-type",
+      "application/json",
+      "content-length",
+      "131",
+      "connection",
+      "close",
+      "date",
+      "Mon, 12 Oct 2026 17:48:19 GMT"
+    ],
+    "body": {
+      "bind": "127.0.0.1",
+      "build_version": "0.90.4887",
+      "manifest_version": 3,
+      "port": 53299,
+      "server_id": "loopback",
+      "status": "ok",
+      "version": 3
+    },
+    "bodyText": "{\"bind\":\"127.0.0.1\",\"build_version\":\"0.90.4887\",\"manifest_version\":3,\"port\":53299,\"server_id\":\"loopback\",\"status\":\"ok\",\"version\":3}",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": [
+        123,
+        34,
+        98,
+        105,
+        110,
+        100,
+        34,
+        58,
+        34,
+        49,
+        50,
+        55,
+        46,
+        48,
+        46,
+        48,
+        46,
+        49,
+        34,
+        44,
+        34,
+        98,
+        117,
+        105,
+        108,
+        100,
+        95,
+        118,
+        101,
+        114,
+        115,
+        105,
+        111,
+        110,
+        34,
+        58,
+        34,
+        48,
+        46,
+        57,
+        48,
+        46,
+        52,
+        56,
+        56,
+        55,
+        34,
+        44,
+        34,
+        109,
+        97,
+        110,
+        105,
+        102,
+        101,
+        115,
+        116,
+        95,
+        118,
+        101,
+        114,
+        115,
+        105,
+        111,
+        110,
+        34,
+        58,
+        51,
+        44,
+        34,
+        112,
+        111,
+        114,
+        116,
+        34,
+        58,
+        53,
+        51,
+        50,
+        57,
+        57,
+        44,
+        34,
+        115,
+        101,
+        114,
+        118,
+        101,
+        114,
+        95,
+        105,
+        100,
+        34,
+        58,
+        34,
+        108,
+        111,
+        111,
+        112,
+        98,
+        97,
+        99,
+        107,
+        34,
+        44,
+        34,
+        115,
+        116,
+        97,
+        116,
+        117,
+        115,
+        34,
+        58,
+        34,
+        111,
+        107,
+        34,
+        44,
+        34,
+        118,
+        101,
+        114,
+        115,
+        105,
+        111,
+        110,
+        34,
+        58,
+        51,
+        125
+      ]
+    },
+    "bodyBytesBase64": "eyJiaW5kIjoiMTI3LjAuMC4xIiwiYnVpbGRfdmVyc2lvbiI6IjAuOTAuNDg4NyIsIm1hbmlmZXN0X3ZlcnNpb24iOjMsInBvcnQiOjUzMjk5LCJzZXJ2ZXJfaWQiOiJsb29wYmFjayIsInN0YXR1cyI6Im9rIiwidmVyc2lvbiI6M30=",
+    "response_ended": true,
+    "complete": true,
+    "closed": false,
+    "aborted": false,
+    "truncated": false,
+    "elapsed_ms": 83,
+    "error": null,
+    "error_detail": null
+  },
+  "case_report": {
+    "case_id": "direct-chat-echo-control",
+    "cell": {
+      "entry_protocol": "openai_chat",
+      "provider_protocol": "openai_chat",
+      "transport": "sse",
+      "mode": "direct"
+    },
+    "classification": "pass",
+    "status": "passed",
+    "diagnostic": "case flow assertions passed",
+    "product_failures": 0,
+    "runner_failures": 0,
+    "provider_attempt_count": 2,
+    "probe_attempt_count": 0,
+    "turn_results": [
+      {
+        "turn": 1,
+        "turn_id": "direct-chat-echo-call",
+        "status": "passed",
+        "request_source": "fixture",
+        "provider_attempts": 1,
+        "scripted_attempts": 1,
+        "probe_attempts": 0,
+        "client_status": 200,
+        "client_closed": false,
+        "diagnostics": []
+      },
+      {
+        "turn": 2,
+        "turn_id": "direct-chat-echo-output-followup",
+        "status": "passed",
+        "request_source": "tool-consumer",
+        "provider_attempts": 1,
+        "scripted_attempts": 1,
+        "probe_attempts": 0,
+        "client_status": 200,
+        "client_closed": false,
+        "diagnostics": []
+      }
+    ],
+    "first_divergence": null,
+    "observations": {
+      "live": [
+        {
+          "kind": "turn",
+          "turn": 1,
+          "turn_id": "direct-chat-echo-call",
+          "request_source": "fixture",
+          "request": {
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body_bytes": 337,
+            "body_sha256": "eb14bea596638e309154649ff5ba2a0ab9cbfc4e4532999cd973467cf8ae7e7a"
+          },
+          "client": {
+            "status": 200,
+            "status_text": "OK",
+            "headers": {
+              "content-type": "text/event-stream",
+              "connection": "close",
+              "transfer-encoding": "chunked",
+              "date": "Mon, 12 Oct 2026 17:48:19 GMT"
+            },
+            "body_bytes": 507,
+            "closed": false,
+            "truncated": false,
+            "response_ended": true,
+            "complete": true,
+            "error": null,
+            "error_code": null
+          },
+          "provider_attempts": 1,
+          "scripted_attempts": 1,
+          "probe_attempts": 0,
+          "diagnostics": [],
+          "evidence": [
+            "captures/direct-chat-echo-control-turn-1-client.json",
+            "captures/direct-chat-echo-control-turn-1-provider.json"
+          ]
+        },
+        {
+          "kind": "tool_execution",
+          "executions": [
+            {
+              "id": "call_direct_echo_control",
+              "name": "echo",
+              "type": "function",
+              "arguments": "{\"text\":\"control-42\"}",
+              "output": "control-42"
+            }
+          ],
+          "diagnostics": []
+        },
+        {
+          "kind": "turn",
+          "turn": 2,
+          "turn_id": "direct-chat-echo-output-followup",
+          "request_source": "tool-consumer",
+          "request": {
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": {
+              "content-type": "application/json"
+            },
+            "body_bytes": 345,
+            "body_sha256": "e9bd6bd97a924423f1a0e2884c86feb28b5f2d12c7788356e74ed8d1cba5a988"
+          },
+          "client": {
+            "status": 200,
+            "status_text": "OK",
+            "headers": {
+              "content-type": "application/json",
+              "connection": "close",
+              "transfer-encoding": "chunked",
+              "date": "Mon, 12 Oct 2026 17:48:19 GMT"
+            },
+            "body_bytes": 256,
+            "closed": false,
+            "truncated": false,
+            "response_ended": true,
+            "complete": true,
+            "error": null,
+            "error_code": null
+          },
+          "provider_attempts": 1,
+          "scripted_attempts": 1,
+          "probe_attempts": 0,
+          "diagnostics": [],
+          "evidence": [
+            "captures/direct-chat-echo-control-turn-2-client.json",
+            "captures/direct-chat-echo-control-turn-2-provider.json"
+          ]
+        }
+      ],
+      "infra": []
+    },
+    "source_provenance": {
+      "verified": false,
+      "note": "module evidence only; no provenance claim from an installed binary"
+    },
+    "evidence_refs": [
+      "captures/direct-chat-echo-control-turn-1-client.json",
+      "captures/direct-chat-echo-control-turn-1-provider.json",
+      "captures/direct-chat-echo-control-turn-2-client.json",
+      "captures/direct-chat-echo-control-turn-2-provider.json"
+    ],
+    "captures": [
+      "captures/direct-chat-echo-control-turn-1-provider.json",
+      "captures/direct-chat-echo-control-turn-2-provider.json"
+    ],
+    "client_evidence": [
+      "captures/direct-chat-echo-control-turn-1-client.json",
+      "captures/direct-chat-echo-control-turn-2-client.json"
+    ]
+  },
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "direct-chat-echo-control",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "openai_chat",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "query": "",
+      "headers": {
+        "accept": "text/event-stream",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:53298",
+        "content-length": "386"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"messages\":[{\"content\":\"call echo with control-42\",\"role\":\"user\"}],\"model\":\"chat-model\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"tools\":[{\"function\":{\"description\":\"Return the text argument unchanged.\",\"name\":\"echo\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"],\"type\":\"object\"}},\"name\":\"echo\",\"type\":\"function\"}]}",
+      "body": {
+        "messages": [
+          {
+            "content": "call echo with control-42",
+            "role": "user"
+          }
+        ],
+        "model": "chat-model",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        },
+        "tools": [
+          {
+            "function": {
+              "description": "Return the text argument unchanged.",
+              "name": "echo",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "type": "object"
+              }
+            },
+            "name": "echo",
+            "type": "function"
+          }
+        ]
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791827299514,
+      "response_script": {
+        "protocol": "openai_chat",
+        "mode": "sse",
+        "status": 200,
+        "content_type": "text/event-stream",
+        "sse_events": [
+          {
+            "data": {
+              "id": "chatcmpl_direct_echo_control",
+              "object": "chat.completion.chunk",
+              "model": "chat-model",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {
+                    "role": "assistant",
+                    "tool_calls": [
+                      {
+                        "index": 0,
+                        "id": "call_direct_echo_control",
+                        "type": "function",
+                        "function": {
+                          "name": "echo",
+                          "arguments": "{\"text\":\"control-42\"}"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "data": {
+              "id": "chatcmpl_direct_echo_control",
+              "object": "chat.completion.chunk",
+              "model": "chat-model",
+              "choices": [
+                {
+                  "index": 0,
+                  "delta": {},
+                  "finish_reason": "tool_calls"
+                }
+              ]
+            }
+          },
+          {
+            "data": "[DONE]"
+          }
+        ]
+      },
+      "attempt_repeated": false
+    },
+    {
+      "phase": "case",
+      "case_id": "direct-chat-echo-control",
+      "turn": 1,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "openai_chat",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "query": "",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:53298",
+        "content-length": "340"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"messages\":[{\"content\":\"call echo with control-42\",\"role\":\"user\"},{\"role\":\"assistant\",\"tool_calls\":[{\"function\":{\"arguments\":\"{\\\"text\\\":\\\"control-42\\\"}\",\"name\":\"echo\"},\"id\":\"call_direct_echo_control\",\"type\":\"function\"}]},{\"content\":\"control-42\",\"role\":\"tool\",\"tool_call_id\":\"call_direct_echo_control\"}],\"model\":\"chat-model\",\"stream\":false}",
+      "body": {
+        "messages": [
+          {
+            "content": "call echo with control-42",
+            "role": "user"
+          },
+          {
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"text\":\"control-42\"}",
+                  "name": "echo"
+                },
+                "id": "call_direct_echo_control",
+                "type": "function"
+              }
+            ]
+          },
+          {
+            "content": "control-42",
+            "role": "tool",
+            "tool_call_id": "call_direct_echo_control"
+          }
+        ],
+        "model": "chat-model",
+        "stream": false
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791827299526,
+      "response_script": {
+        "protocol": "openai_chat",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "id": "chatcmpl_direct_echo_followup",
+          "object": "chat.completion",
+          "model": "chat-model",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "control-42"
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 21,
+            "completion_tokens": 3,
+            "total_tokens": 24
+          }
+        }
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "control_assertions": {
+    "run_case_passed": true,
+    "observed_call": {
+      "count": 1,
+      "id": "call_direct_echo_control",
+      "name": "echo",
+      "arguments": "{\"text\":\"control-42\"}"
+    },
+    "execution": {
+      "count": 1,
+      "output": "control-42"
+    },
+    "second_provider": {
+      "business_attempt_count": 1,
+      "model": "chat-model",
+      "stream": false,
+      "assistant_tool_call": {
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"text\":\"control-42\"}",
+              "name": "echo"
+            },
+            "id": "call_direct_echo_control",
+            "type": "function"
+          }
+        ]
+      },
+      "tool_result": {
+        "content": "control-42",
+        "role": "tool",
+        "tool_call_id": "call_direct_echo_control"
+      }
+    },
+    "second_client": {
+      "status": 200,
+      "body": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "control-42",
+              "role": "assistant"
+            }
+          }
+        ],
+        "id": "chatcmpl_direct_echo_followup",
+        "model": "chat-model",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 3,
+          "prompt_tokens": 21,
+          "total_tokens": 24
+        }
+      }
+    }
+  },
+  "behavior_pass": true,
+  "cleanup": {
+    "complete": true,
+    "pid": 89288,
+    "process_exit_observed": true,
+    "exit_code": 0,
+    "signal": null,
+    "force_killed": false,
+    "kill_error": null,
+    "socket_closed": true,
+    "socket_close_error": null,
+    "all_listeners_closed": true,
+    "listener_closures": [
+      {
+        "role": "primary",
+        "server_id": "loopback",
+        "host": "127.0.0.1",
+        "port": 53299,
+        "closed": true,
+        "error": null
+      },
+      {
+        "role": "admin_webui",
+        "server_id": "admin_webui",
+        "host": "127.0.0.1",
+        "port": 53300,
+        "closed": true,
+        "error": null
+      }
+    ],
+    "elapsed_ms": 163,
+    "failures": []
+  },
+  "child": {
+    "pid": 89288,
+    "ready": true,
+    "running": false,
+    "exit_receipt": {
+      "pid": 89288,
+      "kind": "exit",
+      "exit_code": 0,
+      "signal": null,
+      "at_epoch_ms": 1791827299702,
+      "error": null
+    },
+    "stdout": "[RouteCodexV3] rccv3 server start --foreground version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 config=/Volumes/Intel/playground/routecodex/.worker-runs/magpie-live-matrix-20261012-0435/tool-live-proof/v3-protocol-live-mock-lifecycle-A0AZdf/config.toml snap=false snapall=false snap_stages= debug=false\n\u001b[36m[server:startup          ][-                   ][-                                   ] ✅ [RouteCodexV3]        10:48:19 Server started\u001b[0m\u001b[2;90m  [sessionID:-]                                                                                    event=started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 addresses=127.0.0.1:53299, 127.0.0.1:53300\u001b[0m\n[RouteCodexV3] Server started version=0.90.4887 crate=0.1.0 binary=/Users/fanzhang/.local/bin/rccv3 on 127.0.0.1:53299, 127.0.0.1:53300\n\u001b[38;2;117;41;215m[53299:openai_chat       ][-                   ][tools:mock-openai_chat[key1].chat-model] ▶ [/v1/chat/completions] 10:48:19 [#1/1]             route=tools target=mock-openai_chat[key1].chat-model reason=pool:tools\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T104819476-1-1]        [virtual-router-hit]     10:48:19 req=openai-chat-router-mock.chat-model-20261012T104819476-1-1 event=route_selected route=tools target=mock-openai_chat[key1].chat-model reason=pool:tools\u001b[0m\n\u001b[38;2;117;41;215m[53299:openai_chat       ][-                   ][tools:mock-openai_chat[key1].chat-model] ✅ [/v1/chat/completions] 10:48:19 [#1/1]             status=200 responseStatus=completed finish_reason=tool_calls elapsedMs=39.3 reason=pool:tools time_i=29.4ms time_e=2.6ms time_t=39.3ms transport=sse\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T104819476-1-1]        ✅ [/v1/chat/completions] 10:48:19 req=openai-chat-router-mock.chat-model-20261012T104819476-1-1 event=completed detail=[usage] status=200 responseStatus=completed finish_reason=tool_calls elapsedMs=39.3 reason=pool:tools usage=unreported time_i=29.4ms time_e=2.6ms time_t=39.3ms nodes=15 transport=sse\u001b[0m\n\u001b[38;2;77;229;128m[53299:openai_chat       ][-                   ][tools:mock-openai_chat[key1].chat-model] ▶ [/v1/chat/completions] 10:48:19 [#2/2]             route=tools target=mock-openai_chat[key1].chat-model reason=pool:tools\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T104819521-2-2]        [virtual-router-hit]     10:48:19 req=openai-chat-router-mock.chat-model-20261012T104819521-2-2 event=route_selected route=tools target=mock-openai_chat[key1].chat-model reason=pool:tools\u001b[0m\n\u001b[38;2;77;229;128m[53299:openai_chat       ][-                   ][tools:mock-openai_chat[key1].chat-model] ✅ [/v1/chat/completions] 10:48:19 [#2/2]             status=200 responseStatus=completed finish_reason=stop elapsedMs=6.3 reason=pool:tools usage_in=21 usage_out=3 usage_total=24 time_i=0.5ms time_e=1.9ms time_t=6.3ms transport=json\u001b[0m\u001b[2;90m  [sessionID:rcc-session:request:openai-chat-router-mock.chat-model-20261012T104819521-2-2]        ✅ [/v1/chat/completions] 10:48:19 req=openai-chat-router-mock.chat-model-20261012T104819521-2-2 event=completed detail=[usage] status=200 responseStatus=completed finish_reason=stop elapsedMs=6.3 reason=pool:tools usage_in=21 usage_out=3 usage_cache=0 usage_total=24 time_i=0.5ms time_e=1.9ms time_t=6.3ms nodes=15 transport=json\u001b[0m\n",
+    "stderr": ""
+  },
+  "mock_closed": true,
+  "config_state_removed": true,
+  "pass": true,
+  "exit_code": 0
+}

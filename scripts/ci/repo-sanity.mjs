@@ -51,7 +51,6 @@ function isForbiddenTrackedPath(p) {
   if (p.startsWith('scripts/test-') && p.endsWith('.mjs')) return true;
   if (p.startsWith('tools/')) return true;
   if (p.startsWith('replay/')) return true;
-  if (p.startsWith('servertool/')) return true;
   if (p.startsWith('verified-configs/')) return true;
   if (p.startsWith('interpreter/')) return true;
   if (p.startsWith('exporters/')) return true;
@@ -80,16 +79,27 @@ function checkRootLayout() {
     '.appsdk',
     '.appsdk-control',
     '.appsdk-prepare.json',
+    // Declared governance roots in .appsdk/project.json: active_root
+    // (active/lib/**), generated_root (generated/**), protected_root
+    // (protected/**). They are contract roots, not source; allow them to
+    // exist so a local appsdk-bootstrapped checkout passes this gate.
+    'active',
     'contracts',
+    'generated',
     'playground',
+    'protected',
     'v4',
   ]);
   const approvedIgnored = new Set([
     '.agent-collab',
     '.agent-state',
     '.cache',
+    '.claude',
+    '.codex',
+    '.crew',
     '.DS_Store',
     '.local-index',
+    '.mcp.json',
     '.reasonix',
     '.tmp',
     'artifacts',

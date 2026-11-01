@@ -6,11 +6,8 @@ pub(crate) use common::{
 };
 pub use common::{
     V3HubEntryProtocol, V3HubInvocationSource, V3HubRelayToolKind, V3HubRequestSemanticProtocol,
-    V3HubResponseNormalizedKind, V3HubResponseTerminality, V3HubServertoolResponseAction,
-    V3HubTargetResolution, V3HubTransportIntent, V3ProviderCompatProfileId, V3ServerToolCenter,
-    V3ServerToolCenterKey, V3ServerToolCenterPoisoned, V3ServerToolCenterWriteAction,
-    V3ServerToolCenterWriteAuditEntry, V3ServerToolCenterWriteOrigin, V3ServerToolInstanceState,
-    V3ServerToolName, V3WebSearchCenterPhase, V3WebSearchCenterState,
+    V3HubResponseNormalizedKind, V3HubResponseTerminality, V3HubTargetResolution,
+    V3HubTransportIntent, V3ProviderCompatProfileId,
 };
 pub use common::{V3HubExecutionMode, V3HubProviderWireProtocol};
 mod provider_compat_error;
@@ -21,8 +18,6 @@ pub use provider_compat_error::{
     V3ProviderCompatError, V3ProviderCompatErrorClassification,
 };
 
-mod side_channel;
-pub(crate) use side_channel::find_v3_hub_side_channel_key;
 mod provider_request_dry_run;
 pub(crate) use provider_request_dry_run::{
     captured_provider_response_for_dry_run, is_captured_provider_response_for_dry_run,
@@ -31,18 +26,25 @@ pub(crate) use provider_request_dry_run::{
 mod provider_compat_shared;
 pub(crate) use provider_compat_shared::{
     build_v3_anthropic_messages_transport_request_from_v3_provider_08_with_provider_headers,
-    build_v3_provider_transport_request_for_protocol, is_v3_gpt_canonical_model,
+    build_v3_provider_transport_request_for_protocol,
+    build_v3_provider_transport_request_from_parts, is_v3_gpt_canonical_model,
     is_v3_retain_response_cipher, provider_protocol_compat_id,
     provider_wire_protocol_for_provider_type, provider_wire_protocol_for_selected_candidate,
+    v3_provider_profile_requires_upstream_sse, V3ProviderWireTransportContext,
 };
 mod relay_runtime_shared;
 pub(crate) use relay_runtime_shared::{
-    build_v3_relay_observability, error_output, extract_error_type_style,
-    extract_message_type_style, handle_provider_failure, provider_pool_exhausted_source,
-    provider_request_failure, provider_runtime_failure, provider_target,
-    push_sse_response_chain_trace, server_routing_group, terminalize_provider_failure,
-    wrap_v3_relay_client_sse_usage_observation, V3RelayCommittedSseStream,
-    V3RelayProjectedSseStream, V3RelayProviderFailure,
+    bind_v3_selected_business_auth_kind, build_v3_relay_observability,
+    build_v3_runtime_provider_failed_attempt_evidence_from_error,
+    build_v3_runtime_provider_failed_attempt_evidence_from_response,
+    build_v3_runtime_provider_failed_attempt_evidence_no_response,
+    build_v3_runtime_provider_failure_observation_from_policy_event, error_output,
+    external_http_witness_from_provider_error, external_http_witness_head,
+    extract_error_type_style, extract_message_type_style, handle_provider_failure,
+    provider_pool_exhausted_source, provider_request_failure, provider_runtime_failure,
+    provider_target, push_sse_response_chain_trace, server_routing_group,
+    terminalize_provider_failure, wrap_v3_relay_client_sse_usage_observation,
+    V3RelayCommittedSseStream, V3RelayProjectedSseStream, V3RelayProviderFailure,
 };
 mod relay_runtime_core;
 pub(crate) use relay_runtime_core::{
@@ -50,6 +52,8 @@ pub(crate) use relay_runtime_core::{
     V3RelayProtocolCodec,
 };
 mod responses_openai_codec;
+pub(crate) use responses_openai_codec::build_v3_chat_assistant_message_from_responses_output_item;
+pub(crate) use responses_openai_codec::build_v3_chat_assistant_reasoning_message_from_responses_output_item;
 pub(crate) use responses_openai_codec::build_v3_chat_canonical_request_from_responses_payload_for_req_inbound;
 mod responses_sse_tree;
 pub use responses_sse_tree::*;
@@ -57,20 +61,21 @@ mod anthropic_sse_tree;
 mod openai_chat_sse_tree;
 pub use openai_chat_sse_tree::*;
 mod client_metadata_projection;
-mod history_image_cleanup;
-pub(crate) use history_image_cleanup::{
-    count_v3_payload_image_refs, normalize_v3_all_images_to_placeholder,
-    normalize_v3_history_image_placeholders,
-};
 mod request_outbound_builtin_tool_projection;
 mod request_outbound_format;
 mod request_outbound_mcp_names;
 mod request_outbound_metadata;
 mod request_outbound_tool_id;
+pub(crate) use request_outbound_builtin_tool_projection::project_openai_responses_hosted_web_search_for_selected_target;
 pub(crate) use request_outbound_format::{
-    build_v3_anthropic_provider_request_source_from_chat_canonical,
+    build_v3_anthropic_provider_request_source_from_chat_canonical_with_drops,
     build_v3_openai_chat_standard_request_for_selected_web_search_mode,
+    build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_chat_standard_request_from_chat_canonical,
+    build_v3_openai_chat_standard_request_from_chat_canonical_recording,
+    build_v3_openai_responses_standard_request_for_selected_target,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops,
+    build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
     build_v3_openai_responses_standard_request_from_chat_canonical,
     normalize_v3_openai_responses_provider_request_payload,
 };
@@ -90,7 +95,9 @@ mod req_target_06_resolved;
 pub use req_target_06_resolved::*;
 mod req_outbound_07_provider_semantic;
 pub use req_outbound_07_provider_semantic::*;
+mod provider_req_compat_06_drop;
 mod provider_req_compat_06_provider_compat;
+pub use provider_req_compat_06_drop::*;
 pub use provider_req_compat_06_provider_compat::*;
 mod provider_req_outbound_08_wire_payload;
 pub use provider_req_outbound_08_wire_payload::*;
@@ -100,17 +107,22 @@ mod provider_resp_inbound_01_raw;
 pub use provider_resp_inbound_01_raw::*;
 mod provider_resp_compat_02_provider_compat;
 pub use provider_resp_compat_02_provider_compat::*;
-mod provider_terminal_response_admission;
-pub(crate) use provider_terminal_response_admission::*;
 mod provider_sse_json_codec;
 pub(crate) use provider_sse_json_codec::*;
+mod provider_attempt_business_content;
+pub(crate) use provider_attempt_business_content::*;
+mod resp_chat_process_complete_chat_sse;
+pub(crate) use resp_chat_process_complete_chat_sse::{
+    projected_sse_has_business_content, V3RelayCompleteResponseError,
+};
 #[cfg(test)]
 mod provider_sse_json_codec_mcp_namespace_tests;
 mod resp_inbound_02_normalized;
 pub use resp_inbound_02_normalized::*;
 mod resp_chat_process_03_governed;
 pub use resp_chat_process_03_governed::*;
-pub use responses_relay_runtime::execute_v3_responses_relay_runtime_with_default_transport_health_server_tool_state;
+mod resp_chat_process_codex_integer_values;
+pub use responses_relay_runtime::execute_v3_responses_relay_runtime_with_default_transport_health;
 mod resp_outbound_05_client_semantic;
 pub use resp_outbound_05_client_semantic::*;
 mod server_resp_outbound_06_client_frame;
@@ -118,30 +130,25 @@ pub use server_resp_outbound_06_client_frame::*;
 
 mod relay_request;
 pub use relay_request::*;
-mod servertool_hooks;
-pub use servertool_hooks::*;
+mod tool_thinking_hooks;
+pub use tool_thinking_hooks::*;
 mod anthropic_codec;
 pub use anthropic_codec::*;
 mod openai_chat_codec;
 pub use openai_chat_codec::*;
 mod gemini_codec;
+mod gemini_responses_codec;
+mod gemini_terminal_semantics;
 pub use gemini_codec::*;
+mod gemini_request_normalization;
+pub use gemini_request_normalization::*;
 mod gemini_relay_runtime;
+pub(crate) use gemini_relay_runtime::gemini_model_from_endpoint_path;
 pub use gemini_relay_runtime::*;
 mod openai_chat_relay_runtime;
 pub use openai_chat_relay_runtime::*;
 mod responses_relay_runtime;
-pub(crate) mod web_search_hook_request;
-pub(crate) mod web_search_hop;
-mod web_search_sidecar;
 pub use responses_relay_runtime::*;
-pub(crate) use web_search_hop::{
-    first_local_websearch_tool_call, project_web_search_result_into_finalized,
-    resolve_web_search_mode_and_backend,
-};
-pub(crate) use web_search_sidecar::{
-    execute_web_search_through_hooks_sidecar, web_search_sidecar_failure_source,
-};
 mod anthropic_relay_hooks;
 pub use anthropic_relay_hooks::*;
 mod anthropic_relay_runtime;
@@ -150,7 +157,16 @@ mod anthropic_relay_runtime_codec;
 pub use anthropic_relay_runtime_codec::*;
 mod relay_sse_hooks;
 mod resource_hooks;
+pub mod usage_normalization;
 pub use resource_hooks::*;
+
+// The request-local declared namespace identity inverse used by the Direct
+// Responses response owner. Both share the single traversal in
+// `request_outbound_mcp_names` with the Relay and cross-protocol callers.
+pub(crate) use request_outbound_mcp_names::{
+    responses_mcp_dispatch_identities as responses_namespace_restore_identities,
+    restore_v3_responses_namespace_in_value as restore_v3_responses_namespace_identities,
+};
 
 #[cfg(test)]
 mod tests;

@@ -2,11 +2,11 @@
 members = [
   "crates/routecodex-v3-agent-memory",
   "crates/provider-compat-core",
-  "crates/servertool-core",
   "crates/routecodex-v3-config",
   "crates/routecodex-v3-debug",
   "crates/routecodex-v3-error",
   "crates/routecodex-v3-hooks",
+  "crates/routecodex-v3-oauth",
   "crates/routecodex-v3-route-classifier",
   "crates/routecodex-v3-virtual-router",
   "crates/routecodex-v3-target",
@@ -20,6 +20,10 @@ members = [
   "crates/routecodex-v3-admin",
 ]
 resolver = "2"
+exclude = ["vendor/hyper"]
+
+[patch.crates-io]
+hyper = { path = "vendor/hyper" }
 
 [workspace.package]
 edition = "2021"
@@ -63,8 +67,8 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 sha2 = "0.10"
-servertool-core = { path = "crates/servertool-core" }
 thiserror = "1"
 tiktoken-rs = "0.12"
 tokio = { version = "1", features = ["fs", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }

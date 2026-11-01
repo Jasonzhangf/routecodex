@@ -1,10 +1,12 @@
 mod attempt_store;
+mod auth_types;
 mod defaults;
 mod entry_protocol_validation;
 mod memory_raw_capture;
 mod provider_config;
 mod provider_directory;
 mod provider_priority_schedule;
+mod runtime_config;
 mod store;
 mod types;
 mod user_config;
@@ -12,12 +14,14 @@ pub use memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptu
 pub use provider_config::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
     V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
-    V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config,
+    V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config, V3ReasoningEffort,
 };
 pub use provider_priority_schedule::{
     default_provider_priority_timezone, V3DailyTimeWindowAuthoringConfig,
-    V3ProviderPriorityScheduleAuthoringConfig, V3ProviderPriorityScheduleEntryAuthoringConfig,
+    V3ProviderModelAvailabilityAuthoringConfig, V3ProviderPriorityScheduleAuthoringConfig,
+    V3ProviderPriorityScheduleEntryAuthoringConfig,
 };
+pub use runtime_config::{V3RuntimeAuthoringConfig, V3RuntimeManifest};
 mod validate;
 #[cfg(test)]
 mod validate_auth_tests;
@@ -26,6 +30,7 @@ mod validate_debug_tests;
 mod validate_relations;
 
 pub use attempt_store::{V3AttemptStorePolicyAuthoringConfig, V3AttemptStorePolicyManifest};
+pub use routecodex_v3_oauth::{V3OAuthDeclaration, V3OAuthSource, V3OAuthStore};
 pub use store::{
     default_v3_config_path, load_v3_config_snapshot_from_path, v3_webui_observability_store_path,
     V3ConfigLoadedSnapshot, V3ConfigStore, V3ConfigWritePlan,
@@ -334,6 +339,7 @@ fn collect_v3_visible_provider_ids_from_target(
                             provider: child.provider.clone(),
                             model: child.model.clone(),
                             key: child.key.clone(),
+                            interface: child.interface.clone(),
                             priority: child.priority,
                             weight: child.weight,
                         };
@@ -432,6 +438,7 @@ fn collect_v3_catalog_model_refs_from_forwarder_target(
         provider: target.provider.clone(),
         model: target.model.clone(),
         key: target.key.clone(),
+        interface: target.interface.clone(),
         priority: target.priority,
         weight: target.weight,
     };

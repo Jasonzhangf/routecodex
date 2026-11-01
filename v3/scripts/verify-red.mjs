@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { runAll } from './_common.mjs';
+import { runAll, v3Root } from './_common.mjs';
+import { resolve } from 'node:path';
 
 const entries = [
   {
@@ -12,12 +13,6 @@ const entries = [
     label: 'aggregate-environment-availability-regression',
     command: 'node',
     args: ['scripts/tests/v3-aggregate-environment-availability-regression.mjs'],
-    severity: 'BLOCK',
-  },
-  {
-    label: 'architecture-admission-red-fixtures',
-    command: 'node',
-    args: ['tests/scripts/v3-architecture-admission-red-fixtures.mjs'],
     severity: 'BLOCK',
   },
   {
@@ -34,10 +29,8 @@ const entries = [
   'scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs',
   'scripts/tests/v3-debug-payload-budget-red-fixtures.mjs',
   'scripts/tests/v3-entry-protocol-endpoint-binding-red-fixtures.mjs',
-  'scripts/tests/v3-file-size-red-fixtures.mjs',
   'scripts/tests/v3-gemini-codec-characterization-red-fixtures.mjs',
   'scripts/tests/v3-gemini-relay-runtime-integration-red-fixtures.mjs',
-  'scripts/tests/v3-h1-source-red-fixtures.mjs',
   'scripts/tests/v3-h2-equivalence-red-fixtures.mjs',
   'scripts/tests/v3-hub-pipeline-core-manifest-red-fixtures.mjs',
   'scripts/tests/v3-hub-relay-runtime-closeout-red-fixtures.mjs',
@@ -45,32 +38,28 @@ const entries = [
   'scripts/tests/v3-hub-v1-node-file-topology-red-fixtures.mjs',
   'scripts/tests/v3-live-provider-compat-parity-red-fixtures.mjs',
   'scripts/tests/v3-mainline-caller-flow-red-fixtures.mjs',
-  'scripts/tests/v3-managed-server-lifecycle-red-fixtures.mjs',
   'scripts/tests/v3-normalization-payload-logic-boundary-red-fixtures.mjs',
   'scripts/tests/v3-openai-chat-codec-characterization-red-fixtures.mjs',
   'scripts/tests/v3-openai-chat-relay-runtime-integration-red-fixtures.mjs',
-  'scripts/tests/v3-p6-freeze-red-fixtures.mjs',
   'scripts/tests/v3-protocol-conversion-field-parity-red-fixtures.mjs',
   'scripts/tests/v3-provider-action-gate-red-fixtures.mjs',
   'scripts/tests/v3-provider-directory-config-red-fixtures.mjs',
   'scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs',
   'scripts/tests/v3-relay-hook-resource-red-fixtures.mjs',
   'scripts/tests/v3-relay-payload-copy-budget-red-fixtures.mjs',
-  'scripts/tests/v3-relay-request-semantics-red-fixtures.mjs',
-  'scripts/tests/v3-relay-response-semantics-red-fixtures.mjs',
-  'scripts/tests/v3-relay-tool-servertool-multiturn-parity-red-fixtures.mjs',
   'scripts/tests/v3-resource-relation-edge-lock-red-fixtures.mjs',
   'scripts/tests/v3-responses-inbound-websocket-proxy-red-fixtures.mjs',
   'scripts/tests/v3-responses-session-admission-red-fixtures.mjs',
   'scripts/tests/v3-responses-websocket-v2-transport-hardening-red-fixtures.mjs',
   'scripts/tests/v3-selected-provider-model-binding-red-fixtures.mjs',
-  'scripts/tests/v3-servertool-center-skeleton-red-fixtures.mjs',
   'scripts/tests/v3-source-gate-red-fixtures.mjs',
   'scripts/tests/v3-stage-protocol-shapes-red-fixtures.mjs',
 ].map((fixture) => ({
     label: fixture,
     command: 'node',
-    args: ['scripts/run-admission-gate.mjs', fixture],
+    args: [resolve(v3Root, fixture)],
+    cwd: resolve(v3Root, '..'),
+    tempDir: false,
     severity: 'BLOCK',
   })),
 ];

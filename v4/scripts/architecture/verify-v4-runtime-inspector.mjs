@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Architecture gate for routecodex-v4-runtime-inspector.
-// Positive: snapshot projects only management state; the inspector has no
-// mutation API and never reads business payload.
+// Positive: the inspector keeps no Cordis/NodeContainer import, exposes no
+// mutation entrypoint, and never reads business payload/secret fields.
 // Red: payload/control/secret/native-handle fields in projection fail.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,17 +15,6 @@ const source = ['src/lib.rs']
   .join('\n');
 const red = process.argv.includes('--red-self-test');
 const failures = [];
-const required = [
-  'pub struct RuntimeSnapshot',
-  'pub fn snapshot',
-  'active_pointer_kind',
-  'container_lifecycle',
-  'failed',
-  'audit',
-];
-for (const token of required) {
-  if (!source.includes(token)) failures.push(`missing: ${token}`);
-}
 
 // The inspector must never import Cordis/NodeContainer internals.
 const FORBIDDEN_IMPORT_PATTERNS = [

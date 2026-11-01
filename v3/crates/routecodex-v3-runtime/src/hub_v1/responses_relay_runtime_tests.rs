@@ -1,6 +1,6 @@
 use super::*;
 use crate::execution_control::V3AttemptStoreError;
-use futures_util::{stream, StreamExt};
+use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
 
@@ -23,7 +23,7 @@ fn execution_control_payload_architecture_terminal_read_isolated_from_diagnostic
     );
 }
 
-fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
+pub(super) fn anthropic_then_openai_chat_manifest() -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(
             r#"
 version = 3
@@ -34,7 +34,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.anthropic_first]
@@ -83,7 +83,7 @@ port = 4444
 routing_group = "default"
 [servers.test.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.relay_first]
@@ -178,7 +178,6 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
             payload: json!({"model": "client-model", "input": "hello"}),
         },
         &transport,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -187,8 +186,7 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     .expect("Relay failure must return a typed Direct handoff");
@@ -250,7 +248,7 @@ impl ResponsesTransport for RecordingChatTransport {
 }
 
 #[tokio::test]
-async fn target_protocol_unmapped_field_projects_internal_598_without_switching_provider() {
+async fn target_protocol_unmapped_field_recovers_through_next_provider() {
     std::env::set_var("ANTHROPIC_FIRST_KEY", "anthropic-secret");
     std::env::set_var("OPENAI_SECOND_KEY", "openai-secret");
     let mut manifest = anthropic_then_openai_chat_manifest();
@@ -275,7 +273,6 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
             }),
         },
         &transport,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -284,24 +281,19 @@ async fn target_protocol_unmapped_field_projects_internal_598_without_switching_
         None,
         None,
         BTreeSet::new(),
-        None,
-        None,
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
-    .expect("unmapped target field must project as client request error");
+    .expect("unmapped target field must enter provider recovery");
 
-    assert_eq!(output.status, 598);
-    assert!(!output
+    assert_eq!(output.status, 200);
+    assert!(output
         .node_trace
         .iter()
         .any(|node| *node == "V3TargetLocalReselected"));
-    assert!(
-        transport
-            .provider_ids
-            .lock()
-            .expect("provider ids")
-            .is_empty(),
-        "a request-shape error must not send or switch provider"
+    assert_eq!(
+        *transport.provider_ids.lock().expect("provider ids"),
+        vec!["openai_second"]
     );
 }
 
@@ -318,6 +310,15 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .expect("test server execution policy")
         .attempt_store
         .request_max_attempts = 1;
+    manifest
+        .servers
+        .get_mut("test")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .residence_timeout_ms = 300;
     let request_execution_control =
         crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
             .expect("request execution control");
@@ -325,6 +326,14 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .attempt_budget()
         .admit_transport_attempt()
         .expect("Direct attempt before Relay handoff");
+    let rejection = request_execution_control
+        .attempt_budget()
+        .admit_transport_attempt();
+    assert!(
+        matches!(&rejection, Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
+        if message.contains("limit 1")),
+        "the original attempt ceiling applies before handoff: {rejection:?}"
+    );
     let transport = RecordingChatTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
@@ -347,7 +356,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
             }),
         },
         &transport,
-        None,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
         false,
@@ -356,8 +364,10 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         None,
         None,
         BTreeSet::new(),
-        None,
-        Some(request_execution_control.clone()),
+        V3ResponsesRelayRuntimeSeeds {
+            request_execution_control: Some(request_execution_control.clone()),
+            ..Default::default()
+        },
     )
     .await
     .expect_err("the configured attempt ceiling must reject the exhausted handoff");
@@ -377,11 +387,11 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         1,
         "the handoff must retain the first attempt and reject the second"
     );
-    assert!(matches!(
-        request_execution_control.attempt_budget().admit_transport_attempt(),
-        Err(V3AttemptStoreError::LocalResourceExhausted(message))
-            if message.contains("limit 1")
-    ));
+    let rejection = request_execution_control
+        .attempt_budget()
+        .admit_transport_attempt();
+    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
+        "after pending reaches the original residence deadline it takes precedence over the exhausted attempt ceiling: {rejection:?}");
 }
 
 #[test]
@@ -468,11 +478,64 @@ fn relay_local_tool_output_consumes_call_id_aliases() {
 }
 
 #[test]
+fn duplicate_native_provider_tool_identities_preserve_complete_payloads() {
+    let hooks = compile_v3_hub_relay_response_hooks();
+    for (protocol, payload) in [
+        (
+            V3HubProviderWireProtocol::OpenAiChat,
+            json!({
+                "id":"chat_duplicate_calls",
+                "choices":[{
+                    "message":{
+                        "role":"assistant",
+                        "tool_calls":[
+                            {"type":"function","id":"dup","function":{"name":"lookup","arguments":"{\"query\":\"first\",\"items\":[1,2]}"}},
+                            {"type":"function","id":"dup","function":{"name":"lookup_again","arguments":"{\"query\":\"second\",\"items\":[3,4]}"}}
+                        ]
+                    },
+                    "finish_reason":"tool_calls"
+                }]
+            }),
+        ),
+        (
+            V3HubProviderWireProtocol::Gemini,
+            json!({
+                "candidates":[{
+                    "content":{
+                        "role":"model",
+                        "parts":[
+                            {"functionCall":{"name":"lookup","args":{"query":"first","items":[1,2]}}},
+                            {"functionCall":{"name":"lookup","args":{"query":"second","items":[3,4]}}}
+                        ]
+                    },
+                    "finishReason":"STOP"
+                }]
+            }),
+        ),
+    ] {
+        let raw = build_v3_provider_resp_inbound_01_raw(
+            payload.clone(),
+            V3HubEntryProtocol::Responses,
+            protocol,
+            V3HubExecutionMode::Relay,
+            V3HubInvocationSource::Client,
+            V3HubTransportIntent::Json,
+        );
+        let normalized = hooks.normalize(raw).expect("serialized provider response");
+        let governed = hooks
+            .govern(normalized, &V3HubRelayResponseHookProfile::empty())
+            .expect("duplicate identities must not create a provider failure");
+        assert_eq!(governed.tool_call_count(), 2);
+        assert_eq!(governed.finalized_payload(), &payload);
+    }
+}
+
+#[test]
 fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_separate() {
     let malformed_tool =
         V3ResponsesRelayRuntimeError::Response(V3HubRelayResponseError::MalformedToolCall {
             index: 5,
-            reason: "duplicate call_id/id",
+            reason: "missing call_id/id",
         });
     assert!(is_v3_responses_provider_response_failure(&malformed_tool));
     let resp03_failure = provider_response_hook_failure(malformed_tool, "controlled", None);
@@ -487,7 +550,7 @@ fn provider_response_failure_classifier_keeps_provider_and_local_hook_errors_sep
     assert!(
         resp03_failure
             .policy_error_message
-            .contains("duplicate call_id/id"),
+            .contains("missing call_id/id"),
         "{}",
         resp03_failure.policy_error_message
     );
@@ -551,71 +614,7 @@ fn anthropic_provider_signature_delta_without_string_fails_explicitly() {
 
     assert!(error
         .to_string()
-        .contains("Anthropic codec malformed reasoning content"));
-}
-
-fn glmrelay_error_policy_manifest() -> V3Config05ManifestPublished {
-    compile_v3_config_05_manifest(
-            parse_v3_config_02_authoring(
-                r#"
-version = 3
-
-[[error.provider_error_action_policy]]
-policy_id = "glmrelay_openai_200_diagnostic_zero_usage"
-[error.provider_error_action_policy.scope]
-provider_id = "glmrelay_openai"
-provider_type = "openai_chat"
-[error.provider_error_action_policy.match]
-http_status = 200
-[error.provider_error_action_policy.match.sse]
-finish_reason = "stop"
-usage_total_tokens = 0
-content_contains_any = ["mac超负荷运载，应该是挂了"]
-[error.provider_error_action_policy.action]
-kind = "periodic_recovery"
-reason_code = "provider_diagnostic_zero_usage"
-retry_mode = "reselect_before_client_projection"
-cooldown_ms = 300000
-disable_scope = "provider_model"
-
-[[error.provider_error_action_policy]]
-policy_id = "glmrelay_openai_invalid_field_type_200"
-[error.provider_error_action_policy.scope]
-provider_id = "glmrelay_openai"
-provider_type = "openai_chat"
-[error.provider_error_action_policy.match]
-http_status = 200
-content_contains_any = ["Type invalid, should be set"]
-[[error.provider_error_action_policy.path]]
-step = "project"
-status = 400
-reason_code = "provider_invalid_field_type"
-public_code = "provider_invalid_field_type"
-message_mode = "code_only"
-
-[servers.s]
-bind = "127.0.0.1"
-port = 5555
-routing_group = "g"
-endpoints = ["responses"]
-
-[providers.glmrelay_openai]
-type = "openai_chat"
-base_url = "https://glm-relayapi.top/v1"
-default_model = "glm-5.2"
-auth = { type = "api_key", entries = [{ alias = "key1", env = "GLM_TEST_KEY" }] }
-
-[providers.glmrelay_openai.models."glm-5.2"]
-capabilities = ["text", "reasoning", "tools"]
-
-[route_groups.g.pools.default]
-selection = { strategy = "priority" }
-targets = [{ kind = "provider_model", provider = "glmrelay_openai", model = "glm-5.2", key = "key1", priority = 1 }]
-"#,
-            )
-            .expect("config authoring"),
-        )
-        .expect("manifest")
+        .contains("Anthropic signature_delta requires signature"));
 }
 
 #[test]
@@ -650,7 +649,7 @@ routing_group = "g"
 endpoints = ["responses"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.glm]
@@ -711,7 +710,7 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
 }
 
 #[tokio::test]
-async fn responses_relay_unknown_direct_provider_model_projects_404() {
+async fn responses_relay_unknown_direct_provider_model_falls_back_to_default_pool() {
     std::env::set_var("MINIMAX_TEST_KEY", "secret-key");
     let authoring = parse_v3_config_02_authoring(
             r#"
@@ -723,7 +722,7 @@ routing_group = "g"
 endpoints = ["responses"]
 [servers.s.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.minimax]
@@ -761,14 +760,15 @@ targets = [{ kind = "provider_model", provider = "minimax", model = "MiniMax-M3"
         )
         .await;
 
-    assert_eq!(output.status, 404);
-    assert!(
-        output
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3Error06ClientProjected"),
-        "404 must project through the Error chain: {:?}",
-        output.node_trace
+    // `minimax.unknown-model` names an enabled provider but no model that provider declares,
+    // so it is not a listed direct target: it takes the normal classification path into the
+    // `default` pool instead of failing.
+    assert_eq!(output.status, 200);
+    assert_eq!(output.body["evidence"]["providerNetworkSend"], false);
+    assert_eq!(output.body["providerRequest"]["providerId"], "minimax");
+    assert_eq!(
+        output.body["providerRequest"]["body"]["model"],
+        "MiniMax-M3"
     );
     std::env::remove_var("MINIMAX_TEST_KEY");
 }
@@ -796,17 +796,15 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
         }),
         &json!({
             "tools":[{
-                "type":"function",
-                "function":{
-                    "name":"tool_search",
-                    "parameters":{"type":"object"}
-                }
+                "type":"tool_search",
+                "execution":"client",
+                "parameters":{"type":"object"}
             }]
         }),
     )
     .expect("OpenAI Chat function tool_search must project back to Responses tool_search_call");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "tool_search_call");
     assert_eq!(response["output"][0]["call_id"], "call_search_tools");
     assert_eq!(response["output"][0]["execution"], "client");
@@ -820,44 +818,94 @@ fn openai_chat_tool_search_function_call_projects_to_responses_tool_search_call(
     );
 }
 
+/// The shared eligibility owner must keep the Chat inverse aligned with the
+/// Anthropic one: only a client-executed declaration grants the native kind.
+/// Server execution and omitted execution stay ordinary function calls.
 #[test]
-fn openai_chat_mcp_function_call_restores_namespace_for_responses_client() {
-    let response = build_v3_responses_provider_response_from_openai_chat_payload(
-        &json!({
-            "id":"chatcmpl_mcpx_workspace",
-            "choices":[{
-                "message":{
-                    "role":"assistant",
-                    "content":"",
-                    "tool_calls":[{
-                        "id":"call_mcpx_workspace",
-                        "type":"function",
-                        "function":{
-                            "name":"mcp__mcpx__workspace",
-                            "arguments":"{}"
-                        }
-                    }]
-                },
-                "finish_reason":"tool_calls"
-            }]
-        }),
-        &json!({
-            "tools":[{
-                "type":"function",
-                "function":{
-                    "name":"mcp__mcpx__workspace",
-                    "parameters":{"type":"object"}
-                }
-            }]
-        }),
-    )
-    .expect("flattened MCP function call must restore namespace for Responses client");
+fn openai_chat_non_client_tool_search_function_call_keeps_ordinary_kind() {
+    for declaration in [
+        json!({"type":"tool_search","execution":"server","parameters":{"type":"object"}}),
+        json!({"type":"tool_search","parameters":{"type":"object"}}),
+    ] {
+        let response = build_v3_responses_provider_response_from_openai_chat_payload(
+            &json!({
+                "id":"chatcmpl_tool_search_call",
+                "choices":[{
+                    "message":{
+                        "role":"assistant",
+                        "content":"",
+                        "tool_calls":[{
+                            "id":"call_search_tools",
+                            "type":"function",
+                            "function":{
+                                "name":"tool_search",
+                                "arguments":"{\"query\":\"ssh-manager\",\"limit\":8}"
+                            }
+                        }]
+                    },
+                    "finish_reason":"tool_calls"
+                }]
+            }),
+            &json!({"tools":[declaration]}),
+        )
+        .expect("a non-client tool_search call must still project to the Responses client");
 
-    assert_eq!(response["status"], "requires_action");
+        assert_eq!(response["status"], "completed");
+        assert_eq!(response["output"][0]["type"], "function_call");
+        assert_eq!(response["output"][0]["name"], "tool_search");
+        assert_eq!(response["output"][0]["call_id"], "call_search_tools");
+        assert_eq!(
+            response["output"][0]["arguments"], "{\"query\":\"ssh-manager\",\"limit\":8}",
+            "original arguments must stay verbatim"
+        );
+        assert!(
+            response["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["type"] != "tool_search_call"),
+            "a non-client declaration must not gain client-native authority: {response}"
+        );
+    }
+}
+
+#[test]
+fn openai_chat_declared_namespace_function_call_restores_namespace_for_responses_client() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
+        &json!({"id":"chatcmpl_mcpx_workspace","choices":[{
+            "message":{"role":"assistant","content":"","tool_calls":[{
+                "id":"call_mcpx_workspace","type":"function",
+                "function":{"name":"mcp__mcpx__workspace","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"
+        }]}),
+        &json!({"tools":[{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"function","name":"workspace","parameters":{"type":"object"}}
+        ]}]}),
+    )
+    .expect("declared namespace function call must restore namespace for Responses client");
+
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["namespace"], "mcp__mcpx");
     assert_eq!(response["output"][0]["name"], "workspace");
     assert_eq!(response["output"][0]["call_id"], "call_mcpx_workspace");
+    let followup = build_v3_openai_chat_standard_request_from_chat_canonical(&json!({
+        "model":"deepseek-v4.1-flash",
+        "messages":[
+            {"role":"user","content":"list workspaces"},
+            {"role":"assistant","tool_calls":[{"id":"call_mcpx_workspace","type":"function","function":{"name":"mcp__mcpx__workspace","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"call_mcpx_workspace","content":"workspace result"}
+        ],
+        "tools":[{"type":"namespace","name":"mcp__mcpx","tools":[
+            {"type":"function","name":"workspace","parameters":{"type":"object"}}
+        ]}]
+    }))
+    .expect("the declared MCP namespace must accept the client tool result");
+    assert_eq!(followup["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        followup["messages"][1]["tool_calls"][0]["id"],
+        followup["messages"][2]["tool_call_id"]
+    );
 }
 
 #[test]
@@ -887,7 +935,7 @@ fn openai_chat_web_search_function_call_remains_pending_local_servertool_call() 
         "OpenAI Chat function web_search must remain pending for Resp03 ServerTool interception",
     );
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "function_call");
     assert_eq!(response["output"][0]["call_id"], "call_web_search");
     assert_eq!(response["output"][0]["name"], "web_search");
@@ -1024,8 +1072,8 @@ fn usage_summary_preserves_minimax_anthropic_top_level_cache_fields() {
 }
 
 #[test]
-fn openai_chat_zero_output_upstream_diagnostic_is_provider_error() {
-    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+fn openai_chat_zero_usage_diagnostic_text_preserves_business_output() {
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &json!({
             "id": "chatcmpl_zero_output_diagnostic",
             "model": "glm-5.2",
@@ -1049,18 +1097,16 @@ fn openai_chat_zero_output_upstream_diagnostic_is_provider_error() {
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("zero-output upstream diagnostic must be provider failure, not success");
-
-    assert!(
-        error
-            .to_string()
-            .contains("zero-output upstream diagnostic"),
-        "wrong error: {error}"
+    .expect("diagnostic-looking content is provider business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output_text"],
+        "upstream returned zero output tokens, input_tokens=76100"
     );
 }
 
 #[tokio::test]
-async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
+async fn openai_chat_zero_usage_stream_preserves_business_output() {
     let observation = V3RuntimeStreamObservation::default();
     let raw_sse = concat!(
             "data: {\"id\":\"chatcmpl_zero_output_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Let me rethink this one step at a time.\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
@@ -1077,19 +1123,17 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
     .await
     .expect("stream diagnostic materializes before semantic projection");
 
-    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("stream zero-output upstream diagnostic must remain a provider failure");
-
-    assert!(
-        error
-            .to_string()
-            .contains("zero-output upstream diagnostic"),
-        "wrong error: {error}"
+    .expect("diagnostic-looking stream content is business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output_text"],
+        "upstream returned zero output tokens, input_tokens=76100"
     );
     assert_eq!(
         observation
@@ -1102,7 +1146,7 @@ async fn openai_chat_zero_output_stream_diagnostic_is_provider_error() {
 }
 
 #[tokio::test]
-async fn openai_chat_reasoning_only_stop_stream_is_not_a_successful_response() {
+async fn openai_chat_reasoning_only_stop_stream_preserves_reasoning() {
     let observation = V3RuntimeStreamObservation::default();
     let raw_sse = concat!(
         "data: {\"id\":\"chatcmpl_reasoning_only\",\"object\":\"chat.completion.chunk\",\"created\":1784812451,\"model\":\"grok-4.6\",\"choices\":[{\"delta\":{\"reasoning_content\":\"internal reasoning only\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
@@ -1118,26 +1162,17 @@ async fn openai_chat_reasoning_only_stop_stream_is_not_a_successful_response() {
     .await
     .expect("reasoning-only terminal stream must materialize before semantic validation");
 
-    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
-        None,
-        None,
-        &provider_payload,
-    )
-    .expect("reasoning-only stop must be a provider semantic failure");
-    assert_eq!(projection.status, 502);
-    assert_eq!(projection.code, "provider_empty_visible_output");
-
-    let error = build_v3_responses_provider_response_from_openai_chat_payload(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({
             "tools": [{"type":"function","function":{"name":"exec_command"}}]
         }),
     )
-    .expect_err("reasoning-only stop must not become a successful client response");
-
-    assert!(
-        error.to_string().contains("no visible model output"),
-        "wrong error: {error}"
+    .expect("reasoning-only output is representable");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "internal reasoning only"
     );
 }
 
@@ -1172,8 +1207,7 @@ fn openai_chat_visible_zero_output_text_with_real_usage_remains_success() {
 }
 
 #[test]
-fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
-    let manifest = glmrelay_error_policy_manifest();
+fn openai_chat_zero_usage_overload_text_preserves_business_output() {
     let provider_payload = json!({
         "id": "chatcmpl_overload_diagnostic",
         "model": "glm-5.2",
@@ -1186,37 +1220,17 @@ fn openai_chat_upstream_overload_diagnostic_is_provider_error() {
         }],
         "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
     });
-    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
-        Some(&manifest),
-        Some("glmrelay_openai"),
-        &provider_payload,
-    )
-    .expect("configured diagnostic policy must match");
-    assert_eq!(
-        projection
-            .matched_policy
-            .as_ref()
-            .map(V3ProviderFailureDirective::policy)
-            .map(|policy| policy.policy_id.as_str()),
-        Some("glmrelay_openai_200_diagnostic_zero_usage")
-    );
-    let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
-        Some(&manifest),
-        Some("glmrelay_openai"),
     )
-    .expect_err("upstream overload diagnostic must be provider failure, not success content");
-
-    assert!(
-        error.to_string().contains("provider_diagnostic_zero_usage"),
-        "wrong error: {error}"
-    );
+    .expect("overload-looking text is business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output_text"], "mac超负荷运载，应该是挂了");
 }
 
 #[tokio::test]
-async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
-    let manifest = glmrelay_error_policy_manifest();
+async fn openai_chat_zero_usage_overload_stream_preserves_business_output() {
     let observation = V3RuntimeStreamObservation::default();
     let raw_sse = concat!(
             "data: {\"id\":\"chatcmpl_overload_stream\",\"object\":\"chat.completion.chunk\",\"created\":1784865608,\"model\":\"glm-5.2\",\"choices\":[{\"delta\":{\"reasoning_content\":\"checking\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"index\":0}],\"usage\":null}\n\n",
@@ -1233,23 +1247,17 @@ async fn openai_chat_stream_overload_diagnostic_policy_is_provider_error() {
     .await
     .expect("stream diagnostic materializes before semantic policy");
 
-    let error = build_v3_responses_provider_response_from_openai_chat_payload_with_manifest(
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
         &json!({"tools": [{"type":"function","function":{"name":"exec_command"}}]}),
-        Some(&manifest),
-        Some("glmrelay_openai"),
     )
-    .expect_err("configured stream diagnostic must remain a provider failure");
-
-    assert!(
-        error.to_string().contains("provider_diagnostic_zero_usage"),
-        "wrong error: {error}"
-    );
+    .expect("overload-looking stream content is business output");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output_text"], "mac超负荷运载，应该是挂了");
 }
 
 #[test]
-fn glmrelay_invalid_field_type_diagnostic_is_mapped_to_400_policy() {
-    let manifest = glmrelay_error_policy_manifest();
+fn openai_chat_invalid_field_type_text_preserves_business_output() {
     let provider_payload = json!({
         "id": "chatcmpl_invalid_field_type",
         "model": "glm-5.2",
@@ -1262,20 +1270,15 @@ fn glmrelay_invalid_field_type_diagnostic_is_mapped_to_400_policy() {
         }],
         "usage": {"prompt_tokens": 12, "completion_tokens": 1, "total_tokens": 13}
     });
-    let projection = responses_relay_diagnostics::provider_response_semantic_error_from_manifest(
-        Some(&manifest),
-        Some("glmrelay_openai"),
+    let response = build_v3_responses_provider_response_from_openai_chat_payload(
         &provider_payload,
+        &json!({"tools":[]}),
     )
-    .expect("invalid field type diagnostic must be provider failure");
-    assert_eq!(projection.code, "provider_invalid_field_type");
+    .expect("error-looking text is business output");
+    assert_eq!(response["status"], "completed");
     assert_eq!(
-        projection
-            .matched_policy
-            .as_ref()
-            .map(V3ProviderFailureDirective::policy)
-            .map(|policy| policy.policy_id.as_str()),
-        Some("glmrelay_openai_invalid_field_type_200")
+        response["output_text"],
+        "field Tools[8].Type invalid, should be set"
     );
 }
 
@@ -1329,7 +1332,7 @@ fn openai_chat_provider_reasoning_content_projects_replay_content_before_tool_ca
     )
     .expect("OpenAI Chat response must project reasoning to Responses");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "reasoning");
     assert_eq!(
             response["output"][0]["summary"][0]["text"], "Need inspect before running the tool.",
@@ -1374,7 +1377,7 @@ fn openai_chat_custom_tool_response_round_trips_to_responses_custom_call() {
     )
     .expect("Chat function projection must reverse to the declared Responses custom tool");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
     assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
@@ -1410,7 +1413,7 @@ fn openai_chat_function_tool_call_with_custom_declared_name_round_trips_as_custo
     )
     .expect("flattened function tool_call must reverse to the declared Responses custom tool");
 
-    assert_eq!(response["status"], "requires_action");
+    assert_eq!(response["status"], "completed");
     assert_eq!(response["output"][0]["type"], "custom_tool_call");
     assert_eq!(response["output"][0]["name"], "apply_patch");
     assert_eq!(
@@ -1497,4 +1500,498 @@ fn openai_chat_provider_usage_normalizes_to_hub_canonical_token_names() {
             response["usage"].get("completion_tokens").is_none(),
             "Hub canonical response usage must not expose OpenAI Chat provider-wire completion_tokens: {response}"
         );
+}
+
+fn committed_hook_failure_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["relay"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+
+[providers.openai_first]
+type = "openai_chat"
+base_url = "http://openai-first.invalid/v1"
+default_model = "chat-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "COMMITTED_FIRST_KEY" }] }
+[providers.openai_first.models.chat-test]
+wire_name = "chat-test"
+capabilities = ["text"]
+
+[providers.openai_second]
+type = "openai_chat"
+base_url = "http://openai-second.invalid/v1"
+default_model = "chat-test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "COMMITTED_SECOND_KEY" }] }
+[providers.openai_second.models.chat-test]
+wire_name = "chat-test"
+capabilities = ["text"]
+
+[forwarders.mixed]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "openai_first", model = "chat-test", key = "key", priority = 1 },
+  { kind = "provider_model", provider = "openai_second", model = "chat-test", key = "key", priority = 2 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "mixed", priority = 1 }]
+"#,
+    )
+    .expect("committed hook failure authoring");
+    compile_v3_config_05_manifest(authoring).expect("committed hook failure manifest")
+}
+
+struct CommittedHookFailureTransport {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+enum CommittedRoundReply {
+    SseFirst,
+    Json(Vec<u8>),
+}
+
+struct CommittedRoundTransport {
+    provider_ids: Mutex<Vec<String>>,
+    reply: CommittedRoundReply,
+}
+
+#[async_trait::async_trait]
+impl ResponsesTransport for CommittedRoundTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .expect("provider id recorder")
+            .push(request.provider_id().to_string());
+        match &self.reply {
+            CommittedRoundReply::SseFirst => {
+                let provider: routecodex_v3_provider_responses::V3ProviderSseStream =
+                    Box::pin(stream::iter(vec![
+                        Ok(b"data: {\"id\":\"chatcmpl_committed_refill\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"first\"}}]}\n\n".to_vec()),
+                        Ok(b"data: {\"id\":\"chatcmpl_committed_refill\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+                        Ok(b"data: [DONE]\n\n".to_vec()),
+                    ]));
+                Ok(V3ProviderResp14Raw::from_sse(
+                    request.request_id().to_string(),
+                    request.provider_id().to_string(),
+                    200,
+                    vec![V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"text/event-stream".to_vec(),
+                    }],
+                    provider,
+                ))
+            }
+            CommittedRoundReply::Json(body) => Ok(V3ProviderResp14Raw::from_json(
+                request.request_id(),
+                request.provider_id(),
+                200,
+                vec![V3ProviderResponseHeader {
+                    name: "content-type".to_string(),
+                    value: b"application/json".to_vec(),
+                }],
+                body.clone(),
+            )),
+        }
+    }
+}
+
+fn committed_round_input(request_id: &str) -> V3ResponsesRelayRuntimeInput {
+    V3ResponsesRelayRuntimeInput {
+        server_id: "test".to_string(),
+        failure_session_scope: V3ProviderFailureSessionScope::new(
+            "test",
+            "default",
+            "committed-cross-round-session",
+        )
+        .expect("session scope"),
+        request_id: request_id.to_string(),
+        payload: json!({"model": "client-model", "stream": true, "input": "hello"}),
+    }
+}
+
+async fn execute_committed_first_round(
+    manifest: &V3Config05ManifestPublished,
+    transport: &CommittedRoundTransport,
+    sink: &crate::nodes::V3CommittedClientFrameSink,
+    projection: &super::relay_client_frames::V3RelayClientProjectionHandle,
+) -> V3ResponsesRelayRuntimeOutput {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        committed_round_input("req-committed-first-round"),
+        transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink.clone()),
+            client_stream_projection: Some(projection.clone()),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+    .expect("the first visible text must commit the SSE round")
+}
+
+async fn execute_committed_follow_up_round(
+    manifest: &V3Config05ManifestPublished,
+    transport: &CommittedRoundTransport,
+    sink: &crate::nodes::V3CommittedClientFrameSink,
+    projection: &super::relay_client_frames::V3RelayClientProjectionHandle,
+    request_id: &str,
+) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
+    execute_v3_responses_relay_runtime_inner(
+        manifest,
+        committed_round_input(request_id),
+        transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink.clone()),
+            client_stream_projection: Some(projection.clone()),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+}
+
+fn sse_payloads(frames: &[String]) -> Vec<serde_json::Value> {
+    frames
+        .iter()
+        .filter_map(|frame| {
+            let data = frame
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!data.is_empty())
+                .then(|| serde_json::from_str(&data).ok())
+                .flatten()
+        })
+        .collect()
+}
+
+#[async_trait::async_trait]
+impl ResponsesTransport for CommittedHookFailureTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.provider_ids
+            .lock()
+            .expect("provider id recorder")
+            .push(request.provider_id().to_string());
+        // First visible text commits the client channel. The response governance
+        // then rejects the orphan tool-close marker, which is a response-hook
+        // failure that arrives after the client already holds business frames.
+        let provider: routecodex_v3_provider_responses::V3ProviderSseStream =
+            Box::pin(stream::iter(vec![
+                Ok(b"data: {\"id\":\"chatcmpl_committed\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hello\\n\"}}]}\n\n".to_vec()),
+                Ok(b"data: {\"id\":\"chatcmpl_committed\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"chat-test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"</\xef\xbd\x9cDSML\xef\xbd\x9ctool_calls>\"},\"finish_reason\":\"stop\"}]}\n\n".to_vec()),
+                Ok(b"data: [DONE]\n\n".to_vec()),
+            ]));
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            provider,
+        ))
+    }
+}
+
+#[tokio::test]
+async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_second_candidate() {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let transport = CommittedHookFailureTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection: super::relay_client_frames::V3RelayClientProjectionHandle =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let _output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "committed-hook-failure-session",
+            )
+            .expect("session scope"),
+            request_id: "req-committed-hook-failure".to_string(),
+            payload: json!({"model": "client-model", "stream": true, "input": "hello"}),
+        },
+        &transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink),
+            client_stream_projection: Some(projection),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+    .expect("a committed stream must end through its typed provider failure");
+
+    // The committed channel owns the response head: no second candidate may be
+    // attempted, because a second attempt would append a second response.
+    assert_eq!(
+        transport.provider_ids.lock().expect("provider ids").len(),
+        1,
+        "a failure after the first business frame must not select another candidate"
+    );
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let heads = frames
+        .iter()
+        .filter(|frame| frame.contains("response.created"))
+        .count();
+    assert_eq!(
+        heads, 1,
+        "the committed stream must carry exactly one response head, got {frames:?}"
+    );
+}
+
+#[tokio::test]
+async fn committed_relay_sse_round_then_json_hook_failure_does_not_retry_or_add_a_head() {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let first_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::SseFirst,
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection: super::relay_client_frames::V3RelayClientProjectionHandle =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let _first_output =
+        execute_committed_first_round(&manifest, &first_transport, &sink, &projection).await;
+    {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.as_mut()
+            .expect("committed projection")
+            .close_round()
+            .expect("close the committed round");
+    }
+
+    let second_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::Json(
+            json!({
+                "id": "chatcmpl_committed_json_failure",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "second\n</\u{FF5C}DSML\u{FF5C}tool_calls>"
+                    }
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+    };
+    let failure = execute_committed_follow_up_round(
+        &manifest,
+        &second_transport,
+        &sink,
+        &projection,
+        "req-committed-json-hook-failure",
+    )
+    .await
+    .expect("a committed hook failure must end through its typed provider failure");
+
+    assert_eq!(
+        second_transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .len(),
+        1,
+        "the JSON hook failure must not retry or select another candidate"
+    );
+    assert!(
+        failure.error_chain.is_some(),
+        "the typed response hook failure must remain observable"
+    );
+
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let payloads = sse_payloads(&frames);
+    assert_eq!(
+        payloads
+            .iter()
+            .filter(
+                |payload| payload.get("type").and_then(serde_json::Value::as_str)
+                    == Some("response.created")
+            )
+            .count(),
+        1,
+        "the cross-round failure must not append a second response head: {frames:?}"
+    );
+    assert!(
+        !payloads.iter().any(|payload| {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+        }),
+        "the failed follow-up round must not fabricate a completed terminal: {frames:?}"
+    );
+}
+
+#[tokio::test]
+async fn committed_relay_sse_round_then_json_refill_keeps_terminal_business_items_once() {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let first_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::SseFirst,
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection: super::relay_client_frames::V3RelayClientProjectionHandle =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+
+    let first_output =
+        execute_committed_first_round(&manifest, &first_transport, &sink, &projection).await;
+    let accumulated_items = collect_v3_chat_process_business_output_items(
+        first_output
+            .finalized_response
+            .as_ref()
+            .expect("first round finalized response"),
+    );
+    {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.as_mut()
+            .expect("committed projection")
+            .close_round()
+            .expect("close the committed round");
+    }
+
+    let second_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::Json(
+            json!({
+                "id": "chatcmpl_committed_json_refill",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "second"}
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+    };
+    let second_output = execute_committed_follow_up_round(
+        &manifest,
+        &second_transport,
+        &sink,
+        &projection,
+        "req-committed-json-refill",
+    )
+    .await
+    .expect("the JSON refill round must complete");
+    let mut merged = second_output
+        .finalized_response
+        .clone()
+        .expect("second round finalized response");
+    merge_v3_chat_process_refill_output_items(&mut merged, &accumulated_items);
+
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    let mut sealed = {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.take()
+            .expect("committed projection")
+            .finish(&merged, accumulated_items.len())
+            .expect("seal the merged cross-round response")
+    };
+    use futures_util::StreamExt;
+    while let Some(frame) = sealed.next().await {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+
+    let terminal = sse_payloads(&frames)
+        .into_iter()
+        .find(|payload| {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+        })
+        .expect("merged response terminal");
+    let terminal_items = terminal
+        .pointer("/response/output")
+        .and_then(serde_json::Value::as_array)
+        .expect("terminal output");
+    let mut texts = Vec::new();
+    for item in terminal_items {
+        if let Some(content) = item.get("content").and_then(serde_json::Value::as_array) {
+            for part in content {
+                if part.get("type").and_then(serde_json::Value::as_str) == Some("output_text") {
+                    texts.push(
+                        part.get("text")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default(),
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(
+        texts,
+        vec!["first", "second"],
+        "the terminal must keep each round's business text exactly once: {terminal}"
+    );
+    assert_eq!(
+        second_transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .len(),
+        1,
+        "the successful refill round must use one provider attempt"
+    );
 }

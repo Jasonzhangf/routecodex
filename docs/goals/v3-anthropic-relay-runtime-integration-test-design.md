@@ -27,18 +27,19 @@ mainline call map and wiki.
 | Responses SSE terminal | raw SSE chunks enter `V3ProviderRespInbound01Raw`; `ProviderRespCompat02` invokes the canonical collector before `V3HubRespInbound02Normalized`, and Anthropic projection occurs only after Resp03 | EOF/`[DONE]` without a terminal response enters Error01-06; no partial success synthesis, pre-Resp01 semantic materialization, or second parser |
 | Anthropic provider thinking SSE | `thinking/thinking_delta/signature_delta` and `redacted_thinking/data` normalize to Responses reasoning summary/encrypted_content | `reasoning` aliases, native+alias dual truth, cross-block delta types, `thinking_delta.text`, `redacted_thinking.signature`, and malformed signature fail in the provider event codec |
 | provider 429/5xx | failure enters Error01-06 and retains Anthropic error polarity | failure cannot reach Resp01-06 success nodes |
-| topology | all 15 fixed Hub edges occur once and in order | shortcut, missing edge, duplicate response exit, dynamic hook, continuation revival, or P6 extension fails source/mutation gates |
+| topology | the manifest keeps all 15 fixed Hub edges and their declared call-map bindings; runtime consumers verify actual lifecycle and response exit | missing or changed manifest edges/callees fail data mutations; request/response regressions fail real consumers |
 | client payload ownership | Resp03-governed truth is projected once into Resp05 and returned only from ServerResp06 | runtime closures cannot return a payload that bypasses Resp05/ServerResp06 |
 
-The integration test, verifier, and red fixtures are wired into `verify:architecture-ci-longtail`,
-which is invoked by `verify:architecture-ci`.
+The Rust integration test runs through the existing V3 workspace consumer entry. The reduced
+`verify:v3-anthropic-relay-runtime-integration` checks only the mainline manifest and call-map data.
+Its three manifest/call-map mutations run in `v3/scripts/verify-red.mjs`. Runtime function spellings,
+private struct literals, trace strings and prose digests are not admission checks.
 
 ## Controlled blackbox
 
 The existing harness starts one loopback Responses upstream and invokes the built Server-owned driver.
-Every fixture must capture exactly one real provider request, compare its exact payload, compare the
-client projection, and verify the fixed node trace. The stable fixture digest is
-`74e56c98d05ced968949acdd5d73a05d2a78330cc58a50cae5445a30f50ff50e`.
+Every fixture must capture exactly one real provider request, compare its payload, compare the
+client projection, and verify the fixed node trace. Fixture identity digests are not required.
 
 The pre-change baseline is `status=wiring_missing` with ten missing adjacent edges. A missing driver,
 zero/multiple upstream captures, fixture transformer, fabricated node trace, side-channel leakage, or

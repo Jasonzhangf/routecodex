@@ -1,9 +1,20 @@
 use super::*;
-use crate::webui_observability::V3WebuiObservability;
+use crate::webui_observability::{
+    build_v3_obs_request_key, record_v3_observability_event, V3ObsErrorProjection, V3ObsErrorTruth,
+    V3ObsEventType, V3ObsRequestMeta, V3ObsScope, V3WebuiObservability,
+};
+use axum::body::Bytes;
 use routecodex_v3_error::V3ErrorSourceKind;
 use routecodex_v3_runtime::V3AnthropicRelayClientBody;
 use std::collections::BTreeMap;
 use std::sync::Mutex as StdMutex;
+
+mod foundation_output;
+mod frame_sdk_fault;
+mod local599_output;
+mod post_commit_sse_sdk_fault;
+mod terminal_probe_join;
+mod websocket_sdk_fault;
 
 #[tokio::test]
 async fn listener_bind_retries_eintr_once_before_success() {
@@ -211,6 +222,7 @@ fn test_v3_listener_state_with_debug(
         debug: V3DebugManifest {
             log_console: false,
             log_file: Some(log_file.to_string_lossy().to_string()),
+            projection_drop_log_file: None,
             snapshots,
             codex_samples,
             snapshot_stages,
@@ -223,7 +235,6 @@ fn test_v3_listener_state_with_debug(
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
     });
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
@@ -246,15 +257,26 @@ fn test_v3_listener_state_with_debug(
                 && !manifest.debug.full_codex_sampling
                 && !manifest.debug.codex_samples,
         )),
-        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
-        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-        responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
         webui_observability: V3WebuiObservability::new(),
     })
+}
+
+fn start_test_codex_sample_worker(
+    state: &V3ListenerState,
+) -> (
+    tokio::runtime::Runtime,
+    routecodex_v3_debug::V3CodexSamplePersistHandle,
+) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let worker = {
+        let _runtime = runtime.enter();
+        state.codex_sample_store.start_persist_worker().unwrap()
+    };
+    (runtime, worker)
 }
 
 #[test]
@@ -405,8 +427,9 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
         std::process::id()
     ));
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
 
-    let persistence_error = persist_v3_error_evidence_payload(
+    persist_v3_error_evidence_payload(
         &state,
         "responses",
         "/v1/responses",
@@ -415,7 +438,10 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
         &json!({"input":"must fail explicitly"}),
         Some(502),
     )
-    .expect_err("missing HOME must not silently skip an authorized sample write");
+    .expect("authorized evidence must enter the sample worker");
+    let persistence_error = sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .expect_err("missing HOME must not silently skip an authorized sample write");
     assert!(persistence_error.contains("HOME"), "{persistence_error}");
 
     let startup_error = state
@@ -423,6 +449,499 @@ fn codex_sample_store_persistence_and_retention_are_owned_by_debug_crate() {
         .enforce_listener_retention(5555)
         .expect_err("missing HOME must fail startup retention explicitly");
     assert!(startup_error.contains("HOME"), "{startup_error}");
+    sample_runtime.block_on(sample_worker.shutdown());
+}
+
+#[test]
+fn failure_evidence_preserves_distinct_terminal_sources() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-terminal-source-evidence-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
+
+    let provider_source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3Transport13ResponsesHttpRequest",
+        "provider_http_429",
+        "provider returned HTTP 429",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("rate_limit".to_string()),
+            provider_id: Some("alpha".to_string()),
+            upstream_request_id: Some("upstream-cause".to_string()),
+            message: Some("rate limited".to_string()),
+        },
+    );
+    let runtime_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error05ExecutionDecision",
+        "sdk_error",
+        "SDK policy decision failed",
+    );
+    let attempts = vec![V3RuntimeProviderFailureObservation {
+        external_error_status: provider_source
+            .external_error
+            .as_ref()
+            .and_then(|link| link.status),
+        diagnostic_source: Some(provider_source.clone()),
+        ..test_provider_failure_observation()
+    }];
+
+    persist_v3_chat_failure_evidence_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "terminal-source-preserved",
+        &attempts,
+        Some(&runtime_source),
+        Some(&provider_source),
+    );
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+
+    let evidence_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/\
+         terminal-source-preserved/provider-failed-attempts.json",
+    );
+    let evidence: Value =
+        serde_json::from_str(&fs::read_to_string(&evidence_path).unwrap()).unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&runtime_source).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(
+        evidence["attempts"][0]["diagnostic_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"][0]["provider_status"], json!(429));
+
+    persist_v3_chat_failure_evidence_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "terminal-source-absent",
+        &[],
+        Some(&provider_source),
+        None,
+    );
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+    let legacy_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/\
+         terminal-source-absent/provider-failed-attempts.json",
+    );
+    let legacy: Value = serde_json::from_str(&fs::read_to_string(&legacy_path).unwrap()).unwrap();
+    assert_eq!(
+        legacy["terminal_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert!(
+        legacy.get("terminal_cause").is_none(),
+        "absence of a separate cause must preserve the existing artifact shape: {legacy}"
+    );
+    sample_runtime.block_on(sample_worker.shutdown());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn relay_consumers_preserve_sources_without_observation_or_attempts() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-relay-source-consumers-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (runtime, mut worker) = start_test_codex_sample_worker(&state);
+    let cause = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+        "V3ProviderReqOutbound09TransportRequest",
+        "client_disconnect",
+        "client closed",
+    );
+    let source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error06ClientProjected",
+        "relay_error_operator_sdk_failure",
+        "SDK rejected input",
+    );
+    let chat = V3OpenAiChatRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        error_class: None,
+        error_detail: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_chat_failure_evidence(
+        &state,
+        "openai_chat",
+        "/v1/chat/completions",
+        "relay-chat",
+        &chat,
+    );
+    let anthropic = V3AnthropicRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_response: Value::Null,
+        client_body: routecodex_v3_runtime::V3AnthropicRelayClientBody::Json,
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_anthropic_relay_failure_evidence(
+        &state,
+        "/v1/messages",
+        "relay-anthropic",
+        &anthropic,
+    );
+    let gemini = V3GeminiRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3GeminiRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_gemini_relay_failure_evidence(
+        &state,
+        "/v1beta/models/model:generateContent",
+        "relay-gemini",
+        &gemini,
+    );
+    let responses = V3ResponsesRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
+        client_body: routecodex_v3_runtime::V3ResponsesRelayClientBody::Json(Value::Null),
+        node_trace: Vec::new(),
+        error_chain: None,
+        observability: None,
+        stream_observation: None,
+        provider_snapshots: None,
+        finalized_response: None,
+        protocol_direct_handoff: None,
+        diagnostic_source: Some(source.clone()),
+        diagnostic_cause: Some(cause.clone()),
+    };
+    persist_v3_responses_relay_failure_sources(
+        &state,
+        "responses",
+        "/v1/responses",
+        "relay-responses",
+        &responses,
+    );
+    runtime.block_on(worker.wait_until_idle()).unwrap();
+    for (protocol, request) in [
+        ("openai-chat-completions", "relay-chat"),
+        ("anthropic-messages", "relay-anthropic"),
+        ("gemini-generate-content", "relay-gemini"),
+        ("openai-responses", "relay-responses"),
+    ] {
+        let path = root
+            .join(".rcc/codex-samples")
+            .join(protocol)
+            .join("ports/5555")
+            .join(request)
+            .join("provider-failed-attempts.json");
+        let evidence: Value = serde_json::from_str(
+            &fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+        )
+        .unwrap();
+        assert_eq!(
+            evidence["terminal_source"],
+            serde_json::to_value(&source).unwrap()
+        );
+        assert_eq!(
+            evidence["terminal_cause"],
+            serde_json::to_value(&cause).unwrap()
+        );
+        assert_eq!(evidence["attempts"], json!([]));
+    }
+    runtime.block_on(worker.shutdown());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn responses_direct_policy_failure_consumer_preserves_cause_and_transport_break() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-direct-policy-terminal-consumer-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+
+    // The Runtime producer test proves the SDK policy fault and its original
+    // cause. SDK failure is not inducible through the Server HTTP entry, so this
+    // consumer starts from that actual output contract and exercises the real
+    // Server persistence and terminal transport owners.
+    let provider_source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_200",
+        "provider returned HTTP 200",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(200),
+            code: Some("HTTP_200".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: Some("upstream-200".to_string()),
+            message: Some("provider returned HTTP 200".to_string()),
+        },
+    );
+    let policy_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Error05ExecutionDecision",
+        "v3_route_target_runtime_failure",
+        "SDK policy decision failed",
+    );
+    let mut attempt = test_provider_failure_observation();
+    attempt.diagnostic_source = Some(provider_source.clone());
+    attempt.external_error_status = Some(200);
+    let raw_body = br#"{"id":"provider-response"}"#.to_vec();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        200,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        raw_body.clone(),
+    );
+    let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
+        client_payload: V3Resp15ClientPayload {
+            status: 502,
+            headers: BTreeMap::new(),
+            body: V3ClientBody::Json(json!({
+                "error": {"code": "must_not_reach_client"}
+            })),
+        },
+        terminal_disposition: Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        ),
+        diagnostic_source: Some(policy_source.clone()),
+        diagnostic_cause: Some(provider_source.clone()),
+        provider_request_snapshot: None,
+        provider_response_snapshot: None,
+        node_trace: vec!["V3Error05ExecutionDecision", "V3Error06ClientProjected"],
+        error_chain: Some(vec![
+            "V3Error05ExecutionDecision",
+            "V3Error06ClientProjected",
+        ]),
+        observability: Some(test_direct_observability(vec![attempt])),
+        stream_observation: None,
+        protocol_relay_handoff: None,
+    };
+
+    let terminal =
+        responses_direct_server_outcome::take_responses_direct_terminal_outcome(&mut output)
+            .expect("Direct policy failure must retain its provider terminal disposition");
+    terminal.publish_observations(
+        &state,
+        None,
+        "responses",
+        "/v1/responses",
+        "direct-policy-failure-consumer",
+    );
+    let responses_direct_server_outcome::V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) =
+        terminal
+    else {
+        panic!("Direct policy failure must use the provider terminal transport owner");
+    };
+    let response = provider_terminal_response(
+        &state,
+        None,
+        terminal.disposition,
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "responses",
+            endpoint: "/v1/responses",
+            request_id: "direct-policy-failure-consumer",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+
+    let sample_dir =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/direct-policy-failure-consumer");
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-failed-attempts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&policy_source).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(
+        evidence["attempts"][0]["diagnostic_source"],
+        serde_json::to_value(&provider_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"][0]["provider_status"], json!(200));
+
+    let terminal: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-terminal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["kind"], "external_http");
+    assert_eq!(terminal["status"], 200);
+    assert_eq!(terminal["body"], json!(raw_body));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("Direct policy failure must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
+    assert!(
+        !error.to_string().contains("must_not_reach_client"),
+        "{error}"
+    );
+    assert!(!error.to_string().contains("provider-response"), "{error}");
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-protocol-plan-fault-consumer-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+
+    // Runtime's real-rejection test proves this fault is the contract emitted by
+    // the Error operator. SDK rejection has no public HTTP injection path, so this
+    // test begins at that typed output and exercises the actual Server consumer.
+    let original_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        "V3Execution11ProtocolDecision",
+        "protocol_plan_runtime_failure",
+        "protocol plan failed before dispatch",
+    );
+    let fault = routecodex_v3_runtime::V3RelayErrorOperatorFault {
+        policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "V3Error06ClientProjected",
+            "relay_error_operator_sdk_failure",
+            "Error06 SDK rejected the source projection",
+        ),
+        original_source: Some(original_source.clone()),
+    };
+    let response = crate::endpoint_handlers::finish_v3_protocol_execution_plan_failure(
+        &state,
+        None,
+        "responses",
+        "/v1/responses",
+        "protocol-plan-operator-fault",
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "responses",
+            endpoint: "/v1/responses",
+            request_id: "protocol-plan-operator-fault",
+        },
+        Err(fault.clone()),
+    )
+    .expect_err("the consumer must not turn an operator fault into Error06 success");
+    sample_worker.wait_until_idle().await.unwrap();
+
+    let sample_dir =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/protocol-plan-operator-fault");
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-failed-attempts.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence["terminal_source"],
+        serde_json::to_value(&fault.policy_failure).unwrap()
+    );
+    assert_eq!(
+        evidence["terminal_cause"],
+        serde_json::to_value(&original_source).unwrap()
+    );
+    assert_eq!(evidence["attempts"], json!([]));
+
+    let terminal: Value = serde_json::from_str(
+        &fs::read_to_string(sample_dir.join("provider-terminal.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal["kind"], "no_response");
+    assert_eq!(terminal["status"], Value::Null);
+    assert_eq!(terminal["body"], Value::Null);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut client = response.into_body().into_data_stream();
+    let mut wire = Vec::new();
+    let terminal_error = loop {
+        match client.next().await {
+            Some(Ok(chunk)) => wire.extend_from_slice(chunk.as_ref()),
+            Some(Err(error)) => break error,
+            None => panic!("operator fault must break the client transport"),
+        }
+    };
+    let wire = String::from_utf8(wire).unwrap();
+    assert_eq!(wire, ":\n\n");
+    assert!(!wire.contains("event:"), "{wire}");
+    assert!(!wire.contains("data:"), "{wire}");
+    assert!(!wire.contains("protocol_plan_runtime_failure"), "{wire}");
+    assert!(!wire.contains("relay_error_operator_sdk_failure"), "{wire}");
+    assert!(terminal_error
+        .to_string()
+        .contains("SSE transport unavailable"));
+    assert!(
+        client.next().await.is_none(),
+        "operator fault must close the body after the transport break"
+    );
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
@@ -439,6 +958,8 @@ async fn direct_sse_http_projection_injects_keepalive_and_preserves_provider_byt
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -480,6 +1001,8 @@ async fn direct_live_sse_reaches_front_before_provider_stream_eof() {
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -518,26 +1041,63 @@ async fn direct_live_sse_provider_unavailable_closes_as_recoverable_disconnect()
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
     };
 
     let response = responses_direct_output_response(frame, None);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let mut client = response.into_body().into_data_stream();
+    let body = client.next().await.unwrap().unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.output_text.delta"), "{text}");
     assert!(!text.contains("event: response.failed"), "{text}");
     assert!(!text.contains("internal_response_stream_error"), "{text}");
     assert!(!text.contains("provider secret detail"), "{text}");
     assert!(!text.contains("data: [DONE]"), "{text}");
+    assert!(
+        client.next().await.unwrap().is_err(),
+        "failure must abort, never clean EOF"
+    );
 }
 
-#[tokio::test]
-async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts() {
+#[test]
+fn v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only() {
+    if std::env::var_os("V3_OPTIONAL_SNAPSHOT_DIAGNOSTIC_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::v3_http_server_responses_direct_sse_optional_snapshot_failure_is_diagnostic_only",
+                "--nocapture",
+            ])
+            .env("V3_OPTIONAL_SNAPSHOT_DIAGNOSTIC_CHILD", "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "focused child failed; stdout={} stderr={stderr}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "focused child must execute exactly one test: {stderr}"
+        );
+        assert!(
+            stderr.contains("[v3-sse-snapshot] client response capture failed"),
+            "append failure must remain detectable as a diagnostic: {stderr}"
+        );
+        assert!(
+            stderr.contains("[v3-sse-snapshot] client response finalize failed"),
+            "terminal persistence failure must remain detectable as a diagnostic: {stderr}"
+        );
+        return;
+    }
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-terminal-sse-sample-{}",
+        "routecodex-v3-optional-snapshot-failure-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -551,131 +1111,198 @@ async fn codex_sample_sse_recorders_persist_only_initial_and_terminal_artifacts(
         Some("client-response".to_string()),
         true,
     );
-    let chunk = b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
-    let provider_observation = test_runtime_stream_observation_from_provider_event_json(json!({
-        "type": "response.output_text.delta",
-        "delta": "provider"
-    }));
-    provider_observation
-        .merge_snapshot(&routecodex_v3_runtime::V3RuntimeStreamObservationSnapshot {
-            provider_raw_sse:
-                "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n"
-                    .to_string(),
-            ..Default::default()
-        })
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let evidence = runtime.block_on(async {
+        let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+        let business_bytes =
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"business\"}\n\n"
+                .to_vec();
+        let frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Bytes(Vec::new()),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+        let recorder = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+            &state,
+            "responses",
+            "/v1/responses",
+            "optional-snapshot-public-consumer",
+            &frame,
+        )
         .unwrap();
-    let frame = V3Server16HttpFrame {
-        status: 200,
-        content_type: "text/event-stream".to_string(),
-        body: V3Server16Body::Bytes(Vec::new()),
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: "none",
-        error_chain: Vec::new(),
-        error_body: None,
-        node_trace: vec!["V3Server16HttpFrame"],
-        observability: None,
-        stream_observation: Some(provider_observation),
-    };
-    let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
-        Arc::clone(&state),
-        "responses".to_string(),
-        "/v1/responses".to_string(),
-        "terminal-only".to_string(),
-        &frame,
-    );
-    recorder.persist_initial().unwrap();
-    let response_path =
-        root.join(".rcc/codex-samples/openai-responses/ports/5555/terminal-only/response.json");
-    let initial: Value =
-        serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
-    assert_eq!(initial["rawSse"], "");
+        recorder.poison_raw_sse_capture_for_test();
+        let response = recorder.observe_response(responses_direct_output_response(
+            V3Server16HttpFrame {
+                body: V3Server16Body::Sse(Box::pin(
+                    futures_util::stream::iter(vec![Ok::<
+                        Vec<u8>,
+                        routecodex_v3_error::V3Error01SourceRaised,
+                    >(business_bytes.clone())]),
+                )),
+                ..frame
+            },
+            None,
+        ));
+        let mut client = response.into_body().into_data_stream();
+        let mut delivered = Vec::new();
+        let mut body_error = None;
+        while let Some(item) = client.next().await {
+            match item {
+                Ok(bytes) => delivered.extend_from_slice(&bytes),
+                Err(error) => {
+                    body_error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
 
-    let mut stream = recorder.wrap_committed(test_committed_anthropic_sse(json!([{
-        "event": "message_stop",
-        "data": {"type": "message_stop"}
-    }])));
-    assert_eq!(stream.next().await.unwrap(), chunk);
-    let during_stream: Value =
-        serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
+        let original_source = routecodex_v3_error::build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ServerRespOutbound05ClientFrame",
+            "original_business_source",
+            "original source must survive optional snapshot failure",
+        );
+        let source_frame = V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body: V3Server16Body::Bytes(Vec::new()),
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3Server16HttpFrame"],
+            observability: None,
+            stream_observation: None,
+        };
+        let source_recorder = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+            &state,
+            "responses",
+            "/v1/responses",
+            "optional-snapshot-source-error",
+            &source_frame,
+        )
+        .unwrap();
+        source_recorder.poison_raw_sse_capture_for_test();
+        #[derive(Debug)]
+        struct PreservedSource(routecodex_v3_error::V3Error01SourceRaised);
+        impl std::fmt::Display for PreservedSource {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str(&self.0.message)
+            }
+        }
+        impl std::error::Error for PreservedSource {}
+        let source_response = source_recorder.observe_response(
+            axum::http::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(axum::body::Body::from_stream(futures_util::stream::iter(vec![
+                    Err::<axum::body::Bytes, _>(PreservedSource(original_source.clone())),
+                ])))
+                .unwrap(),
+        );
+        let error = source_response
+            .into_body()
+            .into_data_stream()
+            .next()
+            .await
+            .expect("the original source must remain an error")
+            .expect_err("the optional recorder must not replace the original error with bytes");
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        let yielded_source = loop {
+            if let Some(source) = cause.downcast_ref::<PreservedSource>() {
+                break source.0.clone();
+            }
+            cause = cause.source().expect("the complete original source must remain in the error chain");
+        };
+        sample_worker.shutdown().await;
+        (
+            business_bytes,
+            delivered,
+            body_error,
+            original_source,
+            yielded_source,
+        )
+    });
+    let (business_bytes, delivered, body_error, original_source, yielded_source) = evidence;
+
     assert_eq!(
-        during_stream["rawSse"], "",
-        "stream chunks must not trigger synchronous full-artifact rewrites"
+        delivered, business_bytes,
+        "optional snapshot failure must preserve every original business byte"
     );
-    assert!(stream.next().await.is_none());
-    let terminal: Value =
-        serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
-    assert!(terminal["rawSse"]
-        .as_str()
-        .is_some_and(|value| value.contains("message_stop")));
-    let provider_response_path = root.join(
-        ".rcc/codex-samples/openai-responses/ports/5555/terminal-only/provider-response.json",
+    assert!(
+        body_error.is_none(),
+        "optional snapshot failure must not terminate the public SSE consumer: {body_error:?}"
     );
-    let provider_response: Value =
-        serde_json::from_str(&fs::read_to_string(provider_response_path).unwrap()).unwrap();
-    assert!(provider_response["rawSse"]
-        .as_str()
-        .is_some_and(|value| value.contains("response.output_text.delta")));
-
-    let live_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
-        Arc::clone(&state),
-        "responses".to_string(),
-        "/v1/responses".to_string(),
-        "live-sse".to_string(),
-        &frame,
+    assert_eq!(
+        yielded_source, original_source,
+        "optional snapshot failure must preserve the original upstream source"
     );
-    live_recorder.persist_initial().unwrap();
-    let live_response_path =
-        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/response.json");
-    let live_stream: V3ClientSseStream =
-        Box::pin(futures_util::stream::iter(vec![Ok::<
-            Vec<u8>,
-            routecodex_v3_error::V3Error01SourceRaised,
-        >(chunk.clone())]));
-    let mut live_stream = live_recorder.wrap_live(live_stream);
-    assert!(live_stream.next().await.is_some());
-    assert!(live_stream.next().await.is_none());
-    let live_provider_response_path =
-        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse/provider-response.json");
-    let live_provider_response: Value =
-        serde_json::from_str(&fs::read_to_string(live_provider_response_path).unwrap()).unwrap();
-    assert!(live_provider_response["rawSse"]
-        .as_str()
-        .is_some_and(|value| value.contains("response.output_text.delta")));
-    let live_response: Value =
-        serde_json::from_str(&fs::read_to_string(live_response_path).unwrap()).unwrap();
-    assert!(live_response["rawSse"]
-        .as_str()
-        .is_some_and(|value| value.contains("message_stop")));
-
-    let failed_recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
-        Arc::clone(&state),
-        "responses".to_string(),
-        "/v1/responses".to_string(),
-        "live-sse-failure".to_string(),
-        &frame,
-    );
-    failed_recorder.persist_initial().unwrap();
-    let failed_response_path =
-        root.join(".rcc/codex-samples/openai-responses/ports/5555/live-sse-failure/response.json");
-    fs::remove_file(&failed_response_path).unwrap();
-    fs::create_dir(&failed_response_path).unwrap();
-    let failed_stream: V3ClientSseStream = Box::pin(futures_util::stream::empty());
-    let mut failed_stream = failed_recorder.wrap_live(failed_stream);
-    let failure = failed_stream
-        .next()
-        .await
-        .expect("capture failure must become a stream error")
-        .expect_err("terminal persistence failure must not be swallowed");
-    assert_eq!(failure.code, "codex_sample_persistence_failed");
 
     fs::remove_dir_all(root).unwrap();
 }
 
+fn test_final_body_sse_capture(
+    state: &Arc<V3ListenerState>,
+    request_id: &str,
+) -> V3LiveSnapFinalSseResponseCapture {
+    let frame = V3Server16HttpFrame {
+        status: 200,
+        content_type: "text/event-stream".to_string(),
+        body: V3Server16Body::Bytes(Vec::new()),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: None,
+        stream_observation: None,
+    };
+    V3LiveSnapFinalSseResponseCapture::from_direct_frame(
+        state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        &frame,
+    )
+    .expect("Direct final-body capture must be enabled")
+}
+
+fn test_sse_response(
+    stream: impl futures_util::Stream<Item = Result<Bytes, io::Error>> + Send + 'static,
+) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from_stream(stream))
+        .unwrap()
+}
+
+async fn collect_body_bytes(response: Response<Body>) -> Result<Vec<u8>, axum::Error> {
+    let mut stream = response.into_body().into_data_stream();
+    let mut collected = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        collected.extend_from_slice(&chunk?);
+    }
+    Ok(collected)
+}
+
 #[tokio::test]
-async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
+async fn codex_sample_final_body_capture_persists_exact_large_sse_wire() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
-        "routecodex-v3-dropped-sse-sample-{}",
+        "routecodex-v3-final-body-sse-sample-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&root);
@@ -689,52 +1316,248 @@ async fn codex_sample_sse_recorder_persists_drop_artifact_with_stream_error() {
         Some("client-response".to_string()),
         true,
     );
-    let frame = V3Server16HttpFrame {
-        status: 200,
-        content_type: "text/event-stream".to_string(),
-        body: V3Server16Body::Bytes(Vec::new()),
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: "none",
-        error_chain: Vec::new(),
-        error_body: None,
-        node_trace: vec!["V3Server16HttpFrame"],
-        observability: None,
-        stream_observation: None,
-    };
-    let recorder = V3LiveSnapDirectClientResponseSseRecorder::new(
-        Arc::clone(&state),
-        "responses".to_string(),
-        "/v1/responses".to_string(),
-        "dropped-before-terminal".to_string(),
-        &frame,
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-exact-wire";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    let keepalive = b": keepalive\n\n".to_vec();
+    let event = format!(
+        "event: response.output_text.delta\ndata: {{\"type\":\"response.output_text.delta\",\"delta\":\"{}\"}}\n\n",
+        "x".repeat(200_000)
+    )
+    .into_bytes();
+    let terminal =
+        b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n".to_vec();
+    let expected = [keepalive.clone(), event.clone(), terminal.clone()].concat();
+    let response = test_sse_response(futures_util::stream::iter(vec![
+        Ok::<Bytes, io::Error>(Bytes::from(keepalive)),
+        Ok(Bytes::from(event)),
+        Ok(Bytes::from(terminal)),
+    ]));
+    let response = capture.observe_response(response);
+    let response_path = root
+        .join(".rcc/codex-samples/openai-responses/ports/5555/final-body-exact-wire/response.json");
+    assert!(
+        !response_path.exists(),
+        "final-body capture must not write a placeholder before the stream ends"
     );
-    recorder.persist_initial().unwrap();
-    let response_path = root.join(
-        ".rcc/codex-samples/openai-responses/ports/5555/dropped-before-terminal/response.json",
-    );
-    let mut stream = recorder.wrap_committed(test_committed_anthropic_sse(json!([
-        {
-            "event": "message_delta",
-            "data": {"type": "message_delta", "delta": {"stop_reason": null}}
-        },
-        {
-            "event": "message_stop",
-            "data": {"type": "message_stop"}
-        }
-    ])));
-    assert!(stream.next().await.is_some());
-    drop(stream);
 
-    let dropped: Value =
-        serde_json::from_str(&fs::read_to_string(&response_path).unwrap()).unwrap();
-    assert!(dropped["rawSse"]
-        .as_str()
-        .is_some_and(|value| value.contains("message_delta")));
+    assert_eq!(collect_body_bytes(response).await.unwrap(), expected);
+    sample_worker.wait_until_idle().await.unwrap();
+    let persisted: Value =
+        serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
+    assert_eq!(persisted["bodyKind"], "sse");
     assert_eq!(
-        dropped["streamError"],
-        "client disconnected before SSE replay completed"
+        persisted["rawSse"].as_str(),
+        Some(String::from_utf8(expected).unwrap().as_str())
+    );
+    assert_eq!(persisted["node_trace"], json!(["V3Server16HttpFrame"]));
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn codex_sample_final_body_capture_persists_source_error_and_preserves_business_error() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-final-body-source-error-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-source-error";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    let prefix =
+        b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\"}\n\n"
+            .to_vec();
+    let response = test_sse_response(futures_util::stream::iter(vec![
+        Ok::<Bytes, io::Error>(Bytes::from(prefix.clone())),
+        Err(io::Error::other("provider source error")),
+    ]));
+    let response = capture.observe_response(response);
+    let mut body = response.into_body().into_data_stream();
+    assert_eq!(body.next().await.unwrap().unwrap().as_ref(), prefix);
+    let body_error = body
+        .next()
+        .await
+        .expect("source error must remain visible")
+        .expect_err("source error must not become a clean EOF");
+    assert!(body_error.to_string().contains("provider source error"));
+    assert!(body.next().await.is_none());
+
+    sample_worker.wait_until_idle().await.unwrap();
+    let response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/final-body-source-error/response.json",
+    );
+    let persisted: Value =
+        serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
+    assert_eq!(
+        persisted["rawSse"].as_str(),
+        Some(String::from_utf8(prefix).unwrap().as_str())
+    );
+    assert!(persisted["streamError"]
+        .as_str()
+        .is_some_and(|error| error.contains("provider source error")));
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn codex_sample_final_body_capture_persists_drop_prefix_with_stream_error() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-final-body-drop-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-drop";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    let prefix = b"event: message_delta\ndata: {\"type\":\"message_delta\"}\n\n".to_vec();
+    let response = test_sse_response(
+        futures_util::stream::iter(vec![Ok::<Bytes, io::Error>(Bytes::from(prefix.clone()))])
+            .chain(futures_util::stream::pending()),
+    );
+    let response = capture.observe_response(response);
+    let mut body = response.into_body().into_data_stream();
+    assert_eq!(body.next().await.unwrap().unwrap().as_ref(), prefix);
+    drop(body);
+
+    sample_worker.wait_until_idle().await.unwrap();
+    let response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/final-body-drop/response.json");
+    let persisted: Value =
+        serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
+    assert_eq!(
+        persisted["rawSse"].as_str(),
+        Some(String::from_utf8(prefix).unwrap().as_str())
+    );
+    assert_eq!(
+        persisted["streamError"],
+        "client disconnected before response stream completed"
     );
 
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn codex_sample_final_body_capture_follows_transport_break_replacement() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-final-body-break-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-break";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    // A post-commit attempt has no client payload: the transport breaks and the
+    // server replaces the outcome response with the break response.
+    let response = capture.defer_into(model_no_response_output(true));
+    let response = commit_model_transport_outcome(&state, None, response);
+    let response = observe_v3_live_client_wire(response);
+    let mut body = response.into_body().into_data_stream();
+    assert_eq!(
+        body.next().await.unwrap().unwrap().as_ref(),
+        b":\n\n",
+        "the client observes the transport break head"
+    );
+    body.next()
+        .await
+        .expect("transport break must stay visible")
+        .expect_err("transport break must not become a clean EOF");
+    assert!(body.next().await.is_none());
+
+    sample_worker.wait_until_idle().await.unwrap();
+    let response_path =
+        root.join(".rcc/codex-samples/openai-responses/ports/5555/final-body-break/response.json");
+    let persisted: Value =
+        serde_json::from_str(&fs::read_to_string(response_path).unwrap()).unwrap();
+    assert_eq!(
+        persisted["rawSse"].as_str(),
+        Some(":\n\n"),
+        "the sample must record the bytes the client receives after the replacement"
+    );
+    assert!(persisted["streamError"]
+        .as_str()
+        .is_some_and(|error| error.contains("provider pool exhausted")));
+
+    sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn codex_sample_final_body_capture_write_failure_does_not_change_sse_wire() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-final-body-write-failure-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state = test_v3_listener_state_with_debug(
+        &root.join("server.log"),
+        5555,
+        true,
+        true,
+        Some("client-response".to_string()),
+        true,
+    );
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let request_id = "final-body-write-failure";
+    let capture = test_final_body_sse_capture(&state, request_id);
+    let response_path = root.join(
+        ".rcc/codex-samples/openai-responses/ports/5555/final-body-write-failure/response.json",
+    );
+    fs::create_dir_all(&response_path).unwrap();
+    let wire =
+        b": keepalive\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec();
+    let response = test_sse_response(futures_util::stream::iter(vec![Ok::<Bytes, io::Error>(
+        Bytes::from(wire.clone()),
+    )]));
+    let response = capture.observe_response(response);
+    assert_eq!(collect_body_bytes(response).await.unwrap(), wire);
+
+    let persistence_failure = sample_worker
+        .wait_until_idle()
+        .await
+        .expect_err("terminal filesystem failure must remain observable");
+    assert!(persistence_failure.contains("request=final-body-write-failure"));
+    assert!(persistence_failure.contains("file=response.json"));
+    sample_worker.shutdown().await;
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -750,10 +1573,13 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
     let _home = TestHomeGuard::set(&root);
     let log_file = root.join("server.log");
     let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, false);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
     let media = format!("data:image/png;base64,{}", "A".repeat(16_384));
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: None,
@@ -769,6 +1595,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
             })),
         }),
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     assert!(capture_v3_responses_relay_provider_snapshots(
@@ -779,6 +1606,9 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         &mut output,
     )
     .is_none());
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
 
     let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/redaction-request");
     let request = fs::read_to_string(sample_dir.join("provider-request.json")).unwrap();
@@ -803,6 +1633,7 @@ fn relay_provider_snapshots_are_persisted_verbatim_in_codex_samples() {
         "consumed debug payload must be released after persistence"
     );
 
+    sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -821,6 +1652,8 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: None,
@@ -828,6 +1661,7 @@ fn relay_missing_provider_snapshot_does_not_project_client_failure() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
     let mut snapshots = Some(routecodex_v3_runtime::V3RelayProviderSnapshots {
         provider_request: None,
@@ -857,7 +1691,8 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     let _home = TestHomeGuard::set(&root);
     let state =
         test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
-    let output = V3AnthropicRelayRuntimeOutput {
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
+    let mut output = V3AnthropicRelayRuntimeOutput {
         status: 200,
         client_response: json!({
             "type": "message",
@@ -866,10 +1701,13 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         client_body: V3AnthropicRelayClientBody::Json,
         node_trace: vec!["V3Resp03ToolReason"],
         error_chain: None,
-        servertool_followup_required: false,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        provider_failure_attempts: Vec::new(),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        terminal_disposition: None,
     };
 
     assert!(capture_v3_anthropic_relay_response(
@@ -877,9 +1715,12 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
         "anthropic",
         "/v1/messages",
         "anthropic-client-response",
-        &output,
+        &mut output,
     )
     .is_none());
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
 
     let response_path = root.join(
         ".rcc/codex-samples/anthropic-messages/ports/5555/anthropic-client-response/response.json",
@@ -888,6 +1729,7 @@ fn anthropic_relay_client_response_is_persisted_in_codex_samples() {
     assert!(response.contains("调用工具 pwd：确认当前工作目录"));
     assert!(response.contains("V3Resp03ToolReason"));
 
+    sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -902,7 +1744,8 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     fs::create_dir_all(&root).unwrap();
     let _home = TestHomeGuard::set(&root);
     let state =
-        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, false);
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, true, None, true);
+    let (sample_runtime, mut sample_worker) = start_test_codex_sample_worker(&state);
     let mut output = routecodex_v3_runtime::V3ResponsesDirectRuntimeOutput {
         client_payload: V3Resp15ClientPayload {
             status: 200,
@@ -925,6 +1768,9 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         observability: None,
         stream_observation: None,
         protocol_relay_handoff: None,
+        terminal_disposition: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -934,6 +1780,9 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         &mut output,
     )
     .is_none());
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
     let sample_dir = root.join(".rcc/codex-samples/openai-responses/ports/5555/typed-carrier");
     assert!(sample_dir.join("provider-request.json").is_file());
     assert!(sample_dir.join("provider-response.json").is_file());
@@ -969,6 +1818,9 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         observability: None,
         stream_observation: None,
         protocol_relay_handoff: None,
+        terminal_disposition: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1007,6 +1859,9 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
         observability: None,
         stream_observation: Some(V3RuntimeStreamObservation::default()),
         protocol_relay_handoff: None,
+        terminal_disposition: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
     };
     assert!(capture_v3_responses_direct_provider_snapshots(
         &state,
@@ -1017,6 +1872,10 @@ fn responses_direct_provider_snapshots_require_typed_carrier() {
     )
     .is_none());
     assert_eq!(streaming_missing_carrier.client_payload.status, 200);
+    sample_runtime
+        .block_on(sample_worker.wait_until_idle())
+        .unwrap();
+    sample_runtime.block_on(sample_worker.shutdown());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1069,6 +1928,7 @@ fn test_provider_failure_observation() -> V3RuntimeProviderFailureObservation {
         external_error_code: None,
         external_error_status: None,
         internal_code: None,
+        upstream_request_id: None,
         message: "upstream failed once".to_string(),
         failure_count: 1,
         health_state: "healthy".to_string(),
@@ -1076,6 +1936,8 @@ fn test_provider_failure_observation() -> V3RuntimeProviderFailureObservation {
         action: "switch_provider".to_string(),
         next_provider_key: Some("second:key:gpt-5.5".to_string()),
         wait_ms: None,
+        diagnostic_source: None,
+        failed_attempt_evidence: None,
     }
 }
 
@@ -1128,6 +1990,8 @@ fn direct_to_relay_handoff_preserves_failure_event_order() {
     let mut output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status":"completed"})),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: Vec::new(),
         error_chain: None,
         observability: Some(test_direct_observability(vec![relay_event])),
@@ -1135,6 +1999,7 @@ fn direct_to_relay_handoff_preserves_failure_event_order() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     merge_v3_direct_handoff_provider_failure_events(&mut output, vec![direct_event]);
@@ -1266,9 +2131,11 @@ fn usage_summary_extracts_cached_read_hit_tokens() {
     assert_eq!(summary.cache_read_input_tokens, Some(41_984));
     assert_eq!(summary.cache_creation_input_tokens, Some(7));
     assert_eq!(summary.cached_tokens, None);
+    // Anthropic input excludes cache, so the denominator includes both the read
+    // and the creation count: 59842 + 41984 + 7 = 101833.
     assert_eq!(
         format_v3_console_usage_summary(Some(&summary)),
-        "usage_in=59842 usage_out=822 usage_cache=41984/101826(41.2%) usage_total=60664"
+        "usage_in=59842 usage_out=822 usage_cache=41984/101833(41.2%) usage_total=60664"
     );
 }
 
@@ -1297,6 +2164,46 @@ fn console_project_path_reads_codex_environment_context_cwd() {
     assert_eq!(
         resolve_v3_console_project_path(&headers, &payload).as_deref(),
         Some("/Volumes/extension/code/OneStop")
+    );
+}
+
+#[test]
+fn console_project_path_reads_client_metadata_turn_metadata_workspaces() {
+    // dsh/codex responses payloads place turn metadata in the body under
+    // client_metadata.x-codex-turn-metadata (JSON string) with a workspaces
+    // map keyed by project root. When the request has no HTTP
+    // x-codex-turn-metadata and no inline cwd/input environment_context, the
+    // console project path must still resolve from the first workspaces key.
+    let payload = json!({
+        "model": "gpt-5.5",
+        "client_metadata": {
+            "x-codex-turn-metadata": "{\"workspaces\":{\"/Volumes/extension/code/dsh\":{\"associated_remote_urls\":{\"origin\":\"https://github.com/Jasonzhangf/dsh.git\"}}}}"
+        }
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/Volumes/extension/code/dsh")
+    );
+}
+
+#[test]
+fn console_project_path_uses_first_workspaces_key_in_source_order() {
+    // serde_json::Map is a BTreeMap without preserve_order, so naive
+    // .keys().next() would return the lexicographically first key. The
+    // console project path must honor the workspaces map's source order.
+    let payload = json!({
+        "model": "gpt-5.5",
+        "client_metadata": {
+            "x-codex-turn-metadata": "{\"workspaces\":{\"zebra-root\":{\"associated_remote_urls\":{}},\"alpha-root\":{\"associated_remote_urls\":{}}}}"
+        }
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("zebra-root")
     );
 }
 
@@ -1338,6 +2245,106 @@ fn console_project_path_prefers_header_over_injected_workspace_cwd() {
     assert_eq!(
         resolve_v3_console_project_path(&headers, &payload).as_deref(),
         Some("/from/header")
+    );
+}
+
+#[test]
+fn console_project_path_reads_pi_cwd_system_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "developer",
+            "content": "You are an expert coding assistant operating inside pi, a coding agent harness.\n\n<skills>\n</skills>\n\n<cwd>\n/Users/fanzhang/Documents/github/routecodex\n</cwd>\n\n# pi-crew Delegation Policy (MANDATORY)"
+        }, {
+            "role": "user",
+            "content": "ping"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/Users/fanzhang/Documents/github/routecodex")
+    );
+    assert_eq!(
+        format_v3_console_project_name(
+            resolve_v3_console_project_path(&headers, &payload).as_deref()
+        ),
+        "routecodex"
+    );
+}
+
+#[test]
+fn console_project_path_prefers_explicit_workdir_over_pi_cwd_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "workdir": "/from/body",
+        "messages": [{
+            "role": "developer",
+            "content": "<cwd>\n/from/pi-section\n</cwd>"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/body")
+    );
+}
+
+#[test]
+fn console_project_path_prefers_environment_context_over_pi_cwd_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "developer",
+            "content": "<cwd>\n/from/pi-section\n</cwd>"
+        }],
+        "input": [{
+            "type": "message",
+            "role": "user",
+            "content": [{
+                "type": "input_text",
+                "text": "<environment_context>\n  <cwd>/from/codex</cwd>\n</environment_context>"
+            }]
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/codex")
+    );
+}
+
+#[test]
+fn console_project_path_ignores_unpaired_pi_cwd_marker() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "developer",
+            "content": "the <cwd> marker without a closing tag must not resolve"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(resolve_v3_console_project_path(&headers, &payload), None);
+}
+
+#[test]
+fn console_project_path_falls_through_unquoted_prose_marker_to_pi_cwd_section() {
+    let payload = json!({
+        "model": "gpt-5.5",
+        "messages": [{
+            "role": "system",
+            "content": "Current workspace: unknown\n\n<cwd>\n/from/pi-section\n</cwd>"
+        }]
+    });
+    let headers = HeaderMap::new();
+
+    assert_eq!(
+        resolve_v3_console_project_path(&headers, &payload).as_deref(),
+        Some("/from/pi-section")
     );
 }
 
@@ -1628,7 +2635,7 @@ fn console_plain_layer_keeps_diagnostic_on_the_same_line() {
 }
 
 #[test]
-fn console_machine_fields_start_at_one_column_across_session_lengths() {
+fn console_machine_fields_align_within_session_width_budget() {
     let short = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
         "",
         "headline",
@@ -1641,40 +2648,57 @@ fn console_machine_fields_start_at_one_column_across_session_lengths() {
         "req=long event=started",
         "7a41-a44c-948f9ec6cf66",
     ));
-    let oversized_session =
-        "session-0123456789-abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let oversized_plain = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
+    let wide_session = "session-0123456789-abcdefghijklmnopqrstuvwxyz";
+    let wide_plain = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
         "",
         "headline",
-        "req=oversized-plain event=started",
-        oversized_session,
+        "req=wide event=started",
+        wide_session,
     ));
-    let oversized_color = strip_test_ansi(&colorize_v3_layered_console_line(
-        V3ConsoleLayeredBlock::new(
-            "",
-            "headline",
-            "req=oversized-color event=started",
-            oversized_session,
-        ),
+    let wide_color = strip_test_ansi(&colorize_v3_layered_console_line(
+        V3ConsoleLayeredBlock::new("", "headline", "req=wide-color event=started", wide_session),
         ANSI_REQUEST_CYAN,
         ANSI_DEBUG_DIM,
     ));
 
-    let columns = [&short, &long, &oversized_plain, &oversized_color].map(|block| {
+    let columns = [&short, &long, &wide_plain, &wide_color].map(|block| {
         let debug = block.lines().next().expect("diagnostic line");
         let req = debug.find("req=").expect("machine field");
         v3_console_display_width(&debug[..req])
     });
     assert_eq!(columns[0], columns[1], "{short:?}\n{long:?}");
-    assert_eq!(columns[0], columns[2], "{short:?}\n{oversized_plain:?}");
-    assert_eq!(columns[0], columns[3], "{short:?}\n{oversized_color:?}");
+    assert_eq!(columns[0], columns[2], "{short:?}\n{wide_plain:?}");
+    assert_eq!(columns[0], columns[3], "{short:?}\n{wide_color:?}");
+}
+
+#[test]
+fn console_fallback_session_id_uses_full_request_id_without_truncation() {
+    let request_id =
+        "openai-responses-router-goaichat_ai_responses.deepseek-v4.1-flash-20261005T064615076-767995-11881";
+    let color_key =
+        resolve_v3_log_session_color_key(&HeaderMap::new(), &serde_json::json!({}), request_id);
+    let expected_session = format!("rcc-session:request:{request_id}");
+    assert_eq!(color_key.as_deref(), Some(expected_session.as_str()));
+
+    let plain = format_v3_console_layered_block_plain(V3ConsoleLayeredBlock::new(
+        "",
+        "headline",
+        "req=x event=started",
+        &color_key.unwrap(),
+    ));
+
+    let expected_scope = format!("[sessionID:rcc-session:request:{request_id}]");
+    assert!(plain.contains(&expected_scope), "{plain:?}");
+    assert!(!plain.contains("..."), "must not truncate: {plain:?}");
     assert!(
-        oversized_plain.contains(&format!("sessionIDFull={oversized_session}")),
-        "{oversized_plain:?}"
+        !plain.contains("sessionIDFull="),
+        "must not append sessionIDFull: {plain:?}"
     );
+    // Over-budget scopes shift the debug fields right instead of truncating;
+    // `req=` must still be present in the diagnostic content.
     assert!(
-        oversized_color.contains(&format!("sessionIDFull={oversized_session}")),
-        "{oversized_color:?}"
+        plain.contains("req="),
+        "req= must survive over-budget scope: {plain:?}"
     );
 }
 
@@ -1861,9 +2885,10 @@ async fn malformed_json_error_includes_body_length_without_raw_payload() {
         .body(Body::from(r#"{"model":"gpt-5.5","input":"#))
         .unwrap();
 
-    let projected = read_json_payload(request)
+    let projection = read_json_payload(request)
         .await
         .expect_err("truncated JSON must fail at the HTTP boundary");
+    let projected = projection.expect("normal malformed JSON must produce Error06");
 
     assert_eq!(projected.status, 400);
     assert_eq!(projected.body["error"]["code"], "malformed_json");
@@ -2033,64 +3058,7 @@ fn responses_control_scope_prefers_explicit_headers_over_codex_turn_metadata() {
 }
 
 #[test]
-fn responses_server_tool_scope_ignores_plugin_session_without_typed_conversation() {
-    let mut headers = HeaderMap::new();
-    headers.insert("session_id", HeaderValue::from_static("plugin-session"));
-    headers.insert(
-        "x-client-request-id",
-        HeaderValue::from_static("plugin-request"),
-    );
-
-    let scope = request_local_server_tool_scope(&headers, None, false, "req-fresh")
-        .expect("fresh request must not require a conversation header");
-
-    assert_eq!(
-        scope,
-        (
-            "request:req-fresh".to_string(),
-            "request:req-fresh".to_string()
-        )
-    );
-}
-
-#[test]
-fn responses_server_tool_scope_accepts_body_client_metadata_as_fallback() {
-    let headers = HeaderMap::new();
-    let payload = json!({
-        "input":[{"type":"function_call_output","call_id":"call-1","output":"{\"ok\":true}"}],
-        "client_metadata":{"session_id":"zcode-session","thread_id":"zcode-thread"}
-    });
-
-    let scope = request_local_server_tool_scope(&headers, Some(&payload), true, "req-body-scope")
-        .expect("body client_metadata must construct server tool scope as a fallback");
-
-    assert_eq!(
-        scope,
-        ("zcode-session".to_string(), "zcode-thread".to_string())
-    );
-}
-
-#[test]
-fn responses_server_tool_scope_prefers_headers_over_body_client_metadata() {
-    let mut headers = HeaderMap::new();
-    headers.insert("session-id", HeaderValue::from_static("header-session"));
-    headers.insert("thread-id", HeaderValue::from_static("header-thread"));
-    let payload = json!({
-        "previous_response_id":"resp-1",
-        "client_metadata":{"session_id":"body-session","thread_id":"body-thread"}
-    });
-
-    let scope = request_local_server_tool_scope(&headers, Some(&payload), true, "req-precedence")
-        .expect("typed control headers must keep precedence over body client_metadata");
-
-    assert_eq!(
-        scope,
-        ("header-session".to_string(), "header-thread".to_string())
-    );
-}
-
-#[test]
-fn responses_paired_function_outputs_are_not_server_tool_scope() {
+fn responses_paired_function_outputs_allow_fresh_protocol_plan() {
     let payload = json!({
         "input": [
             {"type": "function_call", "call_id": "call-1", "name": "tool", "arguments": "{}"},
@@ -2132,6 +3100,7 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         external_error_code: Some("TRANSPORT_ERROR".to_string()),
         external_error_status: None,
         internal_code: None,
+        upstream_request_id: None,
         message: "provider response event codec failed".to_string(),
         failure_count: 3,
         health_state: "cooldown".to_string(),
@@ -2139,6 +3108,8 @@ fn provider_failure_console_content_exposes_red_error_and_switch() {
         action: "switch_provider".to_string(),
         next_provider_key: Some("minimax:key1:MiniMax-M3".to_string()),
         wait_ms: None,
+        diagnostic_source: None,
+        failed_attempt_evidence: None,
     };
     let error_content = format_v3_provider_failure_console_content("req-provider-switch", &event);
     assert!(error_content.contains("❌ [provider-error]"));
@@ -2230,6 +3201,8 @@ fn direct_frame_console_emits_provider_switch_complete_and_usage() {
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Resp15ClientPayload"],
         observability: Some(test_direct_observability(vec![provider_failure])),
         stream_observation: None,
@@ -2388,7 +3361,8 @@ fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error()
     );
 
     let body = json!({"error":{"code":"provider_pool_exhausted","message":"exhausted"}});
-    record_v3_webui_error_for_context(&context, 502, Some(&body)).unwrap();
+    record_v3_webui_error_for_context(&context, 502, Some(&body), V3ObsErrorProjection::default())
+        .unwrap();
     let row = state
         .webui_observability
         .rows()
@@ -2400,6 +3374,74 @@ fn provider_attempt_failure_does_not_close_webui_request_before_terminal_error()
     assert_eq!(
         row.meta.error_category.as_deref(),
         Some("provider_pool_exhausted")
+    );
+    let _ = std::fs::remove_file(&log_file);
+}
+
+/// Regression: the provider attempt row's `provider_status` carries only the
+/// upstream provider's real HTTP status. A transport failure (no HTTP response)
+/// keeps `None` and falls back to its transport error identity, while a genuine
+/// upstream HTTP failure keeps its own status.
+#[test]
+fn provider_attempt_row_keeps_no_upstream_status_for_transport_failure() {
+    let log_file = test_v3_console_log_file("provider-transport-no-upstream-status");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7778);
+    let headers = test_direct_console_headers();
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-provider-transport-status",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let sink = build_v3_provider_failure_event_sink(&context);
+
+    // Transport failure: the observed/projected status is the client-facing 502,
+    // but no HTTP response was ever received, so `external_error_status` is None
+    // and the lane's own observability carries no upstream status either.
+    let mut transport = test_provider_failure_observation();
+    transport.status = 502;
+    transport.error_type = Some("provider_transport_error".to_string());
+    transport.external_error_status = None;
+    let mut transport_observability = test_direct_observability(vec![transport.clone()]);
+    transport_observability.provider_status = transport.external_error_status;
+    sink(&transport_observability, &transport);
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7778:req-provider-transport-status")
+        .expect("provider attempt row");
+    assert_eq!(
+        row.meta.provider_status, None,
+        "a transport failure must not record the projected 502 as the upstream status"
+    );
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_transport_error"),
+        "the record falls back to its original transport error identity"
+    );
+
+    // Real upstream HTTP failure: the attempt row keeps the real status.
+    let mut http = test_provider_failure_observation();
+    http.status = 502;
+    http.error_type = Some("provider_http_502".to_string());
+    http.external_error_status = Some(502);
+    let mut http_observability = test_direct_observability(vec![http.clone()]);
+    http_observability.provider_status = http.external_error_status;
+    sink(&http_observability, &http);
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove("7778:req-provider-transport-status")
+        .expect("provider attempt row");
+    assert_eq!(row.meta.provider_status, Some(502));
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_http_502")
     );
     let _ = std::fs::remove_file(&log_file);
 }
@@ -2437,23 +3479,32 @@ fn openai_chat_relay_records_started_before_runtime_can_project_terminal_error()
 }
 
 #[test]
-fn openai_chat_relay_terminal_error_keeps_http_error_projection() {
+fn openai_chat_relay_internal_error_returns_typed_no_response() {
     let output = routecodex_v3_runtime::V3OpenAiChatRelayRuntimeOutput {
-        status: 502,
+        status: 598,
         client_body: routecodex_v3_runtime::V3OpenAiChatRelayClientBody::Json(json!({
-            "error": {"code": "provider_pool_exhausted", "message": "provider unavailable"}
+            "error": {"code": "internal_request_error", "message": "internal request failed"}
         })),
         node_trace: vec!["V3Error06ClientProjected"],
         error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
-        error_class: Some("provider_failure"),
-        error_detail: Some("provider unavailable".to_string()),
+        error_class: Some("internal_failure"),
+        error_detail: Some("internal request failed".to_string()),
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        provider_failure_attempts: Vec::new(),
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        terminal_disposition: None,
     };
     let response = openai_chat_relay_output_response(output, None, Duration::from_secs(1), false);
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(response.headers()["content-type"], "application/json");
+    assert!(
+        !response
+            .extensions()
+            .get::<V3ModelClientNoResponse>()
+            .unwrap()
+            .streaming
+    );
 }
 
 #[test]
@@ -2531,10 +3582,12 @@ fn cooldown_console_logs_enter_and_recovery_once_without_per_request_filter_line
 
 #[test]
 fn background_probe_cycle_failures_are_not_human_console_output() {
-    let source = include_str!("../lib.rs");
+    let source = [
+        include_str!("../lib.rs"),
+        include_str!("../../../routecodex-v3-runtime/src/provider_probe_lifecycle.rs"),
+    ]
+    .concat();
 
-    assert!(source.contains("run_due_provider_health_probes"));
-    assert_eq!(source.matches("run_due_provider_health_probes").count(), 2);
     assert!(!source.contains("run_due_global_subscription_probes"));
     assert!(!source.contains("run_due_provider_key_health_probes"));
     assert!(!source.contains("provider persistent startup probe cycle failed"));
@@ -2630,6 +3683,12 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
     );
     let mut failure = test_direct_observability(Vec::new());
     failure.response_status = Some("failed".to_string());
+    // This case exercises the relay-terminal projection, so the fixture carries
+    // the lane stamp the shared relay observability builder writes. The
+    // "typed truth not exposed" marker is owned by lanes that cannot carry the
+    // typed Error06 projection (the relay lane); a direct lane records the real
+    // chain from its frame instead.
+    failure.execution_mode = "relay".to_string();
     emit_v3_observability_console_lines(
         &failure_context,
         502,
@@ -2645,6 +3704,120 @@ fn nonstream_relay_terminal_projects_webui_success_and_failure() {
         .expect("terminal nonstream failure row");
     assert_eq!(row.result.as_deref(), Some("error"));
     assert_eq!(row.event_type, "request.failed");
+}
+
+/// The direct lane holds real typed truth: its non-SSE error frame carries the
+/// Error chain the runtime projected, so the WebUI row must record that chain and
+/// `error06_projection` — never the `error06_projection_not_exposed` absence
+/// marker, whose empty chain would read as "there was no error chain". A direct
+/// frame with no chain has nothing to expose and records the honest marker.
+#[test]
+fn direct_frame_records_real_typed_error_truth_instead_of_the_absence_marker() {
+    let log_file = test_v3_console_log_file("direct-frame-typed-error-truth");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 4444);
+    let headers = test_direct_console_headers();
+
+    let typed_context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-typed-error",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let typed_frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "upstream_unavailable", "message": "provider unreachable"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "V3Error06ClientProjected",
+        error_chain: routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.to_vec(),
+        error_body: Some(json!({
+            "error": {"code": "upstream_unavailable", "message": "provider unreachable"}
+        })),
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
+        observability: Some(test_direct_observability(Vec::new())),
+        stream_observation: None,
+    };
+    assert!(
+        emit_v3_direct_frame_console_lines(&typed_context, &typed_frame, Instant::now()).is_none()
+    );
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get("4444:req-direct-typed-error")
+        .expect("the direct lane must record a terminal row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    let observed = row
+        .meta
+        .observed_error
+        .as_ref()
+        .expect("the direct lane must record the typed error it holds");
+    assert_eq!(
+        observed.source, "error06_projection",
+        "the direct lane holds typed truth, so the absence marker must not be recorded"
+    );
+    assert_eq!(
+        observed.chain.len(),
+        6,
+        "the real six-node Error chain must be recorded verbatim: {:?}",
+        observed.chain
+    );
+    assert_eq!(observed.chain[0].node, "V3Error01SourceRaised");
+    assert_eq!(observed.chain[5].node, "V3Error06ClientProjected");
+    assert_eq!(observed.chain[5].code.as_deref(), Some("502"));
+    drop(rows);
+
+    // A direct frame that carries no chain has no typed truth to expose, so the
+    // absence marker stays the honest answer.
+    let bare_context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        "req-direct-bare-error",
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let bare_frame = V3Server16HttpFrame {
+        status: 502,
+        content_type: "application/json".to_string(),
+        body: V3Server16Body::Json(json!({
+            "error": {"code": "upstream_unavailable", "message": "provider unreachable"}
+        })),
+        debug_node: "V3Debug01NodeEventRegistered",
+        error_node: "none",
+        error_chain: Vec::new(),
+        error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        node_trace: vec!["V3Server16HttpFrame"],
+        observability: Some(test_direct_observability(Vec::new())),
+        stream_observation: None,
+    };
+    assert!(
+        emit_v3_direct_frame_console_lines(&bare_context, &bare_frame, Instant::now()).is_none()
+    );
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get("4444:req-direct-bare-error")
+        .expect("the direct lane must still terminate a chainless error frame");
+    let observed = row
+        .meta
+        .observed_error
+        .as_ref()
+        .expect("a chainless direct error still records an explicit marker");
+    assert_eq!(observed.source, "error06_projection_not_exposed");
+    assert!(
+        observed.chain.is_empty(),
+        "no chain exists on this frame, so none may be fabricated"
+    );
+    let _ = std::fs::remove_file(&log_file);
 }
 
 #[test]
@@ -2690,15 +3863,17 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
     );
 
     observability.response_status = Some("in_progress".to_string());
-    let missing_finish_error = emit_v3_request_complete_console_line(
+    let missing_finish_result = emit_v3_request_complete_console_line(
         &context,
         200,
         &["V3Resp15ClientPayload"],
         &observability,
         std::time::Duration::from_millis(1),
-    )
-    .expect_err("finish_reason missing with non-inferrable response_status must fail");
-    assert!(missing_finish_error.contains("missing finish_reason"));
+    );
+    assert!(
+        missing_finish_result.is_ok(),
+        "unreported reason is diagnostic absence, not a request failure"
+    );
 
     let _ = std::fs::remove_file(&log_file);
 }
@@ -2707,7 +3882,7 @@ fn response_console_rejects_missing_terminal_summary_instead_of_showing_unreport
 fn response_console_treats_incomplete_terminal_as_success_with_length_finish_reason() {
     assert_eq!(
         infer_v3_console_finish_reason_from_response_status(Some("incomplete")),
-        Some("length".to_string())
+        None
     );
     let mut observability = test_direct_observability(Vec::new());
     observability.response_status = Some("incomplete".to_string());
@@ -2748,6 +3923,8 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Resp15ClientPayload"],
         observability: Some(V3RuntimeObservability {
             response_status: None,
@@ -2763,10 +3940,10 @@ fn direct_frame_console_infers_stop_finish_reason_from_completed_json_status() {
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=stop"), "{log}");
+    assert!(log.contains("finish_reason=unreported"), "{log}");
     assert!(log.contains("usage_in=41 usage_out=38"), "{log}");
     assert!(log.contains("usage_total=79"), "{log}");
-    assert!(!log.contains("finish_reason=unreported"), "{log}");
+    assert!(log.contains("finish_reason=unreported"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -2792,6 +3969,8 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Resp15ClientPayload"],
         observability: Some(V3RuntimeObservability {
             transport: "sse".to_string(),
@@ -2829,12 +4008,12 @@ async fn direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_a
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
     assert!(log.contains("event=completed"), "{log}");
     assert!(log.contains("responseStatus=completed"), "{log}");
-    assert!(log.contains("finish_reason=stop"), "{log}");
+    assert!(log.contains("finish_reason=unreported"), "{log}");
     assert!(log.contains("usage_in=17 usage_out=3"), "{log}");
     assert!(log.contains("usage_cache=5/17(29.4%)"), "{log}");
     assert!(log.contains("usage_total=20"), "{log}");
     assert!(!log.contains("usage=unreported"), "{log}");
-    assert!(!log.contains("finish_reason=unreported"), "{log}");
+    assert!(!log.contains("finish_reason=stop"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -2860,6 +4039,8 @@ async fn direct_sse_console_clean_eof_does_not_project_missing_runtime_timing_as
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Resp15ClientPayload"],
         observability: Some(V3RuntimeObservability {
             transport: "sse".to_string(),
@@ -2938,6 +4119,8 @@ async fn direct_live_sse_drop_after_completed_before_ping_is_completed() {
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3DirectResp15ClientPayloadReady"],
         observability: Some(V3RuntimeObservability {
             transport: "sse".to_string(),
@@ -2947,13 +4130,12 @@ async fn direct_live_sse_drop_after_completed_before_ping_is_completed() {
         stream_observation: Some(observation),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     let chunk = stream.next().await.unwrap().unwrap();
     assert!(std::str::from_utf8(&chunk)
         .unwrap()
@@ -2994,6 +4176,8 @@ async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3DirectResp15ClientPayloadReady"],
         observability: Some(V3RuntimeObservability {
             transport: "sse".to_string(),
@@ -3003,13 +4187,12 @@ async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
         stream_observation: Some(V3RuntimeStreamObservation::default()),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
     drop(stream);
 
@@ -3051,6 +4234,8 @@ async fn direct_live_sse_drop_after_failure_terminal_does_not_become_client_disc
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3DirectResp15ClientPayloadReady"],
         observability: Some(V3RuntimeObservability {
             transport: "sse".to_string(),
@@ -3060,13 +4245,12 @@ async fn direct_live_sse_drop_after_failure_terminal_does_not_become_client_disc
         stream_observation: Some(observation),
     };
     let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-    let mut stream = wrap_v3_direct_live_sse_console_stream(
-        match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        },
-        finalizer,
-    );
+    let client_stream = match frame.body {
+        V3Server16Body::Sse(stream) => stream,
+        _ => unreachable!("test frame owns Direct live SSE body"),
+    };
+    let mut stream: V3IoSseStream =
+        wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
     assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
     drop(stream);
 
@@ -3099,6 +4283,8 @@ async fn direct_committed_sse_console_closeout_keeps_499_on_client_drop() {
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Resp15ClientPayload"],
         observability: Some(V3RuntimeObservability {
             transport: "sse".to_string(),
@@ -3187,7 +4373,7 @@ async fn relay_sse_console_finalizer_prints_usage_for_chat_wire_finish_reason_te
 }
 
 #[tokio::test]
-async fn front_io_sse_error_is_explicit_599_without_keepalive() {
+async fn front_io_sse_error_aborts_without_error_event() {
     let stream: V3IoSseStream =
         Box::pin(stream::iter(vec![Err::<Vec<u8>, _>(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
@@ -3195,21 +4381,19 @@ async fn front_io_sse_error_is_explicit_599_without_keepalive() {
         ))]));
     let body = to_bytes(v3_io_sse_body(stream, None), usize::MAX)
         .await
-        .expect("Front must project an IO failure instead of closing the SSE silently");
-    let text = String::from_utf8_lossy(&body);
-    assert!(text.contains("internal_response_stream_error"), "{text}");
-    assert!(text.contains("\"status\":599"), "{text}");
+        .expect_err("Front IO failure must abort without encoding an error event");
+    assert!(body.to_string().contains("synthetic front IO failure"));
 }
 
+/// The predicate reads the client status only. A recovered (2xx) provider attempt
+/// never creates terminal client error truth, and a terminal failure status always
+/// does — whether or not the output also carried an Error chain, since a chain is
+/// not what makes the client failure terminal.
 #[test]
 fn recovered_provider_attempts_do_not_create_terminal_client_error_truth() {
-    assert!(!v3_output_has_terminal_client_error(200, None));
-    assert!(!v3_output_has_terminal_client_error(200, Some(&[])));
-    assert!(v3_output_has_terminal_client_error(502, None));
-    assert!(!v3_output_has_terminal_client_error(
-        200,
-        Some(&["V3Error06ClientProjected"]),
-    ));
+    assert!(!v3_output_has_terminal_client_error(200));
+    assert!(v3_output_has_terminal_client_error(502));
+    assert!(v3_output_has_terminal_client_error(503));
 }
 
 #[test]
@@ -3238,6 +4422,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         ..Default::default()
     };
     let mut recovered = V3ResponsesRelayRuntimeOutput {
+        diagnostic_source: None,
+        diagnostic_cause: None,
         status: 200,
         client_body: V3ResponsesRelayClientBody::Json(json!({"status": "completed"})),
         node_trace: Vec::new(),
@@ -3250,6 +4436,7 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
     assert!(
         capture_v3_responses_relay_provider_snapshots(
@@ -3264,6 +4451,8 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
     );
 
     let mut terminal_failure = V3ResponsesRelayRuntimeOutput {
+        diagnostic_source: None,
+        diagnostic_cause: None,
         status: 502,
         client_body: V3ResponsesRelayClientBody::Json(json!({})),
         node_trace: Vec::new(),
@@ -3273,6 +4462,7 @@ fn recovered_provider_attempts_do_not_fabricate_missing_relay_snapshot_errors() 
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
     assert!(
         capture_v3_responses_relay_provider_snapshots(
@@ -3312,7 +4502,7 @@ fn error_observability_does_not_emit_green_completed_line() {
 }
 
 #[tokio::test]
-async fn direct_stream_request_error06_projects_sse_error_not_json() {
+async fn direct_stream_request_error06_retains_diagnostics_without_wire_event() {
     let frame = V3Server16HttpFrame {
         status: 429,
         content_type: "application/json".to_string(),
@@ -3326,6 +4516,8 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
         error_node: "V3Error06ClientProjected",
         error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -3336,18 +4528,18 @@ async fn direct_stream_request_error06_projects_sse_error_not_json() {
     assert_eq!(projected.content_type, "text/event-stream");
     match projected.body {
         V3Server16Body::Bytes(bytes) => {
-            let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(text.contains("HTTP_429"), "{text}");
-            assert!(text.contains("Rate limited by upstream provider"), "{text}");
-            assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+            assert!(bytes.is_empty());
+            assert_eq!(
+                projected.error_body.as_ref().unwrap()["error"]["code"],
+                "HTTP_429"
+            );
         }
         other => panic!("stream request Error06 must project SSE body, got {other:?}"),
     }
 }
 
 #[test]
-fn non_responses_stream_error06_uses_protocol_error_event_once() {
+fn non_responses_stream_error06_never_prepares_protocol_error_event() {
     for protocol in [
         V3SseClientProtocol::OpenAiChat,
         V3SseClientProtocol::Anthropic,
@@ -3366,6 +4558,8 @@ fn non_responses_stream_error06_uses_protocol_error_event_once() {
             error_node: "V3Error06ClientProjected",
             error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
             error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
             node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
             observability: None,
             stream_observation: None,
@@ -3375,10 +4569,11 @@ fn non_responses_stream_error06_uses_protocol_error_event_once() {
         assert_eq!(projected.content_type, "text/event-stream");
         match projected.body {
             V3Server16Body::Bytes(bytes) => {
-                let text = std::str::from_utf8(&bytes).unwrap();
-                assert!(text.starts_with("event: error\n"), "{text}");
-                assert!(!text.contains("response.failed"), "{text}");
-                assert_eq!(text.matches("data: [DONE]").count(), 1, "{text}");
+                assert!(bytes.is_empty());
+                assert_eq!(
+                    projected.error_body.as_ref().unwrap()["error"]["code"],
+                    "provider_pool_exhausted"
+                );
             }
             other => panic!("stream Error06 must project SSE body, got {other:?}"),
         }
@@ -3400,6 +4595,8 @@ fn stream_projection_requires_typed_error_chain() {
         error_node: "V3Error06ClientProjected",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -3429,6 +4626,8 @@ fn direct_stream_error_projection_response_uses_error_channel() {
         error_node: "V3Error06ClientProjected",
         error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -3438,43 +4637,15 @@ fn direct_stream_error_projection_response_uses_error_channel() {
         project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
         None,
     );
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-    assert_eq!(
-        response.headers().get("content-type").unwrap(),
-        "text/event-stream"
-    );
+    let outcome = response
+        .extensions()
+        .get::<V3ModelClientNoResponse>()
+        .unwrap();
+    assert!(outcome.streaming);
 }
 
 #[tokio::test]
-async fn direct_responses_pool_exhaustion_disconnects_sse_transport() {
-    let frame = V3Server16HttpFrame {
-        status: 502,
-        content_type: "application/json".to_string(),
-        body: V3Server16Body::Json(json!({
-            "error": {"code": "network_error", "message": "network error"}
-        })),
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: "V3Error06ClientProjected",
-        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
-        error_body: None,
-        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
-        observability: None,
-        stream_observation: None,
-    };
-
-    let response = responses_direct_output_response_with_console_for_protocol(
-        project_v3_responses_direct_stream_error_frame_if_requested(frame, true),
-        None,
-        None,
-        V3SseClientProtocol::Responses,
-    );
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    assert!(to_bytes(response.into_body(), usize::MAX).await.is_err());
-}
-
-#[tokio::test]
-async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
+async fn accept_sse_error06_without_payload_preserves_only_internal_diagnostics() {
     let mut headers = HeaderMap::new();
     headers.insert("accept", HeaderValue::from_static("text/event-stream"));
     let frame = V3Server16HttpFrame {
@@ -3490,6 +4661,8 @@ async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
         error_node: "V3Error06ClientProjected",
         error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -3499,10 +4672,11 @@ async fn accept_sse_error06_without_payload_projects_sse_error_not_json() {
     assert_eq!(projected.content_type, "text/event-stream");
     match projected.body {
         V3Server16Body::Bytes(bytes) => {
-            let text = std::str::from_utf8(&bytes).unwrap();
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(text.contains("malformed_json"), "{text}");
-            assert!(text.contains("malformed JSON request body"), "{text}");
+            assert!(bytes.is_empty());
+            assert_eq!(
+                projected.error_body.as_ref().unwrap()["error"]["code"],
+                "malformed_json"
+            );
         }
         other => panic!("Accept SSE Error06 must project SSE body, got {other:?}"),
     }
@@ -3543,6 +4717,7 @@ fn error_projection_appends_human_console_failure_line() {
         debug: V3DebugManifest {
             log_console: false,
             log_file: Some(log_file.to_string_lossy().to_string()),
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,
@@ -3555,7 +4730,6 @@ fn error_projection_appends_human_console_failure_line() {
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
     });
     let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
@@ -3573,11 +4747,8 @@ fn error_projection_appends_human_console_failure_line() {
             routecodex_v3_config::internal::v3_error_samples_only()
                 && !manifest.debug.full_codex_sampling,
         )),
-        responses_direct_server_tool_state: Arc::new(V3ResponsesDirectServerToolState::default()),
-        responses_relay_server_tool_state: Arc::new(V3ResponsesRelayServerToolState::default()),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-        responses_session_admission: Arc::new(V3ResponsesSessionAdmissionGate::default()),
         request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
         webui_observability: V3WebuiObservability::new(),
@@ -3604,6 +4775,11 @@ fn error_projection_appends_human_console_failure_line() {
                 }
             })),
             project_path: None,
+            execution_mode: Some("relay"),
+            error06_exposed: true,
+            error_class: Some("runtime_failure"),
+            health_action: None,
+            upstream_request_id: None,
         },
     );
 
@@ -3614,7 +4790,28 @@ fn error_projection_appends_human_console_failure_line() {
         .expect("Error06 projection must create a WebUI request row");
     assert_eq!(row.result.as_deref(), Some("error"));
     assert_eq!(row.meta.provider_status, Some(500));
+    assert_eq!(row.meta.execution_mode.as_deref(), Some("relay"));
     assert_eq!(row.meta.error_category.as_deref(), Some("runtime_error"));
+    let observed = row
+        .meta
+        .observed_error
+        .as_ref()
+        .expect("typed Error06 truth must be projected into the row");
+    assert_eq!(observed.source, "error06_projection");
+    assert_eq!(observed.error_class.as_deref(), Some("runtime_failure"));
+    assert_eq!(
+        observed.chain.len(),
+        6,
+        "the typed Error01..Error06 chain must be recorded per node"
+    );
+    assert_eq!(observed.chain[0].node, "V3Error01SourceRaised");
+    assert_eq!(observed.chain[5].node, "V3Error06ClientProjected");
+    assert_eq!(observed.chain[5].code.as_deref(), Some("500"));
+    assert_eq!(
+        observed.chain[1].code.as_deref(),
+        Some("runtime_failure"),
+        "the classified node carries the error class it produced"
+    );
     let log = std::fs::read_to_string(&log_file).unwrap();
     let plain_log = strip_test_ansi(&log);
     assert!(
@@ -3626,11 +4823,111 @@ fn error_projection_appends_human_console_failure_line() {
     let _ = std::fs::remove_file(&log_file);
 }
 
+/// `raw_artifact_ref` is a real reference, not a convention: the store assigns
+/// it from the single debug layout owner only after the sample directory exists,
+/// and leaves it `None` when the directory is absent or belongs to another
+/// request. Nothing is fabricated from the request id alone.
+#[tokio::test]
+async fn provider_attempt_failure_records_raw_artifact_ref_only_when_the_sample_dir_exists() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let home = std::env::temp_dir().join(format!(
+        "v3-obs-raw-artifact-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&home);
+    std::fs::create_dir_all(&home).unwrap();
+    let _home = TestHomeGuard::set(&home);
+
+    let observability = V3WebuiObservability::new();
+    let scope = V3ObsScope {
+        port: 4444,
+        workdir: None,
+        session: None,
+    };
+    let attempt = |request_id: &str| {
+        let meta = V3ObsRequestMeta {
+            request_id: request_id.to_string(),
+            endpoint: "/v1/responses".to_string(),
+            entry_protocol: Some("responses".to_string()),
+            provider_status: Some(502),
+            error_category: Some("provider_http_502".to_string()),
+            observed_error: Some(V3ObsErrorTruth {
+                source: "provider_attempt_failure".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        record_v3_observability_event(
+            &observability,
+            V3ObsEventType::ProviderAttemptFailed,
+            &build_v3_obs_request_key(4444, request_id),
+            scope.clone(),
+            meta,
+            &routecodex_v3_runtime::V3RuntimeObservability::default(),
+        )
+        .unwrap()
+    };
+
+    let absent_key = build_v3_obs_request_key(4444, "req-artifact-absent");
+    let present_key = build_v3_obs_request_key(4444, "req-artifact-present");
+    attempt("req-artifact-absent");
+    attempt("req-artifact-present");
+
+    let rows = observability.rows().unwrap();
+    assert_eq!(
+        rows.get(&absent_key).unwrap().raw_artifact_ref,
+        None,
+        "an absent sample directory must not yield a fabricated reference"
+    );
+    assert_eq!(rows.get(&present_key).unwrap().raw_artifact_ref, None);
+
+    // Capture the real sample directory for exactly one of the two requests.
+    let dir = home
+        .join(".rcc")
+        .join("codex-samples")
+        .join("openai-responses")
+        .join("ports")
+        .join("4444")
+        .join("req-artifact-present");
+    std::fs::create_dir_all(&dir).unwrap();
+    attempt("req-artifact-present");
+
+    let rows = observability.rows().unwrap();
+    assert_eq!(
+        rows.get(&present_key).unwrap().raw_artifact_ref.as_deref(),
+        Some(dir.display().to_string().as_str()),
+        "an existing sample directory must resolve to its real path"
+    );
+    assert_eq!(
+        rows.get(&absent_key).unwrap().raw_artifact_ref,
+        None,
+        "another request's sample directory must not resolve"
+    );
+    assert_eq!(
+        rows.get(&present_key)
+            .unwrap()
+            .meta
+            .observed_error
+            .as_ref()
+            .and_then(|truth| truth.attempt_index),
+        Some(1),
+        "attempt_index is the row attempt counter at the failing attempt"
+    );
+
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 #[tokio::test]
 async fn responses_relay_output_accepts_runtime_sealed_sse() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 200,
         client_body: V3ResponsesRelayClientBody::Sse(test_committed_responses_sse()),
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3HubRespOutbound05ClientSemantic"],
         error_chain: None,
         observability: None,
@@ -3638,6 +4935,7 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     let response =
@@ -3646,13 +4944,25 @@ async fn responses_relay_output_accepts_runtime_sealed_sse() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("event: response.completed"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    // Responses 客户端帧只由协议终态收口：不得追加 response.done 或 Chat
+    // Completions 的 [DONE] 终止符。
+    assert!(!text.contains("data: [DONE]"), "{text}");
+    assert!(
+        text.trim_end()
+            .rsplit("event: ")
+            .next()
+            .unwrap_or_default()
+            .starts_with("response.completed"),
+        "{text}"
+    );
 }
 
 #[tokio::test]
-async fn responses_relay_json_error_projects_failure_terminal_with_done() {
+async fn responses_relay_json_error_returns_typed_no_response() {
     let output = V3ResponsesRelayRuntimeOutput {
         status: 598,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         client_body: V3ResponsesRelayClientBody::Json(json!({
             "error": {
                 "code": "provider_request_payload_invalid",
@@ -3666,87 +4976,203 @@ async fn responses_relay_json_error_projects_failure_terminal_with_done() {
         finalized_response: None,
         provider_snapshots: None,
         protocol_direct_handoff: None,
+        terminal_disposition: None,
     };
 
     let response = responses_relay_output_response(output, None, None, true);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert!(response
+        .extensions()
+        .get::<V3ModelClientNoResponse>()
+        .is_some());
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let text = String::from_utf8(body.to_vec()).unwrap();
-    assert!(text.starts_with("event: response.failed\n"), "{text}");
-    assert!(text.contains("provider_request_payload_invalid"), "{text}");
-    assert!(text.contains("UnmappedOutboundFields"), "{text}");
-    assert!(text.ends_with("data: [DONE]\n\n"), "{text}");
+    assert!(body.is_empty());
 }
 
 #[tokio::test]
-async fn responses_relay_pool_exhaustion_disconnects_sse_transport() {
-    let output = V3ResponsesRelayRuntimeOutput {
-        status: 502,
-        client_body: V3ResponsesRelayClientBody::Json(json!({
-            "error": {
-                "code": "network_error",
-                "message": "network error"
-            }
-        })),
-        node_trace: vec!["V3Error04TargetPoolExhaustion", "V3Error06ClientProjected"],
-        error_chain: Some(vec!["V3Error01SourceRaised", "V3Error06ClientProjected"]),
-        observability: None,
-        stream_observation: None,
-        finalized_response: None,
-        provider_snapshots: None,
-        protocol_direct_handoff: None,
-    };
-
-    let response = responses_relay_output_response(output, None, None, true);
+async fn provider_terminal_external_http_never_projects_provider_response_to_client() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-external-http-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let raw_body = br#"{"error":{"type":"rate_limit_error","message":"later"}}"#.to_vec();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![
+            ("content-type".to_string(), b"application/json".to_vec()),
+            ("retry-after".to_string(), b"17".to_vec()),
+        ],
+        raw_body.clone(),
+    );
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-external-http-unit",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+    // The witness is the provider's real error, so it has to stay readable as
+    // provider-private evidence: its status, headers, and body are recorded
+    // losslessly instead of being carried and discarded at the boundary.
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-external-http-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], 429);
+    assert_eq!(
+        evidence["headers"],
+        json!([
+            [
+                "content-type",
+                [97, 112, 112, 108, 105, 99, 97, 116, 105, 111, 110, 47, 106, 115, 111, 110]
+            ],
+            ["retry-after", [49, 55]],
+        ])
+    );
+    assert_eq!(evidence["body"], json!(raw_body));
+    // The provider's real status and headers are provider-private: the client boundary
+    // stays a transport break and never carries the upstream response.
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let body = to_bytes(response.into_body(), usize::MAX).await;
-    assert!(body.is_err(), "pool exhaustion must fail the SSE transport");
+    assert!(!response.headers().contains_key("retry-after"));
+    assert!(!response.headers().contains_key("connection"));
+    assert!(!response.headers().contains_key("x-hop"));
+    assert!(!response.headers().contains_key("content-length"));
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("a streaming external provider terminal must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
+    assert!(
+        !error.to_string().contains("rate_limit_error"),
+        "the provider body must not reach the client transport: {error}"
+    );
 }
 
-#[test]
-fn responses_stream_network_error_without_error04_projects_sse_body() {
-    let frame = V3Server16HttpFrame {
-        status: 502,
-        content_type: "application/json".to_string(),
-        body: V3Server16Body::Json(json!({
-            "error": {"code": "network_error", "message": "network error"}
-        })),
-        debug_node: "V3Debug01NodeEventRegistered",
-        error_node: "V3Error06ClientProjected",
-        error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
-        error_body: None,
-        node_trace: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
-        observability: None,
-        stream_observation: None,
-    };
-
-    let projected = project_v3_responses_direct_stream_error_frame_if_requested(frame, true);
-    assert!(!v3_is_sse_target_pool_exhaustion_parts(
-        projected.status,
-        &projected.node_trace,
-        &projected.error_chain,
-        projected
-            .error_body
-            .as_ref()
-            .unwrap_or_else(|| match &projected.body {
-                V3Server16Body::Json(body) => body,
-                _ => panic!("projected network error must retain JSON error body"),
-            }),
+#[tokio::test]
+async fn provider_terminal_external_http_records_body_read_failure_without_erasing_the_status() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-body-read-failure-{}",
+        std::process::id()
     ));
-    assert_eq!(projected.status, 502);
-    assert_eq!(projected.content_type, "text/event-stream");
-    match projected.body {
-        V3Server16Body::Bytes(bytes) => {
-            assert!(!bytes.is_empty());
-            let text = std::str::from_utf8(&bytes).expect("SSE error body must be UTF-8");
-            assert!(text.contains("event: response.failed"), "{text}");
-            assert!(text.contains("network_error"), "{text}");
-            assert!(text.contains("network error"), "{text}");
-            assert!(text.contains("data: [DONE]"), "{text}");
-        }
-        other => panic!("network error must project SSE bytes, got {other:?}"),
-    }
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        503,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        Vec::new(),
+    )
+    .with_body_read_failure("upstream closed the response body early");
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-body-read-failure-unit",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+    // The upstream really did answer 503 with headers before the body read
+    // failed. That is a real response head, so the record keeps the status and
+    // headers and names the read failure instead of claiming no response.
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-body-read-failure-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "external_http", "{evidence}");
+    assert_eq!(evidence["status"], 503);
+    assert_eq!(
+        evidence["body_read_failure"],
+        "upstream closed the response body early"
+    );
+    assert!(evidence.get("body").is_some(), "{evidence}");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("a streaming external provider terminal must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn provider_terminal_no_response_breaks_streaming_client_transport() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-no-response-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-no-response-unit",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+    // No provider response exists, so the recorded terminal states exactly that
+    // instead of a fabricated status.
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-no-response-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "no_response");
+    assert!(evidence.get("status").is_none(), "{evidence}");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let error = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect_err("a streaming no-response must break the client transport");
+    assert!(
+        error.to_string().contains("provider pool exhausted"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -3822,7 +5248,7 @@ async fn completed_responses_sse_reaches_eof_without_late_keepalive_comments() {
 }
 
 #[tokio::test]
-async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
+async fn io_sse_body_internal_error_aborts_instead_of_emitting_599() {
     let provider = futures_util::stream::iter(vec![Err::<Vec<u8>, io::Error>(io::Error::other(
         "response body transport failed",
     ))]);
@@ -3832,12 +5258,9 @@ async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
     let error = client
         .next()
         .await
-        .expect("internal response error must emit an SSE error event")
-        .expect("error event must be transportable");
-    let error = std::str::from_utf8(&error).unwrap();
-    assert!(error.starts_with("event: error\n"), "{error}");
-    assert!(error.contains("\"status\":599"), "{error}");
-    assert!(error.contains("internal_response_stream_error"), "{error}");
+        .expect("internal response error must abort the transfer")
+        .expect_err("no error event may be transportable");
+    assert!(error.to_string().contains("response body transport failed"));
     assert!(
         client.next().await.is_none(),
         "error event must close the body"
@@ -3845,7 +5268,7 @@ async fn io_sse_body_internal_error_is_explicit_599_not_silent_eof() {
 }
 
 #[tokio::test]
-async fn responses_live_sse_error_emits_responses_failed_terminal() {
+async fn responses_live_sse_error_aborts_without_failed_terminal() {
     let provider = futures_util::stream::iter(vec![Err(
         routecodex_v3_error::raise_v3_sse_runtime_failure(
             "V3ProviderRespInbound01Raw",
@@ -3856,6 +5279,7 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     let body = v3_live_client_sse_body_for_protocol(
         Box::pin(provider),
         None,
+        None,
         V3SseClientProtocol::Responses,
     );
     let mut client = body.into_data_stream();
@@ -3863,12 +5287,9 @@ async fn responses_live_sse_error_emits_responses_failed_terminal() {
     let error = client
         .next()
         .await
-        .expect("Responses stream failure must emit a terminal event")
-        .expect("terminal event must be transportable");
-    let error = std::str::from_utf8(&error).unwrap();
-    assert!(error.starts_with("event: response.failed\n"), "{error}");
-    assert!(error.contains("internal_response_stream_error"), "{error}");
-    assert!(error.ends_with("data: [DONE]\n\n"), "{error}");
+        .expect("Responses stream failure must abort the transfer")
+        .expect_err("a failed terminal must not be transportable");
+    assert!(error.to_string().contains("provider stream failed"));
     assert!(
         client.next().await.is_none(),
         "terminal event must close the body"
@@ -3892,12 +5313,15 @@ async fn anthropic_relay_output_consumes_typed_sealed_sse_body() {
         status: 200,
         client_response: json!({"events": events.clone()}),
         client_body: V3AnthropicRelayClientBody::Sse(test_committed_anthropic_sse(events)),
+        diagnostic_source: None,
+        diagnostic_cause: None,
+        provider_failure_attempts: Vec::new(),
         node_trace: vec!["V3ServerRespOutbound06ClientFrame"],
         error_chain: None,
-        servertool_followup_required: false,
         observability: None,
         stream_observation: None,
         provider_snapshots: None,
+        terminal_disposition: None,
     };
 
     let response = anthropic_relay_output_response(output, false);
@@ -3949,6 +5373,8 @@ async fn successful_direct_responses_sse_injects_keepalive_then_preserves_provid
         error_node: "none",
         error_chain: Vec::new(),
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -3967,11 +5393,21 @@ async fn successful_direct_responses_sse_injects_keepalive_then_preserves_provid
     let replay = String::from_utf8(replay).unwrap();
     assert!(replay.contains("event: response.created"), "{replay}");
     assert!(replay.contains("event: response.completed"), "{replay}");
-    assert!(replay.ends_with("data: [DONE]\n\n"), "{replay}");
+    // Direct Responses 客户端帧同样只由协议终态收口：不得出现 [DONE]。
+    assert!(!replay.contains("data: [DONE]"), "{replay}");
+    assert!(
+        replay
+            .trim_end()
+            .rsplit("event: ")
+            .next()
+            .unwrap_or_default()
+            .starts_with("response.completed"),
+        "{replay}"
+    );
 }
 
 #[tokio::test]
-async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() {
+async fn error06_responses_sse_returns_empty_typed_outcome() {
     let error_chunk = b"event: error\ndata: {\"code\":\"request_in_flight\"}\n\n".to_vec();
     let frame = V3Server16HttpFrame {
         status: 409,
@@ -3981,22 +5417,21 @@ async fn error06_responses_sse_starts_with_error_and_never_receives_keepalive() 
         error_node: "V3Error06ClientProjected",
         error_chain: vec!["V3Error01SourceRaised", "V3Error06ClientProjected"],
         error_body: None,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
     };
     let response = responses_direct_output_response(frame, Some(Duration::from_millis(10)));
-    let mut client = response.into_body().into_data_stream();
-
-    let first = client.next().await.unwrap().unwrap();
-    assert_eq!(first.as_ref(), error_chunk.as_slice());
     assert!(
-        std::str::from_utf8(&first)
+        response
+            .extensions()
+            .get::<V3ModelClientNoResponse>()
             .unwrap()
-            .starts_with("event: error\n"),
-        "{}",
-        std::str::from_utf8(&first).unwrap()
+            .streaming
     );
+    let mut client = response.into_body().into_data_stream();
     assert!(
         tokio::time::timeout(Duration::from_millis(50), client.next())
             .await

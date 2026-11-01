@@ -67,6 +67,45 @@
         "observed_at"
       ],
       "type": "object"
+    },
+    "tmux_endpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "codex_session_id": {
+          "type": "string"
+        },
+        "codex_thread_id": {
+          "type": "string"
+        },
+        "pane_id": {
+          "pattern": "^%[0-9]+$",
+          "type": "string"
+        },
+        "pane_pid": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "server_pid": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "socket_path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "tmux_session_id": {
+          "pattern": "^\\$[0-9]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "socket_path",
+        "server_pid",
+        "tmux_session_id",
+        "pane_id",
+        "pane_pid"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://appsdk.local/contracts/records/collab-live-closure-record.schema.json",
@@ -86,10 +125,10 @@
         "binding_id": {
           "type": "string"
         },
-        "native_thread_id": {
+        "project_scope_id": {
           "type": "string"
         },
-        "project_scope_id": {
+        "thread_id": {
           "type": "string"
         },
         "worker_id": {
@@ -99,7 +138,6 @@
       "required": [
         "worker_id",
         "binding_id",
-        "native_thread_id",
         "app_scope_id",
         "project_scope_id"
       ],
@@ -343,6 +381,9 @@
         },
         "storage_root": {
           "type": "string"
+        },
+        "tmux_endpoint": {
+          "$ref": "#/$defs/tmux_endpoint"
         }
       },
       "required": [
@@ -350,6 +391,7 @@
         "endpoint_generation",
         "route_scope",
         "storage_root",
+        "tmux_endpoint",
         "resolved_at",
         "source"
       ],

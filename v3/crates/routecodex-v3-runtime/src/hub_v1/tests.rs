@@ -1,3 +1,6 @@
+use super::request_outbound_format::{
+    project_outbound_payload_for_target_protocol, V3OutboundTargetProtocol,
+};
 use super::*;
 use serde_json::json;
 
@@ -257,19 +260,23 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
         routecodex_v3_target::V3TargetCandidate {
             provider_id: "provider".into(),
             provider_type: "openai_chat".into(),
+            interface_id: "default".into(),
             auth_alias: "primary".into(),
             model_id: "model".into(),
             wire_model: "wire-model".into(),
             visible_model_ids: vec!["model".into()],
             model_capabilities: vec!["text".into(), "tools".into()],
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            model_availability: None,
             max_context_tokens: None,
+            max_tokens: None,
             context_token_estimate_scale_bps: 10_000,
             base_url: "http://127.0.0.1:1/v1".into(),
             responses_process: None,
             responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
+            reasoning_effort: None,
             request_timeout_ms: 300_000,
             priority: 0,
             weight: 1,
@@ -277,11 +284,13 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: None,
+            headers: Default::default(),
             env_name: Some("V3_TEST_KEY".into()),
             token_file: None,
             secret_file: None,
             secret_key: None,
             api_key: None,
+            oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
             default_pool_member: false,
@@ -291,9 +300,10 @@ fn all_adjacent_builders_form_the_fixed_typed_topology() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::OpenAiChat,
-    );
+    )
+    .expect("Node06 standard projection must succeed for test fixture");
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
-    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
+    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
     let _req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
 
     let resp01 = build_v3_provider_resp_inbound_01_raw(
@@ -332,19 +342,23 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
         routecodex_v3_target::V3TargetCandidate {
             provider_id: "provider".into(),
             provider_type: "responses".into(),
+            interface_id: "default".into(),
             auth_alias: "primary".into(),
             model_id: "model".into(),
             wire_model: "wire-model".into(),
             visible_model_ids: vec!["model".into()],
             model_capabilities: vec!["text".into(), "tools".into()],
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            model_availability: None,
             max_context_tokens: None,
+            max_tokens: None,
             context_token_estimate_scale_bps: 10_000,
             base_url: "http://127.0.0.1:1/v1".into(),
             responses_process: None,
             responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
+            reasoning_effort: None,
             request_timeout_ms: 300_000,
             priority: 0,
             weight: 1,
@@ -352,11 +366,13 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: None,
+            headers: Default::default(),
             env_name: Some("V3_TEST_KEY".into()),
             token_file: None,
             secret_file: None,
             secret_key: None,
             api_key: None,
+            oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
             default_pool_member: false,
@@ -366,7 +382,8 @@ fn direct_req_compat_projects_chat_to_selected_provider_protocol() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::Responses,
-    );
+    )
+    .expect("Node06 standard projection must succeed for test fixture");
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     let payload = req_compat.provider_semantic_payload();
     assert!(
@@ -406,19 +423,23 @@ fn provider_req_compat_loads_selected_target_profile() {
         routecodex_v3_target::V3TargetCandidate {
             provider_id: "minimax".into(),
             provider_type: "anthropic".into(),
+            interface_id: "default".into(),
             auth_alias: "key1".into(),
             model_id: "MiniMax-M3".into(),
             wire_model: "MiniMax-M3".into(),
             visible_model_ids: vec!["MiniMax-M3".into()],
             model_capabilities: vec!["text".into(), "tools".into()],
             web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+            model_availability: None,
             max_context_tokens: None,
+            max_tokens: None,
             context_token_estimate_scale_bps: 10_000,
             base_url: "http://127.0.0.1:1/v1".into(),
             responses_process: None,
             responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
+            reasoning_effort: None,
             request_timeout_ms: 300_000,
             priority: 0,
             weight: 1,
@@ -426,11 +447,13 @@ fn provider_req_compat_loads_selected_target_profile() {
             initial_concurrency_budget: 8,
             concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: Some("chat:minimax".into()),
+            headers: Default::default(),
             env_name: Some("V3_TEST_KEY".into()),
             token_file: None,
             secret_file: None,
             secret_key: None,
             api_key: None,
+            oauth_declaration: None,
             required_capabilities: Vec::new(),
             pool_ids: vec!["test".into()],
             default_pool_member: false,
@@ -440,16 +463,17 @@ fn provider_req_compat_loads_selected_target_profile() {
     let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(
         req06,
         V3HubProviderWireProtocol::Responses,
-    );
+    )
+    .expect("Node06 standard projection must succeed for test fixture");
     let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07).unwrap();
     assert_eq!(req_compat.profile().as_str(), "chat:minimax");
-    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat);
+    let req08 = build_v3_provider_req_outbound_08_from_provider_req_compat_06(req_compat.node);
     let req09 = build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08(req08);
     assert_eq!(req09.compat_profile_id(), "chat:minimax");
 }
 
 #[test]
-fn routecodex_control_and_payload_mirror_aliases_are_rejected_recursively() {
+fn bug03df769_business_aliases_are_preserved_recursively() {
     for key in [
         "routecodexInternal",
         "routeHint",
@@ -490,11 +514,12 @@ fn routecodex_control_and_payload_mirror_aliases_are_rejected_recursively() {
                 key: {"internal": true}
             }]
         });
-        assert_eq!(
-            find_v3_hub_side_channel_key(&payload),
-            Some(key),
-            "{key} must fail instead of being stripped or forwarded"
-        );
+        let projected = project_outbound_payload_for_target_protocol(
+            &payload,
+            V3OutboundTargetProtocol::OpenAiResponses,
+        )
+        .expect("field spelling is not control provenance");
+        assert_eq!(projected["input"], payload["input"], "{key}");
     }
 }
 
@@ -516,11 +541,16 @@ fn protocol_data_fields_are_not_misclassified_as_routecodex_control() {
             "namespace": "multi_agent_v1"
         }]
     });
-    assert_eq!(find_v3_hub_side_channel_key(&payload), None);
+    let projected = project_outbound_payload_for_target_protocol(
+        &payload,
+        V3OutboundTargetProtocol::OpenAiResponses,
+    )
+    .expect("client metadata remains business data");
+    assert_eq!(projected["metadata"], payload["metadata"]);
 }
 
 #[test]
-fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encrypted_content() {
+fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_wire_signature() {
     let request = build_v3_openai_chat_provider_payload_from_responses_payload(&json!({
         "model": "client-responses",
         "input": [
@@ -549,14 +579,17 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
             }
         ]
     }))
-    .expect("Responses reasoning must normalize into Chat without encrypted replay state");
+    .expect("Responses reasoning must normalize into Chat with its signature association");
 
     let messages = request["messages"]
         .as_array()
         .expect("OpenAI Chat request messages");
     assert_eq!(messages.len(), 3);
     assert_eq!(messages[0]["role"], "user");
-    assert_eq!(messages[0]["content"], "inspect the cwd");
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type":"text","text":"inspect the cwd"}])
+    );
     assert_eq!(messages[1]["role"], "assistant");
     assert_eq!(
         messages[1]["reasoning_content"],
@@ -566,8 +599,18 @@ fn responses_inbound_preserves_reasoning_summary_and_tool_context_without_encryp
     assert_eq!(messages[2]["role"], "tool");
     assert_eq!(messages[2]["tool_call_id"], "call-1");
     assert_eq!(messages[2]["content"], "/tmp");
-    let serialized = serde_json::to_string(&request).expect("OpenAI Chat request JSON");
+    assert_eq!(
+        messages[1]["routecodex_chat_extension"]["responses_reasoning_encrypted_content"],
+        "opaque-reasoning"
+    );
+    let wire =
+        super::request_outbound_format::build_v3_openai_chat_standard_request_from_chat_canonical(
+            &request,
+        )
+        .expect("canonical Chat must project to the provider wire");
+    let serialized = serde_json::to_string(&wire).expect("OpenAI Chat provider wire JSON");
     assert!(!serialized.contains("opaque-reasoning"));
+    assert!(!serialized.contains("routecodex_chat_extension"));
     assert!(!serialized.contains("summary_text"));
 }
 
@@ -638,7 +681,7 @@ fn openai_chat_request_encoding_maps_assistant_reasoning_blocks_to_reasoning_con
     .expect("assistant Responses reasoning block must encode into OpenAI Chat");
 
     assert_eq!(request["messages"][0]["role"], "assistant");
-    assert_eq!(request["messages"][0]["content"], "");
+    assert_eq!(request["messages"][0]["content"], json!([]));
     assert_eq!(
         request["messages"][0]["reasoning_content"],
         "I should verify the result before returning."
@@ -819,5 +862,258 @@ fn responses_reasoning_summary_survives_chat_canonical_round_trip_before_tool_ou
         rebuilt_reasoning[0]["summary"],
         json!([{"type": "summary_text", "text": "**Deciding skill activation and compliance**"}]),
         "rebuild must carry the full summary as plaintext for the next wire"
+    );
+}
+
+fn v3_output_cap_test_candidate(
+    provider_type: &'static str,
+    entry_protocol: V3HubEntryProtocol,
+    declared_max_tokens: Option<u64>,
+) -> routecodex_v3_target::V3TargetCandidate {
+    routecodex_v3_target::V3TargetCandidate {
+        provider_id: "provider".into(),
+        interface_id: "default".into(),
+        provider_type: provider_type.into(),
+        auth_alias: "primary".into(),
+        model_id: "model".into(),
+        wire_model: "wire-model".into(),
+        visible_model_ids: vec!["model".into()],
+        model_capabilities: vec!["text".into(), "tools".into()],
+        web_search_execution_mode: routecodex_v3_config::V3WebSearchExecutionMode::None,
+        model_availability: None,
+        max_context_tokens: None,
+        max_tokens: declared_max_tokens,
+        context_token_estimate_scale_bps: 10_000,
+        base_url: "http://127.0.0.1:1/v1".into(),
+        responses_process: None,
+        responses_transport: routecodex_v3_config::V3ResponsesTransportKind::Http,
+        websocket_v2_url: None,
+        provider_request_cleanup: Default::default(),
+        reasoning_effort: None,
+        request_timeout_ms: 300_000,
+        priority: 0,
+        weight: 1,
+        sse_first_frame_timeout_ms: None,
+        initial_concurrency_budget: 8,
+        concurrency_acquire_timeout_ms: 60_000,
+        compatibility_profile: None,
+        headers: Default::default(),
+        env_name: Some("V3_TEST_KEY".into()),
+        token_file: None,
+        secret_file: None,
+        secret_key: None,
+        api_key: None,
+        oauth_declaration: None,
+        required_capabilities: Vec::new(),
+        pool_ids: vec!["test".into()],
+        default_pool_member: false,
+        path: vec!["provider".into()],
+    }
+}
+
+fn project_v3_output_cap_wire(
+    client_payload: serde_json::Value,
+    entry_protocol: V3HubEntryProtocol,
+    provider_protocol: V3HubProviderWireProtocol,
+    declared_max_tokens: Option<u64>,
+) -> serde_json::Value {
+    let wire_model = match provider_protocol {
+        V3HubProviderWireProtocol::OpenAiChat => "openai_chat",
+        V3HubProviderWireProtocol::Responses => "responses",
+        V3HubProviderWireProtocol::Anthropic => "anthropic",
+        V3HubProviderWireProtocol::Gemini => "gemini",
+    };
+    let req01 = build_v3_hub_req_inbound_01_client_raw(
+        client_payload,
+        entry_protocol,
+        V3HubInvocationSource::Client,
+        V3HubTransportIntent::Json,
+    );
+    let req02 = build_v3_hub_req_inbound_02_from_v3_hub_req_inbound_01(req01);
+    let req04 = build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02(req02);
+    let req05 = build_v3_hub_req_execution_05_from_v3_hub_req_chat_process_04(
+        req04,
+        V3HubExecutionMode::Relay,
+    );
+    let req06 = build_v3_hub_req_target_06_from_v3_hub_req_execution_05(
+        req05,
+        V3HubTargetResolution::Routed,
+        v3_output_cap_test_candidate(wire_model, entry_protocol, declared_max_tokens),
+    );
+    let req07 = build_v3_hub_req_outbound_07_from_v3_hub_req_target_06(req06, provider_protocol)
+        .expect("Node06 standard projection must succeed for test fixture");
+    build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+        .expect("provider compat projection must succeed")
+        .provider_semantic_payload()
+        .clone()
+}
+
+#[test]
+fn provider_req_compat_projects_declared_output_cap_when_client_sent_none() {
+    let wire = project_v3_output_cap_wire(
+        json!({"messages":[{"role":"user","content":"hi"}]}),
+        V3HubEntryProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::Responses,
+        Some(20_000),
+    );
+    assert_eq!(
+        wire["max_output_tokens"],
+        json!(20_000),
+        "declared provider cap must be projected on the Responses wire: {wire}"
+    );
+    assert!(wire.get("max_completion_tokens").is_none());
+    assert!(wire.get("max_tokens").is_none());
+
+    let wire = project_v3_output_cap_wire(
+        json!({"messages":[{"role":"user","content":"hi"}]}),
+        V3HubEntryProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::OpenAiChat,
+        Some(20_000),
+    );
+    assert_eq!(
+        wire["max_completion_tokens"],
+        json!(20_000),
+        "declared provider cap must be projected on the OpenAI Chat wire: {wire}"
+    );
+    assert!(wire.get("max_tokens").is_none());
+    assert!(wire.get("max_output_tokens").is_none());
+
+    let wire = project_v3_output_cap_wire(
+        json!({"messages":[{"role":"user","content":"hi"}]}),
+        V3HubEntryProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::Anthropic,
+        Some(20_000),
+    );
+    assert_eq!(
+        wire["max_tokens"],
+        json!(20_000),
+        "declared provider cap must be projected on the Anthropic wire: {wire}"
+    );
+
+    let wire = project_v3_output_cap_wire(
+        json!({"messages":[{"role":"user","content":"hi"}]}),
+        V3HubEntryProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::Gemini,
+        Some(20_000),
+    );
+    assert_eq!(
+        wire["generationConfig"]["maxOutputTokens"],
+        json!(20_000),
+        "declared provider cap must be projected on the Gemini wire: {wire}"
+    );
+}
+
+#[test]
+fn provider_req_compat_keeps_client_output_cap_over_declared_cap() {
+    // Every Responses alias a client can send must win over the declared cap and
+    // must not be joined by a second alias.
+    for alias in ["max_output_tokens", "max_completion_tokens", "max_tokens"] {
+        let client_payload = serde_json::Map::new();
+        let mut client_payload = json!({"messages":[{"role":"user","content":"hi"}]});
+        client_payload[alias] = json!(64);
+        let wire = project_v3_output_cap_wire(
+            client_payload,
+            V3HubEntryProtocol::OpenAiChat,
+            V3HubProviderWireProtocol::Responses,
+            Some(20_000),
+        );
+        assert_eq!(
+            wire["max_output_tokens"],
+            json!(64),
+            "client Responses alias {alias} must win over the declared cap: {wire}"
+        );
+        assert!(
+            wire.get("max_completion_tokens").is_none(),
+            "a client Responses cap must not gain a second alias ({alias}): {wire}"
+        );
+        assert!(
+            wire.get("max_tokens").is_none(),
+            "a client Responses cap must not gain a second alias ({alias}): {wire}"
+        );
+    }
+
+    let wire = project_v3_output_cap_wire(
+        json!({"messages":[{"role":"user","content":"hi"}], "max_completion_tokens": 64}),
+        V3HubEntryProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::OpenAiChat,
+        Some(20_000),
+    );
+    assert_eq!(
+        wire["max_completion_tokens"],
+        json!(64),
+        "client OpenAI Chat cap must win over the declared cap: {wire}"
+    );
+
+    let wire = project_v3_output_cap_wire(
+        json!({"messages":[{"role":"user","content":"hi"}], "max_tokens": 64}),
+        V3HubEntryProtocol::OpenAiChat,
+        V3HubProviderWireProtocol::Anthropic,
+        Some(20_000),
+    );
+    assert_eq!(
+        wire["max_tokens"],
+        json!(64),
+        "client Anthropic cap must win over the declared cap: {wire}"
+    );
+}
+
+#[test]
+fn provider_req_compat_does_not_inject_output_cap_without_declaration() {
+    for protocol in [
+        (
+            V3HubProviderWireProtocol::Responses,
+            vec!["max_output_tokens", "max_completion_tokens", "max_tokens"],
+        ),
+        (
+            V3HubProviderWireProtocol::OpenAiChat,
+            vec!["max_completion_tokens", "max_tokens", "max_output_tokens"],
+        ),
+        (V3HubProviderWireProtocol::Anthropic, vec!["max_tokens"]),
+        (V3HubProviderWireProtocol::Gemini, vec!["maxOutputTokens"]),
+    ] {
+        let wire = project_v3_output_cap_wire(
+            json!({"messages":[{"role":"user","content":"hi"}]}),
+            V3HubEntryProtocol::OpenAiChat,
+            protocol.0,
+            None,
+        );
+        for field in protocol.1 {
+            assert!(
+                wire.get(&field).is_none(),
+                "no provider-declared cap means no injected {field} on {:?} wire: {wire}",
+                protocol.0
+            );
+        }
+    }
+}
+
+#[test]
+fn provider_req_compat_leaves_existing_gemini_generation_config_untouched() {
+    let mut payload = build_v3_openai_responses_standard_request_for_selected_target(
+        &build_v3_openai_chat_standard_request_for_selected_web_search_mode(
+            &json!({"messages":[{"role":"user","content":"hi"}]}),
+            routecodex_v3_config::V3WebSearchExecutionMode::None,
+            false,
+        )
+        .expect("chat canonical projection must succeed"),
+        false,
+    )
+    .expect("responses projection must succeed");
+    payload["generationConfig"] = json!({"maxOutputTokens": 123});
+    let selected =
+        v3_output_cap_test_candidate("gemini", V3HubEntryProtocol::OpenAiChat, Some(20_000));
+
+    let (wire, _) = apply_v3_provider_req_compat_to_provider_payload(
+        payload,
+        &selected,
+        V3HubProviderWireProtocol::Gemini,
+        &V3ProviderCompatProfileId::Passthrough,
+    )
+    .expect("a pre-existing generationConfig must not make the provider request fail");
+
+    assert_eq!(
+        wire["generationConfig"]["maxOutputTokens"],
+        json!(123),
+        "a pre-existing generationConfig.maxOutputTokens must not be replaced by the declared cap: {wire}"
     );
 }

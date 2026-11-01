@@ -1,0 +1,67 @@
+{
+  "case_id": "responses-to-gemini-json",
+  "turn": 1,
+  "turn_id": null,
+  "provider_captures": [
+    {
+      "phase": "case",
+      "case_id": "responses-to-gemini-json",
+      "turn": 0,
+      "attempt": 0,
+      "attempt_kind": "business",
+      "protocol": "gemini",
+      "method": "POST",
+      "path": "/v1beta/models/gemini-model:generateContent",
+      "query": "",
+      "headers": {
+        "accept": "application/json",
+        "authorization": "Bearer fake-loopback-token",
+        "content-type": "application/json",
+        "host": "127.0.0.1:57203",
+        "content-length": "48"
+      },
+      "content_type": "application/json",
+      "raw_body": "{\"messages\":[{\"content\":\"hello\",\"role\":\"user\"}]}",
+      "body": {
+        "messages": [
+          {
+            "content": "hello",
+            "role": "user"
+          }
+        ]
+      },
+      "body_parsed": true,
+      "captured_at_epoch_ms": 1791823047110,
+      "response_script": {
+        "protocol": "gemini",
+        "mode": "json",
+        "status": 200,
+        "content_type": "application/json",
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "ok"
+                  }
+                ]
+              },
+              "finishReason": "STOP"
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 7,
+            "candidatesTokenCount": 2,
+            "totalTokenCount": 9
+          }
+        }
+      },
+      "attempt_repeated": false
+    }
+  ],
+  "business_attempts": 1,
+  "scripted_attempts": 1,
+  "probe_attempts": 0
+}

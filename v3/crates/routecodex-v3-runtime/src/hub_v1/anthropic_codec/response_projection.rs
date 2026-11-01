@@ -1,4 +1,4 @@
-use super::V3AnthropicCodecError;
+use super::{V3AnthropicCodecError, ANTHROPIC_REASONING_EXTENSION};
 use crate::protocol_tables::{map_value as table_map_value, V3TableDirection, V3TableKind};
 use serde_json::{json, Map, Value};
 
@@ -83,12 +83,12 @@ pub(super) enum V3AnthropicTerminalKind {
     StopSequence,
     PauseTurn,
     Refusal,
+    ContextWindowExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct V3AnthropicResponsesTerminalProjection {
     pub(super) kind: V3AnthropicTerminalKind,
-    pub(super) source_stop_reason: String,
     pub(super) responses_status: &'static str,
     pub(super) incomplete_reason: Option<&'static str>,
     pub(super) stop_sequence: Option<String>,
@@ -133,11 +133,7 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         "stop_sequence" => V3AnthropicTerminalKind::StopSequence,
         "pause_turn" => V3AnthropicTerminalKind::PauseTurn,
         "content_filter" => V3AnthropicTerminalKind::Refusal,
-        "context_window_exceeded" => {
-            return Err(V3AnthropicCodecError::UnsupportedStopReason {
-                stop_reason: stop_reason.to_string(),
-            })
-        }
+        "context_window_exceeded" => V3AnthropicTerminalKind::ContextWindowExceeded,
         other => {
             return Err(V3AnthropicCodecError::InvalidTerminalField {
                 field: "stop_reason",
@@ -167,38 +163,25 @@ pub(super) fn project_v3_anthropic_terminal_as_responses_terminal(
         }
     };
 
-    let stop_details = match object.get("stop_details") {
-        None | Some(Value::Null) => None,
-        Some(Value::Object(_)) if kind == V3AnthropicTerminalKind::Refusal => {
-            object.get("stop_details").cloned()
-        }
-        Some(Value::Object(_)) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_details",
-                reason: format!("must be absent or null when stop_reason={stop_reason}"),
-            })
-        }
-        Some(_) => {
-            return Err(V3AnthropicCodecError::InvalidTerminalField {
-                field: "stop_details",
-                reason: "must be an object when present".to_string(),
-            })
-        }
-    };
+    let stop_details = object.get("stop_details").cloned();
 
+    // A `tool_use` stop reason is Anthropic's native expression of "the model
+    // returned tool calls". The same semantic is a normal output item in the
+    // Responses protocol, so the terminal status stays `completed`. Fabricating
+    // `requires_action` here leaks a non-Responses status to the client.
     let (responses_status, incomplete_reason) = match kind {
         V3AnthropicTerminalKind::EndTurn | V3AnthropicTerminalKind::StopSequence => {
             ("completed", None)
         }
-        V3AnthropicTerminalKind::ToolUse => ("requires_action", None),
+        V3AnthropicTerminalKind::ToolUse => ("completed", None),
         V3AnthropicTerminalKind::MaxTokens => ("incomplete", Some("max_output_tokens")),
         V3AnthropicTerminalKind::PauseTurn => ("in_progress", None),
         V3AnthropicTerminalKind::Refusal => ("incomplete", Some("content_filter")),
+        V3AnthropicTerminalKind::ContextWindowExceeded => ("incomplete", None),
     };
 
     Ok(V3AnthropicResponsesTerminalProjection {
         kind,
-        source_stop_reason: stop_reason.to_string(),
         responses_status,
         incomplete_reason,
         stop_sequence,
@@ -232,8 +215,7 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
         })?;
     match object.get("type").and_then(Value::as_str) {
         Some("thinking") => {
-            validate_anthropic_reasoning_object_keys(object, &["type", "thinking", "signature"])?;
-            let thinking = require_nonempty_reasoning_string(object.get("thinking"))?;
+            let thinking = require_nonempty_reasoning_string(object.get("thinking"), "thinking")?;
             let summary_text = match summary_policy {
                 None | Some("auto" | "concise" | "detailed") => thinking,
                 Some(_) => {
@@ -246,18 +228,24 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
                 "type":"reasoning",
                 "summary":[{"type":"summary_text","text":summary_text}]
             });
-            if let Some(signature) = optional_nonempty_reasoning_string(object, "signature")? {
+            if let Some(signature) = optional_reasoning_string(object, "signature")? {
                 item["encrypted_content"] = Value::String(signature.to_string());
             }
+            preserve_anthropic_reasoning_extensions(
+                object,
+                &["type", "thinking", "signature"],
+                &mut item,
+            );
             Ok(item)
         }
         Some("redacted_thinking") => {
-            validate_anthropic_reasoning_object_keys(object, &["type", "data"])?;
-            let data = require_nonempty_reasoning_string(object.get("data"))?;
-            Ok(json!({
+            let data = require_nonempty_reasoning_string(object.get("data"), "data")?;
+            let mut item = json!({
                 "type":"reasoning",
                 "encrypted_content":data
-            }))
+            });
+            preserve_anthropic_reasoning_extensions(object, &["type", "data"], &mut item);
+            Ok(item)
         }
         _ => Err(V3AnthropicCodecError::MalformedField {
             field: "reasoning content",
@@ -265,38 +253,63 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
     }
 }
 
-fn require_nonempty_reasoning_string(value: Option<&Value>) -> Result<&str, V3AnthropicCodecError> {
+/// Carry provider extension fields on a reasoning block forward as opaque data
+/// so a representable provider response is not dropped. Native fields are
+/// consumed by the mapping above and are never duplicated.
+fn preserve_anthropic_reasoning_extensions(
+    object: &Map<String, Value>,
+    native: &[&str],
+    item: &mut Value,
+) {
+    let Some(target) = item.as_object_mut() else {
+        return;
+    };
+    let mut extension = Map::new();
+    if let Some(content_type) = object.get("type") {
+        extension.insert("type".to_string(), content_type.clone());
+    }
+    for (key, value) in object {
+        if !native.contains(&key.as_str()) {
+            extension.insert(key.clone(), value.clone());
+        }
+    }
+    if extension.len() > 1 {
+        let mut carrier = Map::new();
+        carrier.insert(
+            ANTHROPIC_REASONING_EXTENSION.to_string(),
+            Value::Object(extension),
+        );
+        target.insert(
+            "routecodex_chat_extension".to_string(),
+            Value::Object(carrier),
+        );
+    }
+}
+
+fn require_nonempty_reasoning_string<'a>(
+    value: Option<&'a Value>,
+    field: &'static str,
+) -> Result<&'a str, V3AnthropicCodecError> {
     let value = value
         .and_then(Value::as_str)
-        .ok_or(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        })?;
+        .ok_or(V3AnthropicCodecError::MalformedField { field })?;
     if value.trim().is_empty() {
-        return Err(V3AnthropicCodecError::MalformedField {
-            field: "reasoning content",
-        });
+        return Err(V3AnthropicCodecError::MalformedField { field });
     }
     Ok(value)
 }
 
-fn optional_nonempty_reasoning_string<'a>(
+fn optional_reasoning_string<'a>(
     object: &'a Map<String, Value>,
     key: &str,
 ) -> Result<Option<&'a str>, V3AnthropicCodecError> {
     let Some(value) = object.get(key) else {
         return Ok(None);
     };
-    Ok(Some(require_nonempty_reasoning_string(Some(value))?))
-}
-
-fn validate_anthropic_reasoning_object_keys(
-    object: &Map<String, Value>,
-    allowed: &[&str],
-) -> Result<(), V3AnthropicCodecError> {
-    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return Err(V3AnthropicCodecError::MalformedField {
+    value
+        .as_str()
+        .map(Some)
+        .ok_or(V3AnthropicCodecError::MalformedField {
             field: "reasoning content",
-        });
-    }
-    Ok(())
+        })
 }

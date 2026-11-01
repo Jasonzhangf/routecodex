@@ -1,0 +1,86 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-Y9ABwb/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-Y9ABwb/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 57248
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 57249
+    }
+  ],
+  "admin_bind": "127.0.0.1:57249",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:57249"
+  },
+  "mode": "direct",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": {
+    "provider_id": "mock-chat-a",
+    "model": "mock.chat-model",
+    "wire_model": "chat-model",
+    "candidate_ids": [
+      "mock-chat-a/mock.chat-model",
+      "mock-chat-b/mock.chat-model"
+    ]
+  },
+  "provider_files": [
+    {
+      "provider_id": "mock-chat-a",
+      "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-Y9ABwb/provider/mock-chat-a/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/provider-mock-chat-a.toml",
+      "model": "mock.chat-model",
+      "wire_model": "chat-model",
+      "sha256": "1b88c827d967fac01a47cae11d567721e998e028376c93da68ff5b9b7cc54d83"
+    },
+    {
+      "provider_id": "mock-chat-b",
+      "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-Y9ABwb/provider/mock-chat-b/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/provider-mock-chat-b.toml",
+      "model": "mock.chat-model",
+      "wire_model": "chat-model",
+      "sha256": "728be8d3a87c114f62546cbde42c9d9005addf7129d5ba2f7eb44110062a30d5"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "openai_chat",
+    "wire_model": "chat-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-chat-a/mock.chat-model",
+        "provider_id": "mock-chat-a",
+        "model": "mock.chat-model",
+        "wire_model": "chat-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-Y9ABwb/provider/mock-chat-a/config.v2.toml",
+        "provider_sha256": "1b88c827d967fac01a47cae11d567721e998e028376c93da68ff5b9b7cc54d83",
+        "auth_token": "fake-loopback-token-mock-chat-a",
+        "authorization": "Bearer fake-loopback-token-mock-chat-a",
+        "declared": true
+      },
+      {
+        "candidate_id": "mock-chat-b/mock.chat-model",
+        "provider_id": "mock-chat-b",
+        "model": "mock.chat-model",
+        "wire_model": "chat-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/provider-fault-stream-cut/provider-fault-stream-cut/v3-protocol-live-mock-lifecycle-Y9ABwb/provider/mock-chat-b/config.v2.toml",
+        "provider_sha256": "728be8d3a87c114f62546cbde42c9d9005addf7129d5ba2f7eb44110062a30d5",
+        "auth_token": "fake-loopback-token-mock-chat-b",
+        "authorization": "Bearer fake-loopback-token-mock-chat-b",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-chat-a/mock.chat-model",
+    "mock-chat-b/mock.chat-model"
+  ]
+}

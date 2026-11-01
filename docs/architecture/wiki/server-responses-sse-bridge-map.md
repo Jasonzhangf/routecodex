@@ -1,5 +1,7 @@
 # Server Responses SSE Bridge Map
 
+This page's TS surfaces are historical and do not describe the active V3 Rust server. Current model-client behavior follows AGENTS.md's mandatory all-entry no-client-error rule and [the client/provider boundary design](../../goals/provider-terminal-no-502-dag-20260930.md). Historical error-output surfaces below are not permitted V3 client behavior.
+
 ## Purpose
 
 这页只回答两件事：
@@ -56,12 +58,12 @@ flowchart LR
 
 | Semantic | JSON must expose | SSE must expose | Equality rule |
 | --- | --- | --- | --- |
-| final completion | final response body | `response.completed` and/or `response.done` terminal event | same terminal truth |
+| final completion | final response body | `response.completed` terminal event | same terminal truth |
 | tool call request | final `assistant.tool_calls` or `required_action.submit_tool_outputs.tool_calls[]` | terminal/completed SSE frame with same tool-call set | same consumer-visible required action |
 | tool-call ids | final body ids | SSE terminal ids | exact id equality |
 | plain output text | final text field | accumulated visible text stream | semantic equality |
 | custom tool output / apply_patch freeform | final client-visible body projection | SSE frame projection | same replay-safe visible tool result |
-| error result | JSON error body | `event:error` / started-stream error frame | same error class |
+| uncompletable model request | transport closes without a response | incomplete transport, no error event or semantic terminal | same internal failure; no client error response |
 
 ## Server / SSE Boundary
 

@@ -2,7 +2,7 @@ use super::{normalize_v3_provider_sse_json_data_with_event_name, V3HubProviderWi
 use serde_json::Value;
 
 #[test]
-fn responses_mcp_function_call_restores_namespace_for_client_dispatch() {
+fn responses_mcp_function_call_keeps_provider_name_for_request_scoped_projection() {
     let data = normalize_v3_provider_sse_json_data_with_event_name(
         V3HubProviderWireProtocol::Responses,
         r#"{"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"mcp_1","name":"mcp__mcpx__workspace","arguments":"{}"}]}}"#,
@@ -11,8 +11,8 @@ fn responses_mcp_function_call_restores_namespace_for_client_dispatch() {
     .expect("flattened MCP function call must normalize");
     let value: Value = serde_json::from_str(&data).expect("normalized JSON");
     let item = &value["response"]["output"][0];
-    assert_eq!(item["namespace"], "mcp__mcpx");
-    assert_eq!(item["name"], "workspace");
+    assert!(item.get("namespace").is_none());
+    assert_eq!(item["name"], "mcp__mcpx__workspace");
     assert_eq!(item["arguments"], "{}");
 }
 
@@ -32,7 +32,7 @@ fn responses_mcp_namespace_normalization_preserves_non_matching_calls() {
 }
 
 #[test]
-fn responses_mcp_namespace_normalization_keeps_nested_path_reversible() {
+fn responses_mcp_sse_keeps_nested_provider_name_without_guessing_namespace() {
     let data = normalize_v3_provider_sse_json_data_with_event_name(
         V3HubProviderWireProtocol::Responses,
         r#"{"type":"response.completed","response":{"output":[{"type":"function_call","call_id":"nested_1","name":"mcp__mcpx__workspace__read","arguments":"{}"}]}}"#,
@@ -41,6 +41,8 @@ fn responses_mcp_namespace_normalization_keeps_nested_path_reversible() {
     .expect("nested flattened MCP function call must normalize");
     let value: Value = serde_json::from_str(&data).expect("normalized JSON");
     let item = &value["response"]["output"][0];
-    assert_eq!(item["namespace"], "mcp__mcpx__workspace");
-    assert_eq!(item["name"], "read");
+    assert!(item.get("namespace").is_none());
+    assert_eq!(item["name"], "mcp__mcpx__workspace__read");
+    assert_eq!(item["call_id"], "nested_1");
+    assert_eq!(item["arguments"], "{}");
 }

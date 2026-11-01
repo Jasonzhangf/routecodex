@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative as relativePath, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const repoRoot = process.cwd();
-const verifier = resolve(repoRoot, 'scripts/architecture/verify-v3-anthropic-codec-characterization.mjs');
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const verifier = resolve(repoRoot, 'v3/scripts/architecture/verify-v3-anthropic-codec-characterization.mjs');
 const fixtures = [
   ['hook registration', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'use super::{', 'use super::{ compile_v3_hub_v1_static_registry,', /forbidden.*compile_v3_hub_v1_static_registry/],
   ['Gemini branch', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'V3HubEntryProtocol::Anthropic', 'V3HubEntryProtocol::Gemini', /missing V3HubEntryProtocol::Anthropic|forbidden.*Gemini/],
-  ['side-channel guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', '"metadata_center"', '"mc_removed"', /missing metadata_center/],
+  ['business-name guard revival', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'use super::{', 'fn reject_side_channel_fields() {}\nuse super::{', /forbidden.*reject_side_channel_fields/],
   ['provider error guard removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'MalformedProviderError', 'MalformedProviderFailure', /missing MalformedProviderError/],
   ['SSE coverage removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'V3HubTransportIntent::Sse', 'V3HubTransportIntent::Json', /missing V3HubTransportIntent::Sse/],
   ['shape branch helper removed', 'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs', 'collect_v3_anthropic_request_shape_branch_semantics', 'collect_v3_anthropic_request_branch_semantics_removed', /missing collect_v3_anthropic_request_shape_branch_semantics/],
@@ -22,22 +23,35 @@ const fixtures = [
                                 V3AnthropicChatShapeBranchSemantic::ChatInlineMediaData,`, `"request.messages[].content[].image.source.data",
                                 V3AnthropicChatShapeBranchSemantic::ChatMediaMimeType,`, /image\.source\.data.*must map near ChatInlineMediaData|image\.source\.data.*must not collapse near ChatMediaMimeType/],
   ['shape branch required test removed', 'v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs', 'anthropic_image_source_url_maps_only_to_chat_image_url_url', 'anthropic_image_source_url_removed', /missing anthropic_image_source_url_maps_only_to_chat_image_url_url/],
+  ['npm script points to missing file', 'package.json', [
+    'node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-runtime --test hub_anthropic_codec_characterization',
+    'node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_anthropic_codec_characterization',
+  ], 'node missing/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test hub_anthropic_codec_characterization', /test:v3-anthropic-codec-characterization references missing script missing\/run-v3-cargo-test\.mjs/],
 ];
 
 const failures = [];
-for (const [name, relative, from, to, diagnostic] of fixtures) {
+for (const [index, [name, relative, from, to, diagnostic]] of fixtures.entries()) {
   const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-anthropic-codec-red-'));
   try {
     for (const relative of ['v3', 'docs', 'scripts', 'package.json']) {
-      cpSync(resolve(repoRoot, relative), join(root, relative), {
+      const sourceRoot = resolve(repoRoot, relative);
+      cpSync(sourceRoot, join(root, relative), {
         recursive: true,
-        filter: (source) => !source.includes('/target/'),
+        dereference: relative === 'scripts',
+        filter: (source) => !relativePath(sourceRoot, source).split(sep).some((part) => part === 'target' || part === 'build-control'),
       });
+    }
+    if (index === 0) {
+      const baseline = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
+      if (baseline.status !== 0) {
+        throw new Error('unmutated fixture must pass: ' + (baseline.stdout ?? '') + (baseline.stderr ?? ''));
+      }
     }
     const target = join(root, relative);
     const source = readFileSync(target, 'utf8');
-    if (!source.includes(from)) throw new Error(name + ': fixture source missing');
-    writeFileSync(target, source.split(from).join(to));
+    const fixtureSource = (Array.isArray(from) ? from : [from]).find((candidate) => source.includes(candidate));
+    if (!fixtureSource) throw new Error(name + ': fixture source missing');
+    writeFileSync(target, source.split(fixtureSource).join(to));
     const result = spawnSync(process.execPath, [verifier], { cwd: root, encoding: 'utf8' });
     const output = (result.stdout ?? '') + '\n' + (result.stderr ?? '');
     if (result.status === 0) failures.push(name + ': gate unexpectedly passed');

@@ -1,0 +1,18 @@
+version = "2.0.0"
+providerId = "mock-chat-b"
+
+[provider]
+id = "mock-chat-b"
+enabled = true
+type = "openai_chat"
+baseURL = "http://127.0.0.1:56891/v1"
+defaultModel = "chat-model"
+
+[provider.auth]
+type = "apikey"
+apiKey = "fake-loopback-token-mock-chat-b"
+
+[provider.models."mock.chat-model"]
+wireName = "chat-model"
+capabilities = ["text", "tools", "reasoning", "multimodal"]
+supportsStreaming = true

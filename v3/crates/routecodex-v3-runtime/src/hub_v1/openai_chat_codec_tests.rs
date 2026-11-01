@@ -1,0 +1,1139 @@
+// openai_chat_codec tests, split from openai_chat_codec.rs to satisfy
+// verify:v3-file-size ratchet. Semantics unchanged: this module is the direct
+// child of openai_chat_codec, so `use super::*` resolves identically to the
+// former inline `mod openai_chat_responses_sse_transducer_tests`.
+
+use super::*;
+use serde_json::json;
+
+#[test]
+fn source_responses_completed_preserves_tool_handoff_before_normal_stop() {
+    let canonical = json!({"status":"completed","output":[{"type":"function_call","call_id":"call_normal","name":"evaluate","arguments":"{}"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true)
+            .unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "tool_calls");
+    let mut limited = canonical;
+    limited["incomplete_details"] = json!({"reason":"max_output_tokens"});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&limited, None, true).unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "length");
+}
+
+#[test]
+fn source_responses_normal_stop_terminal_with_tool_calls_prefers_tool_dispatch() {
+    let canonical = json!({"status":"completed","output":[{"type":"function_call","call_id":"call_stop","name":"evaluate","arguments":"{}"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, Some("stop"), true)
+            .unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(
+        projected["choices"][0]["message"]["tool_calls"][0]["id"],
+        "call_stop"
+    );
+
+    for (reason, expected) in [
+        ("max_output_tokens", "length"),
+        ("content_filter", "content_filter"),
+        ("opaque_reason", "opaque_reason"),
+    ] {
+        let mut limited = canonical.clone();
+        limited["incomplete_details"] = json!({"reason": reason});
+        let projected =
+            project_v3_openai_chat_client_response_with_source_terminal(&limited, None, false)
+                .unwrap();
+        assert_eq!(
+            projected["choices"][0]["finish_reason"], expected,
+            "non-stop terminal {reason} must survive a tool-call turn"
+        );
+    }
+
+    let text_only = json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&text_only, Some("stop"), true)
+            .unwrap();
+    assert_eq!(projected["choices"][0]["finish_reason"], "stop");
+}
+
+#[test]
+fn anthropic_text_delta_without_block_start_preserves_public_stream() {
+    let events = [
+        json!({"type":"message_start","message":{"id":"msg_public","type":"message","role":"assistant","content":[],"usage":{"input_tokens":7,"output_tokens":0}}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}),
+        json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}),
+        json!({"type":"message_stop"}),
+    ];
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    let mut chunks = Vec::new();
+    for event in events {
+        chunks.extend(
+            transducer
+                .push_event(event)
+                .expect("parseable text stream must project"),
+        );
+    }
+    transducer
+        .finish()
+        .expect("provider terminal must remain complete");
+    let text: String = chunks
+        .iter()
+        .filter_map(|chunk| {
+            chunk
+                .pointer("/choices/0/delta/content")
+                .and_then(Value::as_str)
+        })
+        .collect();
+    assert_eq!(text, "ok");
+    assert!(chunks
+        .iter()
+        .any(|chunk| chunk.pointer("/choices/0/finish_reason") == Some(&json!("stop"))));
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.pointer("/choices/0/delta/tool_calls").is_none()));
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("terminal usage");
+    assert_eq!(usage["prompt_tokens"], 7);
+    assert_eq!(usage["completion_tokens"], 2);
+    assert_eq!(usage["total_tokens"], 9);
+
+    let mut incomplete = V3OpenAiChatAnthropicSseTransducer::new(false);
+    incomplete.push_event(json!({"type":"message_start","message":{"id":"unfinished","type":"message","role":"assistant"}})).unwrap();
+    incomplete.push_event(json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}})).unwrap();
+    assert!(incomplete.finish().is_err());
+    assert!(incomplete.push_event(json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}})).is_err());
+}
+
+#[test]
+fn compact_chat_message_projection_preserves_text_and_reasoning_once() {
+    for (item, text, reasoning) in [
+        (
+            json!({"type":"message","text":"compact answer"}),
+            "compact answer",
+            "",
+        ),
+        (
+            json!({"type":"message","reasoning_content":"compact reasoning"}),
+            "",
+            "compact reasoning",
+        ),
+        (
+            json!({"type":"message","reasoning_text":"compact reasoning"}),
+            "",
+            "compact reasoning",
+        ),
+        (
+            json!({"type":"message","text":"compact answer","content":[{"type":"output_text","text":"compact answer"}],"reasoning_content":"compact reasoning","extension":{"keep":true}}),
+            "compact answer",
+            "compact reasoning",
+        ),
+    ] {
+        let canonical = json!({"status":"completed","output":[item]});
+        let original = canonical.clone();
+        let projected = project_v3_openai_chat_client_response_from_canonical(&canonical).unwrap();
+        let message = &projected["choices"][0]["message"];
+        assert_eq!(message["content"], text, "{canonical}");
+        assert_eq!(
+            message["reasoning_content"].as_str().unwrap_or_default(),
+            reasoning,
+            "{canonical}"
+        );
+        assert_eq!(projected["choices"][0]["finish_reason"], Value::Null);
+        assert_eq!(
+            canonical, original,
+            "projection must retain source extensions"
+        );
+    }
+}
+
+fn created_event() -> Value {
+    json!({
+        "type": "response.created",
+        "response": {
+            "id": "resp_test_1",
+            "status": "in_progress",
+            "model": "gpt-5.6-sol"
+        }
+    })
+}
+
+fn in_progress_event() -> Value {
+    json!({
+        "type": "response.in_progress",
+        "response": {
+            "id": "resp_test_1",
+            "status": "in_progress"
+        }
+    })
+}
+
+fn delta_event(text: &str) -> Value {
+    json!({"type": "response.output_text.delta", "delta": text})
+}
+
+#[test]
+fn transducer_accepts_official_created_then_in_progress_sequence() {
+    let mut with_in_progress = V3OpenAiChatResponsesSseTransducer::new();
+    let created_chunks = with_in_progress
+        .push_event(created_event())
+        .expect("created");
+    let progress_chunks = with_in_progress
+        .push_event(in_progress_event())
+        .expect("official response.in_progress after response.created must not be rejected");
+    let delta_chunks = with_in_progress
+        .push_event(delta_event("hello"))
+        .expect("delta");
+    with_in_progress
+        .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
+        .expect("completed");
+    with_in_progress.finish().expect("finish");
+
+    let mut without_in_progress = V3OpenAiChatResponsesSseTransducer::new();
+    let baseline_created = without_in_progress
+        .push_event(created_event())
+        .expect("created");
+    let baseline_delta = without_in_progress
+        .push_event(delta_event("hello"))
+        .expect("delta");
+    without_in_progress
+        .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
+        .expect("completed");
+    without_in_progress.finish().expect("finish");
+
+    assert_eq!(
+        created_chunks
+            .iter()
+            .cloned()
+            .chain(progress_chunks.iter().cloned())
+            .chain(delta_chunks.iter().cloned())
+            .collect::<Vec<_>>(),
+        baseline_created
+            .iter()
+            .cloned()
+            .chain(baseline_delta.iter().cloned())
+            .collect::<Vec<_>>(),
+        "response.in_progress must be idempotent and emit no extra chunk"
+    );
+}
+
+#[test]
+fn transducer_still_rejects_duplicate_created() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer
+        .push_event(created_event())
+        .expect("first created");
+    let error = transducer
+        .push_event(created_event())
+        .expect_err("a genuinely duplicate response.created must still fail fast");
+    assert!(
+        error.contains("duplicate response.created"),
+        "unexpected error: {error}"
+    );
+}
+
+#[test]
+fn transducer_in_progress_without_created_starts_response() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    let chunks = transducer
+        .push_event(in_progress_event())
+        .expect("response.in_progress as first event must start the response");
+    assert_eq!(
+        chunks.len(),
+        1,
+        "in_progress start must emit the assistant role chunk"
+    );
+}
+
+#[test]
+fn transducer_accepts_known_responses_lifecycle_events() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    for event_type in [
+        "response.content_part.added",
+        "response.content_part.done",
+        "response.output_text.done",
+        "response.output_text.annotation.added",
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+    ] {
+        let chunks = transducer
+            .push_event(json!({"type": event_type}))
+            .expect("known Responses lifecycle event must be accepted");
+        assert!(chunks.is_empty(), "{event_type} must not emit a Chat chunk");
+    }
+    transducer.push_event(delta_event("hello")).expect("delta");
+    transducer
+        .push_event(json!({
+            "type": "response.completed",
+            "response": {"id": "resp_test_1", "status": "completed"}
+        }))
+        .expect("completed");
+    transducer.finish().expect("finish");
+}
+
+#[test]
+fn responses_usage_is_a_separate_chat_sse_chunk_without_choices() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer.push_event(delta_event("OK")).expect("delta");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_test_1",
+                "status": "completed",
+                "usage": {"input_tokens": 12, "output_tokens": 2}
+            }
+        }))
+        .expect("completed");
+    assert_eq!(
+        chunks.len(),
+        2,
+        "finish and usage need distinct Chat chunks"
+    );
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+    assert!(chunks[0].get("usage").is_none());
+    assert_eq!(chunks[1]["choices"], json!([]));
+    assert_eq!(
+        chunks[1]["usage"],
+        json!({
+            "prompt_tokens": 12,
+            "completion_tokens": 2,
+            "total_tokens": 14
+        })
+    );
+}
+
+#[test]
+fn responses_function_call_finishes_with_tool_calls_before_usage() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let call = transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": "{\"q\":\"alpha\"}"}
+        }))
+        .expect("function call");
+    assert_eq!(
+        call[0]["choices"][0]["delta"]["tool_calls"][0]["function"]["arguments"],
+        "{\"q\":\"alpha\"}"
+    );
+    let terminal = transducer
+        .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 4, "output_tokens": 2}}}))
+        .expect("completed");
+    assert_eq!(terminal[0]["choices"][0]["finish_reason"], "tool_calls");
+    assert_eq!(terminal[1]["choices"], json!([]));
+    transducer.finish().expect("complete tool call");
+}
+
+#[test]
+fn responses_usage_is_not_sent_when_chat_client_opts_out() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new_with_usage_option(false);
+    transducer.push_event(created_event()).expect("created");
+    transducer.push_event(delta_event("OK")).expect("delta");
+    let chunks = transducer
+        .push_event(json!({"type": "response.completed", "response": {"status": "completed", "usage": {"input_tokens": 3, "output_tokens": 1}}}))
+        .expect("completed");
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+    assert!(chunks[0].get("usage").is_none());
+}
+
+#[test]
+fn transducer_maps_max_output_tokens_incomplete_to_length_terminal_chunk() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer
+        .push_event(json!({
+            "type": "response.reasoning_text.delta",
+            "delta": "thinking"
+        }))
+        .expect("reasoning delta");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.incomplete",
+            "response": {
+                "id": "resp_test_1",
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "usage": {
+                    "input_tokens": 42,
+                    "output_tokens": 7,
+                    "total_tokens": 49
+                }
+            }
+        }))
+        .expect("response.incomplete must project a terminal Chat chunk");
+    assert_eq!(chunks.len(), 2);
+    let terminal = &chunks[0];
+    assert_eq!(
+        terminal["choices"][0]["finish_reason"],
+        json!("length"),
+        "max_output_tokens truncation must map to finish_reason=length: {terminal}"
+    );
+    assert_eq!(
+        chunks[1]["usage"]["prompt_tokens"],
+        json!(42),
+        "usage chunk must carry normalized usage: {}",
+        chunks[1]
+    );
+    assert_eq!(chunks[1]["choices"], json!([]));
+    transducer
+        .finish()
+        .expect("finish accepts incomplete terminal");
+}
+
+#[test]
+fn transducer_maps_content_filter_incomplete_to_content_filter_terminal_chunk() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.incomplete",
+            "incomplete_details": {"reason": "content_filter"},
+            "response": {
+                "id": "resp_test_1",
+                "status": "incomplete"
+            }
+        }))
+        .expect("response.incomplete must project a terminal Chat chunk");
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(
+        chunks[0]["choices"][0]["finish_reason"],
+        json!("content_filter")
+    );
+    transducer
+        .finish()
+        .expect("finish accepts incomplete terminal");
+}
+
+#[test]
+fn transducer_preserves_incomplete_with_optional_or_opaque_details() {
+    for details in [
+        None,
+        Some(Value::Null),
+        Some(json!({"reason":""})),
+        Some(json!({"reason":42})),
+    ] {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let mut response = json!({"id":"resp_test_1", "status":"incomplete"});
+        if let Some(details) = details {
+            response["incomplete_details"] = details;
+        }
+        let expected_reason = response
+            .pointer("/incomplete_details/reason")
+            .and_then(Value::as_str)
+            .map(|reason| json!(reason))
+            .unwrap_or(Value::Null);
+        let chunks = transducer
+            .push_event(json!({"type":"response.incomplete", "response":response}))
+            .expect("optional business details must not reject a terminal");
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], expected_reason);
+        transducer.finish().expect("complete transport");
+    }
+}
+
+// Issue #2: the openai_chat outbound response must preserve tool-call
+// pairing. A canonical Responses tool item is keyed by `call_id`, but some
+// providers only carry `id` (and vice versa); reading only `call_id` with
+// `unwrap_or_default()` produces an empty `tool_calls[].id`, which makes the
+// next turn's `tool_call_id` an orphan.
+#[test]
+fn transducer_resolves_tool_call_identity_from_item_id() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "id": "fc_item_only",
+                "name": "lookup",
+                "arguments": "{\"q\":\"alpha\"}"
+            }
+        }))
+        .expect("output_item.done with only item.id must project");
+    let tool_call = chunks
+        .iter()
+        .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+        .expect("tool_call chunk");
+    assert_eq!(
+        tool_call["id"],
+        json!("fc_item_only"),
+        "tool_calls[].id must resolve from item.id, never empty: {chunks:?}"
+    );
+    assert_eq!(tool_call["function"]["name"], json!("lookup"));
+}
+
+#[test]
+fn transducer_ignores_present_but_empty_call_id_before_using_item_id() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": "   ",
+                "id": "fc_item_only",
+                "name": "lookup",
+                "arguments": "{}"
+            }
+        }))
+        .expect("output_item.done must project");
+    let tool_call = chunks
+        .iter()
+        .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+        .expect("tool_call chunk");
+    assert_eq!(
+        tool_call["id"],
+        json!("fc_item_only"),
+        "an empty call_id must not win over a non-empty id: {chunks:?}"
+    );
+}
+
+// Issue #2: `custom_tool_call` items must also project, otherwise the
+// assistant turn that requested a custom tool loses its tool_call and the
+// follow-up `tool_call_id` becomes an orphan.
+#[test]
+fn transducer_projects_custom_tool_call_items() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "custom_tool_call",
+                "call_id": "call_custom_1",
+                "name": "apply_patch",
+                "input": "*** Begin Patch"
+            }
+        }))
+        .expect("custom_tool_call must project");
+    let tool_call = chunks
+        .iter()
+        .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+        .expect("custom_tool_call must emit a tool_call chunk");
+    assert_eq!(tool_call["id"], json!("call_custom_1"));
+    assert_eq!(tool_call["function"]["name"], json!("apply_patch"));
+    assert_eq!(
+        tool_call["function"]["arguments"],
+        json!("{\"input\":\"*** Begin Patch\"}"),
+        "custom_tool_call.input must use the reversible Chat wrapper"
+    );
+    assert_eq!(
+        tool_call["routecodex_chat_extension"]["responses_tool_call_type"],
+        "custom_tool_call"
+    );
+}
+
+// Issue #2: the non-stream projection must apply the same identity resolution
+// and custom_tool_call projection.
+#[test]
+fn non_stream_projection_resolves_item_id_and_projects_custom_tool_call() {
+    let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
+        "status": "completed",
+        "output": [
+            {
+                "type": "function_call",
+                "id": "fc_item_only",
+                "name": "lookup",
+                "arguments": "{\"q\":\"alpha\"}"
+            },
+            {
+                "type": "custom_tool_call",
+                "call_id": "call_custom_1",
+                "name": "apply_patch",
+                "input": "*** Begin Patch"
+            }
+        ]
+    }))
+    .expect("canonical tool items must project");
+    let tool_calls = projected["choices"][0]["message"]["tool_calls"]
+        .as_array()
+        .expect("tool_calls array");
+
+    assert_eq!(tool_calls.len(), 2, "{projected}");
+    assert_eq!(tool_calls[0]["id"], json!("fc_item_only"));
+    assert_eq!(tool_calls[0]["function"]["name"], json!("lookup"));
+    assert_eq!(tool_calls[1]["id"], json!("call_custom_1"));
+    assert_eq!(tool_calls[1]["function"]["name"], json!("apply_patch"));
+    assert_eq!(
+        tool_calls[1]["function"]["arguments"],
+        json!("{\"input\":\"*** Begin Patch\"}")
+    );
+    assert_eq!(
+        tool_calls[1]["routecodex_chat_extension"]["responses_tool_call_type"],
+        "custom_tool_call"
+    );
+    assert_eq!(
+        projected["choices"][0]["finish_reason"],
+        json!("tool_calls")
+    );
+}
+
+#[test]
+fn non_stream_projection_preserves_responses_refusal_with_text_usage_and_tools() {
+    for with_tools in [false, true] {
+        let mut canonical = json!({
+            "id":"resp_native", "model":"model", "status":"completed",
+            "output":[{"type":"message","role":"assistant","content":[
+                {"type":"output_text","text":" retained text "},
+                {"type":"refusal","refusal":" NATIVE_REFUSAL "}
+            ]}],
+            "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}
+        });
+        if with_tools {
+            canonical["output"].as_array_mut().unwrap().push(json!({
+                "type":"function_call", "call_id":"call_native", "name":"lookup",
+                "arguments":"{\"q\":\"retained\"}"
+            }));
+        }
+        let projected = project_v3_openai_chat_client_response_from_canonical(&canonical).unwrap();
+        let choice = &projected["choices"][0];
+        assert_eq!(choice["message"]["refusal"], " NATIVE_REFUSAL ");
+        assert_eq!(choice["message"]["content"], " retained text ");
+        assert_eq!(projected["id"], "resp_native");
+        assert_eq!(projected["model"], "model");
+        assert_eq!(projected["usage"]["prompt_tokens"], 3);
+        assert_eq!(projected["usage"]["completion_tokens"], 2);
+        assert_eq!(projected["usage"]["total_tokens"], 5);
+        assert_eq!(
+            choice["finish_reason"],
+            if with_tools {
+                json!("tool_calls")
+            } else {
+                Value::Null
+            }
+        );
+        if with_tools {
+            assert_eq!(choice["message"]["tool_calls"][0]["id"], "call_native");
+            assert_eq!(
+                choice["message"]["tool_calls"][0]["function"]["arguments"],
+                "{\"q\":\"retained\"}"
+            );
+        }
+        assert_eq!(
+            canonical["output"][0]["content"][1]["refusal"],
+            " NATIVE_REFUSAL "
+        );
+    }
+    let pure = project_v3_openai_chat_client_response_from_canonical(&json!({
+        "id":"resp_native", "status":"completed",
+        "output":[{"type":"message","role":"assistant","content":[
+            {"type":"refusal","refusal":"NATIVE_REFUSAL"}
+        ]}]
+    }))
+    .unwrap();
+    assert_eq!(pure["choices"][0]["message"]["refusal"], "NATIVE_REFUSAL");
+}
+
+#[test]
+fn transducer_preserves_terminal_only_responses_text_refusal_and_incomplete() {
+    for (event_type, status, part, finish) in [
+        (
+            "response.completed",
+            "completed",
+            json!({"type":"output_text","text":"NATIVE_OK"}),
+            json!("stop"),
+        ),
+        (
+            "response.completed",
+            "completed",
+            json!({"type":"refusal","refusal":"NATIVE_REFUSAL"}),
+            json!("stop"),
+        ),
+        (
+            "response.incomplete",
+            "incomplete",
+            json!({"type":"output_text","text":"NATIVE_OK"}),
+            json!("content_filter"),
+        ),
+    ] {
+        let mut response = json!({
+            "id":"resp_native", "model":"model", "status":status,
+            "output":[{"type":"message","role":"assistant","content":[part]}],
+            "usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}
+        });
+        if status == "incomplete" {
+            response["incomplete_details"] = json!({"reason":"content_filter"});
+        }
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        let chunks = transducer
+            .push_event(json!({"type":event_type,"response":response}))
+            .unwrap();
+        let field = if part["type"] == "refusal" {
+            "refusal"
+        } else {
+            "content"
+        };
+        let text = chunks
+            .iter()
+            .filter_map(|chunk| chunk["choices"][0]["delta"][field].as_str())
+            .collect::<String>();
+        assert_eq!(
+            text,
+            if field == "refusal" {
+                "NATIVE_REFUSAL"
+            } else {
+                "NATIVE_OK"
+            }
+        );
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk["choices"][0]["finish_reason"] == finish));
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk["id"] == "resp_native" && chunk["model"] == "model"));
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk["usage"]["total_tokens"] == 5));
+        transducer.finish().unwrap();
+    }
+}
+
+#[test]
+fn transducer_completed_event_without_nested_status_projects_stop_terminal() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer.push_event(delta_event("OK")).expect("delta");
+    let chunks = transducer
+        .push_event(json!({"type": "response.completed", "response": {"id": "resp_test_1"}}))
+        .expect("completed");
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], "stop");
+    transducer.finish().expect("finish");
+}
+
+#[test]
+fn transducer_completed_nested_length_filter_and_opaque_reason_never_become_stop() {
+    for (details, expected) in [
+        (json!({"reason":"max_output_tokens"}), json!("length")),
+        (json!({"reason":"content_filter"}), json!("content_filter")),
+        (json!({"reason":"opaque_reason"}), json!("opaque_reason")),
+    ] {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        let mut response = json!({"id":"resp_test_1", "status":"completed"});
+        response["incomplete_details"] = details.clone();
+        let chunks = transducer
+            .push_event(json!({"type":"response.completed", "response": response}))
+            .expect("completed with nested reason must project");
+        assert_eq!(chunks[0]["choices"][0]["finish_reason"], expected);
+        transducer.finish().expect("finish");
+    }
+}
+
+#[test]
+fn transducer_completed_event_with_explicit_non_stop_status_never_becomes_stop() {
+    for status in ["incomplete", "failed", "cancelled", "in_progress"] {
+        let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+        transducer.push_event(created_event()).expect("created");
+        transducer.push_event(delta_event("OK")).expect("delta");
+        let chunks = transducer
+            .push_event(json!({
+                "type": "response.completed",
+                "response": {"id": "resp_test_1", "status": status}
+            }))
+            .expect("completed event must remain accepted");
+        assert!(
+            chunks[0]["choices"][0]["finish_reason"].is_null(),
+            "{status}"
+        );
+        transducer.finish().expect("finish");
+    }
+}
+
+#[test]
+fn transducer_stream_cut_without_completed_event_remains_missing() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer
+        .push_event(delta_event("partial"))
+        .expect("delta");
+    assert!(transducer.finish().is_err());
+}
+
+#[test]
+fn transducer_preserves_refusal_deltas_alongside_text_without_terminal_duplication() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).unwrap();
+    let text = transducer
+        .push_event(json!({"type":"response.output_text.delta","delta":"retained text"}))
+        .unwrap();
+    assert_eq!(text[0]["choices"][0]["delta"]["content"], "retained text");
+    let refusal = transducer
+        .push_event(json!({"type":"response.refusal.delta","delta":"NATIVE_REFUSAL"}))
+        .unwrap();
+    assert_eq!(refusal.len(), 1);
+    assert_eq!(
+        refusal[0]["choices"][0]["delta"]["refusal"],
+        "NATIVE_REFUSAL"
+    );
+    let terminal = transducer.push_event(json!({"type":"response.completed","response":{
+        "status":"completed","output":[{"type":"message","role":"assistant","content":[
+            {"type":"output_text","text":"retained text"},{"type":"refusal","refusal":"NATIVE_REFUSAL"}
+        ]}]
+    }})).unwrap();
+    assert!(terminal.iter().all(
+        |chunk| chunk["choices"][0]["delta"].get("refusal").is_none()
+            && chunk["choices"][0]["delta"].get("content").is_none()
+    ));
+    transducer.finish().unwrap();
+}
+
+// Canonical lifecycle status alone cannot establish a business terminal reason.
+// This is the canonical-only projector: a real source protocol completion
+// witness is absent here, so even `status=completed` stays missing.
+#[test]
+fn non_stream_projection_preserves_missing_reason_for_any_canonical_status() {
+    for status in ["in_progress", "queued", "completed"] {
+        let projected = project_v3_openai_chat_client_response_from_canonical(&json!({
+            "status": status,
+            "output": [{"type": "output_text", "text": "pong"}]
+        }))
+        .expect("text output must project");
+        let finish_reason = &projected["choices"][0]["finish_reason"];
+        assert!(
+            finish_reason.is_null(),
+            "status={status} must not fabricate a Chat finish_reason: {projected}"
+        );
+    }
+}
+
+// A real Responses completed witness plus a non-empty business output maps to
+// Chat stop. Without the witness the same canonical completed stays missing.
+#[test]
+fn source_terminal_completed_witness_maps_plain_responses_completion_to_stop() {
+    let canonical = json!({"status":"completed","output":[{"type":"output_text","text":"pong"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true)
+            .expect("text output must project");
+    assert_eq!(projected["choices"][0]["finish_reason"], json!("stop"));
+}
+
+#[test]
+fn source_terminal_missing_witness_keeps_canonical_completed_missing() {
+    let canonical = json!({"status":"completed","output":[{"type":"output_text","text":"pong"}]});
+    let projected =
+        project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, false)
+            .expect("text output must project");
+    assert!(projected["choices"][0]["finish_reason"].is_null());
+}
+
+#[test]
+fn source_terminal_explicit_reason_overrides_completed_witness() {
+    for (details, expected) in [
+        (json!({"reason":"max_output_tokens"}), json!("length")),
+        (json!({"reason":"content_filter"}), json!("content_filter")),
+        (json!({"reason":"opaque_reason"}), json!("opaque_reason")),
+    ] {
+        let canonical = json!({"status":"completed","incomplete_details":details,"output":[{"type":"output_text","text":"pong"}]});
+        let projected =
+            project_v3_openai_chat_client_response_with_source_terminal(&canonical, None, true)
+                .expect("text output must project");
+        assert_eq!(projected["choices"][0]["finish_reason"], expected);
+    }
+}
+
+// Issue #2: the helper's middle `tool_call_id` key must resolve too.
+#[test]
+fn transducer_resolves_tool_call_identity_from_tool_call_id() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "tool_call_id": "call_from_tool_call_id",
+                "name": "lookup",
+                "arguments": "{}"
+            }
+        }))
+        .expect("output_item.done must project");
+    let tool_call = chunks
+        .iter()
+        .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+        .expect("tool_call chunk");
+    assert_eq!(tool_call["id"], json!("call_from_tool_call_id"));
+}
+
+// Issue #2: when the provider supplies no identity at all the projection must
+// not silently invent one; it emits an empty id which request-side governance
+// rejects explicitly (no fabrication). This pins the documented residual case.
+#[test]
+fn transducer_emits_empty_id_when_no_identity_is_supplied() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    let chunks = transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "name": "lookup",
+                "arguments": "{}"
+            }
+        }))
+        .expect("output_item.done must project");
+    let tool_call = chunks
+        .iter()
+        .find_map(|chunk| chunk.pointer("/choices/0/delta/tool_calls/0"))
+        .expect("tool_call chunk");
+    assert_eq!(
+        tool_call["id"],
+        json!(""),
+        "a provider with no identity yields an empty id, never a fabricated one: {chunks:?}"
+    );
+}
+
+// Issue #2 / M2: the stream terminal must report finish_reason=tool_calls when
+// a tool call was emitted, matching the non-stream projection; otherwise a
+// client that gates tool execution on finish_reason never runs the tool.
+#[test]
+fn transducer_reports_tool_calls_finish_reason_after_tool_call_item() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    transducer.push_event(created_event()).expect("created");
+    transducer
+        .push_event(json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "arguments": "{}"
+            }
+        }))
+        .expect("tool call item");
+    let terminal = transducer
+        .push_event(json!({
+            "type": "response.completed",
+            "response": {"id": "resp_test_1", "status": "completed"}
+        }))
+        .expect("completed");
+    let finish_reason = terminal
+        .iter()
+        .find_map(|chunk| chunk.pointer("/choices/0/finish_reason"))
+        .expect("terminal finish_reason");
+    assert_eq!(
+        finish_reason,
+        &json!("tool_calls"),
+        "stream terminal after a tool call must be finish_reason=tool_calls: {terminal:?}"
+    );
+}
+
+// Anthropic 语义的 usage 把缓存命中记在 `cache_read_input_tokens`，`input_tokens`
+// 只记未命中增量；OpenAI Chat 的 `prompt_tokens` 是完整输入，
+// `prompt_tokens_details.cached_tokens` 只是它的子计数。真实样本
+// (2026-10-01 4444 openai-chat goaichat/glm-5.3) provider message_delta 为
+// input_tokens=1601 / cache_read_input_tokens=186368，客户端却只收到
+// prompt_tokens=1601，dsh 因此把 186368 缓存读计为 0。
+#[test]
+fn chat_wire_usage_folds_anthropic_cache_read_into_prompt_tokens() {
+    let projected = project_v3_chat_usage_from_canonical(&json!({
+        "input_tokens": 1601,
+        "output_tokens": 265,
+        "total_tokens": 1866,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 186368
+    }))
+    .expect("anthropic-shaped canonical usage must project");
+    assert_eq!(projected["prompt_tokens"], json!(187969));
+    assert_eq!(
+        projected["prompt_tokens_details"]["cached_tokens"],
+        json!(186368)
+    );
+    assert_eq!(projected["completion_tokens"], json!(265));
+    assert_eq!(projected["total_tokens"], json!(188234));
+}
+
+#[test]
+fn chat_wire_usage_keeps_openai_cached_subcount_without_double_counting() {
+    let projected = project_v3_chat_usage_from_canonical(&json!({
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14,
+        "input_tokens_details": {"cached_tokens": 6}
+    }))
+    .expect("openai-shaped canonical usage must project");
+    assert_eq!(projected["prompt_tokens"], json!(10));
+    assert_eq!(
+        projected["prompt_tokens_details"]["cached_tokens"],
+        json!(6)
+    );
+    assert_eq!(projected["completion_tokens"], json!(4));
+    assert_eq!(projected["total_tokens"], json!(14));
+}
+
+#[test]
+fn chat_wire_usage_projects_reasoning_details() {
+    let projected = project_v3_chat_usage_from_canonical(&json!({
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "input_tokens_details": {"cached_tokens": 6},
+        "output_tokens_details": {"reasoning_tokens": 2}
+    }))
+    .expect("reasoning details must project");
+    assert_eq!(
+        projected["completion_tokens_details"]["reasoning_tokens"],
+        json!(2)
+    );
+}
+
+// Anthropic transducer 是同一 Chat wire usage 语义的第二个产出点；它必须与
+// RespOutbound05 共用同一归一化入口，不得各自复制一份缓存处理。
+#[test]
+fn anthropic_transducer_folds_cache_read_into_chat_prompt_tokens() {
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    transducer
+        .push_event(json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_usage",
+                "model": "MiniMax-M3",
+                "role": "assistant",
+                "content": [],
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0
+                }
+            }
+        }))
+        .expect("message_start");
+    transducer
+        .push_event(json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        }))
+        .expect("content_block_start");
+    transducer
+        .push_event(json!({
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "answer"}
+        }))
+        .expect("content_block_delta");
+    transducer
+        .push_event(json!({"type": "content_block_stop", "index": 0}))
+        .expect("content_block_stop");
+    transducer
+        .push_event(json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {
+                "input_tokens": 37,
+                "output_tokens": 10,
+                "cache_read_input_tokens": 128,
+                "cache_creation_input_tokens": 4
+            }
+        }))
+        .expect("message_delta");
+    let chunks = transducer
+        .push_event(json!({"type": "message_stop"}))
+        .expect("message_stop");
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("anthropic terminal must carry usage");
+    assert_eq!(usage["prompt_tokens"], json!(169));
+    assert_eq!(usage["prompt_tokens_details"]["cached_tokens"], json!(128));
+    assert_eq!(usage["completion_tokens"], json!(10));
+    assert_eq!(usage["total_tokens"], json!(179));
+}
+
+#[test]
+fn anthropic_transducer_preserves_cache_write_tokens() {
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    transducer
+        .push_event(json!({
+            "type": "message_start",
+            "message": {
+                "id": "m1",
+                "role": "assistant",
+                "content": [],
+                "usage": {
+                    "input_tokens": 10,
+                    "cache_creation_input_tokens": 6416,
+                    "cache_read_input_tokens": 0,
+                    "output_tokens": 4
+                }
+            }
+        }))
+        .unwrap();
+    transducer
+        .push_event(json!({
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {
+                "input_tokens": 10,
+                "cache_creation_input_tokens": 6416,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 40
+            }
+        }))
+        .unwrap();
+    let chunks = transducer
+        .push_event(json!({"type": "message_stop"}))
+        .unwrap();
+    transducer.finish().unwrap();
+
+    assert_eq!(chunks[0]["choices"][0]["finish_reason"], json!("stop"));
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("terminal usage");
+    assert_eq!(usage["prompt_tokens"], json!(6426));
+    assert_eq!(usage["completion_tokens"], json!(40));
+    assert_eq!(usage["total_tokens"], json!(6466));
+    assert_eq!(
+        usage["prompt_tokens_details"],
+        json!({"cached_tokens": 0, "cache_write_tokens": 6416})
+    );
+}
+
+#[test]
+fn anthropic_transducer_emits_cache_only_usage_terminal_chunk() {
+    // 终帧门禁与投影共用 canonical_usage()：仅有缓存字段时也必须携带 usage，
+    // 否则缓存命中信息会在唯一可承载它的终帧上静默丢失。
+    let mut transducer = V3OpenAiChatAnthropicSseTransducer::new(false);
+    transducer
+        .push_event(json!({
+            "type": "message_start",
+            "message": {
+                "id": "msg_cache_only",
+                "model": "MiniMax-M3",
+                "role": "assistant",
+                "content": [],
+                "usage": {"cache_read_input_tokens": 64}
+            }
+        }))
+        .expect("message_start");
+    transducer
+        .push_event(json!({
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        }))
+        .expect("content_block_start");
+    transducer
+        .push_event(json!({"type": "content_block_stop", "index": 0}))
+        .expect("content_block_stop");
+    let chunks = transducer
+        .push_event(json!({"type": "message_stop"}))
+        .expect("message_stop");
+    let usage = chunks
+        .iter()
+        .find_map(|chunk| chunk.get("usage"))
+        .expect("cache-only anthropic terminal must still carry usage");
+    assert_eq!(usage["prompt_tokens"], json!(64));
+    assert_eq!(usage["prompt_tokens_details"]["cached_tokens"], json!(64));
+    assert!(usage["prompt_tokens_details"]
+        .get("cache_write_tokens")
+        .is_none());
+    assert_eq!(usage["completion_tokens"], json!(0));
+    assert_eq!(usage["total_tokens"], json!(64));
+}

@@ -165,7 +165,91 @@ pub(crate) fn required_dry_run_string(
         .ok_or_else(|| V3DebugError::MalformedFixture(format!("{field} is required")))
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct V3ModelClientNoResponse {
+    pub(crate) streaming: bool,
+    pub(crate) diagnostic_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+    pub(crate) diagnostic_cause: Option<routecodex_v3_error::V3Error01SourceRaised>,
+}
+
+pub(crate) fn model_no_response_output(streaming: bool) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    response.extensions_mut().insert(V3ModelClientNoResponse {
+        streaming,
+        diagnostic_source: None,
+        diagnostic_cause: None,
+    });
+    response
+}
+
+pub(crate) fn commit_model_transport_outcome(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+    mut response: Response<Body>,
+) -> Response<Body> {
+    let streaming = response
+        .extensions()
+        .get::<V3ModelClientNoResponse>()
+        .map(|outcome| {
+            append_v3_model_no_response_diagnostic(state, outcome);
+            outcome.streaming
+        });
+    let Some(streaming) = streaming else {
+        return response;
+    };
+    // A model-entry outcome with no client payload breaks the client transport
+    // without a fabricated error. It carries no provider response head, so it has
+    // no provider-terminal witness to record. The break response replaces this one,
+    // so any client-response sample recorder moves with it and the boundary still
+    // records the bytes the client receives.
+    let mut broken = model_transport_break_response(
+        state,
+        connection,
+        routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        streaming,
+    );
+    transfer_v3_live_client_capture(&mut response, &mut broken);
+    broken
+}
+
+fn append_v3_model_no_response_diagnostic(
+    state: &V3ListenerState,
+    outcome: &V3ModelClientNoResponse,
+) {
+    let (Some(source), cause) = (
+        outcome.diagnostic_source.as_ref(),
+        outcome.diagnostic_cause.as_ref(),
+    ) else {
+        return;
+    };
+    let cause = cause
+        .map(|cause| {
+            format!(
+                " cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+                cause.source_kind, cause.source_stage, cause.code, cause.message
+            )
+        })
+        .unwrap_or_default();
+    let line = format!(
+        "[{}] v3 model transport terminal source_kind={:?} source_stage={} code={} message={}{}",
+        state.server.port,
+        source.source_kind,
+        source.source_stage,
+        source.code,
+        source.message,
+        cause
+    );
+    if let Err(error) = state.debug.append_human_console_line(&line) {
+        emit_v3_debug_sink_console_failure(state, &error);
+    }
+}
+
 pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> Response<Body> {
+    let diagnostic_source = output.diagnostic_source.clone();
+    let diagnostic_cause = output.diagnostic_cause.clone();
+    let failure = !output.error_chain.is_empty()
+        || output.diagnostic_source.is_some()
+        || output.status >= 400;
     let frame = build_v3_server_16_http_frame_from_v3_foundation_output(output);
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -186,7 +270,17 @@ pub(crate) fn foundation_output_response(output: V3FoundationRuntimeOutput) -> R
                 .expect("typed response");
         }
     };
-    builder.body(Body::from(body)).expect("typed response")
+    let mut response = builder.body(Body::from(body)).expect("typed response");
+    // Control APIs retain diagnostic errors. The model-entry owner consumes
+    // this typed outcome before any response is committed to its transport.
+    if failure {
+        response.extensions_mut().insert(V3ModelClientNoResponse {
+            streaming: false,
+            diagnostic_source,
+            diagnostic_cause,
+        });
+    }
+    response
 }
 
 pub(crate) fn responses_direct_output_response(
@@ -207,24 +301,13 @@ pub(crate) fn project_v3_responses_direct_stream_error_frame_if_requested(
     )
 }
 
-pub(crate) fn project_v3_responses_relay_stream_error_frame_if_requested(
-    frame: V3Server16HttpFrame,
-    requested_stream: bool,
-) -> V3Server16HttpFrame {
-    project_v3_protocol_stream_error_frame_if_requested(
-        frame,
-        requested_stream,
-        V3SseClientProtocol::Responses,
-    )
-}
-
 pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
     mut frame: V3Server16HttpFrame,
     requested_stream: bool,
-    protocol: V3SseClientProtocol,
+    _protocol: V3SseClientProtocol,
 ) -> V3Server16HttpFrame {
-    if !requested_stream || frame.error_chain.is_empty() || frame.content_type != "application/json"
-    {
+    let is_error_frame = !frame.error_chain.is_empty() || frame.diagnostic_source.is_some();
+    if !requested_stream || !is_error_frame || frame.content_type != "application/json" {
         return frame;
     }
     let body = match frame.body {
@@ -234,41 +317,13 @@ pub(crate) fn project_v3_protocol_stream_error_frame_if_requested(
             return frame;
         }
     };
-    let (code, message) = v3_error_body_code_message(&body);
-    if frame.status == 502 && code == "network_error" && message == "network error" {
-        if frame
-            .node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-        {
-            frame.error_body = Some(body);
-            frame.content_type = "text/event-stream".to_string();
-            frame.body = V3Server16Body::Json(json!({
-                "error": {"code": "network_error", "message": "network error"}
-            }));
-            return frame;
-        }
-    }
-    let (code, message) = if code.starts_with("provider_response_") {
-        (
-            "response_stream_terminated".to_string(),
-            "response stream terminated before completion".to_string(),
-        )
-    } else {
-        (code, message)
-    };
     if frame.error_body.is_none() {
         frame.error_body = Some(body);
     }
+    // Preserve diagnostics in the typed error frame, never prepare an error
+    // event for the client. The model entry consumes the transport outcome.
     frame.content_type = "text/event-stream".to_string();
-    frame.body = V3Server16Body::Bytes(match protocol {
-        V3SseClientProtocol::Responses => {
-            v3_responses_sse_error_event_chunk(frame.status, &code, &message)
-        }
-        V3SseClientProtocol::OpenAiChat
-        | V3SseClientProtocol::Anthropic
-        | V3SseClientProtocol::Gemini => v3_sse_error_event_chunk(frame.status, &code, &message),
-    });
+    frame.body = V3Server16Body::Bytes(Vec::new());
     frame
 }
 
@@ -289,57 +344,104 @@ pub(crate) fn v3_error_body_code_message(body: &Value) -> (String, String) {
     (code, message)
 }
 
-pub(crate) fn v3_sse_error_event_chunk(status: u16, code: &str, message: &str) -> Vec<u8> {
-    let event = json!({
-        "type": "error",
-        "status": status,
-        "error": {
-            "code": code,
-            "message": message
-        }
-    });
-    format!("event: error\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
-}
-
-pub(crate) fn v3_responses_sse_error_event_chunk(
-    _status: u16,
-    code: &str,
-    message: &str,
-) -> Vec<u8> {
-    let event = json!({
-        "type": "response.failed",
-        "response": {
-            "status": "failed",
-            "error": {
-                "code": code,
-                "message": message
-            }
-        }
-    });
-    format!("event: response.failed\ndata: {event}\n\ndata: [DONE]\n\n").into_bytes()
-}
-
 fn v3_sse_runtime_error_source_chunk_for_protocol(
     source_stage: &'static str,
     code: &'static str,
     message: impl Into<String>,
     status: u16,
-    protocol: V3SseClientProtocol,
-) -> Vec<u8> {
-    let projected = project_v3_post_commit_sse_source(
-        raise_v3_sse_runtime_failure(source_stage, code, message),
-        status,
+    _protocol: V3SseClientProtocol,
+) -> io::Error {
+    let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
+        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+        source_stage,
+        code,
+        message,
+        Some(status),
     );
-    let (code, message) = v3_error_body_code_message(&projected.body);
-    match protocol {
-        V3SseClientProtocol::Responses => {
-            v3_responses_sse_error_event_chunk(projected.status, &code, &message)
+    // The typed error stays internal; Hyper must abort, not encode an error event.
+    v3_post_commit_sse_sdk_result_io_error(result)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum V3PostCommitSseTransportError {
+    Projected(routecodex_v3_error::V3Error06ClientProjected),
+    OperatorFault(routecodex_v3_runtime::V3RelayErrorOperatorFault),
+}
+
+impl std::fmt::Display for V3PostCommitSseTransportError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Projected(projected) => formatter.write_str(&projected.error_detail),
+            Self::OperatorFault(fault) => {
+                let policy = &fault.policy_failure;
+                match fault.original_source.as_ref() {
+                    Some(cause) => write!(
+                        formatter,
+                        "v3 post-commit sse error sdk fault policy_kind={:?} policy_stage={} policy_code={} policy_message={} cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+                        policy.source_kind,
+                        policy.source_stage,
+                        policy.code,
+                        policy.message,
+                        cause.source_kind,
+                        cause.source_stage,
+                        cause.code,
+                        cause.message
+                    ),
+                    None => write!(
+                        formatter,
+                        "v3 post-commit sse error sdk fault policy_kind={:?} policy_stage={} policy_code={} policy_message={}",
+                        policy.source_kind, policy.source_stage, policy.code, policy.message
+                    ),
+                }
+            }
         }
-        V3SseClientProtocol::OpenAiChat => {
-            v3_sse_error_event_chunk(projected.status, &code, &message)
+    }
+}
+
+impl std::error::Error for V3PostCommitSseTransportError {}
+
+pub(crate) fn find_v3_post_commit_sse_transport_error<'a>(
+    mut error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a V3PostCommitSseTransportError> {
+    loop {
+        if let Some(found) = error.downcast_ref::<V3PostCommitSseTransportError>() {
+            return Some(found);
         }
-        V3SseClientProtocol::Anthropic | V3SseClientProtocol::Gemini => {
-            v3_sse_error_event_chunk(projected.status, &code, &message)
+        if let Some(inner) = error
+            .downcast_ref::<io::Error>()
+            .and_then(io::Error::get_ref)
+        {
+            error = inner;
+            continue;
+        }
+        error = error.source()?;
+    }
+}
+
+fn v3_post_commit_sse_sdk_result_io_error(
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) -> io::Error {
+    v3_post_commit_sse_sdk_result_io_error_with_sdk_fallback(result, true)
+}
+
+fn v3_post_commit_sse_sdk_result_io_error_with_sdk_fallback(
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+    emit_sdk_fallback: bool,
+) -> io::Error {
+    match result {
+        Ok(projected) => io::Error::other(V3PostCommitSseTransportError::Projected(projected)),
+        Err(fault) => {
+            let rendered = V3PostCommitSseTransportError::OperatorFault(fault);
+            if emit_sdk_fallback {
+                eprintln!("[v3-sse-internal-error] {rendered}");
+            }
+            io::Error::other(rendered)
         }
     }
 }
@@ -363,8 +465,14 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Response<Body> {
-    if frame.content_type == "text/event-stream" && v3_is_sse_target_pool_exhaustion(&frame) {
-        return v3_sse_transport_disconnect_response();
+    if !frame.error_chain.is_empty() || frame.diagnostic_source.is_some() || frame.status >= 400 {
+        let mut response = Response::new(Body::empty());
+        response.extensions_mut().insert(V3ModelClientNoResponse {
+            streaming: frame.content_type == "text/event-stream",
+            diagnostic_source: frame.diagnostic_source,
+            diagnostic_cause: frame.diagnostic_cause,
+        });
+        return response;
     }
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(frame.status).expect("typed V3 status"))
@@ -375,7 +483,6 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
         }
         V3Server16Body::Bytes(bytes) => bytes,
         V3Server16Body::Sse(stream) => {
-            let stream = wrap_v3_direct_live_sse_console_stream(stream, stream_console_finalizer);
             let keepalive = frame
                 .error_chain
                 .is_empty()
@@ -383,7 +490,10 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
                 .flatten();
             return builder
                 .body(v3_live_client_sse_body_for_protocol(
-                    stream, keepalive, protocol,
+                    stream,
+                    stream_console_finalizer,
+                    keepalive,
+                    protocol,
                 ))
                 .expect("typed response");
         }
@@ -403,55 +513,140 @@ pub(crate) fn responses_direct_output_response_with_console_for_protocol(
     builder.body(Body::from(body)).expect("typed response")
 }
 
-pub(crate) fn v3_sse_transport_disconnect_response() -> Response<Body> {
+/// Request identity the client boundary needs to record provider-terminal evidence.
+///
+/// Copy so the admission handler allocates it once and every terminal branch
+/// passes it by value without restating the field list at each call site.
+#[derive(Clone, Copy)]
+pub(crate) struct V3ProviderTerminalEvidence<'a> {
+    pub entry_protocol: &'a str,
+    pub endpoint: &'a str,
+    pub request_id: &'a str,
+}
+
+/// Project a provider-terminal outcome onto the client boundary.
+///
+/// The client entry is never coupled to a provider. A provider terminal is either
+/// absorbed by a remaining candidate (the runtime keeps rotating before it reaches
+/// this point) or becomes a client transport break. The provider's own status,
+/// headers, and body are provider-private: they are recorded as provider-terminal
+/// evidence, they stay in the typed Error chain, and they must not be projected as
+/// a client response. The disposition is matched exhaustively so a new terminal
+/// shape has to state its client boundary explicitly instead of inheriting
+/// provider passthrough.
+pub(crate) fn provider_terminal_response(
+    state: &Arc<V3ListenerState>,
+    connection: Option<V3FrontConnectionIdentity>,
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    requested_stream: bool,
+    evidence: V3ProviderTerminalEvidence<'_>,
+) -> Response<Body> {
+    // The provider's real error is recorded before the transport breaks. This is
+    // the only production reader of the witness: without it the provider status,
+    // headers, and body would be carried through every attempt and discarded.
+    // The debug sink cannot fail this boundary: it records persistence failures
+    // in its own ledger and reports them out of band.
+    persist_v3_provider_terminal_evidence(
+        state,
+        evidence.entry_protocol,
+        evidence.endpoint,
+        evidence.request_id,
+        &disposition,
+    );
+    model_transport_break_response(state, connection, disposition, requested_stream)
+}
+
+/// Break the model client's transport for a terminal outcome that has no client payload.
+///
+/// This is the single implementation of the model-client break. The provider terminal
+/// entry `provider_terminal_response` records the provider witness first and then
+/// delegates here; a model-entry outcome that carries no provider response enters
+/// directly through `commit_model_transport_outcome`. Neither entry projects a provider
+/// status, header, or body to the client, and only the provider terminal entry has a
+/// witness to record.
+fn model_transport_break_response(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+    disposition: routecodex_v3_error::V3ProviderTerminalDisposition,
+    requested_stream: bool,
+) -> Response<Body> {
+    match disposition {
+        // A real compatible upstream HTTP error is still a provider error. Its real
+        // status, headers, and body are recorded as provider-terminal evidence and in
+        // the Error chain, and the client observes a transport break instead of the
+        // provider's response.
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+        | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
+    }
+    if requested_stream {
+        // A streaming client must observe a transport failure. The response
+        // head is written so the client stays in streaming mode and retries
+        // the same request, instead of reading a header-less close as a
+        // normal end of stream. No client payload and no fabricated upstream
+        // status is sent; the typed Error chain keeps the real cause.
+        if let Some(connection) = connection {
+            // Claim the boundary before Hyper can enqueue the response head, so
+            // a concurrent restart replacement defers instead of closing the
+            // socket and dropping that head. A closeout that already committed
+            // keeps its `503` as the client-visible boundary.
+            state
+                .front_transport_broker
+                .claim_current_connection_transport_break(connection);
+        }
+        return v3_sse_transport_disconnect_response(state, connection);
+    }
+    let connection = connection.expect("accepted Front connection identity");
+    assert!(
+        state
+            .front_transport_broker
+            .abort_current_connection_without_response(connection),
+        "current Front connection must be registered before no-response abort"
+    );
+    // The socket has been closed before Hyper can write this return value.
+    Response::new(Body::empty())
+}
+
+/// Break the client SSE transport for a provider terminal that has no client payload.
+///
+/// The client observes an aborted transfer: the response head plus one SSE comment
+/// frame reach the transport, then the body fails, so the transfer never terminates
+/// with a valid final chunk. A client that retries a transport failure keeps the
+/// session alive across provider exhaustion and recovers when a provider becomes
+/// eligible again.
+///
+/// The failure is gated on the Front transport reporting that it wrote response bytes.
+/// Hyper writes a body only while it can make progress, so an immediately failing
+/// stream aborts the connection before the response head reaches the client, which is
+/// exactly the silent close this terminal must not produce. The bounded wait keeps the
+/// terminal finite when the transport can no longer report progress.
+///
+/// A concurrent exec replacement owns the same client boundary. This terminal
+/// suppresses a restart closeout that has not committed, and commits the restart
+/// closeout that the replacement deferred while waiting for the head. The client then
+/// observes an incomplete transfer or a transport close, without an error frame.
+fn v3_sse_transport_disconnect_response(
+    state: &V3ListenerState,
+    connection: Option<V3FrontConnectionIdentity>,
+) -> Response<Body> {
+    let broker = state.front_transport_broker.clone();
+    let body = stream::once(async { Ok::<Vec<u8>, io::Error>(b":\n\n".to_vec()) }).chain(
+        stream::once(async move {
+            if let Some(connection) = connection {
+                broker
+                    .settle_current_connection_transport_break(connection, Duration::from_secs(2))
+                    .await;
+            }
+            Err(io::Error::other(
+                "provider pool exhausted; SSE transport unavailable",
+            ))
+        }),
+    );
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
-        .body(Body::from_stream(futures_util::stream::once(async {
-            Err::<Vec<u8>, std::io::Error>(std::io::Error::other(
-                "provider pool exhausted; SSE transport unavailable",
-            ))
-        })))
-        .expect("typed SSE transport disconnect response")
-}
-
-fn v3_is_sse_target_pool_exhaustion(frame: &V3Server16HttpFrame) -> bool {
-    let body = match &frame.body {
-        V3Server16Body::Json(body) => body,
-        _ => match frame.error_body.as_ref() {
-            Some(body) => body,
-            None => return false,
-        },
-    };
-    v3_is_sse_target_pool_exhaustion_parts(
-        frame.status,
-        &frame.node_trace,
-        &frame.error_chain,
-        body,
-    )
-}
-
-pub(crate) fn v3_is_sse_target_pool_exhaustion_parts(
-    status: u16,
-    node_trace: &[&str],
-    error_chain: &[&str],
-    body: &Value,
-) -> bool {
-    if error_chain.is_empty() || status != 502 {
-        return false;
-    }
-    let (code, message) = v3_error_body_code_message(body);
-    // Only the explicit pool-exhaustion witness selects transport disconnect.
-    // A terminal provider/network error without that witness must remain an
-    // explicit finite client SSE error frame.
-    code == "network_error"
-        && message == "network error"
-        && (node_trace
-            .iter()
-            .any(|node| *node == "V3Error04TargetPoolExhaustion")
-            || error_chain
-                .iter()
-                .any(|node| *node == "V3Error04TargetPoolExhaustion"))
+        .header("cache-control", "no-cache")
+        .body(Body::from_stream(body))
+        .expect("V3 SSE transport disconnect response")
 }
 
 pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
@@ -473,35 +668,50 @@ pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
 pub(crate) fn wrap_v3_direct_live_sse_console_stream(
     stream: V3ClientSseStream,
     finalizer: Option<V3DirectSseConsoleFinalizer>,
-) -> V3ClientSseStream {
-    let Some(finalizer) = finalizer else {
-        return stream;
-    };
+) -> V3IoSseStream {
     Box::pin(V3DirectLiveSseConsoleStream {
         stream,
-        finalizer: Some(finalizer),
+        finalizer,
+        terminated_after_error: false,
     })
 }
 
 struct V3DirectLiveSseConsoleStream {
     stream: V3ClientSseStream,
     finalizer: Option<V3DirectSseConsoleFinalizer>,
+    terminated_after_error: bool,
 }
 
 impl futures_util::Stream for V3DirectLiveSseConsoleStream {
-    type Item = Result<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>;
+    type Item = Result<Vec<u8>, io::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
+        if self.terminated_after_error {
+            return std::task::Poll::Ready(None);
+        }
         match self.stream.as_mut().poll_next(cx) {
             std::task::Poll::Ready(Some(Ok(chunk))) => std::task::Poll::Ready(Some(Ok(chunk))),
-            std::task::Poll::Ready(Some(Err(error))) => {
-                if let Some(finalizer) = self.finalizer.take() {
-                    finalizer.emit_direct_sse_failure_console_line(599, error.clone());
-                }
-                std::task::Poll::Ready(Some(Err(error)))
+            std::task::Poll::Ready(Some(Err(source))) => {
+                self.terminated_after_error = true;
+                let result =
+                    routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+                        source, 599,
+                    );
+                let has_finalizer = if let Some(finalizer) = self.finalizer.take() {
+                    finalizer.emit_direct_sse_failure_console_line(result.clone());
+                    true
+                } else {
+                    false
+                };
+                std::task::Poll::Ready(Some(Err(
+                    v3_post_commit_sse_sdk_result_io_error_with_sdk_fallback(
+                        result,
+                        !has_finalizer,
+                    ),
+                )))
             }
             std::task::Poll::Ready(None) => {
                 if let Some(finalizer) = self.finalizer.take() {
@@ -558,6 +768,7 @@ pub(crate) fn v3_live_client_sse_body(
 ) -> Body {
     v3_live_client_sse_body_for_protocol(
         stream,
+        None,
         keepalive_interval,
         V3SseClientProtocol::OpenAiChat,
     )
@@ -565,43 +776,12 @@ pub(crate) fn v3_live_client_sse_body(
 
 pub(crate) fn v3_live_client_sse_body_for_protocol(
     stream: V3ClientSseStream,
+    finalizer: Option<V3DirectSseConsoleFinalizer>,
     keepalive_interval: Option<Duration>,
     protocol: V3SseClientProtocol,
 ) -> Body {
-    // Provider unavailability and client disconnect already entered the typed
-    // Error chain. Close those streams as recoverable EOF so the caller can
-    // replay the same entry. Internal response failures remain explicit 599
-    // terminals at the shared SSE transport boundary.
-    let stream: V3IoSseStream = Box::pin(stream::unfold(
-        (stream, false),
-        move |(mut stream, done)| async move {
-            if done {
-                return None;
-            }
-            match stream.next().await {
-                Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
-                Some(Err(source)) => {
-                    match routecodex_v3_error::v3_sse_post_commit_disposition(&source) {
-                        routecodex_v3_error::V3SsePostCommitDisposition::CloseEof => None,
-                        routecodex_v3_error::V3SsePostCommitDisposition::ProjectInternalTerminal => {
-                        Some((
-                            Ok(v3_sse_runtime_error_source_chunk_for_protocol(
-                                "V3ServerRespOutbound05ClientFrame",
-                                "internal_response_stream_error",
-                                "internal response stream failed",
-                                599,
-                                protocol,
-                            )),
-                            (stream, true),
-                        ))
-                        }
-                    }
-                }
-                None => None,
-            }
-        },
-    ));
-    v3_io_sse_body_for_protocol(Box::pin(stream), keepalive_interval, protocol)
+    let stream = wrap_v3_direct_live_sse_console_stream(stream, finalizer);
+    v3_io_sse_body_for_protocol(stream, keepalive_interval, protocol)
 }
 
 pub(crate) fn wrap_v3_committed_sse_dump_stream(
@@ -754,13 +934,19 @@ fn v3_io_sse_body_for_protocol(
             match stream.next().await {
                 Some(Ok(chunk)) => Some((Ok::<Vec<u8>, io::Error>(chunk), (stream, false))),
                 Some(Err(error)) => Some((
-                    Ok(v3_sse_runtime_error_source_chunk_for_protocol(
-                        "V3ServerRespOutbound05ClientFrame",
-                        "internal_response_stream_error",
-                        format!("internal response stream failed: {error}"),
-                        599,
-                        protocol,
-                    )),
+                    Err(
+                        if find_v3_post_commit_sse_transport_error(&error).is_some() {
+                            error
+                        } else {
+                            v3_sse_runtime_error_source_chunk_for_protocol(
+                                "V3ServerRespOutbound05ClientFrame",
+                                "internal_response_stream_error",
+                                format!("internal response stream failed: {error}"),
+                                599,
+                                protocol,
+                            )
+                        },
+                    ),
                     (stream, true),
                 )),
                 None => None,
@@ -780,14 +966,18 @@ fn v3_io_sse_body_for_protocol(
                 {
                     Ok(Some(Ok(bytes))) => Some((Ok::<Vec<u8>, io::Error>(bytes), (stream, false))),
                     Ok(Some(Err(error))) => {
-                        let frame = v3_sse_runtime_error_source_chunk_for_protocol(
-                            "V3ServerRespOutbound05ClientFrame",
-                            "front_sse_io_stream_failed",
-                            error.to_string(),
-                            599,
-                            protocol,
-                        );
-                        Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                        let frame = if find_v3_post_commit_sse_transport_error(&error).is_some() {
+                            error
+                        } else {
+                            v3_sse_runtime_error_source_chunk_for_protocol(
+                                "V3ServerRespOutbound05ClientFrame",
+                                "front_sse_io_stream_failed",
+                                error.to_string(),
+                                599,
+                                protocol,
+                            )
+                        };
+                        Some((Err(frame), (Box::pin(stream::empty()), true)))
                     }
                     Ok(None) => None,
                     Err(payload) => {
@@ -803,7 +993,7 @@ fn v3_io_sse_body_for_protocol(
                             599,
                             protocol,
                         );
-                        Some((Ok(frame), (Box::pin(stream::empty()), true)))
+                        Some((Err(frame), (Box::pin(stream::empty()), true)))
                     }
                 }
             },
@@ -838,15 +1028,19 @@ fn v3_io_sse_body_for_protocol(
             match next {
                 Some((Ok(bytes), state)) => Some((Ok(bytes), state)),
                 Some((Err(error), (stream, interval, _, keepalive_chunk))) => {
-                    let frame = v3_sse_runtime_error_source_chunk_for_protocol(
-                        "V3ServerRespOutbound05ClientFrame",
-                        "front_sse_io_stream_failed",
-                        error.to_string(),
-                        599,
-                        protocol,
-                    );
+                    let frame = if find_v3_post_commit_sse_transport_error(&error).is_some() {
+                        error
+                    } else {
+                        v3_sse_runtime_error_source_chunk_for_protocol(
+                            "V3ServerRespOutbound05ClientFrame",
+                            "front_sse_io_stream_failed",
+                            error.to_string(),
+                            599,
+                            protocol,
+                        )
+                    };
                     Some((
-                        Ok(frame),
+                        Err(frame),
                         (Box::pin(stream::empty()), interval, false, keepalive_chunk),
                     ))
                 }
@@ -892,6 +1086,8 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_resp_15(
         },
         error_chain,
         error_body,
+        diagnostic_source: None,
+        diagnostic_cause: None,
         node_trace,
         observability: None,
         stream_observation: None,
@@ -910,6 +1106,8 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_error_06(
         error_node: projected.chain[5],
         error_chain: projected.chain.to_vec(),
         error_body: Some(body),
+        diagnostic_source: Some(projected.diagnostic_source),
+        diagnostic_cause: None,
         node_trace: vec!["V3Error06ClientProjected", "V3Server16HttpFrame"],
         observability: None,
         stream_observation: None,
@@ -932,9 +1130,29 @@ pub(crate) fn build_v3_server_16_http_frame_from_v3_foundation_output(
         error_node: output.error_node,
         error_chain: output.error_chain,
         error_body,
+        diagnostic_source: output.diagnostic_source,
+        diagnostic_cause: output.diagnostic_cause,
         node_trace: output.node_trace,
         observability: None,
         stream_observation: None,
+    }
+}
+
+pub(crate) fn build_v3_server_16_http_frame_from_error_sdk_result(
+    default_stage: &'static str,
+    projection: V3HttpInputErrorProjection,
+) -> V3Server16HttpFrame {
+    match projection {
+        Ok(projected) => build_v3_server_16_http_frame_from_v3_error_06(projected),
+        Err(fault) => {
+            let stage = fault
+                .original_source
+                .as_ref()
+                .map_or(default_stage, |source| source.source_stage);
+            build_v3_server_16_http_frame_from_v3_foundation_output(
+                foundation_output_from_error_sdk_result(stage, vec![stage], None, Err(fault)),
+            )
+        }
     }
 }
 
@@ -970,9 +1188,14 @@ pub(crate) fn build_v3_debug_runtime_from_manifest(
 // 图片，wire 侧体积回到正常量级，内存峰值仅存在于读取-清洗窗口。
 pub(crate) const V3_MAX_REQUEST_BODY_BYTES: usize = 256 * 1024 * 1024;
 
+pub(crate) type V3HttpInputErrorProjection = Result<
+    routecodex_v3_error::V3Error06ClientProjected,
+    routecodex_v3_runtime::V3RelayErrorOperatorFault,
+>;
+
 pub(crate) async fn read_json_payload(
     request: Request,
-) -> Result<serde_json::Value, routecodex_v3_error::V3Error06ClientProjected> {
+) -> Result<serde_json::Value, V3HttpInputErrorProjection> {
     let content_length = request
         .headers()
         .get(CONTENT_LENGTH)
@@ -1024,12 +1247,16 @@ pub(crate) async fn method_not_allowed(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
     let path = request.uri().path().to_string();
     let request_id = match allocate_v3_console_request_id(&state, &path, None) {
         Ok(request_id) => request_id,
-        Err(response) => return *response,
+        Err(response) => return commit_model_transport_outcome(&state, connection, *response),
     };
-    error_output_response_for_server(
+    let response = error_output_response_for_server(
         &state.server,
         &path,
         &request_id,
@@ -1037,19 +1264,24 @@ pub(crate) async fn method_not_allowed(
             V3HttpBoundaryErrorKind::MethodNotAllowed,
             "HTTP method is not allowed for this endpoint",
         ),
-    )
+    );
+    commit_model_transport_outcome(&state, connection, response)
 }
 
 pub(crate) async fn path_not_found(
     State(state): State<Arc<V3ListenerState>>,
     request: Request,
 ) -> Response<Body> {
+    let connection = request
+        .extensions()
+        .get::<V3FrontConnectionIdentity>()
+        .copied();
     let path = request.uri().path().to_string();
     let request_id = match allocate_v3_console_request_id(&state, &path, None) {
         Ok(request_id) => request_id,
-        Err(response) => return *response,
+        Err(response) => return commit_model_transport_outcome(&state, connection, *response),
     };
-    error_output_response_for_server(
+    let response = error_output_response_for_server(
         &state.server,
         &path,
         &request_id,
@@ -1057,24 +1289,42 @@ pub(crate) async fn path_not_found(
             V3HttpBoundaryErrorKind::PathNotFound,
             "HTTP path is not registered",
         ),
-    )
+    );
+    commit_model_transport_outcome(&state, connection, response)
 }
 
 pub(crate) fn project_http_input_error(
     kind: V3HttpBoundaryErrorKind,
     message: impl Into<String>,
-) -> routecodex_v3_error::V3Error06ClientProjected {
-    project_v3_http_boundary_error(kind, message)
+) -> V3HttpInputErrorProjection {
+    project_v3_http_boundary_error_via_sdk(kind, message)
+}
+
+fn resolve_http_input_error_projection(
+    projection: V3HttpInputErrorProjection,
+) -> Result<routecodex_v3_error::V3Error06ClientProjected, Response<Body>> {
+    projection.map_err(|fault| {
+        let stage = fault
+            .original_source
+            .as_ref()
+            .map_or("V3Server03HttpRequestRaw", |source| source.source_stage);
+        foundation_output_response(foundation_output_from_error_sdk_result(
+            stage,
+            vec![stage],
+            None,
+            Err(fault),
+        ))
+    })
 }
 
 pub(crate) fn error_output_response_for_server(
     server: &V3ServerManifest,
     endpoint: &str,
     request_id: &str,
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+    projection: V3HttpInputErrorProjection,
 ) -> Response<Body> {
     error_output_response_for_server_with_project_path(
-        server, endpoint, request_id, projected, None,
+        server, endpoint, request_id, projection, None,
     )
 }
 
@@ -1082,10 +1332,23 @@ pub(crate) fn error_output_response_for_server_with_project_path(
     server: &V3ServerManifest,
     endpoint: &str,
     request_id: &str,
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+    projection: V3HttpInputErrorProjection,
     project_path: Option<&str>,
 ) -> Response<Body> {
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+    if endpoint.starts_with("/_routecodex/") {
+        let projected = match resolve_http_input_error_projection(projection) {
+            Ok(projected) => projected,
+            Err(response) => return response,
+        };
+        let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+        emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
+        return json_response(
+            frame.status,
+            frame.error_body.expect("typed diagnostic error"),
+        );
+    }
+    let frame =
+        build_v3_server_16_http_frame_from_error_sdk_result("V3Server03HttpRequestRaw", projection);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(
         frame,
@@ -1097,12 +1360,13 @@ pub(crate) fn error_output_response_for_responses_request_with_project_path(
     server: &V3ServerManifest,
     endpoint: &str,
     request_id: &str,
-    projected: routecodex_v3_error::V3Error06ClientProjected,
+    projection: V3HttpInputErrorProjection,
     request_headers: &HeaderMap,
     payload: Option<&Value>,
     project_path: Option<&str>,
 ) -> Response<Body> {
-    let frame = build_v3_server_16_http_frame_from_v3_error_06(projected);
+    let frame =
+        build_v3_server_16_http_frame_from_error_sdk_result("V3Server03HttpRequestRaw", projection);
     emit_v3_frame_error_console_line(server, endpoint, request_id, &frame, project_path);
     responses_direct_output_response(
         project_v3_responses_error_frame_for_request_if_sse(frame, request_headers, payload),

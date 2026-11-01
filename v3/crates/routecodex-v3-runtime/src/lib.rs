@@ -7,6 +7,8 @@ pub mod hub_v1;
 mod internal;
 pub mod kernel;
 pub mod nodes;
+pub mod operation_runner;
+pub mod projection_drop_log;
 pub mod protocol_tables;
 mod provider_action_gate;
 mod provider_error_policy_matching;
@@ -16,9 +18,11 @@ pub mod route_policy;
 mod runtime_timing;
 mod selected_provider_model_binding;
 mod shared;
+mod shared_custom_tool_function_sse;
 mod shared_direct_thinking_compat;
 pub(crate) mod sse_object_pipeline;
 mod token_estimation;
+mod tool_markup_parser;
 
 pub use diagnostics::{project_v3_virtual_router_dry_run, project_v3_virtual_router_status};
 pub use direct_response_hooks::{
@@ -26,8 +30,11 @@ pub use direct_response_hooks::{
     V3DirectResponseCompatPlan,
 };
 pub use foundation::{
-    execute_v3_foundation_pending_runtime, execute_v3_p5_routing_runtime, project_v3_debug_failure,
-    V3FoundationRuntimeInput, V3FoundationRuntimeOutput, V3P5Runtime,
+    execute_v3_foundation_pending_runtime, execute_v3_p5_routing_runtime,
+    foundation_output_from_error_sdk_result, project_v3_debug_failure,
+    project_v3_http_boundary_error_via_sdk, project_v3_server_boundary_error_via_sdk,
+    project_v3_server_websocket_error_via_sdk, V3FoundationRuntimeInput, V3FoundationRuntimeOutput,
+    V3P5Runtime,
 };
 pub use hooks::{register_responses_direct_hooks, V3HookPoint, V3HookRegistry, V3RegisteredHook};
 pub use hub_v1::*;
@@ -47,9 +54,9 @@ pub use kernel::{
     execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug,
     execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target,
     plan_v3_responses_protocol_execution_with_provider_health,
-    project_v3_protocol_execution_plan_failure, V3ChatDirectCodec, V3DirectProtocolCodec,
+    plan_v3_responses_protocol_execution_with_recovery, project_v3_protocol_execution_plan_failure,
+    V3AnthropicDirectCodec, V3ChatDirectCodec, V3DirectProtocolCodec, V3GeminiDirectCodec,
     V3ResponsesDirectRuntimeOutput, V3ResponsesDirectRuntimeSharedState,
-    V3ResponsesDirectServerToolScope, V3ResponsesDirectServerToolState,
     V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure,
     V3ResponsesProtocolRelayHandoff,
 };
@@ -57,7 +64,9 @@ pub use nodes::*;
 pub use provider_action_gate::*;
 pub use provider_failure_runtime_policy::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
-    V3ProviderFailureRuntimeHealth, V3ProviderHealthProbeFailure,
+    V3ProviderFailureRuntimeHealth, V3ProviderHealthObservationClock, V3ProviderHealthProbeFailure,
+    V3RelayErrorOperatorFault,
 };
 pub use route_policy::*;
+pub use routecodex_v3_provider_responses::V3ProviderHealthListenerScope;
 pub use runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};

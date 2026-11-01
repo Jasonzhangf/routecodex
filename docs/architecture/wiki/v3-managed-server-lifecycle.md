@@ -3,6 +3,16 @@
 This review surface owns process control only. The RouteCodex V3 Runtime remains the sole request and
 response business lifecycle.
 
+Formal restart pauses new business dispatch without waiting for accepted requests
+to finish. The `exec_accepted_plan` node in `v3.managed_restart` retains reversible
+admission ownership, stops probe owners and performs bounded diagnostic persistence,
+then executes the replacement or retains the original owner on preparation failure.
+The existing five-node SESE graph needs no separate request-state transfer path.
+An accepted response may still complete on its valid original connection during
+preparation. Successful exec can interrupt remaining transports; clients detect that
+interruption and decide whether to retry. RCC does not replay interrupted requests
+or fabricate a successful completion.
+
 ```mermaid
 flowchart LR
   A[V3Lifecycle01ValidatedConfig] --> B[V3Lifecycle02InstanceDeclared]
@@ -12,6 +22,55 @@ flowchart LR
   E --> F[V3Lifecycle06LiveControlled]
   F --> G[V3Lifecycle07GracefullyStopped]
 ```
+
+## Hooks sidecar DAG (single source, single sink)
+
+The V3 managed lifecycle and the optional hooks sidecar share one entry and one exit
+inside the managed runtime process tree. The lifecycle is the only owner of the sidecar
+process group, its control socket, and its stop/cleanup. `legacy_supervisor` is an explicit
+install-record declaration and is not selected by default; an enabled record without
+`hooks_runtime` or with `hooks_runtime: internal_hooksd` starts the installed
+`rccv3-hooksd` binary with an instance-owned `hooks-sidecar.sock` and
+`hooks-sidecar-state.json`. It never shares the legacy `127.0.0.1:8787` daemon or
+`~/.codex/routecodex-hooks/codexapp.sock` unless the install record explicitly names the
+legacy supervisor.
+
+```mermaid
+flowchart TB
+  A[V3Lifecycle04ChildSpawned] --> B[Read hooks install record]
+  B -- malformed or unreadable --> I[Publish managed Running with hooks_unavailable:reason]
+  B --> C{supervisor_enabled true}
+  C -- no --> N[Publish managed Running without sidecar]
+  C -- yes --> D{valid hooks_runtime}
+  D -- invalid --> I
+  D -- internal_hooksd or unset --> E[Resolve installed rccv3-hooksd]
+  D -- legacy_supervisor --> E2[Resolve declared legacy supervisor]
+  E -- missing or invalid --> I
+  E --> F[Start lifecycle-owned process group]
+  E2 -- missing or invalid --> I
+  E2 --> F
+  F -- spawn failure --> I
+  F --> G[Check selected sidecar readiness; internal uses rcc-hooks-sidecar/v1]
+  G -- ready --> H[Publish managed Running with sidecar healthy]
+  G -- missing/crash/timeout --> I[Publish managed Running with hooks_unavailable:reason]
+  H --> J[Managed status/control; sidecar events only when available]
+  I --> J
+  N --> J
+  J --> K[Lifecycle stop / sidecar process-group stop]
+  K --> L[Remove hooks-sidecar.pid, socket, state when owned]
+  L --> Z[Managed lifecycle exit]
+```
+
+### Current-state notes
+
+- The active install record now selects `internal_hooksd`. The lifecycle therefore owns a
+  sidecar process group independent of the external hooks supervisor daemon and its fixed
+  `8787` endpoint.
+- The previous `legacy_supervisor` path could collide with an already-running external
+  supervisor or try to bind `codexapp.sock` owned by another process. Internal mode does
+  not use the legacy supervisor wrapper, daemon config, or `codexapp.sock` path.
+- A broken install record and a missing `rccv3-hooksd` fail closed with
+  `hooks_unavailable:<reason>`; the managed server remains `running`.
 
 ## Truth and cache
 
@@ -72,6 +131,36 @@ Hidden `rccv3 server start` keeps the background managed-child behavior for scri
   files, process arguments, logs, or evidence.
 - SSE Transport, continuation, Anthropic Relay, Provider routing, and Error policy are outside this
   owner.
+
+## Business listener discovery and optional admin isolation
+
+The instance declaration keeps the complete aggregate listener set, including the optional
+`admin_webui` entry, because `instance.json` and `PreviousReleaseRestartTransfer` compare listener
+sets exactly across releases. `admin_webui` must not be deleted from `declaration.listeners` to
+change discovery behavior.
+
+- Lifecycle availability, stale discovery, cross-instance port release, residual PID scanning,
+  orphan runtime reap, and explicit PID signal harvest all operate on business listeners only
+  (`server_id != "admin_webui"`). An external process that owns only the admin port is never
+  discovered as stale, never blocks start, and is never signaled.
+- The explicit PID port-range guard is unchanged and remains scoped to business target ports.
+- Server-side, `admin_webui` is an optional attached listener. A missing admin router config, a
+  bind-address parse failure, or a bind failure emits an explicit warning and skips admin router
+  construction, AppState/background registration, and the admin listener task. Already-bound
+  business listeners keep serving; a genuine business listener port conflict still fails startup
+  explicitly.
+- `shutdown_listener_ports` already ignores `admin_webui`, so stop/release stays aligned with the
+  business-only discovery scope.
+
+Pending issue850e916 regression tests cover this boundary with random free ports and a public
+consumer only; production listeners are never touched and no CLI start/stop gate is added for this
+fix. Server coverage lives in `v3/crates/routecodex-v3-server/tests/admin_webui_managed.rs`
+(`issue850e916_admin_port_conflict_keeps_business_listeners_serving`,
+`issue850e916_business_listener_conflict_fails_explicitly`). Lifecycle unit coverage lives in
+`v3/crates/routecodex-v3-lifecycle/src/tests.rs`
+(`issue850e916_admin_only_occupancy_is_not_business_unavailability`,
+`issue850e916_admin_only_occupancy_is_excluded_from_residual_pids`,
+`issue850e916_admin_only_occupancy_does_not_block_orphan_reap`).
 
 ## Review checklist
 

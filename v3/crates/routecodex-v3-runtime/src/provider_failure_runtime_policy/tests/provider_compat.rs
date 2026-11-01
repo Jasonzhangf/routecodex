@@ -64,6 +64,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         failed_candidates: &mut failed_candidates,
         same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
+        last_external_http: &mut None,
     };
 
     let result = run_v3_relay_provider_failure_policy(
@@ -140,6 +141,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_external_http: &mut None,
         },
     )
     .await
@@ -165,7 +167,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
     assert_eq!(result.event.action, "switch_provider");
     assert_eq!(
         result.event.next_provider_key.as_deref(),
-        Some("first:key:sibling")
+        Some("first:default:key:sibling")
     );
     assert!(
         health
@@ -196,7 +198,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
 }
 
 #[tokio::test]
-async fn relay_generic_provider_http_400_excludes_provider_family_and_records_health() {
+async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_records_health() {
     let scope = "relay_generic_provider_http_400";
     let manifest = provider_compat_sibling_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -237,28 +239,72 @@ async fn relay_generic_provider_http_400_excludes_provider_family_and_records_he
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_external_http: &mut None,
         },
     )
     .await
     .expect("generic provider HTTP 400 must follow provider-scoped health handling");
 
-    assert_eq!(
-        failed_candidates,
-        BTreeSet::from([
-            "first:key:test".to_string(),
-            "first:key:sibling".to_string(),
-        ]),
-        "generic provider HTTP 400 must exclude every candidate in the provider family"
+    // A generic provider HTTP 400 is an ordinary recoverable failure here: the
+    // exact identity is held by typed observation, not by a permanent
+    // request-local exclusion.
+    assert!(
+        failed_candidates.is_empty(),
+        "generic provider HTTP 400 must not add a permanent request-local exclusion"
     );
     assert_ne!(
         result.event.health_record.state,
         "request_local_provider_compat"
     );
-    assert_eq!(result.event.health_record.failure_count, 1);
-    assert!(result.event.health_record.cooldown_until_ms.is_some());
-    assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
-    assert!(result.retry_selected.is_none());
-    assert!(result.terminal_projection.is_some());
+    assert_eq!(result.event.health_record.state, "pre_cool_observation");
+    assert_eq!(
+        result.event.health_record.failure_count, 0,
+        "a held provider HTTP 400 must not count before its observation"
+    );
+    assert_eq!(result.event.health_record.cooldown_until_ms, None);
+    let held = health.availability("first", Some("key"), Some("test"), u64::MAX);
+    assert!(
+        !held.available,
+        "the failed exact identity must be held for observation"
+    );
+    assert!(held
+        .blocked_scopes
+        .iter()
+        .any(|blocked| blocked == "provider_pre_cool_observation"));
+    assert!(
+        health
+            .store()
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available,
+        "the observation must not cool the identity before its declared gate"
+    );
+    complete_due_precool_failures(&health, 20_000).await;
+    assert!(
+        !health
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available
+    );
+    assert!(
+        !health
+            .store()
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available,
+        "the failed observation must commit the typed cooldown for the exact identity"
+    );
+    assert_eq!(result.event.action, "switch_provider");
+    let retry = result
+        .retry_selected
+        .as_ref()
+        .expect("generic provider HTTP 400 must retain the untried sibling candidate");
+    assert_eq!(retry.candidate.provider_id, "first");
+    assert_eq!(retry.candidate.auth_alias, "key");
+    assert_eq!(retry.candidate.model_id, "sibling");
+    assert!(
+        health
+            .availability("first", Some("key"), Some("sibling"), u64::MAX)
+            .available
+    );
+    assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
 }
@@ -305,6 +351,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_external_http: &mut None,
         },
     )
     .await
@@ -318,7 +365,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
     assert_eq!(reselected.candidate.model_id, "sibling");
     assert_eq!(
         failed_candidates,
-        BTreeSet::from(["first:key:test".to_string()]),
+        BTreeSet::from(["first:default:key:test".to_string()]),
         "invalid_request_error must exclude only the exact failed candidate"
     );
     assert_eq!(
@@ -330,7 +377,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
     assert_eq!(result.event.action, "switch_provider");
     assert_eq!(
         result.event.next_provider_key.as_deref(),
-        Some("first:key:sibling")
+        Some("first:default:key:sibling")
     );
     assert!(result.terminal_projection.is_none());
     assert!(same_candidate_retries.is_empty());
@@ -376,6 +423,7 @@ async fn relay_provider_failure_projects_target_expansion_error() {
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
+            last_external_http: &mut None,
         },
     )
     .await
@@ -401,5 +449,18 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         projection.body["error"]["code"],
         "captured_target_plan_expansion_failed"
     );
-    assert_eq!(failed_candidates.len(), 1);
+    // The attempt stays health-neutral because its own target resolution proved
+    // no alternative exists. An ordinary provider failure adds no permanent
+    // request-local exclusion before that typed projection.
+    assert_eq!(result.event.health_record.state, "last_candidate_terminal");
+    assert!(
+        failed_candidates.is_empty(),
+        "an ordinary provider failure must not add a permanent request-local exclusion"
+    );
+    assert!(
+        health
+            .availability("first", Some("key1"), Some("gpt-test"), 20_000)
+            .available,
+        "a terminal target-resolution projection must not mutate provider health"
+    );
 }

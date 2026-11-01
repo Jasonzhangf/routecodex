@@ -8,6 +8,7 @@ fn target(id: &str, priority: i32, weight: u32) -> V3RoutePoolTargetManifest {
         provider: None,
         model: None,
         key: None,
+        interface: None,
         priority: Some(priority),
         weight: Some(weight),
     }
@@ -40,6 +41,7 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
         debug: V3DebugManifest {
             log_console: false,
             log_file: None,
+            projection_drop_log_file: None,
             snapshots: false,
             codex_samples: false,
             snapshot_stages: None,
@@ -52,7 +54,6 @@ fn manifest(strategy: V3SelectionStrategy) -> V3Config05ManifestPublished {
             policies: BTreeMap::new(),
             provider_error_default_path: Vec::new(),
             provider_error_action_policy: Vec::new(),
-            client_error_projection_policy: Vec::new(),
         },
         route_groups: BTreeMap::from([(
             "g".into(),
@@ -105,8 +106,65 @@ fn matching_facts() -> V3RouterRequestFacts {
         client_model: Some("client-model".into()),
         capabilities: BTreeSet::from(["tools".into()]),
         input_tokens: 10,
+        current_turn_input_tokens: 10,
         route_classification: test_route("tools", &["tools", "default"]),
     }
+}
+
+#[test]
+fn empty_signal_pool_is_skipped_and_default_stays_last_tier() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("tools")
+        .unwrap()
+        .targets
+        .clear();
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
+        .expect("classify");
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .expect("an empty signal pool is skipped instead of failing the request");
+    assert!(
+        plan.tiers.iter().all(|tier| tier.pool_id != "tools"),
+        "empty tools pool must not become a tier: {:?}",
+        plan.tiers
+    );
+    assert_eq!(
+        plan.tiers.last().expect("default tier").pool_id,
+        "default",
+        "the explicit default pool stays the last tier"
+    );
+}
+
+#[test]
+fn empty_explicit_default_pool_fails_even_when_signal_pools_remain() {
+    // 用户规则：default 是必须存在且非空的唯一最低池。非 default 池可空，
+    // 但空 default 是配置错误，即使有其它可命中的池也要显式失败。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("default")
+        .unwrap()
+        .targets
+        .clear();
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
+        .expect("classify");
+    assert_eq!(
+        router.resolve_route_pool_plan(&manifest, classified),
+        Err(V3VirtualRouterError::DefaultPoolEmpty("g".into())),
+        "an empty default pool must fail instead of falling through to another tier"
+    );
 }
 
 #[test]
@@ -143,6 +201,7 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
                 client_model: None,
                 capabilities: BTreeSet::from(["text".into(), "tools".into()]),
                 input_tokens: 1,
+                current_turn_input_tokens: 1,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -174,6 +233,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
             enabled: true,
             provider_type: "responses".into(),
             base_url: "http://127.0.0.1:9/v1".into(),
+            interfaces: BTreeMap::new(),
             default_model: "model-x".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
@@ -187,6 +247,7 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     secret_file: None,
                     secret_key: None,
                     api_key: None,
+                    oauth_declaration: None,
                 }],
             },
             models: BTreeMap::from([(
@@ -197,7 +258,6 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     aliases: vec!["mx".into()],
                     capabilities: vec!["text".into()],
                     web_search_execution_mode: V3WebSearchExecutionMode::None,
-                    web_search_backend_binding: None,
                     supports_streaming: true,
                     supports_thinking: false,
                     thinking: None,
@@ -205,14 +265,18 @@ fn manifest_with_direct_provider() -> V3Config05ManifestPublished {
                     max_context_tokens: None,
                     context_token_estimate_scale_bps: 10_000,
                     features: BTreeMap::new(),
+                    availability: None,
                 },
             )]),
             responses: None,
             concurrency: None,
             health: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+            reasoning_effort: None,
             compatibility_profile: None,
+            headers: BTreeMap::new(),
             features: BTreeMap::new(),
+            local: false,
             request_timeout_ms: 300_000,
             sse_first_frame_timeout_ms: None,
         },
@@ -226,6 +290,7 @@ fn direct_facts(model: &str, capabilities: BTreeSet<String>) -> V3RouterRequestF
         client_model: Some(model.into()),
         capabilities,
         input_tokens: 10,
+        current_turn_input_tokens: 10,
         route_classification: RouteClassification::default(),
     }
 }
@@ -290,6 +355,7 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::new(),
                 input_tokens: 1,
+                current_turn_input_tokens: 1,
                 route_classification: test_route("compact", &["compact"]),
             },
         )
@@ -341,7 +407,7 @@ fn direct_unknown_provider_falls_back_to_classification() {
 }
 
 #[test]
-fn direct_unknown_model_and_media_mismatch_fail_without_reroute() {
+fn direct_unknown_model_falls_back_to_normal_pool_routing() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -352,14 +418,20 @@ fn direct_unknown_model_and_media_mismatch_fail_without_reroute() {
             direct_facts("prov.absent-model", BTreeSet::new()),
         )
         .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(
-        router.resolve_route_pool_plan(&manifest, classified),
-        Err(V3VirtualRouterError::DirectModelUnknown {
-            provider: "prov".into(),
-            model: "absent-model".into(),
-        })
+        hit.pool_id, "default",
+        "an enabled provider that declares no such model must fall back to normal pool routing"
     );
+}
 
+#[test]
+fn direct_media_mismatch_fails_without_reroute() {
+    let router = V3VirtualRouter::default();
+    let manifest = manifest_with_direct_provider();
     let classified = router
         .classify_request_with_facts(
             &manifest,
@@ -396,7 +468,8 @@ fn resolves_listener_default_and_hits_one_opaque_plan() {
 }
 
 #[test]
-fn matched_pool_and_default_floor_are_captured_before_one_hit() {
+fn matched_pool_is_single_pool_without_default_floor() {
+    // 红测：命中一个分类池后只交该池，不再追加 default 或其它分类池。
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
@@ -405,19 +478,33 @@ fn matched_pool_and_default_floor_are_captured_before_one_hit() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
+    let tier_ids = plan
+        .tiers
+        .iter()
+        .map(|tier| tier.pool_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tier_ids,
+        vec!["tools"],
+        "a single matched pool must not append default or any other pool"
+    );
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "tools");
+    // tools pool: a(priority 2), c(priority 1) -> priority order a then c.
     let ids = hit
         .target_plan
         .iter()
         .map(|entry| entry.target_id.as_deref())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec![Some("a"), Some("c"), Some("b")]);
-    assert_eq!(hit.pool_id, "tools");
+    assert_eq!(ids, vec![Some("a"), Some("c")]);
+    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
     assert_eq!(hit.hit_count, 1);
 }
 
 #[test]
-fn tools_capability_without_current_tool_output_selects_tools_pool() {
+fn tools_capability_without_current_turn_signal_stays_default() {
+    // 红测：仅凭 request capability 声明不得选中 tools 池；唯一依据是
+    // classifier 给出的当前轮候选信号。
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
@@ -430,6 +517,7 @@ fn tools_capability_without_current_tool_output_selects_tools_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("default", &["default"]),
             },
         )
@@ -439,8 +527,11 @@ fn tools_capability_without_current_tool_output_selects_tools_pool() {
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
 
-    assert_eq!(hit.pool_id, "tools");
-    assert_eq!(hit.target_plan[0].pool_id, "tools");
+    assert_eq!(hit.pool_id, "default");
+    assert!(hit
+        .target_plan
+        .iter()
+        .all(|entry| entry.pool_id == "default"));
 }
 
 #[test]
@@ -457,7 +548,9 @@ fn no_match_uses_default_and_only_equal_best_precedence_is_ambiguous() {
                 client_model: Some("different-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
-                route_classification: test_route("tools", &["tools", "default"]),
+                current_turn_input_tokens: 10,
+                // Declared capabilities alone are not a current-turn signal.
+                route_classification: test_route("default", &["default"]),
             },
         )
         .unwrap();
@@ -530,6 +623,7 @@ fn entry_protocol_uses_generic_route_signal_pool() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -601,21 +695,11 @@ fn add_model_match_pool(
 }
 
 #[test]
-fn web_search_capability_does_not_override_route_pool_reason() {
+fn classifier_candidates_select_pool_regardless_of_declared_capabilities() {
+    // 红测：能力声明不是选择依据；候选信号顺序决定命中池。
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
-    manifest
-        .route_groups
-        .get_mut("g")
-        .unwrap()
-        .pools
-        .get_mut("tools")
-        .unwrap()
-        .match_rule
-        .as_mut()
-        .unwrap()
-        .precedence = 20;
-    add_match_pool(&mut manifest, "web_search", 22, vec!["web_search"], None);
+    add_match_pool(&mut manifest, "web_search", 0, vec!["web_search"], None);
 
     let classified = router
         .classify_request_with_facts(
@@ -627,6 +711,7 @@ fn web_search_capability_does_not_override_route_pool_reason() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["tools".into(), "web_search".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("tools", &["tools", "default"]),
             },
         )
@@ -661,6 +746,7 @@ fn web_search_capability_pool_is_not_generic_route_fallback() {
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from(["web_search".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -674,15 +760,53 @@ fn web_search_capability_pool_is_not_generic_route_fallback() {
 }
 
 #[test]
-fn route_contract_prefers_multimodal_over_all_non_context_route_signals() {
+fn candidate_order_hosted_websearch_precedes_multimodal() {
+    // 红测：hosted websearch 与图片同时成立时，按固定顺序命中 web_search。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(&mut manifest, "multimodal", 1, vec!["multimodal"], None);
+    add_match_pool(&mut manifest, "web_search", 9, vec!["web_search"], None);
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["web_search".into(), "multimodal".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route(
+                    "web_search",
+                    &["web_search", "multimodal", "default"],
+                ),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers.len(), 1);
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+    assert_eq!(hit.pool_id, "web_search");
+}
+
+#[test]
+fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
+    // 红测：coding > thinking；缺 coding 池时落到 thinking；多信号只按
+    // hosted web_search > multimodal > longcontext > coding > thinking > search
+    // > tools 判序。
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
     add_match_pool(&mut manifest, "coding", 2, vec!["coding"], None);
-    add_match_pool(&mut manifest, "search", 3, vec!["search"], None);
+    add_match_pool(&mut manifest, "tools", 3, vec!["tools"], None);
     add_match_pool(&mut manifest, "web_search", 4, vec!["web_search"], None);
-    add_match_pool(&mut manifest, "multimodal", 99, vec!["multimodal"], None);
 
+    // coding active -> coding wins even though thinking/tools/web_search rules exist.
     let classified = router
         .classify_request_with_facts(
             &manifest,
@@ -692,33 +816,58 @@ fn route_contract_prefers_multimodal_over_all_non_context_route_signals() {
                 entry_protocol: "responses".into(),
                 client_model: Some("client-model".into()),
                 capabilities: BTreeSet::from([
-                    "tools".into(),
-                    "coding".into(),
-                    "search".into(),
-                    "web_search".into(),
                     "thinking".into(),
-                    "multimodal".into(),
+                    "coding".into(),
+                    "tools".into(),
+                    "web_search".into(),
                 ]),
                 input_tokens: 10,
-                route_classification: test_route("multimodal", &["multimodal", "default"]),
+                current_turn_input_tokens: 10,
+                route_classification: test_route(
+                    "coding",
+                    &["coding", "thinking", "tools", "default"],
+                ),
             },
         )
         .unwrap();
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "coding");
 
-    assert_eq!(hit.pool_id, "multimodal");
+    // thinking active -> thinking wins over tools; web_search absent from
+    // candidates, so declared capability cannot pull it in.
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["thinking".into(), "tools".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("thinking", &["thinking", "tools", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "thinking");
 }
 
 #[test]
-fn route_contract_keeps_multimodal_ahead_of_longcontext() {
+fn longcontext_candidate_selects_configured_pool() {
+    // 红测：longcontext 能力保留；配置了非空 longcontext 池就必须选中，
+    // 并在候选顺序中优先于 multimodal。
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
-    add_match_pool(&mut manifest, "multimodal", 1, vec!["multimodal"], None);
-    add_match_pool(&mut manifest, "web_search", 2, vec!["web_search"], None);
-    add_match_pool(&mut manifest, "longcontext", 100, Vec::new(), Some(1_000));
+    add_match_pool(&mut manifest, "multimodal", 0, vec!["multimodal"], None);
+    add_match_pool(&mut manifest, "longcontext", 10, vec!["longcontext"], None);
 
     let classified = router
         .classify_request_with_facts(
@@ -728,11 +877,12 @@ fn route_contract_keeps_multimodal_ahead_of_longcontext() {
             V3RouterRequestFacts {
                 entry_protocol: "responses".into(),
                 client_model: Some("client-model".into()),
-                capabilities: BTreeSet::from(["multimodal".into(), "web_search".into()]),
+                capabilities: BTreeSet::from(["multimodal".into()]),
                 input_tokens: 1_000,
+                current_turn_input_tokens: 1_000,
                 route_classification: test_route(
-                    "multimodal",
-                    &["multimodal", "longcontext", "default"],
+                    "longcontext",
+                    &["longcontext", "multimodal", "default"],
                 ),
             },
         )
@@ -740,13 +890,186 @@ fn route_contract_keeps_multimodal_ahead_of_longcontext() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-
-    assert_eq!(hit.pool_id, "multimodal");
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "longcontext");
 }
 
 #[test]
-fn route_contract_prefers_explicit_model_pool_over_generic_thinking() {
+fn pool_min_max_matches_current_turn_tokens_not_full_request() {
+    // 红测（Review finding 4）：池的 min/max_input_tokens 只看当前轮 token，
+    // 已完成历史不得把请求推入有上下界的池。完整 input_tokens 仍保留给
+    // Target 做容量估计。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(
+        &mut manifest,
+        "longcontext",
+        10,
+        vec!["longcontext"],
+        Some(1_000),
+    );
+
+    // 当前轮很小（1 token），但完整请求很大（5_000）。因当前轮未越过
+    // 下限，longcontext 池不得命中，落入 default。
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 5_000,
+                current_turn_input_tokens: 1,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let hit = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap()
+        .tiers;
+    assert_eq!(hit.last().expect("default tier").pool_id, "default");
+
+    // 当前轮越过下限时，longcontext 池命中；此时完整 input_tokens 仍保留。
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 5_000,
+                current_turn_input_tokens: 2_000,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers[0].pool_id, "longcontext");
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    // Target 仍收到完整请求 token 做容量估计。
+    assert_eq!(hit.request_input_tokens, 5_000);
+}
+
+#[test]
+fn pool_min_max_bounds_exclude_when_current_turn_below_min() {
+    // 绿测反例：下限只看当前轮；历史再长也不能让低于下限的当前轮命中。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(
+        &mut manifest,
+        "longcontext",
+        10,
+        vec!["longcontext"],
+        Some(1_000),
+    );
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 1_000,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("longcontext", &["longcontext", "default"]),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap()
+            .tiers[0]
+            .pool_id,
+        "default"
+    );
+}
+
+#[test]
+fn candidate_priority_skips_absent_or_empty_pools() {
+    // 红测：按 classifier 候选固定顺序，缺省池和空池都不能截断或抢占；
+    // 首个已配置非空池是唯一交付池。
+    let ordered = [
+        "web_search",
+        "multimodal",
+        "longcontext",
+        "coding",
+        "thinking",
+        "search",
+        "tools",
+    ];
+    for (expected_index, expected) in ordered.iter().enumerate() {
+        let router = V3VirtualRouter::default();
+        let mut manifest = manifest(V3SelectionStrategy::Priority);
+        for pool_id in ordered {
+            add_match_pool(&mut manifest, pool_id, 0, vec![pool_id], None);
+        }
+        for (index, pool_id) in ordered.iter().enumerate() {
+            if index >= expected_index {
+                continue;
+            }
+            let pool = manifest
+                .route_groups
+                .get_mut("g")
+                .unwrap()
+                .pools
+                .get_mut(*pool_id)
+                .unwrap();
+            if index % 2 == 0 {
+                pool.targets.clear();
+            } else {
+                manifest
+                    .route_groups
+                    .get_mut("g")
+                    .unwrap()
+                    .pools
+                    .remove(*pool_id);
+            }
+        }
+        let mut candidates = ordered.to_vec();
+        candidates.push("default");
+        let classified = router
+            .classify_request_with_facts(
+                &manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some("client-model".into()),
+                    capabilities: ordered.iter().map(|signal| (*signal).to_string()).collect(),
+                    input_tokens: 10,
+                    current_turn_input_tokens: 10,
+                    route_classification: test_route(expected, &candidates),
+                },
+            )
+            .unwrap();
+        let plan = router
+            .resolve_route_pool_plan(&manifest, classified)
+            .unwrap();
+        assert_eq!(
+            plan.tiers
+                .iter()
+                .map(|tier| tier.pool_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![*expected],
+            "first configured non-empty candidate must win"
+        );
+    }
+}
+
+#[test]
+fn model_match_pool_does_not_preempt_candidate_signal() {
+    // 红测：普通请求没有隐藏的 model 匹配路径；候选信号顺序决定池。
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
@@ -762,6 +1085,7 @@ fn route_contract_prefers_explicit_model_pool_over_generic_thinking() {
                 client_model: Some("client-test".into()),
                 capabilities: BTreeSet::from(["thinking".into()]),
                 input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route("thinking", &["thinking", "default"]),
             },
         )
@@ -771,7 +1095,154 @@ fn route_contract_prefers_explicit_model_pool_over_generic_thinking() {
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
 
-    assert_eq!(hit.pool_id, "client_test");
+    assert_eq!(hit.pool_id, "thinking");
+}
+
+#[test]
+fn virtual_alias_and_auto_share_the_current_turn_classification_pool() {
+    // 公开 crate 级反例：当前轮信号相同时，非 provider.model 的虚拟别名与
+    // auto 必须命中同一个分类池；模型名命中的池不得额外抢占，也不得在没有
+    // 分类池时被选中。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(&mut manifest, "thinking_primary", 5, vec!["thinking"], None);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("thinking_primary")
+        .unwrap()
+        .match_rule
+        .as_mut()
+        .unwrap()
+        .models = vec!["virtual-alias".into()];
+    add_match_pool(
+        &mut manifest,
+        "thinking_secondary",
+        10,
+        vec!["thinking"],
+        None,
+    );
+    add_model_match_pool(&mut manifest, "alias_only", 0, "virtual-alias");
+
+    let resolve = |manifest: &V3Config05ManifestPublished, model: &str| {
+        let classified = router
+            .classify_request_with_facts(
+                manifest,
+                "s",
+                "/v1/responses",
+                V3RouterRequestFacts {
+                    entry_protocol: "responses".into(),
+                    client_model: Some(model.into()),
+                    capabilities: BTreeSet::new(),
+                    input_tokens: 10,
+                    current_turn_input_tokens: 10,
+                    route_classification: test_route("thinking", &["thinking", "default"]),
+                },
+            )
+            .unwrap();
+        router
+            .resolve_route_pool_plan(manifest, classified)
+            .unwrap()
+    };
+    let pool_ids = |plan: &V3Router06RoutePoolResolved| {
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let auto = resolve(&manifest, "auto");
+    let alias = resolve(&manifest, "virtual-alias");
+    assert_eq!(
+        pool_ids(&auto),
+        pool_ids(&alias),
+        "the virtual alias must not hit a model-named pool that auto does not hit"
+    );
+    assert_eq!(pool_ids(&alias), vec!["thinking_primary"]);
+
+    // Without a configured pool for the current-turn signal both names must
+    // land on the same required default pool, never on the model-named pool.
+    let mut alias_only = manifest.clone();
+    alias_only
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .remove("thinking_primary");
+    alias_only
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .remove("thinking_secondary");
+    let auto = resolve(&alias_only, "auto");
+    let alias = resolve(&alias_only, "virtual-alias");
+    assert_eq!(pool_ids(&auto), vec!["default"]);
+    assert_eq!(pool_ids(&alias), vec!["default"]);
+}
+
+#[test]
+fn model_match_pool_is_not_an_inbound_route() {
+    // 红测：`match.models` 不是普通请求的路由维度；没有当前轮信号时，
+    // 非 provider.model 的虚拟模型名和 auto 一样落到 default，不因模型名
+    // 命中额外池。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_model_match_pool(&mut manifest, "client_test", 10, "client-test");
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-test".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "default");
+}
+
+#[test]
+fn model_match_pool_without_signal_uses_default_pool() {
+    // 红测：模型名声明不能在没有当前轮信号时改路；default 是唯一 no-match
+    // 终点。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_model_match_pool(&mut manifest, "client_test", 99, "client-test");
+
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-test".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 1,
+                current_turn_input_tokens: 1,
+                route_classification: test_route("default", &["default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "default");
 }
 
 #[test]
@@ -832,6 +1303,7 @@ fn missing_non_default_match_and_invalid_protocol_facts_fail_explicitly() {
                 client_model: None,
                 capabilities: BTreeSet::new(),
                 input_tokens: 0,
+                current_turn_input_tokens: 0,
                 route_classification: RouteClassification::default(),
             },
         ),
@@ -1101,9 +1573,9 @@ fn missing_or_empty_explicit_default_pool_is_rejected() {
 }
 
 #[test]
-fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
-    // 红测：无显式 multimodal/web_search 池时，具备能力的模型默认进
-    // 隐式能力池（RoundRobin 轮询）；web_search 池优先级高于 multimodal。
+fn no_implicit_capability_pool_without_configured_pool() {
+    // 红测：无显式 multimodal/web_search 池时，不得从 provider 能力构造隐式
+    // 能力池；应直接落 default。
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     manifest.providers.insert(
@@ -1113,6 +1585,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             enabled: true,
             provider_type: "anthropic".into(),
             base_url: "http://127.0.0.1:9/v1".into(),
+            interfaces: BTreeMap::new(),
             default_model: "MiniMax-M3".into(),
             auth: V3ProviderAuthManifest {
                 auth_type: V3ProviderAuthType::ApiKey,
@@ -1126,6 +1599,7 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     secret_file: None,
                     secret_key: None,
                     api_key: None,
+                    oauth_declaration: None,
                 }],
             },
             models: BTreeMap::from([(
@@ -1136,7 +1610,6 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     aliases: vec![],
                     capabilities: vec!["text".into(), "multimodal".into(), "web_search".into()],
                     web_search_execution_mode: V3WebSearchExecutionMode::None,
-                    web_search_backend_binding: None,
                     supports_streaming: true,
                     supports_thinking: false,
                     thinking: None,
@@ -1144,19 +1617,23 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
                     max_context_tokens: None,
                     context_token_estimate_scale_bps: 10_000,
                     features: BTreeMap::new(),
+                    availability: None,
                 },
             )]),
             responses: None,
             concurrency: None,
             health: None,
             provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig::default(),
+            reasoning_effort: None,
             compatibility_profile: None,
+            headers: BTreeMap::new(),
             features: BTreeMap::new(),
+            local: false,
             request_timeout_ms: 300_000,
             sse_first_frame_timeout_ms: None,
         },
     );
-    let mut classified = router
+    let classified = router
         .classify_request_with_facts(
             &manifest,
             "s",
@@ -1164,57 +1641,9 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
             V3RouterRequestFacts {
                 entry_protocol: "responses".into(),
                 client_model: Some("MiniMax-M3".into()),
-                capabilities: BTreeSet::from(["multimodal".into()]),
+                capabilities: BTreeSet::from(["multimodal".into(), "web_search".into()]),
                 input_tokens: 10,
-                route_classification: test_route("multimodal", &["multimodal", "default"]),
-            },
-        )
-        .unwrap();
-    let plan = router
-        .resolve_route_pool_plan(&manifest, classified)
-        .unwrap();
-    let tier_ids: Vec<&str> = plan
-        .tiers
-        .iter()
-        .map(|tier| tier.pool_id.as_str())
-        .collect();
-    assert!(
-        tier_ids.contains(&"implicit:multimodal"),
-        "implicit multimodal pool tier must exist when no explicit pool: {tier_ids:?}"
-    );
-    let implicit = plan
-        .tiers
-        .iter()
-        .find(|tier| tier.pool_id == "implicit:multimodal")
-        .expect("implicit multimodal tier");
-    assert_eq!(
-        implicit.selection,
-        V3SelectionStrategy::RoundRobin,
-        "implicit capability pool must round-robin"
-    );
-    assert_eq!(implicit.targets.len(), 1);
-
-    // 红测：隐式能力池是 synthetic pool（无 manifest 池声明），opaque
-    // target plan 的 entry 必须携带 direct_provider_model，否则 Target
-    // expand 查 group.pools 找不到 implicit:* 池 → SelectedPoolMissing。
-    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-    assert_eq!(
-        hit.target_plan[0].direct_provider_model,
-        Some(("mm".to_string(), "MiniMax-M3".to_string())),
-        "implicit capability pool entry must carry direct provider/model"
-    );
-
-    // web_search 请求（web_search 声明）：web_search 隐式池优先级高于 multimodal。
-    classified = router
-        .classify_request_with_facts(
-            &manifest,
-            "s",
-            "/v1/responses",
-            V3RouterRequestFacts {
-                entry_protocol: "responses".into(),
-                client_model: Some("MiniMax-M3".into()),
-                capabilities: BTreeSet::from(["web_search".into(), "multimodal".into()]),
-                input_tokens: 10,
+                current_turn_input_tokens: 10,
                 route_classification: test_route(
                     "web_search",
                     &["web_search", "multimodal", "default"],
@@ -1230,16 +1659,152 @@ fn implicit_capability_pool_round_robin_when_no_explicit_pool() {
         .iter()
         .map(|tier| tier.pool_id.as_str())
         .collect();
-    let web_index = tier_ids
-        .iter()
-        .position(|id| *id == "implicit:web_search")
-        .expect("implicit web_search tier");
-    let multi_index = tier_ids
-        .iter()
-        .position(|id| *id == "implicit:multimodal")
-        .expect("implicit multimodal tier");
+    assert_eq!(
+        tier_ids,
+        vec!["default"],
+        "no implicit capability pool may be synthesized from provider capabilities: {tier_ids:?}"
+    );
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "default");
     assert!(
-        web_index < multi_index,
-        "web_search implicit pool must precede multimodal: {tier_ids:?}"
+        hit.target_plan
+            .iter()
+            .all(|entry| entry.direct_provider_model.is_none()),
+        "no synthetic provider/model entry may be injected"
+    );
+}
+
+#[test]
+fn candidate_order_selects_first_configured_non_empty_pool() {
+    // 红测：按 classifier 给出的候选顺序命中第一个已配置非空池，且只交一池。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
+    add_match_pool(&mut manifest, "coding", 3, vec!["coding"], None);
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["tools".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route(
+                    "coding",
+                    &["coding", "thinking", "tools", "default"],
+                ),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers.len(), 1, "exactly one pool must be handed off");
+    assert_eq!(plan.tiers[0].pool_id, "coding");
+}
+
+#[test]
+fn empty_configured_pool_is_skipped_for_next_candidate() {
+    // 红测：已配置但为空的高优先级池不参与命中，落到下一个候选池。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(&mut manifest, "multimodal", 0, vec!["multimodal"], None);
+    add_match_pool(&mut manifest, "coding", 3, vec!["coding"], None);
+    manifest
+        .route_groups
+        .get_mut("g")
+        .unwrap()
+        .pools
+        .get_mut("multimodal")
+        .unwrap()
+        .targets
+        .clear();
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["multimodal".into(), "coding".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route(
+                    "multimodal",
+                    &["multimodal", "coding", "default"],
+                ),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "coding");
+}
+
+#[test]
+fn absent_non_default_pool_falls_through_to_default() {
+    // 红测：候选池缺省时无条件落到 default，且只交 default 一池。
+    let router = V3VirtualRouter::default();
+    let manifest = manifest(V3SelectionStrategy::Priority);
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["multimodal".into(), "coding".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route(
+                    "multimodal",
+                    &["multimodal", "coding", "default"],
+                ),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers[0].pool_id, "default");
+}
+
+#[test]
+fn explicit_direct_model_ignores_classification_candidates() {
+    // 红测：有效 provider.model 直接命中目标，classifier 候选不影响选择。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest_with_direct_provider();
+    add_match_pool(&mut manifest, "multimodal", 0, vec!["multimodal"], None);
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("prov.model-x".into()),
+                capabilities: BTreeSet::new(),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("multimodal", &["multimodal", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
+    assert_eq!(
+        hit.target_plan[0].direct_provider_model,
+        Some(("prov".to_string(), "model-x".to_string()))
     );
 }

@@ -11,9 +11,16 @@ use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod cc_sol;
+mod custom_tool_function;
 mod deepseek_console_go;
 mod minimax_anthropic;
+pub mod namespace_identity;
 pub mod namespace_tools;
+pub mod opencode_zen_tcm;
+
+pub use custom_tool_function::SseState as CustomToolFunctionSseState;
+pub use custom_tool_function::PROFILE as CUSTOM_TOOL_FUNCTION_PROFILE;
+pub use custom_tool_function::{compile_custom_tool_function_binding, CustomToolFunctionBinding};
 
 /// DeepSeek Console Go responses 网关的响应侧 custom/function 工具回射入口：
 /// 上游以 `function_call` 返回映射过的 function 工具（exec_command 等），客户端
@@ -21,6 +28,22 @@ pub mod namespace_tools;
 /// 否则客户端不执行调用、下一轮历史缺 output（孤儿 call）触发上游 400。
 pub fn apply_deepseek_console_go_response_compat(payload: Value) -> Value {
     deepseek_console_go::apply_response_compat(payload)
+}
+
+/// Responses gateways that reject `custom_tool_call` history but accept an
+/// equivalent `function_call` shape must re-project responses before the client.
+pub fn apply_custom_tool_function_response_compat(
+    payload: Value,
+    binding: &CustomToolFunctionBinding,
+) -> Value {
+    custom_tool_function::apply_response_compat(payload, binding)
+}
+
+pub fn apply_custom_tool_function_sse_event_compat(
+    event: &mut Value,
+    state: &mut CustomToolFunctionSseState,
+) {
+    custom_tool_function::apply_sse_event_compat(event, state)
 }
 
 /// DeepSeek Console Go request-side 400 compatibility owner.
@@ -88,6 +111,8 @@ pub struct AdapterContext {
     pub conversation_id: Option<String>,
     #[serde(default)]
     pub web_search_execution_mode: Option<String>,
+    #[serde(default)]
+    pub custom_tool_function_binding: Option<CustomToolFunctionBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +269,28 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, None));
     }
 
+    if is_custom_tool_function_profile(profile_id) {
+        if provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "openai-responses",
+        ) {
+            let binding = adapter_context
+                .custom_tool_function_binding
+                .clone()
+                .unwrap_or_else(|| {
+                    custom_tool_function::compile_custom_tool_function_binding(&payload)
+                });
+            return Ok(CompatResult {
+                payload: custom_tool_function::apply_request_compat_with_binding(
+                    payload, &binding,
+                )?,
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
+        return Ok(build_compat_result(payload, None));
+    }
+
     if is_gemini_profile(profile_id) {
         if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "gemini-chat") {
             return Ok(CompatResult {
@@ -356,6 +403,27 @@ pub fn run_resp_inbound_stage3_compat(
         return Ok(build_compat_result(input.payload, None));
     }
 
+    if is_custom_tool_function_profile(profile_id) {
+        if provider_protocol_matches(
+            input.adapter_context.provider_protocol.as_ref(),
+            "openai-responses",
+        ) {
+            let Some(binding) = input.adapter_context.custom_tool_function_binding.as_ref() else {
+                return Ok(CompatResult {
+                    payload: input.payload,
+                    applied_profile: Some(profile_id.to_string()),
+                    native_applied: false,
+                });
+            };
+            return Ok(CompatResult {
+                payload: custom_tool_function::apply_response_compat(input.payload, binding),
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
+        return Ok(build_compat_result(input.payload, None));
+    }
+
     if is_cc_profile(profile_id) {
         if provider_protocol_matches(
             input.adapter_context.provider_protocol.as_ref(),
@@ -448,6 +516,10 @@ fn is_deepseek_console_go_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:deepseek-console-go")
 }
 
+fn is_custom_tool_function_profile(profile: &str) -> bool {
+    profile_matches(profile, custom_tool_function::PROFILE)
+}
+
 fn is_cc_profile(profile: &str) -> bool {
     profile_matches(profile, "responses:cc")
 }
@@ -537,6 +609,12 @@ fn normalize_responses_function_tools(root: &mut Map<String, Value>) {
                     .or_else(|| function_obj.and_then(|row| row.get("parameters"))),
             ),
         );
+        if let Some(strict) = tool_obj
+            .get("strict")
+            .or_else(|| function_obj.and_then(|row| row.get("strict")))
+        {
+            normalized_tool.insert("strict".to_string(), strict.clone());
+        }
         normalized.push(Value::Object(normalized_tool));
     }
     root.insert("tools".to_string(), Value::Array(normalized));

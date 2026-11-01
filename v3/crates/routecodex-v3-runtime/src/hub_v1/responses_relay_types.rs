@@ -1,5 +1,9 @@
+use super::common::V3ChatProcessRefillDisposition;
 use super::*;
+use crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault;
+use routecodex_v3_error::V3Error01SourceRaised;
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 
 pub type V3ResponsesRelayClientStream = crate::nodes::V3CommittedClientSseStream;
@@ -25,24 +29,81 @@ pub struct V3ResponsesRelayRuntimeInput {
 
 pub struct V3ResponsesRelayRuntimeOutput {
     pub status: u16,
+    pub terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
     pub client_body: V3ResponsesRelayClientBody,
     pub node_trace: Vec<&'static str>,
     pub error_chain: Option<Vec<&'static str>>,
     pub observability: Option<V3RuntimeObservability>,
+    pub diagnostic_source: Option<V3Error01SourceRaised>,
+    pub diagnostic_cause: Option<V3Error01SourceRaised>,
     pub stream_observation: Option<V3RuntimeStreamObservation>,
     pub finalized_response: Option<Value>,
     pub provider_snapshots: Option<V3ResponsesRelayProviderSnapshots>,
     pub protocol_direct_handoff: Option<V3ResponsesProtocolDirectHandoff>,
 }
 
+/// Internal per-execution signal used by the bounded refill loop. It carries
+/// only the Chat Process disposition; it is never projected into a business
+/// payload or copied into a client response.
+#[derive(Clone, Default)]
+pub(crate) struct V3ResponsesRelayRefillSignal {
+    value: Arc<AtomicU8>,
+}
+
+impl V3ResponsesRelayRefillSignal {
+    const NONE: u8 = 0;
+    const DELIVER: u8 = 1;
+    const REQUEST_REFILL: u8 = 2;
+
+    pub(crate) fn clear(&self) {
+        self.value.store(Self::NONE, Ordering::Release);
+    }
+
+    pub(crate) fn set(&self, disposition: V3ChatProcessRefillDisposition) {
+        let value = match disposition {
+            V3ChatProcessRefillDisposition::Deliver => Self::DELIVER,
+            V3ChatProcessRefillDisposition::RequestRefill => Self::REQUEST_REFILL,
+        };
+        self.value.store(value, Ordering::Release);
+    }
+
+    pub(crate) fn take(&self) -> Option<V3ChatProcessRefillDisposition> {
+        match self.value.swap(Self::NONE, Ordering::AcqRel) {
+            Self::DELIVER => Some(V3ChatProcessRefillDisposition::Deliver),
+            Self::REQUEST_REFILL => Some(V3ChatProcessRefillDisposition::RequestRefill),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct V3ResponsesProtocolDirectHandoff {
     pub request_payload: Value,
     pub plan: V3ResponsesProtocolExecutionPlan,
+    pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub node_trace: Vec<&'static str>,
     pub provider_failure_events: Vec<V3RuntimeProviderFailureObservation>,
     pub observability_accumulator: V3RuntimeObservabilityAccumulator,
     pub request_execution_control: crate::nodes::V3RequestExecutionControl,
+}
+
+/// Carry-over inputs that seed a Relay run from an upstream Direct/protocol plan
+/// or Direct handoff. Grouped so the call sites stay compact.
+#[derive(Clone, Default)]
+pub struct V3ResponsesRelayRuntimeSeeds {
+    pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
+    pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
+    pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
+    pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
+    pub request_local_busy_candidates: BTreeSet<String>,
+    /// Client frame channel of the request. Present only when the client
+    /// requested SSE and the Server created the committed client channel.
+    /// Relay uses it to project its first business frame at provider arrival
+    /// time instead of the provider terminal.
+    pub client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
+    /// Request-scoped projection state that survives Relay refill rounds.
+    pub client_stream_projection: Option<super::relay_client_frames::V3RelayClientProjectionHandle>,
 }
 
 pub enum V3ResponsesRelayDryRunOutcome {
@@ -148,6 +209,16 @@ pub struct V3RuntimeUsageSummary {
     pub cache_creation_input_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct V3RuntimeProviderFailedAttemptEvidence {
+    /// The actual admitted provider transport ordinal for this request. This is
+    /// not a candidate index or a reconstructed sequence number.
+    pub attempt: usize,
+    pub provider_request: Option<Value>,
+    /// The real response head and retained bytes, or an explicit `no_response`.
+    pub provider_response: Value,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct V3RuntimeProviderFailureObservation {
     pub provider_key: String,
@@ -160,6 +231,10 @@ pub struct V3RuntimeProviderFailureObservation {
     pub external_error_code: Option<String>,
     pub external_error_status: Option<u16>,
     pub internal_code: Option<String>,
+    /// Upstream provider request id captured from the provider response headers.
+    /// `None` means this lane did not expose one (an honest unknown), never a
+    /// synthesised id.
+    pub upstream_request_id: Option<String>,
     pub message: String,
     pub failure_count: u32,
     pub health_state: String,
@@ -167,6 +242,14 @@ pub struct V3RuntimeProviderFailureObservation {
     pub action: String,
     pub next_provider_key: Option<String>,
     pub wait_ms: Option<u64>,
+    /// The original typed Error01 source of the provider attempt. It stays on
+    /// the runtime side-channel only: the private provider-failed-attempt
+    /// artifact serializes it explicitly, and the existing log/admin
+    /// projections keep their field set unchanged.
+    pub diagnostic_source: Option<V3Error01SourceRaised>,
+    /// Failure-only attempt-local wire evidence. It is serialized exclusively by
+    /// the private failed-attempt artifact and never drives policy or health.
+    pub failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -198,6 +281,11 @@ pub struct V3RuntimeObservability {
 pub struct V3RuntimeStreamObservation {
     inner: Arc<Mutex<V3RuntimeStreamObservationSnapshot>>,
     control: Arc<Mutex<V3RuntimeStreamControlState>>,
+    /// Typed attempt-local fact recorded while the complete native provider
+    /// stream is processed. It is physically separate from the diagnostic
+    /// snapshot (`provider_raw_sse`) so a 2 MiB diagnostic cap or a split UTF-8
+    /// chunk can never hide a provider-explicit reasoning summary.
+    source_summary_observed: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +297,10 @@ pub enum V3RuntimeSemanticTerminal {
 #[derive(Debug, Clone, Default)]
 struct V3RuntimeStreamControlState {
     semantic_terminal: Option<V3RuntimeSemanticTerminal>,
+    provider_business_content: bool,
+    client_disconnect: bool,
+    /// Attempt-local typed Error handoff, physically separate from snapshots.
+    response_governance_failure: Option<super::V3HubRelayResponseError>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -241,13 +333,48 @@ pub struct V3RuntimeToolreasonObservation {
 #[derive(Clone)]
 pub(crate) struct V3ResponsesRelayProviderFailure {
     pub(crate) status: u16,
+    /// The upstream provider's real HTTP status; `None` when no HTTP response was
+    /// received (network/transport failure or an internally synthesized failure).
+    /// Never the client-facing projection status.
+    pub(crate) provider_status: Option<u16>,
+    /// A typed body-read failure for an HTTP response whose status and headers
+    /// really arrived. `None` for a response-less transport failure and for a
+    /// completely received upstream HTTP error.
+    pub(crate) provider_body_read_failure: Option<String>,
     pub(crate) policy_error_type: String,
     pub(crate) policy_error_message: String,
     pub(crate) provider_id: String,
     pub(crate) source_stage: &'static str,
     pub(crate) observability: Option<V3RuntimeObservability>,
     pub(crate) terminal_projection: Option<routecodex_v3_error::V3Error06ClientProjected>,
+    pub(crate) terminal_disposition: Option<routecodex_v3_error::V3ProviderTerminalDisposition>,
+    pub(crate) error_operator_fault: Option<V3RelayErrorOperatorFault>,
+    pub(crate) failed_attempt_evidence: Option<Arc<V3RuntimeProviderFailedAttemptEvidence>>,
     pub(crate) matched_policy: Option<V3ProviderFailureDirective>,
+    pub(crate) response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
+    pub(crate) attempt_source: Option<routecodex_v3_error::V3Error01SourceRaised>,
+}
+
+impl From<V3RelayErrorOperatorFault> for V3ResponsesRelayProviderFailure {
+    fn from(fault: V3RelayErrorOperatorFault) -> Self {
+        Self {
+            attempt_source: None,
+            status: 599,
+            provider_status: None,
+            provider_body_read_failure: None,
+            policy_error_type: fault.policy_failure.code.clone(),
+            policy_error_message: fault.policy_failure.message.clone(),
+            provider_id: "none".to_string(),
+            source_stage: fault.policy_failure.source_stage,
+            observability: None,
+            terminal_projection: None,
+            terminal_disposition: None,
+            error_operator_fault: Some(fault),
+            failed_attempt_evidence: None,
+            matched_policy: None,
+            response_processing_code: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,6 +393,7 @@ impl V3ProviderFailureDirective {
 }
 
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
+    pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) retry_selected:
@@ -295,6 +423,14 @@ impl V3RuntimeStreamObservation {
             .map_err(|_| "V3 runtime stream observation state lock is poisoned".to_string())
     }
 
+    pub(crate) fn record_source_summary_observed(&self) {
+        self.source_summary_observed.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn has_source_summary_observed(&self) -> bool {
+        self.source_summary_observed.load(Ordering::Acquire)
+    }
+
     pub(crate) fn record_post_commit_error(&self, error: &str) -> Result<(), String> {
         let mut snapshot = self
             .inner
@@ -315,6 +451,74 @@ impl V3RuntimeStreamObservation {
 
     pub(crate) fn has_semantic_terminal(&self) -> Result<bool, String> {
         Ok(self.semantic_terminal()?.is_some())
+    }
+
+    pub(crate) fn record_semantic_terminal(
+        &self,
+        terminal: V3RuntimeSemanticTerminal,
+    ) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.semantic_terminal = Some(terminal))
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_provider_business_content(&self, has_content: bool) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.provider_business_content |= has_content)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn has_provider_business_content(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|control| control.provider_business_content)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_client_disconnect(&self) -> Result<(), String> {
+        self.control
+            .lock()
+            .map(|mut control| control.client_disconnect = true)
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn take_client_disconnect(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|mut control| std::mem::take(&mut control.client_disconnect))
+            .map_err(|_| "V3 runtime stream control state lock is poisoned".to_string())
+    }
+
+    pub(crate) fn record_response_governance_failure(
+        &self,
+        error: super::V3HubRelayResponseError,
+    ) -> Result<(), String> {
+        let mut control = self
+            .control
+            .lock()
+            .map_err(|_| "V3 stream Error handoff lock is poisoned".to_string())?;
+        if control.response_governance_failure.is_none() {
+            control.response_governance_failure = Some(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn take_response_governance_failure(
+        &self,
+    ) -> Result<Option<super::V3HubRelayResponseError>, String> {
+        self.control
+            .lock()
+            .map(|mut control| control.response_governance_failure.take())
+            .map_err(|_| "V3 stream Error handoff lock is poisoned".to_string())
+    }
+
+    pub(crate) fn has_response_governance_failure(&self) -> Result<bool, String> {
+        self.control
+            .lock()
+            .map(|control| control.response_governance_failure.is_some())
+            .map_err(|_| "V3 stream Error handoff lock is poisoned".to_string())
     }
 
     pub fn semantic_terminal(&self) -> Result<Option<V3RuntimeSemanticTerminal>, String> {
@@ -521,71 +725,6 @@ fn semantic_terminal_from_response_status(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct V3ResponsesRelayServerToolScope {
-    pub(crate) entry_endpoint: String,
-    pub(crate) session_id: String,
-    pub(crate) conversation_id: String,
-    pub(crate) port: u16,
-    pub(crate) routing_group: String,
-}
-
-impl V3ResponsesRelayServerToolScope {
-    pub fn new(
-        entry_endpoint: impl Into<String>,
-        session_id: impl Into<String>,
-        conversation_id: impl Into<String>,
-        port: u16,
-        routing_group: impl Into<String>,
-    ) -> Self {
-        Self {
-            entry_endpoint: entry_endpoint.into(),
-            session_id: session_id.into(),
-            conversation_id: conversation_id.into(),
-            port,
-            routing_group: routing_group.into(),
-        }
-    }
-
-    pub(crate) fn has_client_session_scope(&self) -> bool {
-        let session_id = self.session_id.trim();
-        let conversation_id = self.conversation_id.trim();
-        if session_id.is_empty() || conversation_id.is_empty() {
-            return false;
-        }
-        !(session_id == conversation_id && session_id.starts_with("request:"))
-    }
-
-    pub fn web_search_hook_scope(
-        &self,
-    ) -> servertool_core::web_search_contract::WebSearchHookScope {
-        servertool_core::web_search_contract::WebSearchHookScope {
-            entry_endpoint: self.entry_endpoint.clone(),
-            session_id: self.session_id.clone(),
-            conversation_id: self.conversation_id.clone(),
-            port: self.port,
-            routing_group: self.routing_group.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct V3ResponsesRelayServerToolState {
-    pub(crate) center: V3ServerToolCenter,
-    hooks_sidecar_socket: Option<std::path::PathBuf>,
-}
-
-impl V3ResponsesRelayServerToolState {
-    pub fn with_hooks_sidecar_socket(mut self, socket_path: Option<std::path::PathBuf>) -> Self {
-        self.hooks_sidecar_socket = socket_path;
-        self
-    }
-
-    pub(crate) fn hooks_sidecar_socket(&self) -> Option<&std::path::Path> {
-        self.hooks_sidecar_socket.as_deref()
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct V3LiveSnapResponsesTransport<T> {
     pub(crate) inner: T,
@@ -743,6 +882,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 provider_id,
                 ..
             }
+            | V3ProviderError::ResponseBodyUnreadable {
+                request_id,
+                provider_id,
+                ..
+            }
             | V3ProviderError::InternalTransport {
                 request_id,
                 provider_id,
@@ -781,6 +925,10 @@ impl V3LiveSnapProviderSnapshotRecorder {
             | V3ProviderError::ClientDisconnect {
                 request_id,
                 provider_id,
+            }
+            | V3ProviderError::ConcurrencyBusy {
+                request_id,
+                provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),
             V3ProviderError::ProviderModelBindingMismatch {
                 request_id,
@@ -790,7 +938,6 @@ impl V3LiveSnapProviderSnapshotRecorder {
             V3ProviderError::InvalidWireBody { request_id }
             | V3ProviderError::InvalidStreamIntent { request_id }
             | V3ProviderError::InvalidDataImage { request_id, .. }
-            | V3ProviderError::ControlFieldInWireBody { request_id, .. }
             | V3ProviderError::NamespaceToolFlattenFailed { request_id, .. }
             | V3ProviderError::FunctionToolShapeFailed { request_id, .. } => {
                 self.record_transport_provider_error(attempt, request_id, "unknown", error)
@@ -806,6 +953,11 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 ..
             }
             | V3ProviderError::AuthSecretRead {
+                request_id,
+                provider_id,
+                ..
+            }
+            | V3ProviderError::OAuthCredential {
                 request_id,
                 provider_id,
                 ..
@@ -1070,8 +1222,6 @@ pub enum V3ResponsesRelayRuntimeError {
     Target(String),
     #[error("V3 Responses Relay provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
-    #[error("V3 Responses Relay requested direct provider model not found: {0}")]
-    ModelNotFound(String),
     #[error("V3 Responses Relay provider contract failed: {0}")]
     Provider(#[from] V3ProviderError),
     #[error("V3 Responses Relay provider compat failed: {0}")]
@@ -1082,19 +1232,6 @@ pub enum V3ResponsesRelayRuntimeError {
     ProviderHealth(String),
     #[error("V3 Responses Relay JSON provider body is malformed: {0}")]
     ProviderJson(#[from] serde_json::Error),
-    #[error("web_search Mode B requires exactly one backend binding at runtime: {0}")]
-    WebSearchBackendBindingMissing(String),
-    #[error("web_search local search hop failed: {0}")]
-    WebSearchDispatchFailed(String),
-    #[error("web_search hooks sidecar failed [{code}] retryable={retryable}: {message}")]
-    WebSearchSidecarFailed {
-        call_id: String,
-        code: String,
-        message: String,
-        retryable: bool,
-    },
-    #[error("web_search local search hop returned no usable result: {0}")]
-    WebSearchResultUnavailable(String),
     #[error("V3 Responses Relay provider SSE transport failed: {0}")]
     ProviderSseTransport(String),
     #[error("V3 Responses Relay provider response event codec failed: {0}")]
@@ -1113,6 +1250,4 @@ pub enum V3ResponsesRelayRuntimeError {
         code: String,
         message: String,
     },
-    #[error("V3 Responses Relay server tool state lock is poisoned")]
-    ServerToolStatePoisoned,
 }

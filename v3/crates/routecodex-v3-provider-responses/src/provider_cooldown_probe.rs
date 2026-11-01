@@ -12,12 +12,17 @@ pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 5_000;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ProviderCooldownProbeKey {
     pub provider_id: String,
+    pub interface_id: String,
     pub auth_alias: Option<String>,
     pub model_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct V3ProviderCooldownProbeState {
+    /// Cause of this cooldown, independent of subsequent failure history. A
+    /// `RateLimit` cause marks a bounded 429 hold: the identity auto-releases
+    /// when `blocked_until_ms` passes and is released early by real success.
+    pub cooldown_cause: Option<crate::global_cooldown::V3ProviderCooldownFailureClass>,
     pub blocked_until_ms: Option<u64>,
     pub next_probe_at_ms: Option<u64>,
     pub probe_interval_ms: u64,
@@ -30,36 +35,45 @@ pub struct V3ProviderCooldownProbeState {
     pub observed_failures: u32,
     pub recovery_ewma_ms: Option<u64>,
     pub cooldown_started_at_ms: u64,
-    pub probe_in_flight: bool,
+    pub(crate) active_probe: Option<crate::key_health::V3ProbeAcquisitionId>,
     pub probe_model_id: Option<String>,
     pub rescue_probe_attempted: bool,
-    pub completion: tokio::sync::watch::Sender<bool>,
+    /// Advisory recovery probe (per-provider `health.advisory_probe`). A
+    /// scheduled or in-flight probe is never an availability decision: only the
+    /// real `blocked_until_ms` window may exclude the identity, and probe
+    /// failures never advance the ladder.
+    pub advisory_probe: bool,
 }
 
-pub fn provider_cooldown_probe_key(
+pub fn provider_cooldown_probe_key_for_interface(
     provider_id: &str,
+    interface_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
 ) -> V3ProviderCooldownProbeKey {
     V3ProviderCooldownProbeKey {
         provider_id: provider_id.to_string(),
+        interface_id: interface_id.to_string(),
         auth_alias: auth_alias.map(str::to_string),
         model_id: model_id.map(str::to_string),
     }
 }
 
-pub(crate) fn resolve_provider_cooldown_probe_key(
+pub(crate) fn resolve_provider_cooldown_probe_key_for_interface(
     probes: &BTreeMap<V3ProviderCooldownProbeKey, V3ProviderCooldownProbeState>,
     provider_id: &str,
+    interface_id: &str,
     auth_alias: Option<&str>,
     model_id: Option<&str>,
 ) -> V3ProviderCooldownProbeKey {
-    let exact = provider_cooldown_probe_key(provider_id, auth_alias, model_id);
+    let exact =
+        provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id);
     if probes.contains_key(&exact) {
         return exact;
     }
     if model_id.is_some() {
-        let auth_key = provider_cooldown_probe_key(provider_id, auth_alias, None);
+        let auth_key =
+            provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, None);
         if probes.contains_key(&auth_key) {
             return auth_key;
         }

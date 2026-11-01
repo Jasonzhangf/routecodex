@@ -1,0 +1,63 @@
+{
+  "case_id": "reasoning-provided-signature-not-invented",
+  "turn": 1,
+  "turn_id": null,
+  "request_source": "fixture",
+  "request": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body_text": "{\"model\":\"mock.gemini-model\",\"max_tokens\":1000,\"messages\":[{\"role\":\"user\",\"content\":\"list files\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"function-call-7\",\"name\":\"bash\",\"input\":{\"command\":\"ls\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"function-call-7\",\"content\":\"a.txt\"}]}],\"tools\":[{\"name\":\"bash\",\"input_schema\":{\"type\":\"object\"}}]}"
+  },
+  "client_response": {
+    "url": "http://127.0.0.1:57128/v1/messages",
+    "method": "POST",
+    "request_headers": {
+      "content-type": "application/json"
+    },
+    "status": null,
+    "status_text": null,
+    "headers": {},
+    "raw_headers": [],
+    "body": null,
+    "bodyText": "",
+    "bodyBytes": {
+      "type": "Buffer",
+      "data": []
+    },
+    "bodyBytesBase64": "",
+    "response_ended": false,
+    "complete": null,
+    "closed": true,
+    "aborted": false,
+    "truncated": false,
+    "elapsed_ms": 40,
+    "error": "socket hang up",
+    "error_detail": {
+      "name": "Error",
+      "message": "socket hang up",
+      "code": "ECONNRESET",
+      "errno": null,
+      "syscall": null,
+      "stack": "Error: socket hang up\n    at Socket.socketOnEnd (node:_http_client:599:25)\n    at Socket.emit (node:events:531:35)\n    at endReadableNT (node:internal/streams/readable:1698:12)\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)"
+    }
+  },
+  "observation": {
+    "protocol": "anthropic",
+    "kind": "unknown",
+    "content_type": "",
+    "ok": false,
+    "error": "empty_body"
+  },
+  "diagnostics": [
+    "provider attempt count 0 != scripted 1 for turn 1",
+    "provider attempt count 0 != asserted 1 for turn 1",
+    "provider business attempt missing for turn 1",
+    "client status missing for completed response",
+    "client body_must content.0.text missing",
+    "client body_must stop_reason missing",
+    "semantic terminal missing from client output"
+  ]
+}

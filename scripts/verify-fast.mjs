@@ -92,6 +92,7 @@ function changedFileLines(relative, commit = null) {
 function classifyWorkflowScope(entries) {
   let v3 = false;
   let v4 = false;
+  let v3Build = false;
   const v3Marker = /\bV3\b|needs\.scope\.outputs\.v3|(?:^|[\s"'`/:])v3(?:[-_/.:]|[\s"'`]|$)/u;
   const v4Marker = /\bV4\b|needs\.scope\.outputs\.v4|(?:^|[\s"'`/:])v4(?:[-_/.:]|[\s"'`]|$)/u;
 
@@ -108,6 +109,10 @@ function classifyWorkflowScope(entries) {
     const changedLines = changedFileLines(relative, commit);
     const touchesV3 = changedLines.some((line) => v3Marker.test(line));
     const touchesV4 = changedLines.some((line) => v4Marker.test(line));
+    if (touchesV3 && !touchesV4) {
+      v3Build ||= changedLines.some((line) =>
+        /needs\.scope\.outputs\.v3_build\b|npm run (?:build:min|install:v3|fix:cli-shim)\b|v3\/scripts\/(?:tests\/v3-protocol-live-mock-matrix|run-v3-cargo-test)\.mjs|test:v3-cargo-test-stack-env-regression\b/u.test(line));
+    }
     if (touchesV3 && !touchesV4) v3 = true;
     else if (touchesV4 && !touchesV3) v4 = true;
     else {
@@ -115,7 +120,7 @@ function classifyWorkflowScope(entries) {
       v4 = true;
     }
   }
-  return { v3, v4 };
+  return { v3, v4, v3Build };
 }
 
 function classifyRootPackageScope(entries) {
@@ -123,8 +128,6 @@ function classifyRootPackageScope(entries) {
   const v4Marker = /\bV4\b|(?:^|[\s"'`/:])v4(?:[-_/.:]|[\s"'`]|$)/u;
   const sharedRootV3Scripts = [
     'verify:fallback-hardcode',
-    'verify:file-line-limit',
-    'test:file-line-limit',
     'verify:no-fallback-all',
     'verify:architecture-fallback-denylist',
     'verify:internal-policy-hardcode',
@@ -149,7 +152,7 @@ function classifyRootPackageScope(entries) {
         if (/(?:session|continuation)/u.test(value)) fineScopes.add('v3_session');
         if (/debug/u.test(value)) fineScopes.add('v3_debug');
         if (/(?:router|route-classifier|classifier)/u.test(value)) fineScopes.add('v3_router');
-        if (/(?:tool|servertool)/u.test(value)) fineScopes.add('v3_tool');
+        if (/tool/u.test(value)) fineScopes.add('v3_tool');
         if (fineScopes.size === before) fineScopes.add('v3_architecture');
       }
       if (v4Marker.test(line)) {
@@ -169,7 +172,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/audit-custom-payload-carrier-owner-queryability.mjs',
     'scripts/architecture/audit-function-map-canonical-builder-spread.mjs',
     'scripts/architecture/audit-resource-global-coverage.mjs',
-    'scripts/architecture/compile-v3-build-admission.mjs',
     'scripts/architecture/custom-payload-carrier-owner-queryability-lib.mjs',
     'scripts/architecture/generate-mainline-chain-manifests.mjs',
     'scripts/architecture/mainline-call-map-lib.mjs',
@@ -180,7 +182,6 @@ function isV3RootScript(relative) {
     'scripts/architecture/v3-mainline-caller-flow-lib.mjs',
     'scripts/architecture/v3-provider-compat-module-boundary-lib.mjs',
     'scripts/architecture/v3-req04-tool-governance-review-lib.mjs',
-    'scripts/architecture/v3-root-thin-dispatch-contract.mjs',
     'scripts/architecture/verify-architecture-fallback-denylist.mjs',
     'scripts/architecture/verify-architecture-mainline-call-map.mjs',
     'scripts/architecture/verify-architecture-mainline-manifest-sync.mjs',
@@ -188,31 +189,27 @@ function isV3RootScript(relative) {
     'scripts/architecture/verify-direct-semantic-classification-design.mjs',
     'scripts/architecture/verify-error-pipeline-contract.mjs',
     'scripts/architecture/verify-function-map-compile-gate.mjs',
-    'scripts/architecture/verify-install-release-contract.mjs',
     'scripts/architecture/verify-internal-error-numbering.mjs',
     'scripts/architecture/verify-internal-policy-hardcode.mjs',
     'scripts/architecture/verify-mainline-call-map-binding-state.mjs',
     'scripts/architecture/verify-no-fallback-diff.mjs',
     'scripts/architecture/verify-provider-response-errorerr-bypass-closeout.mjs',
     'scripts/architecture/verify-repository-filesystem-governance.mjs',
-    'scripts/architecture/verify-runtime-lifecycle-loop-gate-matrix.mjs',
     'scripts/architecture/verify-runtime-lifecycle-pid-rebase.mjs',
     'scripts/architecture/verify-runtime-responses-provider-compat.mjs',
     'scripts/architecture/verify-server-function-map-boundary.mjs',
     'scripts/architecture/verify-sse-architecture-boundary.mjs',
-    'scripts/architecture/verify-v3-dependency-projection.mjs',
     'scripts/architecture/verify-v3-provider-compat-module-boundary.mjs',
     'scripts/architecture/verify-v3-simplified-user-config.mjs',
     'scripts/architecture/wiki-html-lib.mjs',
   ]);
   return /^scripts\/(?:run-v3-|verify-v3-)/u.test(relative)
-    || /^(?:scripts\/verify-fast|scripts\/verify-servertool-rust-only)\.mjs$/u.test(relative)
+    || /^scripts\/verify-fast\.mjs$/u.test(relative)
     || v3ArchitectureScripts.has(relative)
-    || relative === 'scripts/ci/check-file-line-limit.mjs'
     || relative === 'scripts/ci/repo-sanity.mjs'
     || relative === 'scripts/ci/mempalace-scan-artifact-audit.mjs'
     || relative === 'scripts/tests/repository-filesystem-governance-red-fixtures.mjs'
-    || /^(?:scripts\/install-v3-cli|scripts\/ensure-cli-command-shim)\.mjs$/u.test(relative)
+    || /^(?:scripts\/install-v3-cli|scripts\/ensure-cli-command-shim|scripts\/ensure-cli-executable)\.mjs$/u.test(relative)
     || /^scripts\/tests\/v3-/u.test(relative)
     || /^tests\/scripts\/(?:v3-cli-distribution|install-v3-cli-target-cleanup)\.spec\.mjs$/u.test(relative)
     || /^scripts\/install-(?:global|release)\.sh$/u.test(relative)
@@ -223,7 +220,6 @@ function isV3RootScript(relative) {
 function isV3ArchitectureRootScript(relative) {
   return isV3RootScript(relative)
     && relative !== 'scripts/verify-fast.mjs'
-    && relative !== 'scripts/ci/check-file-line-limit.mjs'
     && relative !== 'scripts/ci/repo-sanity.mjs'
     && relative !== 'scripts/ci/mempalace-scan-artifact-audit.mjs';
 }
@@ -246,21 +242,25 @@ function classifyV3FineScopes(paths, { workflowScope }) {
 
   if (workflowScope.v3 && paths.some((path) => /^\.github\/workflows\//u.test(path))) {
     add('v3_architecture');
+    if (workflowScope.v3Build) add('v3_build');
   }
 
   for (const path of paths) {
     const isV3Path = path.startsWith('v3/') || isV3RootScript(path);
     if (/^docs\/(?:architecture|design|goals|schemas)\//u.test(path)
-        || isV3ArchitectureRootScript(path)) add('v3_architecture');
+        || isV3ArchitectureRootScript(path)
+        || path === 'v3/scripts/verify-ci.mjs') add('v3_architecture');
     if (/^v3\/(?:Cargo\.toml|Cargo\.lock|package(?:-lock)?\.json)$/u.test(path)
         || /^v3\/crates\//u.test(path)
-        || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim)\.mjs$/u.test(path)
+        || path === 'v3/scripts/run-v3-cargo-test.mjs'
+        || path === 'v3/scripts/tests/v3-cargo-test-stack-env-regression.mjs'
+        || /^scripts\/(?:install-v3-cli|ensure-cli-command-shim|ensure-cli-executable)\.mjs$/u.test(path)
         || /^scripts\/install-(?:global|release)\.sh$/u.test(path)) add('v3_build');
     if (isV3Path && /(?:^|[\/_-])provider(?:[\/_-]|$)/iu.test(path)) add('v3_provider');
     if (isV3Path && /(?:^|[\/_-])session(?:[\/_-]|$)|continuation/iu.test(path)) add('v3_session');
     if (isV3Path && /(?:^|[\/_-])debug(?:[\/_-]|$)/iu.test(path)) add('v3_debug');
     if (isV3Path && /(?:^|[\/_-])router(?:[\/_-]|$)|route-classifier/iu.test(path)) add('v3_router');
-    if (isV3Path && /(?:^|[\/_-])tool(?:[\/_-]|$)|servertool/iu.test(path)) add('v3_tool');
+    if (isV3Path && /(?:^|[\/_-])tool(?:[\/_-]|$)/iu.test(path)) add('v3_tool');
   }
   return scopes;
 }
@@ -341,10 +341,11 @@ function affectedCargoPackages(rustFiles, { allowUnowned = new Set() } = {}) {
     metadata = JSON.parse(
       execFileSync(
         'cargo',
-        ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
+        ['metadata', '--locked', '--format-version', '1', '--manifest-path', 'v3/Cargo.toml'],
         {
           cwd: root,
           encoding: 'utf8',
+          maxBuffer: 32 * 1024 * 1024,
           env: { ...process.env, CARGO_NET_OFFLINE: process.env.CARGO_NET_OFFLINE ?? 'true' },
         },
       ),
@@ -426,8 +427,8 @@ const semanticFiles = [...new Set(entries.map(({ path }) => path).filter((relati
 if (semanticFiles.length > 0) {
   process.stderr.write(`[verify:fast] ${GATE_SEVERITY.WARN} semantic validation deferred for ${semanticFiles.length} Rust/config file(s): ${semanticFiles.join(', ')}\n`);
 }
-
 for (const { commit, path: relative } of entries) {
+  if (!/\.(?:mjs|js|cjs|json|sh)$/u.test(relative) && relative !== '.githooks/pre-commit' && relative !== '.githooks/pre-push') continue;
   let content;
   try {
     content = contentFor(relative, commit);

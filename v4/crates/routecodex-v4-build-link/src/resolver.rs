@@ -1,11 +1,8 @@
-//! Active artifact resolver: identity -> manifest/hash -> records -> target ->
+//! Active artifact resolver: identity -> Active artifact -> target/rustc ->
 //! dependency closure -> link flags. Fail-fast, no fallback.
 
 use crate::error::ActiveLinkError;
-use crate::identity::{
-    canonical, recompute_artifact_hash, recompute_public_api_hash, sha256_hex,
-    ActiveArtifactDependency, ActiveArtifactIdentity, ActiveArtifactResolution, ArtifactEntry,
-};
+use crate::identity::{ActiveArtifactDependency, ActiveArtifactIdentity, ActiveArtifactResolution};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -401,23 +398,6 @@ fn read_json(
         .map_err(|e| ActiveLinkError::ManifestInvalid(format!("parse {}: {e}", path.display())))
 }
 
-fn read_record(
-    root: &Path,
-    module_id: &str,
-    name: &str,
-) -> Result<serde_json::Value, ActiveLinkError> {
-    let path = root
-        .join(".appsdk/records")
-        .join(format!("{name}-{module_id}.json"));
-    fs::read_to_string(&path)
-        .map_err(|e| ActiveLinkError::StaleOrMissingRecord(format!("read {}: {e}", path.display())))
-        .and_then(|text| {
-            serde_json::from_str(&text).map_err(|e| {
-                ActiveLinkError::StaleOrMissingRecord(format!("parse {}: {e}", path.display()))
-            })
-        })
-}
-
 fn record_str<'a>(record: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     record.get(key).and_then(serde_json::Value::as_str)
 }
@@ -532,7 +512,7 @@ fn find_dependency_version(
     )))
 }
 
-/// Resolve a frozen module Active artifact and validate the full contract.
+/// Resolve a frozen module Active artifact into its compile/link surface.
 ///
 /// Public entrypoint (no cycle-guard plumbing exposed).
 pub fn resolve(
@@ -548,15 +528,15 @@ pub fn resolve(
 ///
 /// Validation order (fail-fast, first mismatch wins):
 /// 1. identity (module_id + active_version)
-/// 2. freeze record exists (module must be frozen)
-/// 3. Active version directory + artifact.json exist
-/// 4. artifact entry path safety + symlink/escape checks
-/// 5. artifact file hashes match `artifacts[].hash`
-/// 6. public_api_hash recompute matches record
-/// 7. artifact_hash recompute matches record
-/// 8. record graph (freeze/promotion/review/evidence) consistency
-/// 9. target triple vs rustc host
-/// 10. dependency closure (recursive, cycle-guarded)
+/// 2. Active version directory + artifact.json exist and declare `stage=frozen`
+/// 3. artifact entry path safety + symlink/escape checks + real rlib existence
+/// 4. target triple vs rustc host
+/// 5. producer rustc release vs current rustc (when recorded in the artifact)
+/// 6. dependency closure (recursive, cycle-guarded)
+/// 7. link flags emitted for the full closure
+///
+/// Steps 2 and 3 replace the retired pre-link `.rlib` SHA-256 recomputation
+/// and the `.appsdk/records/**` freeze/promotion/review/evidence graph checks.
 fn resolve_inner(
     root: &Path,
     module_id: &str,
@@ -589,10 +569,7 @@ fn resolve_impl(
         .canonicalize()
         .map_err(|e| ActiveLinkError::IdentityMissing(format!("canonicalize root: {e}")))?;
 
-    // 2. freeze record gate: mutable/unknown modules are never resolvable.
-    let freeze = read_record(&root, module_id, "freeze-record")?;
-
-    // 3. Active version directory.
+    // 2. Active version directory plus the artifact's own frozen status.
     let version_dir = root.join("active/lib").join(module_id).join(version);
     if !version_dir.is_dir() {
         return Err(ActiveLinkError::ArtifactMissing(format!(
@@ -613,20 +590,21 @@ fn resolve_impl(
         &artifact_file,
         ActiveLinkError::ArtifactMissing(format!("{} missing", artifact_file.display())),
     )?;
+    if record_str(&artifact, "stage") != Some("frozen") {
+        return Err(ActiveLinkError::ManifestInvalid(format!(
+            "{module_id} {version}: artifact stage is not frozen"
+        )));
+    }
 
-    // 4-5. artifact entries: safety first, then byte hashes.
+    // 3. artifact entries: path safety, symlink/escape checks, real files.
     let entries_value = artifact
         .get("artifacts")
         .and_then(serde_json::Value::as_array);
-    let mut entries = Vec::new();
     let mut rlib_paths = Vec::new();
     if let Some(entries_value) = entries_value {
         for entry_value in entries_value {
             let relative = record_str(entry_value, "path").ok_or_else(|| {
                 ActiveLinkError::ManifestInvalid(format!("{module_id} artifact entry missing path"))
-            })?;
-            let recorded_hash = record_str(entry_value, "hash").ok_or_else(|| {
-                ActiveLinkError::ManifestInvalid(format!("{module_id} artifact entry missing hash"))
             })?;
             let safe_path = safe_relative_artifact_path(relative)?;
             let target_file = version_dir.join("lib").join(&safe_path);
@@ -637,110 +615,23 @@ fn resolve_impl(
                     target_file.display()
                 )));
             }
-            let actual_hash = sha256_hex(&fs::read(&target_file).map_err(|e| {
-                ActiveLinkError::ArtifactHashMismatch(format!(
-                    "read {}: {e}",
-                    target_file.display()
-                ))
-            })?);
-            if actual_hash != recorded_hash {
-                return Err(ActiveLinkError::ArtifactHashMismatch(format!(
-                    "{}: recorded {} != actual {}",
-                    target_file.display(),
-                    recorded_hash,
-                    actual_hash
-                )));
-            }
-            entries.push(ArtifactEntry {
-                path: relative.to_string(),
-                hash: recorded_hash.to_string(),
-            });
             rlib_paths.push(target_file);
         }
     }
 
-    // 6. public_api_hash is the contract binding of the entry set.
+    // Recorded identity fields are consumed as-is; this resolver does not
+    // recompute packaging hashes or cross-check the record graph.
     let recorded_public_api_hash = record_str(&artifact, "public_api_hash").ok_or_else(|| {
         ActiveLinkError::ManifestInvalid(format!("{module_id} artifact missing public_api_hash"))
     })?;
-    let recomputed_public_api_hash = recompute_public_api_hash(&entries);
-    if recomputed_public_api_hash != recorded_public_api_hash {
-        return Err(ActiveLinkError::PublicApiHashMismatch(format!(
-            "{module_id} {version}: recorded {recorded_public_api_hash} != recomputed {recomputed_public_api_hash}"
-        )));
-    }
-
-    // 7. artifact_hash binds the whole manifest object.
     let recorded_artifact_hash = record_str(&artifact, "artifact_hash").ok_or_else(|| {
         ActiveLinkError::ManifestInvalid(format!("{module_id} artifact missing artifact_hash"))
     })?;
-    let recomputed_artifact_hash = recompute_artifact_hash(&artifact)?;
-    if recomputed_artifact_hash != recorded_artifact_hash {
-        return Err(ActiveLinkError::ArtifactHashMismatch(format!(
-            "{module_id} {version}: recorded {recorded_artifact_hash} != recomputed {recomputed_artifact_hash}"
-        )));
-    }
+    let source_commit = record_str(&artifact, "source_commit")
+        .or_else(|| record_str(&artifact, "source_commit_or_tag"))
+        .map(str::to_string);
 
-    // 8. record graph: freeze + promotion + review + evidence must agree.
-    let source_commit = record_str(&freeze, "source_commit_or_tag")
-        .ok_or_else(|| {
-            ActiveLinkError::StaleOrMissingRecord(format!(
-                "freeze record {module_id} missing source_commit_or_tag"
-            ))
-        })?
-        .to_string();
-    for key in ["library_hash", "public_api_hash"] {
-        let recorded = record_str(&freeze, key).ok_or_else(|| {
-            ActiveLinkError::StaleOrMissingRecord(format!(
-                "freeze record {module_id} missing {key}"
-            ))
-        })?;
-        let expected = if key == "library_hash" {
-            recorded_artifact_hash
-        } else {
-            recorded_public_api_hash
-        };
-        if recorded != expected {
-            return Err(ActiveLinkError::StaleOrMissingRecord(format!(
-                "freeze record {module_id} {key} {recorded} != artifact {expected}"
-            )));
-        }
-    }
-    let promotion = read_record(&root, module_id, "promotion-record")?;
-    let review = read_record(&root, module_id, "review-record")?;
-    let evidence = read_record(&root, module_id, "evidence-record")?;
-    for (name, record) in [
-        ("promotion", &promotion),
-        ("review", &review),
-        ("evidence", &evidence),
-    ] {
-        let artifact_match = match name {
-            "promotion" => record_str(record, "artifact_hash") == Some(recorded_artifact_hash),
-            "review" => {
-                record_str(record, "reviewed_artifact_hash") == Some(recorded_artifact_hash)
-            }
-            _ => record_str(record, "artifact_hash") == Some(recorded_artifact_hash),
-        };
-        if !artifact_match {
-            return Err(ActiveLinkError::StaleOrMissingRecord(format!(
-                "{name} record {module_id} artifact hash does not match Active artifact"
-            )));
-        }
-    }
-    if record_str(&review, "verdict") != Some("pass") {
-        return Err(ActiveLinkError::StaleOrMissingRecord(format!(
-            "review record {module_id} verdict is not pass"
-        )));
-    }
-    if record_str(&promotion, "source_commit") != Some(source_commit.as_str())
-        || record_str(&evidence, "source_commit") != Some(source_commit.as_str())
-    {
-        return Err(ActiveLinkError::StaleOrMissingRecord(format!(
-            "record graph {module_id} source commit does not match freeze record"
-        )));
-    }
-
-    // 9. target triple binding.
+    // 4. target triple binding (steps 2-3 keep the Active surface honest).
     let facts = rustc_facts()?;
     if target != facts.host {
         return Err(ActiveLinkError::TargetMismatch(format!(
@@ -748,11 +639,11 @@ fn resolve_impl(
             facts.host
         )));
     }
-    // 9a. producer rustc binding: when the freeze record records the producer
+    // 5. producer rustc binding: when the artifact records the producer
     // toolchain, the current rustc release must match before any link flags
     // are emitted (design §10.1, no auto-rebuild). Existing frozen artifacts
-    // predate this field; they stay bound by artifact hash + host triple.
-    let producer_rustc_version = record_str(&freeze, "rustc_version").map(str::to_string);
+    // predate this field; they stay bound by host triple.
+    let producer_rustc_version = record_str(&artifact, "rustc_version").map(str::to_string);
     if let Some(producer) = &producer_rustc_version {
         if producer != &facts.release {
             return Err(ActiveLinkError::RustcMismatch(format!(
@@ -762,7 +653,7 @@ fn resolve_impl(
         }
     }
 
-    // 10. dependency closure.
+    // 6. dependency closure.
     let mut dependency_resolutions = Vec::new();
     let mut dependencies = Vec::new();
     if let Some(dep_entries) = artifact
@@ -804,11 +695,7 @@ fn resolve_impl(
         source_commit,
         dependencies,
     };
-    let identity_value = serde_json::to_value(&identity)
-        .map_err(|e| ActiveLinkError::ManifestInvalid(format!("serialize identity: {e}")))?;
-    let manifest_hash = sha256_hex(canonical(&identity_value).as_bytes());
     let mut resolution = ActiveArtifactResolution {
-        manifest_hash,
         artifact_root: version_dir.clone(),
         rlib_paths,
         identity,

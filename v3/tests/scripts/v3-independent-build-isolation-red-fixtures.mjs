@@ -23,6 +23,10 @@ const validPackage = JSON.stringify({
 });
 const noCargoFailures = () => [];
 const localYaml = () => `${v3Root}/node_modules/yaml/dist/index.js`;
+const symlinkRoot = '/tmp/release-root/v3';
+const symlinkedLocalYaml = () => `${symlinkRoot}/node_modules/yaml/dist/index.js`;
+const symlinkRealpath = (path) =>
+  path.startsWith(symlinkRoot) ? `${v3Root}${path.slice(symlinkRoot.length)}` : path;
 const validRead = (path) => path === 'rust-toolchain.toml'
   ? `[toolchain]\nchannel = "${pinnedRustToolchain}"\n`
   : validPackage;
@@ -35,6 +39,16 @@ const valid = collectIsolationFailures({
   resolveNodeDependency: localYaml,
 });
 assert.deepEqual(valid, []);
+
+const symlinkedValid = collectIsolationFailures({
+  env: {},
+  fileExists: (path) => completeFiles.has(path),
+  read: validRead,
+  inspectCargo: noCargoFailures,
+  resolveNodeDependency: symlinkedLocalYaml,
+  realpath: symlinkRealpath,
+});
+assert.deepEqual(symlinkedValid, []);
 
 for (const missing of ['package.json', 'package-lock.json', 'rust-toolchain.toml', '.cargo/config.toml']) {
   const failures = collectIsolationFailures({
@@ -86,6 +100,16 @@ const rootNodeModulesFallback = collectIsolationFailures({
   resolveNodeDependency: () => '/repo/node_modules/yaml/dist/index.js',
 });
 assert(rootNodeModulesFallback.some((failure) => failure.includes('outside v3/node_modules')));
+
+const externalV3Fallback = collectIsolationFailures({
+  env: {},
+  fileExists: (path) => completeFiles.has(path),
+  read: validRead,
+  inspectCargo: noCargoFailures,
+  resolveNodeDependency: () => '/repo/v3/node_modules/yaml/dist/index.js',
+  realpath: (path) => path,
+});
+assert(externalV3Fallback.some((failure) => failure.includes('outside v3/node_modules')));
 
 const missingLocalDependencyWarnings = [];
 const missingLocalDependency = collectIsolationFailures({

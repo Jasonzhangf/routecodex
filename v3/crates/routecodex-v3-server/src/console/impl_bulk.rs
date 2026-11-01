@@ -1,4 +1,7 @@
-use crate::webui_observability::V3ObsEventType;
+use crate::webui_observability::{
+    v3_obs_error_projection_for_direct_frame, v3_obs_lane_holds_typed_error06,
+    V3ObsErrorProjection, V3ObsEventType,
+};
 use crate::*;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -602,9 +605,7 @@ pub(crate) fn emit_v3_request_complete_console_line(
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| infer_v3_console_finish_reason_from_response_status(Some(response_status)))
-        .ok_or_else(|| {
-            "successful V3 Runtime observability is missing finish_reason".to_string()
-        })?;
+        .unwrap_or_else(|| "unreported".to_string());
     let human_usage = format_v3_console_human_usage_summary(observability.usage.as_ref());
     let debug_usage = format_v3_console_usage_summary(observability.usage.as_ref());
     let route = resolve_v3_console_route_projection(observability);
@@ -680,8 +681,15 @@ pub(crate) fn emit_v3_runtime_observability_contract_failure(
     observability: &V3RuntimeObservability,
     error: impl Into<String>,
 ) {
-    let source = raise_v3_runtime_observability_contract_failure(error);
-    emit_v3_post_commit_sse_source_console_line_for_context(context, observability, 500, &source);
+    let result = routecodex_v3_runtime::foundation::project_v3_runtime_observability_contract_failure_via_sdk(
+        error,
+    );
+    emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+        context,
+        observability,
+        500,
+        result,
+    );
 }
 
 fn emit_v3_runtime_observability_contract_or_warning(
@@ -798,8 +806,26 @@ pub(crate) fn emit_v3_observability_console_lines(
                 emit_v3_webui_projection_failure(context, &error);
             }
         }
-        if terminal_event == V3ObsEventType::Failed {
-            if let Err(error) = record_v3_webui_error_for_context(context, status, None) {
+        // Terminal carrier projection. The explicit "Error06 typed truth not
+        // exposed here" marker is honest only on a lane that genuinely cannot
+        // carry the typed `V3Error06ClientProjected` — the relay lane (plan §9.4
+        // boundary A). The direct lane owns its typed truth and records the real
+        // chain in `emit_v3_direct_frame_console_lines`, so writing the marker
+        // here would replace a real chain and source with an absence. Even if a
+        // marker did land, `merge_v3_obs_error_truth` ranks it below real typed
+        // truth, so a later marker can never clear a recorded chain.
+        if terminal_event == V3ObsEventType::Failed
+            && !v3_obs_lane_holds_typed_error06(observability)
+        {
+            if let Err(error) = record_v3_webui_error_for_context(
+                context,
+                status,
+                None,
+                V3ObsErrorProjection {
+                    execution_mode: Some(observability.execution_mode.as_str()),
+                    ..Default::default()
+                },
+            ) {
                 emit_v3_webui_projection_failure(context, &error);
             }
         }
@@ -846,6 +872,26 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
     let observability = observability?;
+    // The direct lane ran the typed Error path in-process, so a non-SSE error
+    // frame already holds real typed truth in `frame.error_chain`: record it here
+    // as the terminal Error06 observation, before the shared emitter runs, which
+    // in turn skips its absence marker for this lane. A frame with no chain
+    // records the honest absence marker instead. A relay-stamped observability is
+    // left alone: the relay lane owns its own honest marker (plan §9.4 boundary A).
+    if !is_sse
+        && v3_obs_lane_holds_typed_error06(&observability)
+        && v3_webui_terminal_event_for_response(frame.status, &observability)
+            == V3ObsEventType::Failed
+    {
+        if let Err(error) = record_v3_webui_error_for_context(
+            context,
+            frame.status,
+            None,
+            v3_obs_error_projection_for_direct_frame(&frame.error_chain),
+        ) {
+            emit_v3_webui_projection_failure(context, &error);
+        }
+    }
     emit_v3_observability_console_lines(
         context,
         frame.status,
@@ -1015,7 +1061,19 @@ impl V3SseConsoleFinalizer {
         ) {
             emit_v3_webui_projection_failure(&self.context, &error);
         }
-        self.emit_relay_sse_failure_console_line(499, raise_v3_sse_client_disconnect());
+        let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
+            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+            "V3ServerRespOutbound06ClientFrame",
+            "client_disconnect",
+            "client disconnected before provider SSE stream completed",
+            Some(499),
+        );
+        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+            &self.context,
+            &self.observability,
+            499,
+            result,
+        );
     }
 
     pub(crate) fn emit_relay_sse_failure_console_line(
@@ -1115,7 +1173,19 @@ impl V3DirectSseConsoleFinalizer {
         ) {
             emit_v3_webui_projection_failure(&self.context, &error);
         }
-        self.emit_direct_sse_failure_console_line(499, raise_v3_sse_client_disconnect());
+        let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
+            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
+            "V3ServerRespOutbound06ClientFrame",
+            "client_disconnect",
+            "client disconnected before provider SSE stream completed",
+            Some(499),
+        );
+        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+            &self.context,
+            &self.observability,
+            499,
+            result,
+        );
     }
 
     pub(crate) fn merge_stream_observation(&mut self) -> Result<(), String> {
@@ -1128,14 +1198,16 @@ impl V3DirectSseConsoleFinalizer {
 
     pub(crate) fn emit_direct_sse_failure_console_line(
         self,
-        status: u16,
-        source: V3Error01SourceRaised,
+        result: Result<
+            routecodex_v3_error::V3Error06ClientProjected,
+            routecodex_v3_runtime::V3RelayErrorOperatorFault,
+        >,
     ) {
-        emit_v3_post_commit_sse_source_console_line_for_context(
+        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
             &self.context,
             &self.observability,
-            status,
-            &source,
+            599,
+            result,
         );
     }
 }
@@ -1146,18 +1218,87 @@ pub(crate) fn emit_v3_post_commit_sse_source_console_line_for_context(
     status: u16,
     source: &V3Error01SourceRaised,
 ) {
-    let projected = project_v3_post_commit_sse_source(source.clone(), status);
-    emit_v3_error_console_line_for_context(
+    let result = routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+        source.clone(),
+        status,
+    );
+    emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
         context,
         observability,
-        projected.status,
-        &projected.chain,
-        Some(&projected.body),
+        status,
+        result,
     );
-    if let Err(error) =
-        record_v3_webui_error_for_context(context, projected.status, Some(&projected.body))
-    {
-        emit_v3_webui_projection_failure(context, &error);
+}
+
+pub(crate) fn emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
+    context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+    status: u16,
+    result: Result<
+        routecodex_v3_error::V3Error06ClientProjected,
+        routecodex_v3_runtime::V3RelayErrorOperatorFault,
+    >,
+) {
+    match result {
+        Ok(projected) => {
+            emit_v3_error_console_line_for_context(
+                context,
+                observability,
+                projected.status,
+                &projected.chain,
+                Some(&projected.body),
+            );
+            if let Err(error) = record_v3_webui_error_for_context(
+                context,
+                projected.status,
+                Some(&projected.body),
+                // Forward the typed Error06 truth this lane already holds verbatim.
+                V3ObsErrorProjection {
+                    execution_mode: Some(observability.execution_mode.as_str()),
+                    exposed: true,
+                    error_class: Some(projected.error_class),
+                    error_chain: &projected.chain,
+                    health_action: projected.health_action.as_ref(),
+                    upstream_request_id: None,
+                },
+            ) {
+                emit_v3_webui_projection_failure(context, &error);
+            }
+        }
+        Err(fault) => {
+            let policy = &fault.policy_failure;
+            let cause = fault
+                .original_source
+                .as_ref()
+                .map(|source| {
+                    format!(
+                        " cause_kind={:?} cause_stage={} cause_code={} cause_message={}",
+                        source.source_kind, source.source_stage, source.code, source.message
+                    )
+                })
+                .unwrap_or_default();
+            let line = format!(
+                "[{}] v3 post-commit sse error sdk fault req={} status={} source_kind={:?} source_stage={} code={} message={}{}",
+                context.state.server.port,
+                context.request_identity.request_id,
+                status,
+                policy.source_kind,
+                policy.source_stage,
+                policy.code,
+                policy.message,
+                cause
+            );
+            append_v3_human_console_line(&context.state, &line);
+            eprintln!("{line}");
+            if let Err(error) = record_v3_webui_error_for_context(
+                context,
+                status,
+                None,
+                V3ObsErrorProjection::default(),
+            ) {
+                emit_v3_webui_projection_failure(context, &error);
+            }
+        }
     }
 }
 
@@ -1281,6 +1422,8 @@ pub(crate) fn resolve_v3_console_project_path_with_metadata(
     payload: &Value,
     turn_metadata: Option<&Value>,
 ) -> Option<String> {
+    let header_turn_metadata_text = read_v3_header_codex_turn_metadata_text(headers);
+    let body_turn_metadata_text = read_v3_body_codex_turn_metadata_text(payload);
     first_header_text(
         headers,
         &["x-routecodex-workdir", "x-rcc-workdir", "x-workdir"],
@@ -1290,6 +1433,8 @@ pub(crate) fn resolve_v3_console_project_path_with_metadata(
     .or_else(|| read_first_scope_value(turn_metadata, TURN_METADATA_WORKDIR_PATHS))
     .or_else(|| read_first_scope_value(Some(payload), BODY_WORKDIR_PATHS))
     .or_else(|| read_v3_environment_context_cwd_from_payload(payload))
+    .or_else(|| read_v3_turn_metadata_workspaces_root_text(header_turn_metadata_text.as_deref()?))
+    .or_else(|| read_v3_turn_metadata_workspaces_root_text(body_turn_metadata_text.as_deref()?))
     .or_else(|| console::read_injected_workspace_cwd_from_payload(payload))
 }
 
@@ -1394,7 +1539,7 @@ pub(crate) const V3_CONSOLE_CONTENT_TAG_WIDTH: usize = 24;
 pub(crate) const V3_CONSOLE_PREFIX_PORT_PROTOCOL_COLUMN_WIDTH: usize = 24;
 pub(crate) const V3_CONSOLE_PREFIX_PROJECT_COLUMN_WIDTH: usize = 20;
 pub(crate) const V3_CONSOLE_PREFIX_ROUTE_MODEL_COLUMN_WIDTH: usize = 36;
-pub(crate) const V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH: usize = 52;
+pub(crate) const V3_CONSOLE_DEBUG_SCOPE_COLUMN_WIDTH: usize = 96;
 pub(crate) const V3_CONSOLE_REQUEST_COUNT_COLUMN_WIDTH: usize = 18;
 
 pub(crate) fn format_v3_console_timed_content(tag: &str, fields: &str) -> String {
@@ -1409,10 +1554,6 @@ pub(crate) fn align_v3_console_display_width(value: &str, width: usize) -> Strin
 
 pub(crate) fn fit_v3_console_display_width(value: &str, width: usize) -> String {
     console::fit_display_width(value, width)
-}
-
-pub(crate) fn truncate_v3_console_display_width_middle(value: &str, width: usize) -> String {
-    console::truncate_display_width_middle(value, width)
 }
 
 pub(crate) fn v3_console_display_width(value: &str) -> usize {

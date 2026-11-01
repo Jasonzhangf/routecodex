@@ -1,0 +1,486 @@
+{
+  "role": "independent troubleshooting author; not Reviewer",
+  "baseline_hash": "bd874c09cc3146f59206c34845fefbe6d78f793373d59257dd8ac5601bfe1e91",
+  "source_hashes": {
+    "v3/scripts/tests/protocol-live-mock/assertions.mjs": "62af585da7b7492a9d68a7c09b8b3a24ef5ffa41d89d156e473f982eeb8d6b51",
+    "v3/scripts/tests/protocol-live-mock/assertions.test.mjs": "b8dce9800a5d24029c8277de15361e502c168b0892678dbd8a15bab2c45d809c",
+    "v3/scripts/tests/protocol-live-mock/protocol-semantics.mjs": "41a3eea3b6ab074801057b85245b158b66ab38c6f7bb29dc9fce9fb2c57f188c",
+    "v3/scripts/tests/protocol-live-mock/protocol-semantics.test.mjs": "f069125b11bb63d196441f8883253a116e154e562ad35ad45335f58cd69eae5f",
+    "v3/scripts/tests/protocol-live-mock/corpus.mjs": "3e2d09d14ef71bfa4ba87e42bca2dce1ae7852aa6540e72dff3b248d4714b6b1",
+    "v3/scripts/tests/protocol-live-mock/corpus.test.mjs": "a86548d11d7d93e86eb9adb8979239be363b593bf9445039e534b76bd1e6bef4",
+    "v3/fixtures/protocol-live-mock-matrix/cases/anthropic-to-anthropic-json.json": "220a8dbd3e682515296b65619e1b7dc493918f8fa6b95bbd411a76f6af56d26c",
+    "v3/fixtures/protocol-live-mock-matrix/cases/chat-to-anthropic-json.json": "9e52c4bc9609dad9f9e85f2c28aa55d3fc944939a052a0438e627da2f3069478",
+    "v3/fixtures/protocol-live-mock-matrix/cases/chat-to-responses-json.json": "5658d23963cd90a22aa0c959d1f6d08527e85ea5d5faf0a587b338ef0143fbb6",
+    "v3/fixtures/protocol-live-mock-matrix/cases/chat-to-responses-sse.json": "485507f369bd679a9f86a230b8061d1076856bc62507ba68713be117e104453a",
+    "v3/fixtures/protocol-live-mock-matrix/cases/responses-to-anthropic-sse.json": "83375b1548ce4b50aa3a8d66fdb8ecc712ba58ae70d04899d9d0cc0ac625aefc",
+    "v3/fixtures/protocol-live-mock-matrix/cases/responses-to-chat-sse.json": "580db967d381a9960c61cf13dde1fe55d0ded2090ac3f2457292ee122d92ece5",
+    "v3/fixtures/protocol-live-mock-matrix/cases/responses-to-gemini-sse.json": "9fc058e263a1543a4707d7f96db6b6604c6828f0612886177b1bc3a7eecd169d"
+  },
+  "namespace": {
+    "wire_callee_advertised": true,
+    "unknown_name_rejected": true,
+    "wrong_type_rejected": true,
+    "wire_tool_names": [
+      {
+        "type": "function",
+        "name": "exec_command"
+      },
+      {
+        "type": "function",
+        "name": "collaboration__spawn_agent"
+      },
+      {
+        "type": "function",
+        "name": "collaboration__freeform"
+      }
+    ],
+    "client_status": null,
+    "client_bytes": 0,
+    "requested_stream": false,
+    "mock_mode": "sse",
+    "classification": "not an index-only pass; empty client response; request/mock transport mismatch; mechanism unresolved; custom declaration fidelity not certified"
+  },
+  "reports": [
+    {
+      "case_id": "anthropic-to-anthropic-json",
+      "status": "passed",
+      "diagnostics": "case flow assertions passed",
+      "provider_attempt_count": 1,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "anthropic-to-anthropic-json",
+            "rcc": {
+              "complete": true,
+              "pid": 76355,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 64844,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 64845,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 16,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "chat-to-anthropic-json",
+      "status": "passed",
+      "diagnostics": "case flow assertions passed",
+      "provider_attempt_count": 1,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "chat-to-anthropic-json",
+            "rcc": {
+              "complete": true,
+              "pid": 84853,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 65113,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 65114,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 19,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "chat-to-responses-json",
+      "status": "passed",
+      "diagnostics": "case flow assertions passed",
+      "provider_attempt_count": 1,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "chat-to-responses-json",
+            "rcc": {
+              "complete": true,
+              "pid": 86709,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 65170,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 65171,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 16,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "chat-to-responses-sse",
+      "status": "passed",
+      "diagnostics": "case flow assertions passed",
+      "provider_attempt_count": 1,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "chat-to-responses-sse",
+            "rcc": {
+              "complete": true,
+              "pid": 92015,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 65325,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 65326,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 18,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "responses-to-anthropic-sse",
+      "status": "passed",
+      "diagnostics": "case flow assertions passed",
+      "provider_attempt_count": 1,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "responses-to-anthropic-sse",
+            "rcc": {
+              "complete": true,
+              "pid": 90292,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 65277,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 65278,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 15,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "responses-to-chat-sse",
+      "status": "passed",
+      "diagnostics": "case flow assertions passed",
+      "provider_attempt_count": 1,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "responses-to-chat-sse",
+            "rcc": {
+              "complete": true,
+              "pid": 88524,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 65228,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 65229,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 21,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "responses-to-gemini-sse",
+      "status": "failed",
+      "diagnostics": "provider attempt count 0 != scripted 1 for turn 1; provider attempt count 0 != asserted 1 for turn 1; provider business attempt missing for turn 1; client body_must text missing; client body_must status missing; client body_must output_items.0.type missing; client body_must output_items.0.role missing; client body_must output_items.0.content.0.type missing; client body_must output_items.0.content.0.text missing; semantic terminal missing from client output",
+      "provider_attempt_count": 0,
+      "runtime_identity": {
+        "path": "/Users/fanzhang/.local/bin/rccv3",
+        "version": "rccv3 0.90.4887 (crate 0.1.0)",
+        "version_output": "rccv3 0.90.4887 (crate 0.1.0)\n",
+        "version_stderr": "",
+        "exit_code": 0,
+        "signal": null,
+        "sha256": "5c1672a562c32c4c996b2ce6c83f552e8e271c4266256a34a0f4fc2a5847a563",
+        "size": 35945136,
+        "mtime_ms": 1791826625740.5696,
+        "error": null,
+        "kind": "installed"
+      },
+      "cleanup": {
+        "complete": true,
+        "cases": [
+          {
+            "complete": true,
+            "case_id": "responses-to-gemini-sse",
+            "rcc": {
+              "complete": true,
+              "pid": 38291,
+              "process_exit_observed": true,
+              "exit_code": 0,
+              "signal": null,
+              "force_killed": false,
+              "kill_error": null,
+              "socket_closed": true,
+              "socket_close_error": null,
+              "all_listeners_closed": true,
+              "listener_closures": [
+                {
+                  "role": "primary",
+                  "server_id": "loopback",
+                  "host": "127.0.0.1",
+                  "port": 50051,
+                  "closed": true,
+                  "error": null
+                },
+                {
+                  "role": "admin_webui",
+                  "server_id": "admin_webui",
+                  "host": "127.0.0.1",
+                  "port": 50052,
+                  "closed": true,
+                  "error": null
+                }
+              ],
+              "elapsed_ms": 16,
+              "failures": []
+            },
+            "mock_closed": true,
+            "config_state_removed": true,
+            "retained_state": null
+          }
+        ]
+      }
+    }
+  ]
+}

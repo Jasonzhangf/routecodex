@@ -21,6 +21,7 @@ modules:
     owned_paths:
       - scripts/install-v3-cli.mjs
       - scripts/ensure-cli-command-shim.mjs
+      - scripts/ensure-cli-executable.mjs
       - scripts/install-global.sh
       - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
@@ -57,6 +58,7 @@ modules:
       - node:child_process
       - node:fs
       - node:path
+      - node:readline
       - node:url
     forbidden_paths:
       - v3/crates
@@ -77,20 +79,16 @@ modules:
       - docs/architecture/v3-runtime-module-registry.yml
       - docs/architecture/wiki/v3-independent-build-isolation.md
       - docs/architecture/wiki/v3-independent-build-isolation.html
-      - scripts/architecture/compile-v3-build-admission.mjs
       - scripts/install-global.sh
       - scripts/install-release.sh
-      - scripts/architecture/v3-root-thin-dispatch-contract.mjs
       - v3/package.json
       - v3/package-lock.json
       - v3/rust-toolchain.toml
       - v3/.cargo/config.toml
       - v3/scripts
       - v3/tests
-      - v3/build-contracts
     referenced_paths:
       - v3/crates/provider-compat-core/**
-      - v3/crates/servertool-core/**
     allowed_dependencies:
       - node:child_process
       - node:crypto
@@ -112,8 +110,6 @@ modules:
     required_gates:
       - npm --prefix v3 run verify:isolation
       - npm --prefix v3 run test:isolation:red
-      - npm --prefix v3 run verify:admission
-      - npm --prefix v3 run test:admission:red
       - npm --prefix v3 run verify:ci
 
   - module_id: v3-admin-webui-static

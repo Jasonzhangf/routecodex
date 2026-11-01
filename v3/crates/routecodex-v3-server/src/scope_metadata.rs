@@ -1,7 +1,10 @@
 use crate::*;
 use axum::http::HeaderMap;
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::fmt;
 
 pub(crate) struct V3ResponsesEntryFacts {
     pub(crate) has_function_call_output: bool,
@@ -51,66 +54,6 @@ pub(crate) fn responses_effective_execution_mode_for_request_purpose(
         return configured_mode;
     }
     responses_effective_execution_mode_for_entry_facts(configured_mode, entry_facts)
-}
-
-pub(crate) fn build_responses_relay_server_tool_scope(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    request_id: &str,
-    server: &V3ServerManifest,
-    endpoint: &str,
-) -> Result<V3ResponsesRelayServerToolScope, String> {
-    let (session_id, conversation_id) =
-        request_local_server_tool_scope(headers, payload, false, request_id)?;
-    Ok(V3ResponsesRelayServerToolScope::new(
-        endpoint,
-        session_id,
-        conversation_id,
-        server.port,
-        server.routing_group.clone(),
-    ))
-}
-
-pub(crate) fn build_responses_direct_server_tool_scope(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    request_id: &str,
-    server: &V3ServerManifest,
-    endpoint: &str,
-) -> Result<V3ResponsesDirectServerToolScope, String> {
-    let (session_id, conversation_id) =
-        request_local_server_tool_scope(headers, payload, false, request_id)?;
-    Ok(V3ResponsesDirectServerToolScope::new(
-        endpoint,
-        session_id,
-        conversation_id,
-        server.port,
-        server.routing_group.clone(),
-    ))
-}
-
-pub(crate) fn request_local_server_tool_scope(
-    headers: &HeaderMap,
-    payload: Option<&Value>,
-    requires_client_scope: bool,
-    request_id: &str,
-) -> Result<(String, String), String> {
-    let (session_id, conversation_id) = responses_control_scope_headers(headers, payload)?;
-    match (session_id, conversation_id) {
-        (Some(session_id), Some(conversation_id)) => Ok((session_id, conversation_id)),
-        (None, None) if !requires_client_scope => {
-            let request_scope = format!("request:{request_id}");
-            Ok((request_scope.clone(), request_scope))
-        }
-        (Some(_), None) | (None, Some(_)) if !requires_client_scope => {
-            let request_scope = format!("request:{request_id}");
-            Ok((request_scope.clone(), request_scope))
-        }
-        _ => Err(
-            "Responses server tool scope requires typed session and conversation control identity in control headers, x-codex-turn-metadata, or request payload client_metadata"
-                .to_string(),
-        ),
-    }
 }
 
 pub(crate) fn responses_control_scope_headers(
@@ -394,6 +337,105 @@ pub(crate) fn read_first_scope_value(source: Option<&Value>, paths: &[&[&str]]) 
         }
     }
     None
+}
+
+pub(crate) fn read_v3_header_codex_turn_metadata_text(headers: &HeaderMap) -> Option<String> {
+    let text = header_text(headers, "x-codex-turn-metadata")
+        .ok()
+        .flatten()?;
+    if serde_json::from_str::<Value>(&text).is_ok() {
+        return Some(text);
+    }
+    if let Some(decoded) = percent_decode_header_value(&text).ok().flatten() {
+        if serde_json::from_str::<Value>(&decoded).is_ok() {
+            return Some(decoded);
+        }
+    }
+    Some(text)
+}
+
+pub(crate) fn read_v3_body_codex_turn_metadata_text(payload: &Value) -> Option<String> {
+    read_first_scope_value(
+        Some(payload),
+        &[
+            &["client_metadata", "x-codex-turn-metadata"],
+            &["clientMetadata", "x-codex-turn-metadata"],
+            &["metadata", "client_metadata", "x-codex-turn-metadata"],
+            &["metadata", "clientMetadata", "x-codex-turn-metadata"],
+        ],
+    )
+}
+
+pub(crate) fn read_v3_turn_metadata_workspaces_root_text(text: &str) -> Option<String> {
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    V3TurnMetadataFirstWorkspaceKey::deserialize(&mut deserializer)
+        .ok()
+        .and_then(|value| value.0)
+}
+
+struct V3TurnMetadataFirstWorkspaceKey(Option<String>);
+
+impl<'de> Deserialize<'de> for V3TurnMetadataFirstWorkspaceKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(V3TurnMetadataFirstWorkspaceKeyVisitor)
+    }
+}
+
+struct V3TurnMetadataFirstWorkspaceKeyVisitor;
+
+impl<'de> Visitor<'de> for V3TurnMetadataFirstWorkspaceKeyVisitor {
+    type Value = V3TurnMetadataFirstWorkspaceKey;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a codex turn metadata JSON object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut first_key = None;
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "workspaces" {
+                first_key = map.next_value::<V3WorkspacesFirstKey>()?.0;
+            } else {
+                map.next_value::<IgnoredAny>()?;
+            }
+        }
+        Ok(V3TurnMetadataFirstWorkspaceKey(first_key))
+    }
+}
+
+struct V3WorkspacesFirstKey(Option<String>);
+
+impl<'de> Deserialize<'de> for V3WorkspacesFirstKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(V3WorkspacesFirstKeyVisitor)
+    }
+}
+
+struct V3WorkspacesFirstKeyVisitor;
+
+impl<'de> Visitor<'de> for V3WorkspacesFirstKeyVisitor {
+    type Value = V3WorkspacesFirstKey;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a workspaces JSON object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut first_key = None;
+        while let Some(key) = map.next_key::<String>()? {
+            if first_key.is_none() {
+                first_key = Some(key);
+            }
+            map.next_value::<IgnoredAny>()?;
+        }
+        Ok(V3WorkspacesFirstKey(first_key))
+    }
 }
 
 pub(crate) fn read_scope_value_at_path(source: &Value, path: &[&str]) -> Option<String> {

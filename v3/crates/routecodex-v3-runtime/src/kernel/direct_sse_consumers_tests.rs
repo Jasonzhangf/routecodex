@@ -256,7 +256,11 @@ fn direct_consumer_projects_chat_chunk_from_typed_tree_and_preserves_extension()
         .unwrap();
     assert_eq!(
         consumer.consume(&mut object).unwrap(),
-        SseObjectConsumerAction::RewriteData
+        SseObjectConsumerAction::Pass
+    );
+    assert_eq!(
+        object.data_value().unwrap()["choices"][0]["delta"]["role"],
+        "assistant"
     );
     assert_eq!(
         object.data_value().unwrap()["choices"][0]["delta"]["content"],
@@ -386,6 +390,25 @@ fn direct_consumer_strips_tool_thinking_fields_inside_function_arguments() {
     assert!(reasoning.contains("调用工具 pwd：读取工作目录"));
     assert!(reasoning.contains("\"output_index\":1"));
     assert!(!reasoning.contains("reasoning_content"));
+}
+
+#[test]
+fn direct_chat_wire_provider_compat_applies_profile_owner_per_object() {
+    // A chat-wire provider configured with `chat:minimax` gets its provider
+    // sentinel stripped by the provider response compat owner. Relay reaches
+    // that owner for every SSE object; Direct must reach the same owner, so the
+    // sentinel must be gone from the client chunk.
+    let mut consumer = V3DirectSseContentConsumer::default()
+        .with_provider_protocol(V3HubProviderWireProtocol::OpenAiChat)
+        .with_provider_response_compat_profile(Some("chat:minimax".to_string()))
+        .with_typed_hooks(V3DirectSseTypedHookCatalog::default());
+    let mut object = SseObjectFrame::from_json(
+            r#"{"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello ]<]minimax[>[ world"}}]}"#,
+        )
+        .unwrap();
+    consumer.consume(&mut object).unwrap();
+    let delta = &object.data_value().unwrap()["choices"][0]["delta"];
+    assert_eq!(delta["content"], "hello  world");
 }
 
 #[test]
@@ -779,7 +802,10 @@ fn provider_error_consumer_rejects_malformed_json_instead_of_silently_passing() 
 
 #[test]
 fn transport_error_export_enters_the_canonical_error_chain() {
-    let source = build_v3_sse_transport_error_source(SseTransportError::UnterminatedFrame);
+    let source = match build_v3_sse_transport_error_source(SseTransportError::UnterminatedFrame) {
+        Ok(source) => source,
+        Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+    };
     assert_eq!(source.source_stage, "V3ProviderResp14Raw");
     assert_eq!(source.code, "provider_response_sse_unterminated_frame");
     let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(source);

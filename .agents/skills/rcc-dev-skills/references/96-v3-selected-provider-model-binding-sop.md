@@ -51,8 +51,8 @@ model divergence, retry candidate model leakage, or upstream "model not configur
 ## Required proof before closure
 
 - Positive and negative model-binding tests.
-- Static unique-writer gate.
-- Provider-request dry-run showing client alias != selected wire model. For Gemini, this evidence is
+- Applicable mapped unique-writer gate; reuse its result from the architecture umbrella.
+- Provider-request dry-run showing the selected wire model. For alias-binding defects, include a case where the client alias differs from that model. For Gemini, this evidence is
   URL path model identity plus absent `body.model`.
 - Old live sample replay.
-- Root cause and architectural owner explanation in the final summary.
+- Root cause and architectural owner evidence in the existing task record; summarize the finding without repeating the full record.

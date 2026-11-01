@@ -15,7 +15,7 @@ nodes:
     semantic: immutable selected provider canonical model and wire model truth
   - node_id: V3HubReqOutbound07ProviderSemantic
     owner: routecodex-v3-runtime
-    semantic: relay provider semantic payload before selected model binding
+    semantic: owns standard protocol projection and selected model binding before provider compatibility
   - node_id: V3SelectedProviderModelBindingBlock
     owner: v3/crates/routecodex-v3-runtime/src/selected_provider_model_binding.rs
     semantic: sole request model replacement from client route input to selected wire model

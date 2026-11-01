@@ -1,0 +1,58 @@
+{
+  "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-8Y8BVk/config.toml",
+  "state": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-8Y8BVk/state",
+  "listeners": [
+    {
+      "role": "primary",
+      "server_id": "loopback",
+      "host": "127.0.0.1",
+      "port": 57481
+    },
+    {
+      "role": "admin_webui",
+      "server_id": "admin_webui",
+      "host": "127.0.0.1",
+      "port": 57482
+    }
+  ],
+  "admin_bind": "127.0.0.1:57482",
+  "env": {
+    "ROUTECODEX_V3_ADMIN_BIND": "127.0.0.1:57482"
+  },
+  "mode": "direct",
+  "model": "mock.chat-model",
+  "wire_model": "chat-model",
+  "runtime_setup": null,
+  "provider_files": [
+    {
+      "provider_id": "mock-openai_chat",
+      "path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-8Y8BVk/provider/mock-openai_chat/config.v2.toml",
+      "written_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/chat-to-chat-json/chat-to-chat-json/provider.toml",
+      "model": "mock.chat-model",
+      "wire_model": "chat-model",
+      "sha256": "c2e66ff666e7f096cb304cc022c79b9aa18ab2629de7c18b617c1a08f54f3346"
+    }
+  ],
+  "candidate_identity_receipts": {
+    "validated": true,
+    "protocol": "openai_chat",
+    "wire_model": "chat-model",
+    "tier_count": 1,
+    "candidates": [
+      {
+        "candidate_id": "mock-openai_chat/mock.chat-model",
+        "provider_id": "mock-openai_chat",
+        "model": "mock.chat-model",
+        "wire_model": "chat-model",
+        "provider_path": "/Volumes/Intel/playground/routecodex/magpie-live-matrix-20261012/docs/reports/magpie-live-matrix/delta-replay-20261012/latest/chat-to-chat-json/chat-to-chat-json/v3-protocol-live-mock-lifecycle-8Y8BVk/provider/mock-openai_chat/config.v2.toml",
+        "provider_sha256": "c2e66ff666e7f096cb304cc022c79b9aa18ab2629de7c18b617c1a08f54f3346",
+        "auth_token": "fake-loopback-token",
+        "authorization": "Bearer fake-loopback-token",
+        "declared": true
+      }
+    ]
+  },
+  "candidate_ids": [
+    "mock-openai_chat/mock.chat-model"
+  ]
+}

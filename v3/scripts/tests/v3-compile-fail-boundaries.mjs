@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,12 @@ const v3Root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const compileFailTarget = resolve(v3Root, 'build-control', 'compile-fail-target');
 
 mkdirSync(compileFailTarget, { recursive: true });
+
+function fixtureRoot(prefix) {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  copyFileSync(resolve(v3Root, 'Cargo.lock'), join(root, 'Cargo.lock'));
+  return root;
+}
 
 function files(dir, out = []) {
   for (const entry of readdirSync(dir)) {
@@ -56,13 +62,13 @@ for (const fixture of [
   ['cli', 'routecodex-v3-cli', resolve(v3Root, 'crates/routecodex-v3-cli')],
 ]) {
   const [name, dependencyName, dependencyPath] = fixture;
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-${name}-shortcut-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\n${dependencyName} = { path = "${dependencyPath}" }\n\n[workspace]\n`,
+      `[package]\nname = "v3-${name}-shortcut-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\n${dependencyName} = { path = "${dependencyPath}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(
       join(sourceDir, 'main.rs'),
@@ -88,13 +94,13 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-health-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-health-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-target-health-mutation-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[workspace]\n`,
+      `[package]\nname = "v3-target-health-mutation-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(
       join(sourceDir, 'main.rs'),
@@ -120,7 +126,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-availability-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-router-availability-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -144,7 +150,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-one-shot-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-router-one-shot-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -168,7 +174,7 @@ for (const fixture of [
 }
 
 {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-router-private-plan-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-router-private-plan-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
@@ -205,13 +211,13 @@ for (const fixture of [
     code: 'use routecodex_v3_provider_responses::V3ProviderResp14Raw;\nfn main() { let _ = V3ProviderResp14Raw { request_id: String::new(), provider_id: String::new(), status: 200, headers: Vec::new(), body: todo!() }; }\n',
   },
 ]) {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-provider-node-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-provider-node-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-provider-private-node-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[workspace]\n`,
+      `[package]\nname = "v3-provider-private-node-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
@@ -257,13 +263,13 @@ for (const fixture of [
     diagnostic: /returns a value referencing data owned by the current function|E0515/,
   },
 ]) {
-  const root = mkdtempSync(join(tmpdir(), 'routecodex-v3-hub-node-compile-fail-'));
+  const root = fixtureRoot('routecodex-v3-hub-node-compile-fail-');
   const sourceDir = join(root, 'src');
   try {
     mkdirSync(sourceDir);
     writeFileSync(
       join(root, 'Cargo.toml'),
-      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-config = { path = "${resolve(v3Root, 'crates/routecodex-v3-config')}" }\nroutecodex-v3-runtime = { path = "${resolve(v3Root, 'crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n\n[workspace]\n`,
+      `[package]\nname = "v3-hub-node-compile-fail-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-config = { path = "${resolve(v3Root, 'crates/routecodex-v3-config')}" }\nroutecodex-v3-runtime = { path = "${resolve(v3Root, 'crates/routecodex-v3-runtime')}" }\nserde_json = "1"\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
     );
     writeFileSync(join(sourceDir, 'main.rs'), fixture.code);
     const result = spawnSync('cargo', ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')], {
@@ -272,6 +278,40 @@ for (const fixture of [
     const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
     if (result.status === 0) fail(`${fixture.name} unexpectedly compiled`);
     else if (!fixture.diagnostic.test(diagnostic)) fail(`${fixture.name} failed for wrong reason: ${diagnostic.slice(-800)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+{
+  const root = fixtureRoot('routecodex-v3-provider-cooldown-single-owner-');
+  const sourceDir = join(root, 'src');
+  try {
+    mkdirSync(sourceDir);
+    writeFileSync(
+      join(root, 'Cargo.toml'),
+      `[package]\nname = "v3-provider-cooldown-single-owner-fixture"\nversion = "0.0.0"\nedition = "2021"\n\n[dependencies]\nroutecodex-v3-provider-responses = { path = "${resolve(v3Root, 'crates/routecodex-v3-provider-responses')}" }\n\n[patch.crates-io]\nhyper = { path = ${JSON.stringify(resolve(v3Root, 'vendor/hyper'))} }\n\n[workspace]\n`,
+    );
+    writeFileSync(
+      join(sourceDir, 'main.rs'),
+      'use routecodex_v3_provider_responses::V3ProviderCooldownCoordinator;\nfn main() {\n    let mut coordinator = V3ProviderCooldownCoordinator::new("x".into());\n    let _ = coordinator.availability("p", None, None, 0);\n}\n',
+    );
+    const result = spawnSync(
+      'cargo',
+      ['check', '--offline', '--manifest-path', join(root, 'Cargo.toml')],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CARGO_TARGET_DIR: compileFailTarget },
+      },
+    );
+    const diagnostic = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    if (result.status === 0) {
+      fail('Provider cooldown coordinator availability fixture unexpectedly compiled');
+    } else if (!/no method named .availability|E0599/.test(diagnostic)) {
+      fail(
+        `Provider cooldown coordinator availability fixture failed for wrong reason: ${diagnostic.slice(-600)}`,
+      );
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

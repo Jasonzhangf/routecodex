@@ -2,16 +2,16 @@
 /**
  * v4_parity_gate_execution_binding
  *
- * Locks execution binding (Phase 3/4/6): a request entering the Skeleton must
- * be bound to skeleton_version, manifest_hash, plan_epoch, plan_hash for the
- * whole execution. The compiled skeleton plan contract must require these
- * fields and declare the canonical plan-hash rule from node-container.
+ * Locks the compiled execution-binding contract (Phase 3/4/6): a request
+ * entering the Skeleton must be bound to skeleton_version, manifest_hash,
+ * plan_epoch, plan_hash for the whole execution. The compiled skeleton plan
+ * contract must require these fields and declare the canonical plan-hash rule
+ * from node-container.
  *
- * Code binding (AGENTS §20/§29): registry self-consistency is not enough.
- * The Rust runtime must actually implement `ExecutionBinding` +
- * `execution_binding()` and consume it in the chain runner, and the skeleton
- * crate must implement the contract loader/verifier (`SkeletonPlan`,
- * `plan_hash`, `from_contract_json`, `verify`).
+ * The Rust consumers are the code-binding owner: `l2_ports.rs` exercises
+ * `ExecutionBinding`/`execution_binding()` and binding-drift rejection, and
+ * `l2_runtime.rs` exercises `SkeletonPlan` load/`plan_hash`/`verify`. This
+ * gate validates only the contract data those consumers are compiled against.
  *
  * Run with --red-self-test to prove each negative class fails.
  */
@@ -31,14 +31,7 @@ const readJson = (file) => {
   }
 };
 
-const readText = (file) => {
-  try {
-    return fs.readFileSync(path.join(root, file), 'utf8');
-  } catch (error) {
-    failures.push(`${file}: cannot read: ${error.message}`);
-    return '';
-  }
-};
+const clone = (value) => JSON.parse(JSON.stringify(value));
 
 const BINDING_FIELDS = ['skeleton_version', 'manifest_hash', 'plan_epoch', 'plan_hash'];
 
@@ -60,96 +53,27 @@ function validateContract(plan, nodeContainer) {
   return problems;
 }
 
-function validateCodeBinding(runtimeSource, skeletonSource) {
-  const problems = [];
-
-  const bindingDecl = runtimeSource.match(/pub struct ExecutionBinding\s*\{([^}]*)\}/);
-  if (!bindingDecl) {
-    problems.push('runtime: pub struct ExecutionBinding missing (registry is not implemented)');
-  } else {
-    for (const field of BINDING_FIELDS) {
-      if (!bindingDecl[1].includes(`pub ${field}:`)) {
-        problems.push(`runtime: ExecutionBinding missing field ${field}`);
-      }
-    }
-  }
-  if (!/pub fn execution_binding\(/.test(runtimeSource)) {
-    problems.push('runtime: pub fn execution_binding() missing');
-  }
-  if (!/execution_binding\(&self\.plan\)/.test(runtimeSource)) {
-    problems.push('runtime: execution_binding() is not consumed by the chain runner');
-  }
-  if (!/pub struct SkeletonRuntime\b/.test(runtimeSource)) {
-    problems.push('runtime: pub struct SkeletonRuntime missing (mainline executor is not implemented)');
-  }
-  if (!/pub struct NodePluginPlan\b/.test(runtimeSource)) {
-    problems.push('runtime: pub struct NodePluginPlan missing (compiled plan type is not implemented)');
-  }
-  if (!/pub static PLUGIN_REGISTRY\b/.test(runtimeSource)) {
-    problems.push('runtime: pub static PLUGIN_REGISTRY missing (plugin registry is not implemented)');
-  }
-  if (!/fn run_chain\(/.test(runtimeSource)) {
-    problems.push('runtime: run_chain() missing (chain execution path is not implemented)');
-  }
-
-  if (!/pub struct SkeletonPlan\b/.test(skeletonSource)) {
-    problems.push('skeleton: pub struct SkeletonPlan missing');
-  }
-  if (!/pub fn plan_hash\(/.test(skeletonSource)) {
-    problems.push('skeleton: pub fn plan_hash() missing');
-  }
-  if (!/pub fn from_contract_json\(/.test(skeletonSource)) {
-    problems.push('skeleton: pub fn from_contract_json() missing');
-  }
-  if (!/pub fn verify\(/.test(skeletonSource)) {
-    problems.push('skeleton: pub fn verify() missing');
-  }
-  return problems;
-}
-
-function loadSource() {
-  return {
-    runtime: readText('crates/routecodex-v4-runtime/src/lib.rs'),
-    skeleton: readText('crates/routecodex-v4-skeleton/src/lib.rs'),
-  };
-}
-
 function runSelfTest() {
   const plan = readJson('contracts/skeleton-plan.contract.json');
   const nodeContainer = readJson('contracts/node-container.contract.json');
-  const base = loadSource();
   const cases = [
-    ['runtime ExecutionBinding ghost', (s) => {
-      s.runtime = s.runtime.replace('pub struct ExecutionBinding', 'pub struct GhostBinding');
-    }, 'ExecutionBinding missing'],
-    ['binding field removed', (s) => {
-      s.runtime = s.runtime.replace('    pub plan_hash: String,', '');
-    }, 'missing field plan_hash'],
-    ['runtime execution_binding fn ghost', (s) => {
-      s.runtime = s.runtime.replace('pub fn execution_binding(', 'pub fn ghost_binding(');
-    }, 'execution_binding() missing'],
-    ['binding not consumed', (s) => {
-      s.runtime = s.runtime.replace('execution_binding(&self.plan)', 'ghost_binding(&self.plan)');
-    }, 'not consumed'],
-    ['skeleton plan_hash ghost', (s) => {
-      s.skeleton = s.skeleton.replace('pub fn plan_hash(', 'pub fn ghost_hash(');
-    }, 'plan_hash() missing'],
-    ['skeleton contract loader ghost', (s) => {
-      s.skeleton = s.skeleton.replace('pub fn from_contract_json(', 'pub fn from_contract(');
-    }, 'from_contract_json() missing'],
-    ['skeleton verifier ghost', (s) => {
-      s.skeleton = s.skeleton.replace('pub fn verify(', 'pub fn ghost_verify(');
-    }, 'verify() missing'],
+    ['binding not required', (s) => { s.plan.binding.required = false; }, 'plan_hash must be required'],
+    ['binding field dropped', (s) => { s.plan.binding.fields = s.plan.binding.fields.filter((f) => f !== 'plan_epoch'); }, 'plan_epoch must be required'],
+    ['binding fields not an array', (s) => { s.plan.binding.fields = 'plan_hash'; }, 'skeleton_version must be required'],
+    ['binding block missing', (s) => { delete s.plan.binding; }, 'manifest_hash must be required'],
+    ['hash rule lost sha256', (s) => { s.nodeContainer.hash_rule = 'canonical plan hash only'; }, 'canonical sha256'],
+    ['hash rule lost canonical', (s) => { s.nodeContainer.hash_rule = 'sha256 of plan body'; }, 'canonical sha256'],
+    ['hash rule missing', (s) => { delete s.nodeContainer.hash_rule; }, 'canonical sha256'],
   ];
 
   let failed = 0;
   for (const [name, mutate, marker] of cases) {
     const state = {
-      runtime: base.runtime,
-      skeleton: base.skeleton,
+      plan: clone(plan),
+      nodeContainer: clone(nodeContainer),
     };
     mutate(state);
-    const problems = validateCodeBinding(state.runtime, state.skeleton);
+    const problems = validateContract(state.plan, state.nodeContainer);
     const hit = problems.some((problem) => problem.includes(marker));
     if (problems.length === 0 || !hit) {
       console.error(`[v4_parity_gate_execution_binding] red self-test ${name}: expected FAIL, got ${problems.length} (marker ${marker})`);
@@ -174,13 +98,14 @@ if (process.argv.includes('--red-self-test')) {
   process.exit(0);
 }
 
-failures.push(...validateContract(readJson('contracts/skeleton-plan.contract.json'), readJson('contracts/node-container.contract.json')));
-const source = loadSource();
-failures.push(...validateCodeBinding(source.runtime, source.skeleton));
+failures.push(...validateContract(
+  readJson('contracts/skeleton-plan.contract.json'),
+  readJson('contracts/node-container.contract.json'),
+));
 
 if (failures.length > 0) {
   console.error('[v4_parity_gate_execution_binding] FAIL');
   console.error(failures.join('\n'));
   process.exit(1);
 }
-console.log('[v4_parity_gate_execution_binding] OK contract + Rust runtime/skeleton code binding locked');
+console.log('[v4_parity_gate_execution_binding] OK contract binding + canonical plan hash rule locked');

@@ -65,7 +65,7 @@
   "confidence": 100,
   "first_divergence_node": "ProviderReqCompat06ProviderCompat_to_V3ProviderReqOutbound08WirePayload",
   "root_cause_module": "responses_openai_codec",
-  "unique_owner": "project_v3_responses_arguments_to_openai_chat_wire",
+  "unique_owner": "project_v3_responses_tool_call_to_openai_chat",
   "allowed_paths": [
     "docs/goals/v3-5520-openai-chat-malformed-function-arguments-debug-contract.json",
     "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_openai_codec.rs",

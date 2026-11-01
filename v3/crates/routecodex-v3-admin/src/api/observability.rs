@@ -1,153 +1,75 @@
 // feature_id: v3.webui_request_observability
 // Aggregates per-listener persisted JSONL projections for the single WebUI.
+//
+// This module keeps the shared record/store core: the typed query projection and
+// its row helpers, the record list and record detail handlers, and their unit
+// tests. The cooldown passthrough, the whitelisted artifact drill-down and the
+// SSE live tail live in the `observability` submodules. Every route they serve
+// is still declared in the single route table below, which `api/mod.rs` merges
+// behind the router-wide admin token layer.
 
+mod artifacts;
+mod cooldown;
+mod store_cache;
+mod stream;
+
+use self::artifacts::{
+    artifact_content, artifacts, list_v3_obs_artifacts, resolve_v3_obs_sample_dir,
+};
+use self::cooldown::{add_cooldown, cooldown_pool, probe_cooldown, remove_cooldown};
+pub(crate) use self::store_cache::visit_v3_obs_stores;
+use self::store_cache::{read_v3_obs_projection, read_v3_obs_rows_for_request_key};
+use self::stream::stream;
 use crate::AppState;
-use axum::extract::{RawQuery, State};
+use axum::extract::{Path as AxumPath, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
+use routecodex_v3_runtime::hub_v1::usage_normalization::{
+    split_v3_canonical_usage_cache, V3CanonicalUsageCache,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+/// The six typed Error chain nodes, in canonical order. The detail endpoint
+/// always reports all six; nodes the store did not observe are `not_reached`.
+const V3_OBS_ERROR_CHAIN_NODES: [&str; 6] = [
+    "V3Error01SourceRaised",
+    "V3Error02Classified",
+    "V3Error03TargetLocalAction",
+    "V3Error04TargetExhaustionDecision",
+    "V3Error05ExecutionDecision",
+    "V3Error06ClientProjected",
+];
 
 pub(crate) fn routes() -> axum::Router<crate::AppState> {
     axum::Router::new()
         .route("/api/observability/records", axum::routing::get(records))
         .route(
+            "/api/observability/records/:request_key",
+            axum::routing::get(record_detail),
+        )
+        .route(
+            "/api/observability/artifacts",
+            axum::routing::get(artifacts),
+        )
+        .route(
+            "/api/observability/artifacts/content",
+            axum::routing::get(artifact_content),
+        )
+        .route("/api/observability/stream", axum::routing::get(stream))
+        .route(
             "/api/observability/cooldown-pool",
             axum::routing::get(cooldown_pool).post(remove_cooldown),
         )
-}
-
-async fn cooldown_pool(State(state): axum::extract::State<AppState>) -> Response {
-    let ports = match configured_ports(&state) {
-        Ok(ports) => ports,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
-        }
-    };
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("cooldown client build failed: {error}") })),
-            )
-                .into_response()
-        }
-    };
-    let mut listeners = Vec::new();
-    for port in ports {
-        let url = format!("http://127.0.0.1:{port}/_routecodex/health/cooldown-pool");
-        let response = match client.get(&url).send().await {
-            Ok(response) => response,
-            Err(error) => return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("cooldown listener {port} unavailable: {error}") })),
-            )
-                .into_response(),
-        };
-        let status = response.status();
-        let body = match response.json::<Value>().await {
-            Ok(body) => body,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({ "error": format!("cooldown listener {port} invalid response: {error}") })),
-                )
-                    .into_response()
-            }
-        };
-        if !status.is_success() {
-            return (StatusCode::BAD_GATEWAY, Json(body)).into_response();
-        }
-        listeners.push(body);
-    }
-    Json(json!({ "listeners": listeners })).into_response()
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct RemoveCooldownRequest {
-    port: u16,
-    provider_id: String,
-    #[serde(default)]
-    auth_alias: Option<String>,
-    #[serde(default)]
-    model_id: Option<String>,
-    kind: String,
-}
-
-async fn remove_cooldown(
-    State(state): axum::extract::State<AppState>,
-    Json(request): Json<RemoveCooldownRequest>,
-) -> Response {
-    if request.provider_id.trim().is_empty()
-        || !matches!(request.kind.as_str(), "session" | "auth_key" | "probe")
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "invalid cooldown removal request" })),
+        .route(
+            "/api/observability/cooldown-pool/add",
+            axum::routing::post(add_cooldown),
         )
-            .into_response();
-    }
-    let ports = match configured_ports(&state) {
-        Ok(ports) => ports,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
-        }
-    };
-    if !ports.contains(&request.port) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": format!("port {} is not configured", request.port) })),
+        .route(
+            "/api/observability/cooldown-pool/probe",
+            axum::routing::post(probe_cooldown),
         )
-            .into_response();
-    }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(client) => client,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("cooldown client build failed: {error}") })),
-            )
-                .into_response()
-        }
-    };
-    let url = format!(
-        "http://127.0.0.1:{}/_routecodex/health/cooldown-pool",
-        request.port
-    );
-    let response = match client.post(url).json(&request).send().await {
-        Ok(response) => response,
-        Err(error) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("cooldown listener {} unavailable: {error}", request.port) })),
-            )
-                .into_response()
-        }
-    };
-    let status = response.status();
-    let body = match response.json::<Value>().await {
-        Ok(body) => body,
-        Err(error) => {
-            return (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({ "error": format!("cooldown listener response invalid: {error}") })),
-            )
-                .into_response()
-        }
-    };
-    if !status.is_success() {
-        return (StatusCode::BAD_GATEWAY, Json(body)).into_response();
-    }
-    Json(body).into_response()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -212,6 +134,7 @@ pub(crate) struct RecordQuery {
     response_type: Option<String>,
     error_category: Option<String>,
     error_status_code: Option<String>,
+    error_origin: Option<String>,
     session: Option<String>,
     search: Option<String>,
     range: String,
@@ -229,6 +152,10 @@ struct QueryRow {
     meta: serde_json::Value,
     scope: SourceScope,
     result: Option<String>,
+    /// Projection of this row's own `error_category`, filled by
+    /// `project_query_rows`; `null` for rows that carry no error result.
+    #[serde(default)]
+    error_origin: Option<String>,
     attempts: u64,
     failed_attempts: u64,
     switches: u64,
@@ -247,7 +174,7 @@ pub(crate) struct RecordsResponse {
     page: u64,
     page_size: u64,
     stats: serde_json::Value,
-    facets: BTreeMap<String, BTreeMap<String, u64>>,
+    facets: BTreeMap<String, serde_json::Value>,
     timeseries: Vec<TimeseriesBucket>,
 }
 
@@ -355,10 +282,16 @@ impl RecordQuery {
                 "response_type" => query.response_type = Some(value.to_string()),
                 "error_category" => query.error_category = Some(value.to_string()),
                 "error_status_code" => {
-                    if value != "unknown" && value.parse::<u16>().is_err() {
+                    if !matches!(value, "unknown" | "network") && value.parse::<u16>().is_err() {
                         return Err(format!("invalid error_status_code: {value}"));
                     }
                     query.error_status_code = Some(value.to_string());
+                }
+                "error_origin" => {
+                    if !matches!(value, "upstream" | "local" | "unknown") {
+                        return Err(format!("invalid error_origin: {value}"));
+                    }
+                    query.error_origin = Some(value.to_string());
                 }
                 "session" => query.session = Some(value.to_string()),
                 "search" => query.search = Some(value.to_string()),
@@ -506,6 +439,16 @@ impl RecordQuery {
                 return false;
             }
         }
+        // AND-combines with `error_status_code`. Origin is defined only for rows
+        // that carry an error result, so this never selects a row whose own
+        // `error_origin` is null (success, active, cancelled).
+        if self
+            .error_origin
+            .as_deref()
+            .is_some_and(|origin| row_error_origin_opt(row) != Some(origin))
+        {
+            return false;
+        }
         if let Some(search) = self
             .search
             .as_deref()
@@ -629,6 +572,16 @@ fn error_category_status_code(category: Option<&str>) -> Option<String> {
         "malformed_json" | "content_type_required" | "content_type_unsupported" => {
             Some("400".to_string())
         }
+        // A provider failure that received no upstream HTTP response has no
+        // numeric HTTP status. Render it as a distinct `network` label instead of
+        // falling through to the 599 internal-response-lane default.
+        // `provider_runtime_error` is the pre-typed-code relay category; it stays
+        // listed so rows persisted before the typed category still render.
+        "provider_transport_error"
+        | "provider_runtime_error"
+        | "provider_response_header_timeout"
+        | "provider_websocket_protocol_error"
+        | "provider_websocket_event_error" => Some("network".to_string()),
         "internal_request_lane" | "v3_debug_failure" | "debug_sink" => Some("598".to_string()),
         "internal_response_lane"
         | "provider_response_sse_event_invalid"
@@ -648,7 +601,10 @@ fn attempt_status_code(row: &QueryRow) -> Option<String> {
     {
         return None;
     }
-    Some(status_code_label(row.meta.get("provider_status")))
+    // Use the same projection as the `error_status_codes` facet so filtering by
+    // that label matches the facet, including the `network` label for a
+    // response-less provider failure.
+    Some(row_status_code(row))
 }
 
 /// Projects the raw lifecycle stream into the WebUI query surface.
@@ -657,11 +613,11 @@ fn attempt_status_code(row: &QueryRow) -> Option<String> {
 /// `provider_attempt_failed` row is additionally kept as a separate
 /// `failed-attempt` query row with its original status/category/detail, so a
 /// retry that eventually succeeds does not hide the non-normal attempt.
-fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
-    let mut latest: BTreeMap<String, SourceRow> = BTreeMap::new();
-    let mut attempt_rows: Vec<SourceRow> = Vec::new();
+fn project_query_rows<'a>(rows: impl IntoIterator<Item = &'a SourceRow>) -> Vec<QueryRow> {
+    let mut latest: BTreeMap<String, &'a SourceRow> = BTreeMap::new();
+    let mut attempt_rows: Vec<&'a SourceRow> = Vec::new();
     for row in rows {
-        if is_provider_attempt_failure(&row) {
+        if is_provider_attempt_failure(row) {
             attempt_rows.push(row);
         } else {
             latest.insert(row.request_key.clone(), row);
@@ -672,43 +628,117 @@ fn project_query_rows(rows: Vec<SourceRow>) -> Vec<QueryRow> {
     for row in latest.into_values() {
         query_rows.push(to_query_row(row));
     }
-    query_rows.extend(
-        attempt_rows
-            .into_iter()
-            .map(|row| to_attempt_query_row(row))
-            .collect::<Vec<_>>(),
-    );
+    query_rows.extend(attempt_rows.into_iter().map(to_attempt_query_row));
+    for row in query_rows.iter_mut() {
+        row.error_origin = row_error_origin_opt(row).map(str::to_string);
+    }
     query_rows
 }
 
-fn to_query_row(row: SourceRow) -> QueryRow {
-    let value = serde_json::to_value(row).expect("source row serializes");
-    serde_json::from_value(value).expect("query row shape is compatible")
-}
-
-fn to_attempt_query_row(row: SourceRow) -> QueryRow {
+/// Projects a stored row into its query shape.
+///
+/// `QueryRow` is `SourceRow` without `tokens_output` plus `error_origin`, so the
+/// projection is a direct field mapping. It previously round-tripped the row
+/// through `serde_json::to_value` + `from_value`, which serialized and reparsed
+/// every row of the whole history on every projection rebuild.
+fn to_query_row(row: &SourceRow) -> QueryRow {
     QueryRow {
-        request_key: row.request_key,
-        event_type: row.event_type,
+        request_key: row.request_key.clone(),
+        event_type: row.event_type.clone(),
         started_epoch_ms: row.started_epoch_ms,
         updated_epoch_ms: row.updated_epoch_ms,
         finished_epoch_ms: row.finished_epoch_ms,
         duration_ms: row.duration_ms,
-        meta: row.meta,
-        scope: row.scope,
-        result: Some("failed-attempt".to_string()),
+        meta: row.meta.clone(),
+        scope: row.scope.clone(),
+        result: row.result.clone(),
+        error_origin: None,
         attempts: row.attempts,
         failed_attempts: row.failed_attempts,
         switches: row.switches,
-        usage: row.usage,
+        usage: row.usage.clone(),
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
-        raw_artifact_ref: row.raw_artifact_ref,
+        raw_artifact_ref: row.raw_artifact_ref.clone(),
+    }
+}
+
+fn to_attempt_query_row(row: &SourceRow) -> QueryRow {
+    QueryRow {
+        request_key: row.request_key.clone(),
+        event_type: row.event_type.clone(),
+        started_epoch_ms: row.started_epoch_ms,
+        updated_epoch_ms: row.updated_epoch_ms,
+        finished_epoch_ms: row.finished_epoch_ms,
+        duration_ms: row.duration_ms,
+        meta: row.meta.clone(),
+        scope: row.scope.clone(),
+        result: Some("failed-attempt".to_string()),
+        error_origin: None,
+        attempts: row.attempts,
+        failed_attempts: row.failed_attempts,
+        switches: row.switches,
+        usage: row.usage.clone(),
+        timing_internal_ms: row.timing_internal_ms,
+        timing_external_ms: row.timing_external_ms,
+        servertool: row.servertool,
+        raw_artifact_ref: row.raw_artifact_ref.clone(),
+    }
+}
+
+/// Classifies a failure row from the typed `error_category`, never from the
+/// status: `provider_status` is the *projected client* status, so a network
+/// failure also shows up as `502` there, while `error_category` is the only field
+/// that separates "the provider rejected us" from "we failed to get an answer".
+///
+/// The rule is deliberately **positive for `upstream` and open for `local`**: the
+/// category set is open-ended, so a closed allowlist of local categories would
+/// silently misclassify every category added later. `provider_http_<code>` with a
+/// non-numeric `<code>` is therefore `local`, not `upstream`.
+fn row_error_origin(row: &QueryRow) -> &'static str {
+    let Some(category) = row.meta.get("error_category").and_then(Value::as_str) else {
+        return "unknown";
+    };
+    let category = category.trim();
+    if category.is_empty() {
+        return "unknown";
+    }
+    match category.strip_prefix("provider_http_") {
+        Some(code) if code.parse::<u16>().is_ok() => "upstream",
+        _ => "local",
+    }
+}
+
+/// Origin-bearing rows are exactly the rows that carry an error result. A
+/// success, active, or cancelled row has no origin: its serialized
+/// `error_origin` is `null` and no `error_origin` filter selects it.
+fn row_error_origin_opt(row: &QueryRow) -> Option<&'static str> {
+    match row.result.as_deref() {
+        Some("error") | Some("failed-attempt") => Some(row_error_origin(row)),
+        _ => None,
     }
 }
 
 fn row_status_code(row: &QueryRow) -> String {
+    // Error rows display their typed error identity first. A local conversion
+    // failure stays visibly local even when a legacy carrier still records a
+    // numeric provider status (e.g. an internal 400 that never reached the
+    // provider). Only a numeric typed identity may replace the provider status:
+    // non-numeric labels such as `network` describe a transport failure but must
+    // not split one status bucket away from its other origins.
+    if matches!(
+        row.result.as_deref(),
+        Some("error") | Some("failed-attempt")
+    ) {
+        if let Some(code) =
+            error_category_status_code(row.meta.get("error_category").and_then(Value::as_str))
+        {
+            if code.chars().all(|character| character.is_ascii_digit()) {
+                return code;
+            }
+        }
+    }
     let provider_status = status_code_label(row.meta.get("provider_status"));
     if provider_status != "unknown" {
         return provider_status;
@@ -726,6 +756,20 @@ fn facet_add_status_code_label(
         .entry(name.to_string())
         .or_default()
         .entry(label)
+        .or_default() += 1;
+}
+
+/// Splits one `error_status_codes` bucket by origin; fed from the same places, so
+/// the three origin counts sum to `error_status_codes[s]` for every status `s`.
+fn facet_add_status_origin(
+    status_origins: &mut BTreeMap<String, BTreeMap<String, u64>>,
+    label: String,
+    origin: &'static str,
+) {
+    *status_origins
+        .entry(label)
+        .or_default()
+        .entry(origin.to_string())
         .or_default() += 1;
 }
 
@@ -752,73 +796,55 @@ fn row_output_value(row: &QueryRow) -> u64 {
     usage_value(row, "output_tokens")
 }
 
-fn row_cached_value(row: &QueryRow) -> u64 {
-    usage_value(row, "cached_tokens")
+fn row_cached_value(row: &QueryRow) -> Option<u64> {
+    usage_value_opt(row, "cached_tokens")
 }
 
-fn row_cache_read_value(row: &QueryRow) -> u64 {
+fn row_cache_read_value(row: &QueryRow) -> Option<u64> {
     usage_value_opt(row, "cache_read_input_tokens")
-        .or_else(|| usage_value_opt(row, "cached_tokens"))
-        .unwrap_or(0)
 }
 
-fn row_cache_creation_value(row: &QueryRow) -> u64 {
-    usage_value(row, "cache_creation_input_tokens")
+fn row_cache_creation_value(row: &QueryRow) -> Option<u64> {
+    usage_value_opt(row, "cache_creation_input_tokens")
 }
 
 fn row_total_value(row: &QueryRow) -> u64 {
     usage_value(row, "total_tokens")
 }
 
-/// Returns the cache-hit numerator for the Anthropic/MiniMax/glm-5.3 cache
-/// shape, which exposes `cache_read_input_tokens` independently of
-/// `cache_creation_input_tokens`. Falls back to `cached_tokens` for the
-/// OpenAI/Responses shape that pre-dates the split, so the pre-existing
-/// Admin aggregation stays numerically identical for OpenAI traffic.
+/// Row usage -> canonical cache split via the shared truth source.
+///
+/// OpenAI/Responses/Gemini rows carry `cached_tokens` as a sub-count of an
+/// input that already includes cache; Anthropic/MiniMax/glm rows carry
+/// `cache_read_input_tokens` / `cache_creation_input_tokens` as independent
+/// counts that must be added to the uncached input.
+fn row_canonical_usage_cache(row: &QueryRow) -> V3CanonicalUsageCache {
+    split_v3_canonical_usage_cache(
+        Some(row_input_value(row)),
+        row_cached_value(row),
+        row_cache_read_value(row),
+        row_cache_creation_value(row),
+    )
+}
+
+/// Cache-hit numerator: the canonical cached sub-count, i.e. the cache read
+/// count under Anthropic/MiniMax/glm semantics.
 fn row_cache_hit_numerator(row: &QueryRow) -> u64 {
-    let read = row_cache_read_value(row);
-    if read > 0 {
-        return read;
-    }
-    row_cached_value(row)
+    row_canonical_usage_cache(row).cached_tokens.unwrap_or(0)
 }
 
+/// Cache-hit denominator: the canonical effective input, i.e. input + read +
+/// creation under Anthropic/MiniMax/glm semantics.
 fn row_effective_input(row: &QueryRow) -> u64 {
-    row_input_value(row).max(row_cached_value(row))
+    row_canonical_usage_cache(row).effective_input_tokens
 }
 
-fn configured_ports(state: &AppState) -> Result<Vec<u16>, String> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| format!("observability config read failed: {error}"))?;
-    let mut ports = authoring
-        .servers
-        .values()
-        .filter(|server| server.enabled)
-        .map(|server| server.port)
-        .collect::<Vec<_>>();
-    ports.sort_unstable();
-    ports.dedup();
-    if ports.is_empty() {
-        return Err("observability has no enabled listener source".to_string());
-    }
-    Ok(ports)
-}
-
-/// Per-listener JSONL store path. Server and Admin derive the same path from
-/// the shared config helper using the authoring debug log file truth.
-fn observability_store_path(state: &AppState, port: u16) -> Result<PathBuf, String> {
-    let authoring = state
-        .store
-        .read_authoring()
-        .map_err(|error| format!("observability config read failed: {error}"))?;
-    let debug_log = authoring.debug.log_file.as_deref();
-    Ok(routecodex_v3_config::v3_webui_observability_store_path(
-        &state.config_path,
-        debug_log,
-        port,
-    ))
+fn query_params(raw_query: &RawQuery) -> HashMap<String, String> {
+    raw_query
+        .0
+        .as_deref()
+        .map(parse_query_params)
+        .unwrap_or_default()
 }
 
 async fn records(
@@ -839,58 +865,36 @@ async fn records(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
         }
     };
-    let ports = match configured_ports(&state) {
-        Ok(ports) => ports,
+    // The cache lock spans metadata reads, decoding and the fold, so the read
+    // runs on the blocking pool instead of stalling a runtime worker.
+    let projection_state = state.clone();
+    let projection = match tokio::task::spawn_blocking(move || {
+        read_v3_obs_projection(&projection_state)
+    })
+    .await
+    {
+        Ok(Ok(projection)) => projection,
+        Ok(Err((status, body))) => return (status, Json(body)).into_response(),
         Err(error) => {
-            return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("observability records read task failed: {error}")
+                })),
+            )
+                .into_response()
         }
     };
-    let mut rows = Vec::new();
-    for port in ports {
-        let path = match observability_store_path(&state, port) {
-            Ok(path) => path,
-            Err(error) => {
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    Json(json!({
-                        "error": format!("observability store path {port} unavailable: {error}")
-                    })),
-                )
-                    .into_response();
-            }
-        };
-        let values = match routecodex_v3_debug::v3_webui_observability_read_raw_rows(&path) {
-            Ok(values) => values,
-            Err(error) => {
-                if path.exists() {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({
-                            "error": format!("observability store {port} unavailable: {error}")
-                        })),
-                    )
-                        .into_response();
-                }
-                continue;
-            }
-        };
-        for value in values {
-            match serde_json::from_value::<SourceRow>(value) {
-                Ok(row) => rows.push(row),
-                Err(error) => {
-                    return (
-                        StatusCode::BAD_GATEWAY,
-                        Json(json!({
-                            "error": format!("decode observability store {port} row failed: {error}")
-                        })),
-                    )
-                        .into_response();
-                }
-            }
-        }
-    }
-    let rows = project_query_rows(rows);
-    let mut filtered: Vec<QueryRow> = rows.into_iter().filter(|row| query.matches(row)).collect();
+    // The matched rows are materialised as an owned, contiguous Vec: the stats,
+    // facet and by-port passes below all walk it after the page sort, and
+    // iterating owned rows there is measurably cheaper than chasing sorted
+    // references back into the shared projection.
+    let mut filtered: Vec<QueryRow> = projection
+        .rows
+        .iter()
+        .filter(|row| query.matches(row))
+        .cloned()
+        .collect();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
         .map(|row| super::timeseries::TimeseriesRow {
@@ -920,11 +924,20 @@ async fn records(
     let total = filtered.len() as u64;
     let offset = ((query.page - 1) * query.page_size) as usize;
     let end = (offset + query.page_size as usize).min(filtered.len());
-    let page_rows: &[QueryRow] = if offset < filtered.len() {
-        &filtered[offset..end]
+    let mut page_rows: Vec<QueryRow> = if offset < filtered.len() {
+        filtered[offset..end].to_vec()
     } else {
-        &[]
+        Vec::new()
     };
+    // Same read-time resolution as the detail endpoint: the listener records
+    // `raw_artifact_ref` before the asynchronous sample writer has created the
+    // directory, so a listed row re-checks the filesystem instead of reporting
+    // a permanent null for a request that really did capture artifacts.
+    for row in page_rows.iter_mut() {
+        if row.raw_artifact_ref.is_none() {
+            row.raw_artifact_ref = resolve_v3_obs_row_artifact_ref(row);
+        }
+    }
     let mut stats = json!({
         "count":0u64,
         "success_count":0u64,
@@ -943,7 +956,18 @@ async fn records(
         "provider_failure_count":0u64,
         "by_provider": {}
     });
-    let mut facets = BTreeMap::new();
+    let mut facets: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    // `error_status_origins` splits each `error_status_codes` bucket by origin and
+    // `error_origins` is its rollup over error rows; both are seeded so a fixture
+    // with no failure row still reports explicit zero counts.
+    let mut status_origins: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    facets.insert(
+        "error_origins".to_string(),
+        ["upstream", "local", "unknown"]
+            .into_iter()
+            .map(|origin| (origin.to_string(), 0u64))
+            .collect(),
+    );
     let count = filtered.len() as f64;
     let mut input = 0;
     let mut output = 0;
@@ -968,9 +992,11 @@ async fn records(
         if is_success {
             let row_input = row_input_value(row);
             let row_output = row_output_value(row);
-            let row_cached = row_cached_value(row);
-            let row_cache_read = row_cache_read_value(row);
-            let row_cache_creation = row_cache_creation_value(row);
+            let row_cached = row_cached_value(row).unwrap_or(0);
+            // Canonical hit count: OpenAI `cached_tokens` sub-count, otherwise
+            // Anthropic `cache_read_input_tokens`.
+            let row_cache_read = row_cache_hit_numerator(row);
+            let row_cache_creation = row_cache_creation_value(row).unwrap_or(0);
             input += row_input;
             output += row_output;
             cached += row_cached;
@@ -991,6 +1017,12 @@ async fn records(
         }
         if row.result.as_deref() == Some("failed-attempt") {
             facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
+            facet_add_status_origin(
+                &mut status_origins,
+                row_status_code(row),
+                row_error_origin(row),
+            );
+            facet_add(&mut facets, "error_origins", Some(row_error_origin(row)));
         }
         if matches!(
             row.result.as_deref(),
@@ -1055,10 +1087,32 @@ async fn records(
             "response_types",
             row.meta.get("response_status").and_then(Value::as_str),
         );
+        // Entry protocol facet: the UI protocol filter must be populated from the
+        // same field the `entry_protocol` query parameter filters on.
+        facet_add(
+            &mut facets,
+            "entry_protocols",
+            row.meta.get("entry_protocol").and_then(Value::as_str),
+        );
         if row.result.as_deref() == Some("error") {
             facet_add_status_code_label(&mut facets, "error_status_codes", row_status_code(row));
+            facet_add_status_origin(
+                &mut status_origins,
+                row_status_code(row),
+                row_error_origin(row),
+            );
+            facet_add(&mut facets, "error_origins", Some(row_error_origin(row)));
         } else if row.result.as_deref() == Some("cancelled") {
             facet_add_status_code_label(&mut facets, "error_status_codes", "499".to_string());
+            // Mirrors the pre-existing 499 bucket so `error_status_origins` stays a
+            // strict refinement of `error_status_codes`. A cancellation carries no
+            // category, so it lands in `unknown` — but it is NOT counted in
+            // `error_origins`, which must not report a cancellation as an error.
+            facet_add_status_origin(
+                &mut status_origins,
+                "499".to_string(),
+                row_error_origin(row),
+            );
         }
     }
     stats["count"] = json!(count as u64);
@@ -1176,6 +1230,11 @@ async fn records(
     if with_duration > 0 {
         stats["avg_duration_ms"] = json!(durations as f64 / with_duration as f64);
     }
+    let mut facets: BTreeMap<String, serde_json::Value> = facets
+        .into_iter()
+        .map(|(name, counts)| (name, json!(counts)))
+        .collect();
+    facets.insert("error_status_origins".to_string(), json!(status_origins));
     Json(RecordsResponse {
         records: page_rows.to_vec(),
         total,
@@ -1186,6 +1245,161 @@ async fn records(
         timeseries,
     })
     .into_response()
+}
+
+/// Per-request detail: the current row, every provider attempt row, the typed
+/// Error01..Error06 chain, the typed health action, and the debug artifact list.
+async fn record_detail(
+    State(state): State<AppState>,
+    AxumPath(request_key): AxumPath<String>,
+) -> Response {
+    let detail_state = state.clone();
+    let detail_key = request_key.clone();
+    let mut matching: Vec<SourceRow> = match tokio::task::spawn_blocking(move || {
+        read_v3_obs_rows_for_request_key(&detail_state, &detail_key)
+    })
+    .await
+    {
+        Ok(Ok(rows)) => rows,
+        Ok(Err((status, body))) => return (status, Json(body)).into_response(),
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("observability record detail read task failed: {error}")
+                })),
+            )
+                .into_response()
+        }
+    };
+    if matching.is_empty() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "request_not_found" })),
+        )
+            .into_response();
+    }
+    matching.sort_by_key(|row| row.updated_epoch_ms);
+    let port = matching[0].scope.port;
+    let request_id = matching
+        .iter()
+        .rev()
+        .find_map(|row| row.meta.get("request_id").and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_string();
+    let attempts: Vec<QueryRow> = matching
+        .iter()
+        .filter(|row| is_provider_attempt_failure(row))
+        .map(to_attempt_query_row)
+        .collect();
+    let mut row = matching
+        .iter()
+        .rev()
+        .find(|row| !is_provider_attempt_failure(row))
+        .map(to_query_row)
+        .unwrap_or_else(|| {
+            to_attempt_query_row(matching.last().expect("matching rows are non-empty"))
+        });
+    let observed_error = row
+        .meta
+        .get("observed_error")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let error_chain = build_v3_obs_error_chain(observed_error.as_ref());
+    let health_action = observed_error
+        .as_ref()
+        .and_then(|value| value.get("health_action"))
+        .filter(|value| !value.is_null())
+        .cloned()
+        .unwrap_or(Value::Null);
+    let observed_error_source = observed_error
+        .as_ref()
+        .and_then(|value| value.get("source"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let sample_dir = if request_id.is_empty() {
+        None
+    } else {
+        match resolve_v3_obs_sample_dir(port, &request_id) {
+            Ok(dir) => dir,
+            Err(error) => {
+                return (StatusCode::BAD_GATEWAY, Json(json!({ "error": error }))).into_response()
+            }
+        }
+    };
+    let artifacts = match sample_dir.as_deref() {
+        Some(dir) => list_v3_obs_artifacts(dir),
+        None => Vec::new(),
+    };
+    // The listener writes `raw_artifact_ref` when it records the row, but the
+    // debug sample writer persists asynchronously, so that write can lose the
+    // race with the files on disk. The filesystem is the truth here: resolve at
+    // read time, and keep `None` when no directory exists rather than
+    // fabricating a path.
+    if row.raw_artifact_ref.is_none() {
+        row.raw_artifact_ref = sample_dir.as_ref().map(|dir| dir.display().to_string());
+    }
+    Json(json!({
+        "row": row,
+        "attempts": attempts,
+        "error_chain": error_chain,
+        "health_action": health_action,
+        "artifacts": artifacts,
+        "observed_error_source": observed_error_source,
+    }))
+    .into_response()
+}
+
+/// Project the stored typed chain onto the fixed six-node contract. All six
+/// nodes are always reported in canonical order; a node the store did not
+/// observe is `not_reached` with a null code. Nothing is invented for a node
+/// that was not observed, and no node is omitted.
+fn build_v3_obs_error_chain(observed_error: Option<&Value>) -> Vec<Value> {
+    let stored = observed_error
+        .and_then(|value| value.get("chain"))
+        .and_then(Value::as_array);
+    V3_OBS_ERROR_CHAIN_NODES
+        .iter()
+        .enumerate()
+        .map(|(index, node)| {
+            let entry = stored.and_then(|chain| {
+                chain
+                    .iter()
+                    .find(|entry| entry.get("node").and_then(Value::as_str) == Some(*node))
+            });
+            let state = match entry {
+                Some(_) if index == 0 => "raised",
+                Some(_) => "observed",
+                None => "not_reached",
+            };
+            let code = entry
+                .and_then(|entry| entry.get("code"))
+                .filter(|value| !value.is_null())
+                .cloned()
+                .unwrap_or(Value::Null);
+            json!({ "node": node, "state": state, "code": code })
+        })
+        .collect()
+}
+
+/// Read-time artifact reference for one listed row.
+///
+/// `raw_artifact_ref` is recorded by the listener, but the debug sample writer
+/// persists asynchronously, so that value can be `None` for a request whose
+/// artifacts exist a moment later. Re-resolving against the filesystem keeps the
+/// list consistent with the detail endpoint. A missing directory stays `None`;
+/// no path is invented. A resolution failure (no `HOME`, unreadable root) is
+/// reported as "no artifact reference", never as an error, because the list is
+/// a catalog view and one unavailable samples root must not fail it.
+fn resolve_v3_obs_row_artifact_ref(row: &QueryRow) -> Option<String> {
+    let request_id = row.meta.get("request_id").and_then(Value::as_str)?;
+    if request_id.trim().is_empty() {
+        return None;
+    }
+    resolve_v3_obs_sample_dir(row.scope.port, request_id)
+        .ok()
+        .flatten()
+        .map(|dir| dir.display().to_string())
 }
 
 fn parse_query_params(raw: &str) -> std::collections::HashMap<String, String> {
@@ -1221,95 +1435,5 @@ fn urldecode_component(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        error_category_status_code, row_cache_creation_value, row_cache_read_value,
-        row_cached_value, row_input_value, row_output_value, row_total_value, QueryRow,
-        SourceScope,
-    };
-    use serde_json::{json, Value};
-
-    #[test]
-    fn cache_read_uses_raw_input_as_denominator() {
-        // OpenAI/Responses shape: input_tokens already includes cached_tokens;
-        // cache hit is cached / input_tokens.
-        let row = build_usage_row(json!({
-            "input_tokens": 1000,
-            "output_tokens": 200,
-            "cached_tokens": 250,
-            "total_tokens": 1200,
-        }));
-        assert_eq!(row_input_value(&row), 1000);
-        assert_eq!(row_output_value(&row), 200);
-        assert_eq!(row_cached_value(&row), 250);
-        assert_eq!(row_total_value(&row), 1200);
-        assert_eq!(row_cache_read_value(&row), 250);
-    }
-
-    #[test]
-    fn split_anthropic_cache_fields_keep_read_and_creation_distinct() {
-        let row = build_usage_row(json!({
-            "input_tokens": 800,
-            "output_tokens": 150,
-            "cache_read_input_tokens": 600,
-            "cache_creation_input_tokens": 100,
-            "total_tokens": 950,
-        }));
-        assert_eq!(row_input_value(&row), 800);
-        assert_eq!(row_cached_value(&row), 0);
-        assert_eq!(row_cache_read_value(&row), 600);
-        assert_eq!(row_cache_creation_value(&row), 100);
-    }
-
-    #[test]
-    fn split_cache_read_zero_does_not_use_creation_as_hit() {
-        let row = build_usage_row(json!({
-            "input_tokens": 100,
-            "output_tokens": 5,
-            "cache_read_input_tokens": 0,
-            "cache_creation_input_tokens": 30,
-            "total_tokens": 105,
-        }));
-        assert_eq!(row_cache_read_value(&row), 0);
-        assert_eq!(row_cache_creation_value(&row), 30);
-    }
-
-    fn build_usage_row(usage: Value) -> QueryRow {
-        QueryRow {
-            request_key: "k".to_string(),
-            event_type: "request.completed".to_string(),
-            started_epoch_ms: 0,
-            updated_epoch_ms: 0,
-            finished_epoch_ms: Some(0),
-            duration_ms: Some(0),
-            meta: json!({}),
-            scope: SourceScope::default(),
-            result: Some("success".to_string()),
-            attempts: 1,
-            failed_attempts: 0,
-            switches: 0,
-            usage: Some(usage),
-            timing_internal_ms: None,
-            timing_external_ms: None,
-            servertool: false,
-            raw_artifact_ref: None,
-        }
-    }
-
-    #[test]
-    fn error_categories_always_have_numbered_status_projection() {
-        assert_eq!(
-            error_category_status_code(Some("malformed_json")),
-            Some("400".to_string())
-        );
-        assert_eq!(
-            error_category_status_code(Some("provider_response_sse_event_invalid")),
-            Some("599".to_string())
-        );
-        assert_eq!(
-            error_category_status_code(Some("v3_debug_failure")),
-            Some("598".to_string())
-        );
-        assert_eq!(error_category_status_code(Some("unclassified")), None);
-    }
-}
+#[path = "observability_tests.rs"]
+mod tests;

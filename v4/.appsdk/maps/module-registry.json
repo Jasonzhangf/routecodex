@@ -46,12 +46,6 @@
         "v4_parity_gate_real_runtime_admission",
         "v4_parity_gate_real_runtime_admission_red",
         "v4_real_runtime_admission_red",
-        "v4_feature_layer_batches",
-        "v4_feature_layer_batch_build_guard",
-        "v4_feature_layer_batches_self_test",
-        "v4_feature_layer_batch_admission",
-        "v4_feature_layer_batches_boundary",
-        "v4_feature_layer_batches_red",
         "v4_parity_gate_plane_isolation",
         "v4_parity_gate_plane_isolation_red"
       ]
@@ -72,7 +66,6 @@
         "contract_valid",
         "record_graph",
         "v4_active_link_resolver",
-        "v4_active_index_verify",
         "v4_cargo_workspace_build"
       ]
     },
@@ -135,7 +128,6 @@
       "verification_gates": [
         "v4_edge_l1_regression",
         "v4_active_link_resolver",
-        "v4_active_index_verify",
         "v4_frozen_source_edge_forbidden",
         "fix_lifecycle_graph",
         "mainline_merge_identity",
@@ -567,9 +559,7 @@
       "verification_gates": [
         "v4_node_container_l2_regression",
         "v4_cordis_host_l3_regression",
-        "v4_node_container_test_consumer",
-        "v4_parity_gate_node_container",
-        "v4_parity_gate_node_container_red"
+        "v4_node_container_test_consumer"
       ]
     },
     {
@@ -654,19 +644,6 @@
         "v4_servertool_l2_regression",
         "v4_infrastructure_contract"
       ]
-    },
-    {
-      "module_id": "routecodex-v4-parity",
-      "status": "active",
-      "owner": "routecodex-v4-parity",
-      "owned_paths": [
-        "scripts/architecture/verify-v4-product-parity-ledger.mjs",
-        "scripts/architecture/verify-v4-v3-baseline-delta.mjs",
-        "scripts/architecture/verify-v4-product-parity-status.mjs",
-        "scripts/architecture/verify-v4-product-differential.mjs"
-      ],
-      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**"],
-      "verification_gates": ["v4_parity_ledger_positive", "v4_parity_ledger_red", "v4_parity_ledger_boundary", "v4_parity_ledger_plane"]
     }
   ]
 }

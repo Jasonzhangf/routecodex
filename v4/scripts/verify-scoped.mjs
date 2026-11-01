@@ -55,10 +55,6 @@ function metadataCommands(paths) {
   const commands = [];
   if (paths.includes('docs/architecture/maps/verification-map.json')) {
     commands.push({
-      label: 'contract:verification-map',
-      command: 'node scripts/architecture/verify-v4-feature-layer-batches.mjs',
-    });
-    commands.push({
       label: 'contract:verification-map-binding',
       command: 'node scripts/verify-isolation.mjs --verification-map-binding',
     });

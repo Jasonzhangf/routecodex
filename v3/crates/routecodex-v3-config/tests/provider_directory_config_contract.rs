@@ -131,6 +131,202 @@ fn native_v3_root_loads_referenced_provider_files() {
 }
 
 #[test]
+fn provider_directory_responses_omitted_block_preserves_absence() {
+    // A Responses provider that omits the whole Responses subconfiguration must
+    // take the same-protocol Direct default instead of the force-Relay "chat"
+    // policy. Explicit declarations stay untouched (see the neighbors below).
+    let root = temp_root("responses-omitted-block");
+    let token = write_token(&root, "external");
+    write_provider(&root, "external", "responses", "gpt-test", &token, "");
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("external", "gpt-test")).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("omitted Responses block must compile");
+    assert!(
+        manifest.providers["external"].interfaces["default"]
+            .responses
+            .is_none(),
+        "an omitted Responses block must not invent a process policy"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn provider_directory_responses_explicit_process_is_preserved() {
+    let root = temp_root("responses-explicit-process");
+    let token = write_token(&root, "external");
+    write_provider(
+        &root,
+        "external",
+        "responses",
+        "gpt-test",
+        &token,
+        "\n[provider.responses]\nprocess = \"chat\"\nstreaming = \"always\"\n",
+    );
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("external", "gpt-test")).unwrap();
+
+    let manifest = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("explicit Responses block must compile");
+    let responses = manifest.providers["external"].interfaces["default"]
+        .responses
+        .as_ref()
+        .expect("responses provider must materialize a Responses policy");
+    assert_eq!(
+        responses.process, "chat",
+        "an explicit process declaration must be preserved"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn write_multi_interface_provider(root: &Path, provider_id: &str, token_file: &Path) -> PathBuf {
+    let path = root
+        .join("provider")
+        .join(provider_id)
+        .join("config.v2.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        format!(
+            r#"version = "2.0.0"
+providerId = "{provider_id}"
+
+[provider]
+id = "{provider_id}"
+enabled = true
+defaultModel = "gpt-test"
+
+[provider.auth]
+type = "apikey"
+entries = [{{ alias = "key1", tokenFile = "{}" }}]
+
+[provider.models."gpt-test"]
+wireName = "gpt-test"
+capabilities = ["text"]
+supportsStreaming = true
+
+[provider.interfaces.responses]
+enabled = true
+type = "responses"
+baseURL = "https://{provider_id}.invalid/v1"
+responses = {{ process = "chat", streaming = "always", transport = "http" }}
+
+[provider.interfaces.chat]
+enabled = true
+type = "openai_chat"
+baseURL = "https://{provider_id}.invalid/chat/v1"
+compatibilityProfile = "chat:test"
+"#,
+            token_file.display()
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn provider_directory_compiles_multi_interface_provider_files() {
+    let root = temp_root("multi-interface");
+    let token = write_token(&root, "multi");
+    write_multi_interface_provider(&root, "multi", &token);
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        r#"version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4555
+routing_group = "primary"
+endpoints = ["responses"]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", key = "key1", interface = "chat", priority = 1 }]
+"#,
+    )
+    .unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("multi-interface provider file must compile");
+    let provider = &snapshot.providers["multi"];
+    assert_eq!(provider.interfaces.len(), 2);
+    assert_eq!(provider.interfaces["chat"].provider_type, "openai_chat");
+    assert_eq!(
+        provider.interfaces["chat"].base_url,
+        "https://multi.invalid/chat/v1"
+    );
+    assert_eq!(
+        provider.interfaces["chat"].compatibility_profile.as_deref(),
+        Some("chat:test")
+    );
+    assert_eq!(
+        provider.interfaces["responses"]
+            .responses
+            .as_ref()
+            .expect("responses contract")
+            .process,
+        "chat"
+    );
+    assert_eq!(
+        snapshot.route_groups["primary"].pools["default"].targets[0]
+            .interface
+            .as_deref(),
+        Some("chat")
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn provider_directory_rejects_scalar_and_interface_dual_truth() {
+    let root = temp_root("multi-interface-dual-truth");
+    let token = write_token(&root, "multi");
+    let provider_path = write_multi_interface_provider(&root, "multi", &token);
+    let provider_text = fs::read_to_string(&provider_path).unwrap().replacen(
+        "defaultModel = \"gpt-test\"",
+        "defaultModel = \"gpt-test\"\ntype = \"responses\"\nbaseURL = \"https://multi.invalid/v1\"",
+        1,
+    );
+    fs::write(&provider_path, provider_text).unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        r#"version = 3
+
+[servers.primary]
+bind = "127.0.0.1"
+port = 4555
+routing_group = "primary"
+endpoints = ["responses"]
+
+[route_groups.primary.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "provider_model", provider = "multi", model = "gpt-test", key = "key1", priority = 1 }]
+"#,
+    )
+    .unwrap();
+
+    let error = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect_err("scalar and interface provider truth must not coexist");
+    assert!(
+        error
+            .to_string()
+            .contains("cannot declare interfaces together with type/baseURL/responses"),
+        "unexpected error: {error}"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn off_route_directory_default_model_does_not_block_referenced_route() {
     let root = temp_root("off-route-default");
     let token = write_token(&root, "external");
@@ -237,50 +433,6 @@ targets = [{ kind = "provider_model", provider = "direct-provider", model = "dir
 
     let manifest = V3ConfigStore::new(&config_path).load_snapshot().unwrap();
     assert!(manifest.providers.contains_key("direct-provider"));
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn provider_directory_snake_case_web_search_mode_parses_to_manifest() {
-    // 生产 provider 目录 config.v2.toml 使用 snake_case 的
-    // `web_search_execution_mode` / `web_search_backend`（历史写法），
-    // 必须解析进 manifest（Mode B 判定真源）——否则真实请求
-    // resolve_web_search_mode_and_backend 返回 None → web_search 声明不
-    // 贡献路由能力 → 落 default → openai_chat 出站不支持 web_search part
-    // → 500（真实故障 20260808）。
-    let root = temp_root("snake-mode");
-    let token = write_token(&root, "external");
-    let provider_path = write_provider(&root, "external", "anthropic", "MiniMax-M3", &token, "");
-    // 在 model 段内注入 snake_case 的 Mode B 字段（生产 provider config 写法）。
-    let content = fs::read_to_string(&provider_path)
-        .unwrap()
-        .replace(
-            "maxContextTokens = 200000",
-            "maxContextTokens = 200000\nweb_search_execution_mode = \"metadata_center_local_search\"\nweb_search_backend = \"MiniMax-M3\"",
-        );
-    fs::write(&provider_path, content).unwrap();
-    let config_path = root.join("config.v3.toml");
-    fs::write(
-        &config_path,
-        directory_root_config("external", "MiniMax-M3"),
-    )
-    .unwrap();
-
-    let snapshot = V3ConfigStore::new(&config_path)
-        .load_snapshot_with_source_identity()
-        .unwrap();
-    let model = &snapshot.manifest.providers["external"].models["MiniMax-M3"];
-    assert_eq!(
-        model.web_search_execution_mode.as_str(),
-        "metadata_center_local_search",
-        "snake_case web_search_execution_mode must parse into manifest (found {:?})",
-        model.web_search_execution_mode.as_str()
-    );
-    assert_eq!(
-        model.web_search_backend_binding.as_deref(),
-        Some("MiniMax-M3"),
-        "snake_case web_search_backend must parse into manifest"
-    );
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -409,6 +561,63 @@ supportsThinking = true
     assert_eq!(
         provider.compatibility_profile.as_deref(),
         Some("responses:deepseek-console-go")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn deepseek_official_directory_provider_defaults_to_official_responses_compat_profile() {
+    // DeepSeek 官方 Responses 的 reasoning 回传契约必须由 provider 配置声明承载，
+    // 不能按 provider id/模型名在 wire 层猜：目录 provider 未显式声明
+    // compatibilityProfile 时解析到 responses:deepseek-official。
+    let root = temp_root("deepseek-official-default-profile");
+    let token = write_token(&root, "deepseek-official");
+    let path = root
+        .join("provider")
+        .join("deepseek_official")
+        .join("config.v2.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        format!(
+            r#"version = "2.0.0"
+providerId = "deepseek_official"
+
+[provider]
+id = "deepseek_official"
+enabled = true
+type = "responses"
+baseURL = "https://api.deepseek.invalid"
+defaultModel = "deepseek-flash"
+
+[provider.auth]
+type = "apikey"
+entries = [{{ alias = "key1", tokenFile = "{}" }}]
+
+[provider.models."deepseek-flash"]
+wireName = "deepseek-flash"
+capabilities = ["text", "reasoning", "thinking", "tools"]
+supportsStreaming = true
+supportsThinking = true
+"#,
+            token.display()
+        ),
+    )
+    .unwrap();
+    let config_path = root.join("config.v3.toml");
+    fs::write(
+        &config_path,
+        directory_root_config("deepseek_official", "deepseek-flash"),
+    )
+    .unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot_with_source_identity()
+        .unwrap();
+    let provider = &snapshot.manifest.providers["deepseek_official"];
+    assert_eq!(
+        provider.compatibility_profile.as_deref(),
+        Some("responses:deepseek-official")
     );
     fs::remove_dir_all(root).unwrap();
 }

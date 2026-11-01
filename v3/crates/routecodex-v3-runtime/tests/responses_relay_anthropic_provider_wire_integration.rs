@@ -101,6 +101,7 @@ impl ResponsesTransport for AnthropicCyberRefusalThenSuccessTransport {
             let frames: Vec<Result<Vec<u8>, V3ProviderError>> = vec![
                 Ok("event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_refusal\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-fable-5\",\"content\":[]}}\n\n".as_bytes().to_vec()),
                 Ok("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"type\":\"refusal\",\"category\":\"cyber\",\"explanation\":\"policy\"}}}\n\n".as_bytes().to_vec()),
+                Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
             ];
             return Ok(V3ProviderResp14Raw::from_sse(
                 request.request_id().to_string(),
@@ -165,7 +166,7 @@ data: {"type":"content_block_start","index":0,"content_block":{"type":"text","te
 "#
             .to_vec()),
             Ok(br#"event: content_block_delta
-data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial-must-not-commit"}}
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial-truncated-output"}}
 
 "#
             .to_vec()),
@@ -292,6 +293,74 @@ async fn responses_relay_selected_anthropic_provider_uses_anthropic_messages_wir
     assert_eq!(client["usage"]["input_tokens"], 7);
     assert_eq!(client["usage"]["output_tokens"], 5);
     assert_eq!(client["usage"]["total_tokens"], 12);
+}
+
+#[tokio::test]
+async fn responses_relay_named_unpaired_tool_output_reaches_anthropic_wire_without_fabricated_call_id(
+) {
+    // Live P0 shape (bug f29d7db): the standalone Codex notification output must
+    // reach the selected Anthropic target as client-visible text, not as a
+    // fabricated tool_result whose tool_use_id has no matching tool_use.
+    let transport = AnthropicProviderJsonTransport {
+        captured_url: Mutex::new(None),
+        captured_body: Mutex::new(None),
+    };
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-named-unpaired-output".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[
+                    {
+                        "type":"message",
+                        "role":"user",
+                        "content":[{"type":"input_text","text":"continue"}]
+                    },
+                    {
+                        "type":"function_call_output",
+                        "id":"fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                        "name":"send_message_to_thread",
+                        "namespace":"codex_tui",
+                        "output":"<codex_delegation>cross-thread notification</codex_delegation>"
+                    }
+                ],
+                "stream":false,
+                "max_output_tokens":64
+            }),
+        },
+        &transport,
+    )
+    .await
+    .expect("named unpaired tool output must not be rejected before routing");
+
+    let captured = transport.captured_body.lock().unwrap().clone().unwrap();
+    let messages = captured["messages"].as_array().expect("anthropic messages");
+    let serialized = serde_json::to_string(messages).unwrap();
+    assert!(
+        serialized.contains("cross-thread notification"),
+        "the unpaired output text must reach the Anthropic wire: {captured}"
+    );
+    assert!(
+        !serialized.contains("fco_01a0c969-72fc-7530-9f23-0181a8b116e3"),
+        "the Responses item id must never become an Anthropic tool_use_id: {captured}"
+    );
+    assert!(
+        messages.iter().all(|message| {
+            message["content"]
+                .as_array()
+                .is_none_or(|blocks| blocks.iter().all(|block| block["type"] != "tool_result"))
+        }),
+        "an unpaired output must not fabricate an Anthropic tool_result: {captured}"
+    );
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
 }
 
 #[tokio::test]
@@ -611,7 +680,8 @@ async fn responses_relay_claude_anthropic_provider_uses_claude_code_prompt_and_h
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exhausted() {
+async fn responses_relay_anthropic_cyber_refusal_sse_preserves_business_terminal() {
+    use futures_util::StreamExt;
     let transport = AnthropicCyberRefusalThenSuccessTransport {
         attempts: Mutex::new(0),
     };
@@ -641,35 +711,23 @@ async fn responses_relay_anthropic_cyber_refusal_sse_is_terminal_when_route_exha
     .await
     .unwrap();
 
-    // RetrySame is a config compatibility enum only; production never grants a
-    // same-candidate retry, and this pool declares a single target so
-    // reselection cannot yield another attempt either.
     assert_eq!(*transport.attempts.lock().unwrap(), 1);
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 200);
     let observability = output.observability.as_ref().expect("observability");
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    let failure = &observability.provider_failure_events[0];
-    assert_eq!(failure.status, 429);
-    assert_eq!(
-        failure.error_type.as_deref(),
-        Some("ANTHROPIC_CYBER_REFUSAL")
-    );
-    assert!(failure
-        .message
-        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
-    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
-        panic!("route exhaustion must project a typed JSON terminal error")
+    assert!(observability.provider_failure_events.is_empty());
+    let V3ResponsesRelayClientBody::Sse(body) = output.client_body else {
+        panic!("provider terminal must reach the requested SSE client channel")
     };
-    assert_eq!(body["error"]["code"], "network_error");
-    assert!(
-        output.node_trace.contains(&"V3Error06ClientProjected"),
-        "single-candidate pool must project the provider failure terminally: {:?}",
-        output.node_trace
-    );
+    let chunks = body.collect::<Vec<_>>().await;
+    let text = String::from_utf8(chunks.into_iter().flatten().collect()).unwrap();
+    assert!(text.contains("response.incomplete"), "{text}");
+    assert!(text.contains("content_filter"), "{text}");
+    assert!(output.error_chain.is_none());
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation_semantics() {
+async fn responses_relay_anthropic_cyber_refusal_json_preserves_business_terminal() {
     let transport = AnthropicCyberRefusalJsonTransport {
         attempts: Mutex::new(0),
     };
@@ -700,22 +758,21 @@ async fn responses_relay_anthropic_cyber_refusal_json_keeps_retryable_saturation
     .unwrap();
 
     assert_eq!(*transport.attempts.lock().unwrap(), 1);
-    assert_eq!(output.status, 502);
+    assert_eq!(output.status, 200);
     let observability = output.observability.as_ref().expect("observability");
-    assert_eq!(observability.provider_failure_events.len(), 1);
-    let failure = &observability.provider_failure_events[0];
-    assert_eq!(failure.status, 429);
-    assert_eq!(
-        failure.error_type.as_deref(),
-        Some("ANTHROPIC_CYBER_REFUSAL")
-    );
-    assert!(failure
-        .message
-        .contains("Anthropic cyber refusal is treated as retryable provider saturation"));
+    assert!(observability.provider_failure_events.is_empty());
+    let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
+        panic!("provider terminal must reach the requested JSON client channel")
+    };
+    assert_eq!(body["status"], "incomplete");
+    assert_eq!(body["incomplete_details"]["reason"], "content_filter");
+    assert!(body.to_string().contains("refused"), "{body}");
+    assert!(output.error_chain.is_none());
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
 }
 
 #[tokio::test]
-async fn responses_relay_anthropic_incomplete_exhaustion_keeps_typed_terminal_error() {
+async fn responses_relay_anthropic_max_tokens_commits_partial_incomplete_output() {
     let transport = AnthropicIncompleteExhaustionTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
@@ -740,42 +797,38 @@ async fn responses_relay_anthropic_incomplete_exhaustion_keeps_typed_terminal_er
         &transport,
     )
     .await
-    .expect("Anthropic provider exhaustion must project a typed terminal error");
+    .expect("Anthropic max_tokens must project the partial incomplete response");
 
-    assert_eq!(output.status, 502);
-    let mut attempted_provider_ids = transport.provider_ids.lock().unwrap().clone();
-    attempted_provider_ids.sort();
+    assert_eq!(output.status, 200);
+    assert!(output.error_chain.is_none());
+    // The pool tries one candidate at a time; an admitted truncation is a
+    // committed client response, so no further candidate may be attempted.
+    let attempted_provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(
-        attempted_provider_ids,
-        [
-            "anthropic_incomplete_primary",
-            "anthropic_incomplete_secondary"
-        ]
+        attempted_provider_ids.len(),
+        1,
+        "an admitted output-cap truncation must not switch provider: {attempted_provider_ids:?}"
+    );
+    let observability = output.observability.as_ref().expect("observability");
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "output-cap truncation is valid partial output, not a provider failure: {observability:?}"
     );
     let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
-        panic!("expected typed JSON error body")
+        panic!("expected JSON client body")
     };
-    assert_eq!(body["error"]["code"], "network_error");
-    assert_eq!(body["error"]["message"], "network error");
-    assert!(
-        !body.to_string().contains("partial-must-not-commit"),
-        "partial incomplete output must not be committed: {body}"
-    );
+    assert_eq!(body["status"], "incomplete", "{body}");
     assert_eq!(
-        output.error_chain.as_deref(),
-        Some(routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS.as_slice())
+        body["incomplete_details"]["reason"], "max_output_tokens",
+        "{body}"
     );
-    let usage = output
-        .stream_observation
-        .as_ref()
-        .expect("terminal incomplete failure must retain the final attempt observation")
-        .snapshot()
-        .expect("terminal incomplete failure observation must be readable")
-        .usage
-        .expect("terminal incomplete failure must retain provider usage");
-    assert_eq!(usage.input_tokens, Some(10));
-    assert_eq!(usage.output_tokens, Some(2));
-    assert_eq!(usage.total_tokens, Some(12));
+    assert!(
+        body.to_string().contains("partial-truncated-output"),
+        "truncated partial output must reach the client: {body}"
+    );
+    assert_eq!(body["usage"]["input_tokens"], 10, "{body}");
+    assert_eq!(body["usage"]["output_tokens"], 2, "{body}");
+    assert_eq!(body["usage"]["total_tokens"], 12, "{body}");
 }
 
 #[tokio::test]
@@ -1270,8 +1323,10 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
                 "thinking text must remain Responses reasoning.summary text: {text}"
             );
             assert!(text.contains("event: response.completed"));
-            assert!(text.contains("event: response.done"));
-            assert!(text.contains("data: [DONE]"));
+            // Responses 客户端帧只由协议终态收口；不得追加 response.done 或
+            // Chat Completions 的 [DONE] 终止符。
+            assert!(!text.contains("event: response.done"));
+            assert!(!text.contains("data: [DONE]"));
             assert!(
                 !text.contains("redacted_thinking"),
                 "provider-wire redacted_thinking must not leak to Responses client payload: {text}"
@@ -1279,6 +1334,222 @@ async fn responses_relay_anthropic_provider_sse_preserves_reasoning_encrypted_co
         }
         V3ResponsesRelayClientBody::Json(_) => panic!("stream request must project SSE body"),
     }
+}
+
+// Controlled Anthropic provider fixture (not a live provider sample). A
+// provider `thinking` block may carry provider extension fields such as
+// `cache_control` (an Anthropic prompt-cache breakpoint). The transparent
+// proxy contract requires a compatible provider response to survive
+// projection, so the native reasoning payload and the extension must both
+// reach the client.
+struct AnthropicProviderSseReasoningCacheControlTransport;
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderSseReasoningCacheControlTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_sse_cache","type":"message","role":"assistant","model":"MiniMax-M3","content":[],"usage":{"input_tokens":3,"output_tokens":4}}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"plan ","cache_control":{"type":"ephemeral"}}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"step"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":"answer"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+"#.to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}
+
+"#.to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+            Ok(b"data: [DONE]
+
+".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_provider_sse_preserves_thinking_cache_control_extension() {
+    let output = execute_v3_responses_relay_runtime(
+        &manifest(),
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-sse-cache-control".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
+                "stream":false
+            }),
+        },
+        &AnthropicProviderSseReasoningCacheControlTransport,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(output.status, 200, "runtime output: {output:?}");
+    let client = match output.client_body {
+        V3ResponsesRelayClientBody::Json(value) => value,
+        V3ResponsesRelayClientBody::Sse(_) => panic!("expected JSON client body"),
+    };
+    let reasoning = &client["output"][0];
+    assert_eq!(reasoning["type"], "reasoning");
+    assert_eq!(reasoning["summary"][0]["text"], "plan step");
+    assert_eq!(
+        reasoning["routecodex_chat_extension"]["anthropic_reasoning"]["cache_control"],
+        json!({"type":"ephemeral"}),
+        "a representable provider reasoning extension must survive projection: {client}"
+    );
+    assert_eq!(client["output"][1]["content"][0]["text"], "answer");
+    assert_eq!(client["status"], "completed");
+}
+
+// Controlled Anthropic provider fixture (not a live provider sample). A
+// reasoning block that omits its own native payload is a real malformed
+// business response: the runtime must surface a typed internal error and
+// must not fabricate a client payload for it.
+struct AnthropicProviderSseMalformedReasoningTransport;
+
+#[async_trait]
+impl ResponsesTransport for AnthropicProviderSseMalformedReasoningTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let stream = futures_util::stream::iter([
+            Ok(br#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_sse_bad","type":"message","role":"assistant","model":"MiniMax-M3","content":[]}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","text":"alias without native payload"}}
+
+"#.to_vec()),
+            Ok(br#"event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+"#.to_vec()),
+            Ok(br#"event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}
+
+"#.to_vec()),
+            Ok(br#"event: message_stop
+data: {"type":"message_stop"}
+
+"#.to_vec()),
+            Ok(b"data: [DONE]
+
+".to_vec()),
+        ]);
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().to_string(),
+            request.provider_id().to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_provider_sse_malformed_reasoning_is_internal_typed_error() {
+    let mut manifest = manifest();
+    // The single failed identity cannot be retried and cannot close the
+    // request before its original declared recovery budget.
+    manifest
+        .servers
+        .get_mut("gateway_priority_5555")
+        .unwrap()
+        .execution
+        .as_mut()
+        .unwrap()
+        .attempt_store
+        .residence_timeout_ms = 1000;
+    let output = execute_v3_responses_relay_runtime(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "gateway_priority_5555".into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                concat!(module_path!(), ":", line!()),
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-responses-anthropic-sse-malformed-reasoning".into(),
+            payload: json!({
+                "model":"MiniMax-M3",
+                "input":[{"role":"user","content":[{"type":"input_text","text":"reason"}]}],
+                "stream":false
+            }),
+        },
+        &AnthropicProviderSseMalformedReasoningTransport,
+    )
+    .await
+    .unwrap();
+
+    // The runtime keeps the failure in the typed internal Error chain; the
+    // server turns a populated error chain into a no-response transport break,
+    // so no provider error payload reaches the client.
+    assert!(
+        output.error_chain.is_some(),
+        "a reasoning block missing its native payload must stay a typed internal error: {output:?}"
+    );
+    assert_eq!(output.status, 502);
+    let observability = output.observability.as_ref().expect("observability");
+    let failure = observability
+        .provider_failure_events
+        .first()
+        .unwrap_or_else(|| panic!("provider failure event missing: {output:?}"));
+    assert!(
+        failure
+            .message
+            .contains("Anthropic codec malformed thinking"),
+        "the typed diagnostic must stay distinct: {failure:?}"
+    );
+    assert_eq!(
+        failure.error_type.as_deref(),
+        Some("provider_response_event_codec_failure")
+    );
 }
 
 fn manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
@@ -1295,7 +1566,7 @@ endpoints = ["responses", "anthropic"]
 
 [servers.gateway_priority_5555.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.minimax]
@@ -1304,6 +1575,9 @@ base_url = "http://controlled.invalid/anthropic"
 default_model = "MiniMax-M3"
 compatibility_profile = "chat:minimax"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
+# This suite checks Anthropic wire projection; keep parallel tests outside the
+# provider admission path they are not intended to exercise.
+concurrency = { max_in_flight = 32, acquire_timeout_ms = 5000, stale_lease_ms = 300000 }
 
 [providers.minimax.models.MiniMax-M3]
 wire_name = "MiniMax-M3"
@@ -1334,7 +1608,7 @@ endpoints = ["responses"]
 
 [servers.anthropic_incomplete_exhaustion.execution]
 allowed_modes = ["relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.anthropic_incomplete_primary]
@@ -1394,7 +1668,7 @@ endpoints = ["responses"]
 
 [servers.anthropic_v3_10000.execution]
 allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "servertool_followup", "dry_run"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
 
 [providers.modrouter_anthropic]

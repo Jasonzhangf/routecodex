@@ -1,6 +1,72 @@
 use super::*;
 
 #[test]
+fn named_unpaired_tool_output_keeps_identity_without_fabricating_call_id() {
+    // Live P0 shape (bug f29d7db): name+namespace identify the standalone output.
+    // The Responses item id (fco_*) is an item id, never a tool call id, so it must
+    // not become tool_call_id and must not fabricate a Chat tool pair.
+    let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-5.5",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "continue"}]
+            },
+            {
+                "type": "function_call_output",
+                "id": "fco_01a0c969-72fc-7530-9f23-0181a8b116e3",
+                "name": "send_message_to_thread",
+                "namespace": "codex_tui",
+                "output": "<codex_delegation>cross-thread notification</codex_delegation>"
+            }
+        ]
+    }))
+    .expect("named unpaired tool output must reach Chat canonical");
+
+    let messages = request["messages"].as_array().expect("messages");
+    assert!(
+        messages.iter().all(|message| {
+            message.get("tool_call_id").and_then(Value::as_str)
+                != Some("fco_01a0c969-72fc-7530-9f23-0181a8b116e3")
+        }),
+        "the Responses item id must never be projected as a tool_call_id: {request}"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|message| message.get("role").and_then(Value::as_str) != Some("tool")),
+        "an unpaired output must not fabricate a tool role message: {request}"
+    );
+    let carrier = messages
+        .iter()
+        .find(|message| {
+            message["routecodex_chat_extension"]["responses_tool_output_name"].is_string()
+        })
+        .unwrap_or_else(|| panic!("named unpaired output must keep its identity: {request}"));
+    let extension = &carrier["routecodex_chat_extension"];
+    assert_eq!(
+        extension["responses_tool_output_name"],
+        "send_message_to_thread"
+    );
+    assert_eq!(extension["responses_tool_output_namespace"], "codex_tui");
+    assert_eq!(
+        extension["responses_item_id"],
+        "fco_01a0c969-72fc-7530-9f23-0181a8b116e3"
+    );
+    assert_eq!(
+        extension["responses_tool_output_type"],
+        "function_call_output"
+    );
+    assert!(
+        carrier["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("cross-thread notification")),
+        "the exact output text must survive canonicalization: {request}"
+    );
+}
+
+#[test]
 fn codex_client_metadata_keeps_source_identity_in_chat_extension() {
     let turn_metadata = "x".repeat(577);
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -110,7 +176,10 @@ fn responses_explicit_assistant_message_then_function_call_coalesces_same_turn()
         "same-turn assistant text and tool_calls must coalesce: {request}"
     );
     assert_eq!(messages[0]["role"], json!("assistant"));
-    assert_eq!(messages[0]["content"], json!("turn one"));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type": "text", "text": "turn one"}])
+    );
     assert_eq!(
         messages[0]["tool_calls"][0]["id"],
         json!("call_z"),
@@ -145,8 +214,14 @@ fn responses_two_nonempty_assistant_messages_keep_history_boundaries() {
         2,
         "two non-empty assistant messages are independent history, must not coalesce: {request}"
     );
-    assert_eq!(messages[0]["content"], json!("turn one"));
-    assert_eq!(messages[1]["content"], json!("turn two"));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type": "text", "text": "turn one"}])
+    );
+    assert_eq!(
+        messages[1]["content"],
+        json!([{"type": "text", "text": "turn two"}])
+    );
 }
 
 #[test]
@@ -197,7 +272,10 @@ fn responses_assistant_message_reasoning_function_call_coalesces_single_turn() {
     assert_eq!(messages[0]["role"], json!("assistant"));
     assert_eq!(
         messages[0]["content"],
-        json!("These three untracked entries aren't code — they're local tool artifacts:")
+        json!([{
+            "type": "text",
+            "text": "These three untracked entries aren't code — they're local tool artifacts:"
+        }])
     );
     assert_eq!(messages[0]["reasoning_content"], json!("Need to inspect."));
     assert_eq!(
@@ -207,6 +285,498 @@ fn responses_assistant_message_reasoning_function_call_coalesces_single_turn() {
     );
     assert_eq!(messages[1]["role"], json!("tool"));
     assert_eq!(messages[2]["role"], json!("user"));
+}
+
+#[test]
+fn responses_reasoning_extension_survives_assistant_message_coalescing() {
+    // A reasoning item that follows an assistant text message, or follows a
+    // pending function call, is merged into that assistant message to keep
+    // tool adjacency. The merge must also carry the provider reasoning
+    // extension; otherwise the second provider request loses `cache_control`.
+    let reasoning_item = json!({
+        "type": "reasoning",
+        "id": "reasoning-ext-1",
+        "summary": [{"type": "summary_text", "text": "Why the lookup matters."}],
+        "routecodex_chat_extension": {
+            "anthropic_reasoning": {"cache_control": {"type": "ephemeral"}}
+        }
+    });
+
+    let message_first = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "I will look that up."}]
+            },
+            reasoning_item.clone(),
+            {
+                "type": "function_call",
+                "call_id": "call_ext_1",
+                "name": "lookup",
+                "arguments": "{\"query\":\"p0\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_ext_1",
+                "output": "42"
+            }
+        ]
+    }))
+    .expect("message+reasoning extension must project to Chat");
+    let message_first_messages = message_first["messages"].as_array().expect("messages");
+    assert_eq!(
+        message_first_messages[0]["routecodex_chat_extension"]["anthropic_reasoning"]
+            ["cache_control"],
+        json!({"type": "ephemeral"}),
+        "extension must survive merging into a preceding assistant message: {message_first}"
+    );
+
+    let tool_call_first = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "function_call",
+                "call_id": "call_ext_2",
+                "name": "lookup",
+                "arguments": "{\"query\":\"p0\"}"
+            },
+            reasoning_item,
+            {
+                "type": "function_call_output",
+                "call_id": "call_ext_2",
+                "output": "42"
+            }
+        ]
+    }))
+    .expect("function_call+reasoning extension must project to Chat");
+    let tool_call_first_messages = tool_call_first["messages"].as_array().expect("messages");
+    assert_eq!(
+        tool_call_first_messages[0]["routecodex_chat_extension"]["anthropic_reasoning"]
+            ["cache_control"],
+        json!({"type": "ephemeral"}),
+        "extension must survive merging into a pending tool-call message: {tool_call_first}"
+    );
+
+    let multiple_reasoning = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "first block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "cache_control": {"type": "ephemeral"},
+                        "first_only": true
+                    }
+                }
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "second block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {"second_only": true}
+                }
+            }
+        ]
+    }))
+    .expect("multiple reasoning extensions must project to Chat");
+    let merged_extension =
+        &multiple_reasoning["messages"][0]["routecodex_chat_extension"]["anthropic_reasoning"];
+    assert_eq!(
+        merged_extension["cache_control"],
+        json!({"type": "ephemeral"})
+    );
+    assert_eq!(merged_extension["first_only"], json!(true));
+    assert!(
+        merged_extension.get("second_only").is_none(),
+        "the first block compatibility view must not gain values from a later block: {multiple_reasoning}"
+    );
+    let block_extensions = multiple_reasoning["messages"][0]["routecodex_chat_extension"]
+        ["anthropic_reasoning_blocks"]
+        .as_array()
+        .expect("each coalesced reasoning block must retain its own association");
+    assert_eq!(block_extensions.len(), 2, "{multiple_reasoning}");
+    assert_eq!(
+        block_extensions[1]["anthropic_reasoning"]["second_only"],
+        json!(true),
+        "a second carrier-bearing reasoning item must not lose its extension: {multiple_reasoning}"
+    );
+}
+
+#[test]
+fn responses_reasoning_extensions_keep_distinct_block_associations() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "claude",
+        "input": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "answer"}]
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "first block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "thinking",
+                        "marker": "first",
+                        "opaque": {"a": 1}
+                    }
+                }
+            },
+            {
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "second block"}],
+                "routecodex_chat_extension": {
+                    "anthropic_reasoning": {
+                        "type": "thinking",
+                        "marker": "second",
+                        "opaque": {"b": 2}
+                    }
+                }
+            }
+        ]
+    }))
+    .expect("multiple provider reasoning extensions must reach canonical Chat");
+
+    let blocks = canonical["messages"][0]["routecodex_chat_extension"]
+        ["anthropic_reasoning_blocks"]
+        .as_array()
+        .expect("canonical Chat must retain one extension record per reasoning block");
+    assert_eq!(blocks.len(), 2, "{canonical}");
+    assert_eq!(blocks[0]["reasoning_content"], "first block");
+    assert_eq!(blocks[0]["anthropic_reasoning"]["marker"], "first");
+    assert_eq!(blocks[0]["anthropic_reasoning"]["opaque"], json!({"a": 1}));
+    assert_eq!(blocks[1]["reasoning_content"], "second block");
+    assert_eq!(blocks[1]["anthropic_reasoning"]["marker"], "second");
+    assert_eq!(blocks[1]["anthropic_reasoning"]["opaque"], json!({"b": 2}));
+
+    let provider =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("distinct canonical reasoning blocks must restore on the Anthropic wire");
+    let reasoning = provider["messages"][0]["content"]
+        .as_array()
+        .expect("assistant content")
+        .iter()
+        .filter(|block| block["type"] == "thinking")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasoning.len(),
+        2,
+        "each source reasoning block must remain separate: {provider}"
+    );
+    assert_eq!(reasoning[0]["thinking"], "first block");
+    assert_eq!(reasoning[0]["marker"], "first");
+    assert_eq!(reasoning[0]["opaque"], json!({"a": 1}));
+    assert_eq!(reasoning[1]["thinking"], "second block");
+    assert_eq!(reasoning[1]["marker"], "second");
+    assert_eq!(reasoning[1]["opaque"], json!({"b": 2}));
+}
+
+#[test]
+fn responses_mixed_reasoning_blocks_keep_complete_ordered_records_in_both_orders() {
+    let extended = json!({
+        "type": "reasoning",
+        "encrypted_content": "redacted-encrypted",
+        "routecodex_chat_extension": {
+            "anthropic_reasoning": {
+                "type": "redacted_thinking",
+                "cache_control": {"type": "ephemeral"}
+            }
+        }
+    });
+    let plain = json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "plain reasoning"}],
+        "encrypted_content": "plain-signature"
+    });
+    let plain_record = json!({
+        "type": "thinking",
+        "reasoning_content": "plain reasoning",
+        "encrypted_content": "plain-signature"
+    });
+    let extended_record = json!({
+        "type": "redacted_thinking",
+        "reasoning_content": "",
+        "encrypted_content": "redacted-encrypted",
+        "anthropic_reasoning": {
+            "type": "redacted_thinking",
+            "cache_control": {"type": "ephemeral"}
+        }
+    });
+
+    for (order, reasoning_items, expected_records) in [
+        (
+            "plain-first",
+            [plain.clone(), extended.clone()],
+            vec![plain_record.clone(), extended_record.clone()],
+        ),
+        (
+            "extended-first",
+            [extended.clone(), plain.clone()],
+            vec![extended_record.clone(), plain_record.clone()],
+        ),
+    ] {
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "claude",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "mixed reasoning"}]
+                },
+                reasoning_items[0].clone(),
+                reasoning_items[1].clone(),
+                {
+                    "type": "function_call",
+                    "call_id": format!("call_mixed_{order}"),
+                    "name": "lookup",
+                    "arguments": "{\"query\":\"p0\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": format!("call_mixed_{order}"),
+                    "output": "42"
+                }
+            ]
+        }))
+        .expect("mixed reasoning blocks must reach canonical Chat");
+
+        let blocks = canonical["messages"][1]["routecodex_chat_extension"]
+            ["anthropic_reasoning_blocks"]
+            .as_array()
+            .unwrap_or_else(|| {
+                panic!("missing ordered reasoning records for {order}: {canonical}")
+            });
+        assert_eq!(blocks, &expected_records, "{order}: {canonical}");
+
+        let provider =
+            crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .expect("mixed canonical reasoning records must restore on the Anthropic wire");
+        let assistant_content = provider["messages"][1]["content"]
+            .as_array()
+            .expect("assistant content");
+        let expected_wire = if order == "plain-first" {
+            vec![
+                json!({
+                    "type": "thinking",
+                    "thinking": "plain reasoning",
+                    "signature": "plain-signature"
+                }),
+                json!({
+                    "type": "redacted_thinking",
+                    "data": "redacted-encrypted",
+                    "cache_control": {"type": "ephemeral"}
+                }),
+            ]
+        } else {
+            vec![
+                json!({
+                    "type": "redacted_thinking",
+                    "data": "redacted-encrypted",
+                    "cache_control": {"type": "ephemeral"}
+                }),
+                json!({
+                    "type": "thinking",
+                    "thinking": "plain reasoning",
+                    "signature": "plain-signature"
+                }),
+            ]
+        };
+        let reasoning_content = assistant_content
+            .iter()
+            .filter(|block| {
+                matches!(
+                    block["type"].as_str(),
+                    Some("thinking" | "redacted_thinking")
+                )
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reasoning_content,
+            expected_wire.as_slice(),
+            "{order}: {provider}"
+        );
+        let tool_call_id = format!("call_mixed_{order}");
+        let tool_use = assistant_content
+            .iter()
+            .find(|block| block["type"] == "tool_use" && block["id"] == tool_call_id)
+            .unwrap_or_else(|| panic!("{order}: missing paired tool_use: {provider}"));
+        assert_eq!(
+            tool_use,
+            &json!({
+                "type": "tool_use",
+                "id": tool_call_id,
+                "name": "lookup",
+                "input": {"query": "p0"}
+            }),
+            "{order}: {provider}"
+        );
+        let tool_result = provider["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|message| {
+                message["content"].as_array().and_then(|content| {
+                    content.iter().find(|block| {
+                        block["type"] == "tool_result" && block["tool_use_id"] == tool_call_id
+                    })
+                })
+            })
+            .unwrap_or_else(|| panic!("{order}: missing paired tool_result: {provider}"));
+        assert_eq!(
+            tool_result["tool_use_id"], tool_call_id,
+            "{order}: {provider}"
+        );
+        assert!(
+            tool_result["content"].to_string().contains("42"),
+            "{order}: {provider}"
+        );
+    }
+}
+
+#[test]
+fn responses_message_and_tool_call_reasoning_keep_ordered_records_with_standalone_item() {
+    let user = json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "find the value"}]
+    });
+    let message_reasoning = json!({
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "I will look it up."}],
+        "reasoning_content": "message reasoning"
+    });
+    let standalone_reasoning = json!({
+        "type": "reasoning",
+        "summary": [{"type": "summary_text", "text": "standalone reasoning"}]
+    });
+    let function_call = json!({
+        "type": "function_call",
+        "call_id": "call_reasoning_sources",
+        "name": "lookup",
+        "arguments": "{\"query\":\"answer\",\"limit\":3}",
+        "reasoning_content": "tool reasoning"
+    });
+    let function_output = json!({
+        "type": "function_call_output",
+        "call_id": "call_reasoning_sources",
+        "output": "42"
+    });
+
+    for (order, reasoning_sources, expected_reasoning) in [
+        (
+            "message-first",
+            vec![message_reasoning.clone(), standalone_reasoning.clone()],
+            [
+                "message reasoning",
+                "standalone reasoning",
+                "tool reasoning",
+            ],
+        ),
+        (
+            "standalone-first",
+            vec![standalone_reasoning, message_reasoning],
+            [
+                "standalone reasoning",
+                "message reasoning",
+                "tool reasoning",
+            ],
+        ),
+    ] {
+        let mut input = vec![user.clone()];
+        input.extend(reasoning_sources);
+        input.push(function_call.clone());
+        input.push(function_output.clone());
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "claude",
+            "input": input
+        }))
+        .unwrap_or_else(|error| {
+            panic!("{order}: every accepted reasoning source must reach canonical Chat: {error}")
+        });
+
+        let assistant = &canonical["messages"][1];
+        assert_eq!(
+            assistant["reasoning_content"],
+            expected_reasoning.join("\n"),
+            "{order}: {canonical}"
+        );
+        let blocks = assistant["routecodex_chat_extension"]["anthropic_reasoning_blocks"]
+            .as_array()
+            .unwrap_or_else(|| {
+                panic!("{order}: message and tool-call reasoning need block records: {canonical}")
+            });
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| block["reasoning_content"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            expected_reasoning,
+            "{order}: {canonical}"
+        );
+
+        let provider =
+            crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .expect("all canonical reasoning sources must restore on the Anthropic wire");
+        let assistant_content = provider["messages"][1]["content"]
+            .as_array()
+            .expect("assistant content");
+        let mut expected_assistant_content = expected_reasoning
+            .iter()
+            .map(|reasoning| {
+                json!({
+                    "type": "thinking",
+                    "thinking": reasoning
+                })
+            })
+            .collect::<Vec<_>>();
+        expected_assistant_content.push(json!({
+            "type": "text",
+            "text": "I will look it up."
+        }));
+        expected_assistant_content.push(json!({
+            "type": "tool_use",
+            "id": "call_reasoning_sources",
+            "name": "lookup",
+            "input": {"query": "answer", "limit": 3}
+        }));
+        assert_eq!(
+            assistant_content, &expected_assistant_content,
+            "{order}: {provider}"
+        );
+        assert!(
+            provider["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(
+                    |message| message["content"].as_array().is_some_and(|content| {
+                        content.iter().any(|block| {
+                            block["type"] == "tool_result"
+                                && block["tool_use_id"] == "call_reasoning_sources"
+                                && block["content"].to_string().contains("42")
+                        })
+                    })
+                ),
+            "{order}: {provider}"
+        );
+    }
 }
 
 #[test]
@@ -249,7 +819,10 @@ fn responses_encrypted_only_reasoning_item_keeps_empty_reasoning_content() {
         json!(""),
         "encrypted-only reasoning must keep empty reasoning_content on the assistant turn"
     );
-    assert_eq!(messages[0]["content"], json!("previous answer"));
+    assert_eq!(
+        messages[0]["content"],
+        json!([{"type": "text", "text": "previous answer"}])
+    );
     assert_eq!(messages[1]["role"], json!("user"));
 }
 
@@ -297,6 +870,113 @@ fn responses_summary_reasoning_item_projects_plaintext_reasoning_content() {
         assistant["reasoning_content"],
         json!("**Deciding skill activation**\n**Preparing to read docs**"),
         "summary plaintext must be carried as reasoning_content for the next wire"
+    );
+}
+
+#[test]
+fn responses_null_encrypted_content_does_not_fabricate_redacted_thinking() {
+    // A Responses reasoning item can carry `encrypted_content: null` with no
+    // plaintext. Key presence alone must not infer `redacted_thinking`: the
+    // Anthropic outbound projection rejects a data-less redacted block and
+    // failed the whole request before provider wire.
+    for (label, encrypted_content) in [("null", Some(Value::Null)), ("absent", None)] {
+        let mut reasoning = json!({
+            "type": "reasoning",
+            "id": format!("reasoning-{label}"),
+            "summary": []
+        });
+        if let Some(value) = encrypted_content {
+            reasoning["encrypted_content"] = value;
+        }
+        let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+            "model": "deepseek-v4.1-flash",
+            "input": [
+                reasoning,
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "previous answer"}]
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}]
+                }
+            ]
+        }))
+        .unwrap_or_else(|error| {
+            panic!("{label}: reasoning item must reach Chat canonical: {error}")
+        });
+
+        let blocks = canonical["messages"][0]["routecodex_chat_extension"]
+            ["anthropic_reasoning_blocks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{label}: missing reasoning block record: {canonical}"));
+        assert_eq!(blocks.len(), 1, "{label}: {canonical}");
+        assert_eq!(
+            blocks[0]["type"], "thinking",
+            "{label}: data-less ciphertext must not fabricate redacted_thinking: {canonical}"
+        );
+
+        let provider =
+            crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+                canonical,
+            )
+            .unwrap_or_else(|error| {
+                panic!("{label}: Anthropic outbound must not reject the request: {error}")
+            });
+        let assistant_content = provider["messages"][0]["content"]
+            .as_array()
+            .expect("assistant content");
+        assert!(
+            !assistant_content
+                .iter()
+                .any(|block| block["type"] == "redacted_thinking"),
+            "{label}: empty ciphertext must not become an Anthropic redacted block: {provider}"
+        );
+    }
+}
+
+#[test]
+fn responses_nonempty_encrypted_content_still_restores_redacted_thinking() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {
+                "type": "reasoning",
+                "id": "reasoning-redacted",
+                "encrypted_content": "redacted-payload"
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "previous answer"}]
+            }
+        ]
+    }))
+    .expect("ciphertext-only reasoning must reach Chat canonical");
+
+    let blocks = canonical["messages"][0]["routecodex_chat_extension"]
+        ["anthropic_reasoning_blocks"]
+        .as_array()
+        .expect("reasoning block record");
+    assert_eq!(blocks[0]["type"], "redacted_thinking");
+    assert_eq!(blocks[0]["encrypted_content"], "redacted-payload");
+
+    let provider =
+        crate::hub_v1::anthropic_codec::encode_v3_responses_semantic_as_anthropic_request(
+            canonical,
+        )
+        .expect("real ciphertext must restore on the Anthropic wire");
+    assert!(
+        provider["messages"][0]["content"]
+            .as_array()
+            .expect("assistant content")
+            .iter()
+            .any(|block| {
+                block["type"] == "redacted_thinking" && block["data"] == "redacted-payload"
+            }),
+        "non-empty ciphertext must still restore a redacted block: {provider}"
     );
 }
 

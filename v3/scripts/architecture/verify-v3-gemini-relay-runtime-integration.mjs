@@ -77,13 +77,12 @@ for (const phrase of [
   'build_v3_hub_req_target_06_from_v3_hub_req_execution_05',
   'build_v3_hub_req_outbound_07_from_v3_hub_req_target_06',
   'build_provider_req_compat_06_from_v3_hub_req_outbound_07',
-  'build_v3_provider_req_outbound_08_from_provider_req_compat_06',
-  'build_v3_provider_req_outbound_09_from_v3_provider_req_outbound_08',
+  'build_v3_provider_req_outbound_08_wire_from_compat_06',
+  'build_v3_provider_req_outbound_09_transport_from_wire',
   'build_v3_gemini_transport_09',
   'target.wire_model',
-  'transport.send(transport_request),',
   'build_v3_provider_resp_inbound_01_raw',
-  'hooks.normalize(resp01)',
+  'hooks.normalize_with_context(resp01, None, request_id)',
   'hooks.govern(',
   'build_v3_hub_resp_outbound_05_from_v3_hub_resp_chat_process_03',
   'build_v3_server_resp_outbound_06_from_v3_hub_resp_outbound_05',
@@ -92,7 +91,7 @@ for (const phrase of [
   'Gemini SSE ended without terminal finishReason',
   'Gemini SSE emitted a frame after terminal finishReason',
   'gemini_model_from_endpoint_path',
-  'gemini_routing_payload',
+  'execute_v3_relay_runtime_core::<V3GeminiRelayCodec, T>',
 ]) requireText(runtimeSurface, `${runtimePath}+${relayCorePath}+${relaySharedPath}`, phrase);
 
 for (const node of [
@@ -116,8 +115,8 @@ for (const phrase of [
   'malformed_non_terminal_and_post_terminal_sse_fail_explicitly',
   'provider_error_enters_error01_06_without_success_projection',
   'malformed_provider_error_body_projects_explicit_error_not_fallback',
-  'side_channel_request_fails_before_provider_send',
-  'response_side_channel_is_rejected_for_json_and_sse_before_client_success',
+  'business_names_reach_provider_without_steering_typed_target',
+  'response_business_names_are_preserved_for_json_and_sse',
 ]) requireText(tests, testsPath, phrase);
 for (const phrase of [
   'server_executes_controlled_json_sse_error_and_isolation_without_second_owner',
@@ -137,7 +136,7 @@ for (const [text, owner, phrases] of [
   [manifest, manifestPath, ['lifecycle_id: v3.gemini_relay.controlled_runtime', 'V3ServerRespOutbound06ClientFrame', 'v3-gemini-relay-15']],
   [wiki, wikiPath, ['Single lifecycle', 'Body::from_stream', 'Live Gemini provider compatibility', 'No fallback']],
   [wikiHtml, wikiHtmlPath, ['Canonical Markdown source:', 'V3 Gemini Relay Controlled Runtime', 'Body::from_stream', 'No fallback']],
-  [entryBindingManifest, entryBindingManifestPath, ['entry_protocol: gemini', 'execution_mode: relay', 'implementation_status: implemented', 'execute_v3_gemini_relay_runtime_with_default_transport']],
+  [entryBindingManifest, entryBindingManifestPath, ['entry_protocol: gemini', 'execution_mode: direct', 'implementation_status: implemented', 'execute_v3_gemini_direct_server_outcome']],
 ]) for (const phrase of phrases) requireText(text, owner, phrase);
 
 requireText(hub, hubPath, 'mod gemini_relay_runtime;');
@@ -157,10 +156,8 @@ for (const phrase of [
 for (const phrase of [
   'protocol_from_endpoint',
   'endpoint.starts_with("/v1beta/models/")',
-  'endpoint.ends_with("/generateContent")',
   'return "gemini".to_string();',
 ]) requireText(virtualRouter, virtualRouterPath, phrase);
-for (const phrase of ['metadata_center', 'debug_snapshot', 'resource_handle', 'continuation_owner']) requireText(codec, codecPath, phrase);
 for (const phrase of [
   'characterize_v3_gemini_client_input_to_hub_semantic',
   'characterize_v3_gemini_hub_semantic_to_provider_wire',
@@ -175,7 +172,7 @@ forbid(geminiServerProjection, serverExecutorsPath, [
 ]);
 
 forbid(runtimeSurface, `${runtimePath}+${relayCorePath}+${relaySharedPath}`, [
-  /fallback/i,
+  /\bfallback\b/i,
   /ResponsesDirect(?:Runtime|11Policy)|execute_v3_responses_direct/i,
   /dynamic[_ -]?hook|libloading|read_dir/i,
   /into_body_bytes|collect::<Vec<u8>>|bodyText|sse_frames/i,

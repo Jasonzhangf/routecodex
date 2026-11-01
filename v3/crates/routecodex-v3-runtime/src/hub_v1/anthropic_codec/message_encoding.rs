@@ -33,6 +33,7 @@ pub(super) fn push_anthropic_shape_string(
 pub(super) fn encode_anthropic_messages_as_responses_semantic(
     messages: &[Value],
 ) -> Result<Vec<Value>, V3AnthropicCodecError> {
+    let mut custom_results = HashMap::new();
     let mut encoded = Vec::new();
     for message in messages {
         let role = message.get("role").cloned().unwrap_or(Value::Null);
@@ -40,10 +41,24 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
             Some(Value::String(text)) => {
                 encoded.push(json!({
                     "role":role,
-                    "content":[{"type":"input_text","text":text}]
+                    "content":text
                 }));
             }
             Some(Value::Array(parts)) => {
+                if parts.iter().any(|part| part["type"] == "tool_use") {
+                    custom_results.clear();
+                    for part in parts.iter().filter(|part| part["type"] == "tool_use") {
+                        if let Some(id) = part.get("id").and_then(Value::as_str) {
+                            let custom = part["routecodex_chat_extension"]
+                                ["responses_tool_call_type"]
+                                == "custom_tool_call";
+                            custom_results
+                                .entry(id)
+                                .and_modify(|all_custom| *all_custom &= custom)
+                                .or_insert(custom);
+                        }
+                    }
+                }
                 let mut message_content = Vec::new();
                 for part in parts {
                     match part.get("type").and_then(Value::as_str) {
@@ -74,7 +89,32 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?}));
+                            let association = &part["routecodex_chat_extension"];
+                            if association["responses_tool_call_type"] == "custom_tool_call" {
+                                let mut call = json!({"type":"custom_tool_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null)});
+                                let input = if association["responses_custom_input_wrapped"] == true
+                                {
+                                    part.get("input").and_then(|input| input.get("input"))
+                                } else {
+                                    part.get("input")
+                                };
+                                if let Some(input) = input {
+                                    call["input"] = input.clone();
+                                }
+                                if let Some(id) = association.get("responses_item_id") {
+                                    call["id"] = id.clone();
+                                }
+                                if let Some(namespace) = association.get("responses_namespace") {
+                                    call["namespace"] = namespace.clone();
+                                }
+                                encoded.push(call);
+                            } else {
+                                let mut call = json!({"type":"function_call","call_id":part.get("id").cloned().unwrap_or(Value::Null),"name":part.get("name").cloned().unwrap_or(Value::Null),"arguments":serde_json::to_string(part.get("input").unwrap_or(&Value::Null)).map_err(|_| V3AnthropicCodecError::MalformedField { field: "tool_use input" })?});
+                                if let Some(signature) = part.get("thought_signature") {
+                                    call["thought_signature"] = signature.clone();
+                                }
+                                encoded.push(call);
+                            }
                         }
                         Some("tool_result") => {
                             push_responses_message_content(
@@ -82,7 +122,21 @@ pub(super) fn encode_anthropic_messages_as_responses_semantic(
                                 &role,
                                 &mut message_content,
                             );
-                            encoded.push(json!({"type":"function_call_output","call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))}));
+                            let custom = part
+                                .get("tool_use_id")
+                                .and_then(Value::as_str)
+                                .and_then(|id| custom_results.get(id))
+                                .copied()
+                                .unwrap_or(false);
+                            let mut output = json!({"type":if custom {"custom_tool_call_output"} else {"function_call_output"},"call_id":part.get("tool_use_id").cloned().unwrap_or(Value::Null),"output":anthropic_tool_result_output_as_responses_semantic(part.get("content"))?});
+                            // Preserve the native explicit is_error marker as
+                            // opaque business data so the inverse projection can
+                            // distinguish an explicit false from an absent flag.
+                            if let Some(is_error) = part.get("is_error") {
+                                output["routecodex_chat_extension"] =
+                                    json!({"anthropic_tool_result_is_error": is_error.clone()});
+                            }
+                            encoded.push(output);
                         }
                         _ => {}
                     }
@@ -108,10 +162,25 @@ pub(super) fn push_responses_message_content(
     }
 }
 
-pub(super) fn anthropic_tool_result_output_as_responses_semantic(content: Option<&Value>) -> Value {
-    match content {
+pub(super) fn anthropic_tool_result_output_as_responses_semantic(
+    content: Option<&Value>,
+) -> Result<Value, V3AnthropicCodecError> {
+    Ok(match content {
         Some(Value::String(text)) => Value::String(text.clone()),
         Some(Value::Array(parts)) => {
+            if parts
+                .iter()
+                .any(|part| part.get("type").and_then(Value::as_str) == Some("image"))
+            {
+                let parts = parts
+                    .iter()
+                    .map(|part| {
+                        anthropic_content_part_as_responses_message_part(part)
+                            .unwrap_or_else(|| Ok(part.clone()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Value::Array(parts));
+            }
             let text = parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(Value::as_str))
@@ -127,7 +196,7 @@ pub(super) fn anthropic_tool_result_output_as_responses_semantic(content: Option
             Value::String(serde_json::to_string(value).unwrap_or_else(|_| "null".into()))
         }
         None => Value::String(String::new()),
-    }
+    })
 }
 
 pub(super) fn system_as_responses_instructions(value: &Value) -> Option<String> {
@@ -189,13 +258,13 @@ pub(super) fn anthropic_image_part_as_responses_input_image(
             field: "image source",
         },
     )?;
-    match source.get("type").and_then(Value::as_str) {
+    let image_url = match source.get("type").and_then(Value::as_str) {
         Some("url") => source
             .get("url")
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
-            .map(|url| json!({"type":"input_image","image_url":url}))
-            .ok_or(V3AnthropicCodecError::MalformedField { field: "image url" }),
+            .map(str::to_string)
+            .ok_or(V3AnthropicCodecError::MalformedField { field: "image url" })?,
         Some("base64") => {
             let media_type = source
                 .get("media_type")
@@ -211,10 +280,23 @@ pub(super) fn anthropic_image_part_as_responses_input_image(
                 .ok_or(V3AnthropicCodecError::MalformedField {
                     field: "image data",
                 })?;
-            Ok(json!({"type":"input_image","image_url":format!("data:{media_type};base64,{data}")}))
+            format!("data:{media_type};base64,{data}")
         }
-        _ => Err(V3AnthropicCodecError::MalformedField {
-            field: "image source type",
-        }),
+        _ => {
+            return Err(V3AnthropicCodecError::MalformedField {
+                field: "image source type",
+            });
+        }
+    };
+    let mut converted = Map::new();
+    converted.insert("type".to_string(), Value::String("input_image".to_string()));
+    converted.insert("image_url".to_string(), Value::String(image_url));
+    if let Some(object) = part.as_object() {
+        for (key, value) in object {
+            if !matches!(key.as_str(), "type" | "source" | "image_url") {
+                converted.insert(key.clone(), value.clone());
+            }
+        }
     }
+    Ok(Value::Object(converted))
 }
