@@ -1494,6 +1494,78 @@ const mutations = [
     },
     expect: /Node02 required Error graph is missing/u,
   },
+  {
+    name: 'node02-ingress-contract-feature-binding-missing',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/v3-function-map.yml');
+      const doc = YAML.parse(fs.readFileSync(file, 'utf8'));
+      const feature = doc.features.find((entry) => entry.feature_id === 'v3.unified_operation_runner_design');
+      if (!feature) throw new Error('missing v3.unified_operation_runner_design feature');
+      feature.resource_bindings = (feature.resource_bindings ?? []).filter((resource) => resource !== 'v3.operation_runner.ingress_contract');
+      fs.writeFileSync(file, YAML.stringify(doc));
+    },
+    expect: /missing feature resource_binding v3\.operation_runner\.ingress_contract/u,
+  },
+  {
+    name: 'node02-normalize-writes-legacy-payload-resource',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = doc.nodes.find((entry) => entry.id === 'normalize_request_losslessly');
+      if (!node) throw new Error('missing normalize_request_losslessly graph node');
+      node.resources = {
+        ...(node.resources ?? {}),
+        writes: [...(node.resources?.writes ?? []), 'v3.request.normal_payload'],
+      };
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+    },
+    expect: /must not write legacy payload resource v3\.request\.normal_payload/u,
+  },
+  {
+    name: 'full-node02-normalize-reads-legacy-payload-resource',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = doc.nodes.find((entry) => entry.id === 'normalize_request_losslessly');
+      if (!node) throw new Error('missing normalize_request_losslessly graph node');
+      node.resources = {
+        ...(node.resources ?? {}),
+        reads: [...(node.resources?.reads ?? []), 'v3.request.normal_payload'],
+      };
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+    },
+    expect: /docs\/architecture\/dagpipe\/v3\.operation_runner\.request\.graph\.json: normalize_request_losslessly resource reads drifted from slice graph|docs\/architecture\/dagpipe\/v3\.operation_runner\.request\.graph\.json: node normalize_request_losslessly must not read legacy payload resource v3\.request\.normal_payload/u,
+  },
+  {
+    name: 'full-resolve-target-reads-legacy-payload-resource',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = doc.nodes.find((entry) => entry.id === 'resolve_target');
+      if (!node) throw new Error('missing resolve_target graph node');
+      node.resources = {
+        ...(node.resources ?? {}),
+        reads: [...(node.resources?.reads ?? []), 'v3.request.normal_payload'],
+      };
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+    },
+    expect: /docs\/architecture\/dagpipe\/v3\.operation_runner\.request\.graph\.json: node resolve_target must not read legacy payload resource v3\.request\.normal_payload/u,
+  },
+  {
+    name: 'full-project-standard-reads-legacy-payload-resource',
+    mutate(tmp) {
+      const file = path.join(tmp, 'docs/architecture/dagpipe/v3.operation_runner.request.graph.json');
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const node = doc.nodes.find((entry) => entry.id === 'project_standard_provider_request');
+      if (!node) throw new Error('missing project_standard_provider_request graph node');
+      node.resources = {
+        ...(node.resources ?? {}),
+        reads: [...(node.resources?.reads ?? []), 'v3.request.normal_payload'],
+      };
+      fs.writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
+    },
+    expect: /docs\/architecture\/dagpipe\/v3\.operation_runner\.request\.graph\.json: node project_standard_provider_request must not read legacy payload resource v3\.request\.normal_payload/u,
+  },
 ];
 
 let failed = 0;

@@ -240,6 +240,7 @@ forEachGraph((rel) => {
 const resourceMap = YAML.parse(fs.readFileSync(path.join(root, 'docs/architecture/v3-resource-operation-map.yml'), 'utf8'));
 const mainlineMap = YAML.parse(fs.readFileSync(path.join(root, 'docs/architecture/v3-mainline-call-map.yml'), 'utf8'));
 const verificationMap = YAML.parse(fs.readFileSync(path.join(root, 'docs/architecture/v3-verification-map.yml'), 'utf8'));
+const functionMap = YAML.parse(fs.readFileSync(path.join(root, 'docs/architecture/v3-function-map.yml'), 'utf8'));
 const semanticMatrix = loadYaml('docs/architecture/reviews/v3-protocol-semantic-field-matrix.yml');
 
 function buildSourcePathIndex() {
@@ -270,6 +271,65 @@ function sourcePathExists(protocol, sourcePath) {
   const info = sourcePathIndex.byProtocol.get(protocol);
   if (info?.exact.has(`${protocol}:${sourcePath}`)) return true;
   return sourcePathIndex.byNormalized.has(`${normalizedProtocol(protocol)}:${normalizedPath(sourcePath)}`);
+}
+
+const normalizeGraphRel = 'docs/architecture/dagpipe/v3.operation_runner.request.normalize_request_losslessly.graph.json';
+const normalizeGraph = JSON.parse(fs.readFileSync(path.join(root, normalizeGraphRel), 'utf8'));
+const normalizeNode = normalizeGraph.nodes.find((node) => node.id === 'normalize_request_losslessly');
+const fullRequestGraph = JSON.parse(fs.readFileSync(path.join(root, requestGraphRel), 'utf8'));
+const fullNormalizeNode = fullRequestGraph.nodes.find((node) => node.id === 'normalize_request_losslessly');
+if (!fullNormalizeNode) {
+  failures.push(`${requestGraphRel}: missing normalize_request_losslessly graph node`);
+} else if (!normalizeNode) {
+  failures.push(`${normalizeGraphRel}: missing normalize_request_losslessly graph node`);
+} else {
+  const resourceArraysEqual = (left, right) =>
+    JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+  if (!resourceArraysEqual(fullNormalizeNode.resources?.reads ?? [], normalizeNode.resources?.reads ?? [])) {
+    failures.push(`${requestGraphRel}: normalize_request_losslessly resource reads drifted from slice graph ${normalizeGraphRel}`);
+  }
+  if (!resourceArraysEqual(fullNormalizeNode.resources?.writes ?? [], normalizeNode.resources?.writes ?? [])) {
+    failures.push(`${requestGraphRel}: normalize_request_losslessly resource writes drifted from slice graph ${normalizeGraphRel}`);
+  }
+}
+if (!normalizeNode) {
+  failures.push(`${normalizeGraphRel}: missing normalize_request_losslessly graph node`);
+} else {
+  const functionMapRel = 'docs/architecture/v3-function-map.yml';
+  const functionFeature = (functionMap?.features ?? []).find(
+    (feature) => feature.feature_id === 'v3.unified_operation_runner_design',
+  );
+  const graphWrites = new Set(normalizeNode.resources?.writes ?? []);
+  const declaredReads = new Set(normalizeNode.resources?.reads ?? []);
+  for (const resource of declaredReads) {
+    const resourceEntry = (resourceMap?.resources ?? []).find((entry) => entry?.resource_id === resource);
+    const ownerFeatureId = resourceEntry?.owner_feature_id;
+    if (ownerFeatureId !== 'v3.unified_operation_runner_design') continue;
+    if (!functionFeature?.resource_bindings?.includes(resource)) {
+      failures.push(`${functionMapRel}: missing feature resource_binding ${resource} for graph node normalize_request_losslessly`);
+    }
+  }
+  for (const resource of graphWrites) {
+    const resourceEntry = (resourceMap?.resources ?? []).find((entry) => entry?.resource_id === resource);
+    if (resourceEntry?.owner_feature_id !== 'v3.unified_operation_runner_design') continue;
+    if (!functionFeature?.resource_bindings?.includes(resource)) {
+      failures.push(`${functionMapRel}: missing feature resource_binding ${resource} for graph node normalize_request_losslessly`);
+    }
+  }
+  if ((normalizeNode.resources?.reads ?? []).includes('v3.request.normal_payload')) {
+    failures.push(`${normalizeGraphRel}: normalize_request_losslessly must not read legacy payload resource v3.request.normal_payload; canonical business values must flow through graph inputs/outputs`);
+  }
+  if ((normalizeNode.resources?.writes ?? []).includes('v3.request.normal_payload')) {
+    failures.push(`${normalizeGraphRel}: normalize_request_losslessly must not write legacy payload resource v3.request.normal_payload; canonical business values must flow through graph outputs`);
+  }
+}
+
+for (const node of fullRequestGraph.nodes ?? []) {
+  for (const direction of ['reads', 'writes']) {
+    if ((node.resources?.[direction] ?? []).includes('v3.request.normal_payload')) {
+      failures.push(`${requestGraphRel}: node ${node.id} must not ${direction === 'reads' ? 'read' : 'write'} legacy payload resource v3.request.normal_payload; business payload must flow through graph inputs/outputs`);
+    }
+  }
 }
 
 if (fieldProfiles.contract_id !== 'v3.operation_runner.field_profiles') {
