@@ -1373,7 +1373,11 @@ where
                     .get(&selected_target_provider_id)
                     .and_then(|provider| provider.sse_first_frame_timeout_ms);
                 let first_frame_result = match tokio::time::timeout_at(
-                    tokio::time::Instant::from_std(attempt_budget.attempt_deadline().map_or(attempt_deadline.into_std(), |deadline| deadline.min(attempt_deadline.into_std()))),
+                    tokio::time::Instant::from_std(
+                        attempt_budget
+                            .residence_deadline()
+                            .min(attempt_deadline.into_std()),
+                    ),
                     guard_relay_sse_first_frame_with_budget(
                         request_id,
                         &selected_target_provider_id,

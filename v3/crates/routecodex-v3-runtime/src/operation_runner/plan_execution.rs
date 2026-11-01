@@ -764,10 +764,47 @@ pub(crate) async fn wait_for_target_recovery(
                 return Ok(true);
             }
         }
-        let Some(due_at) = attempt_budget.current_target_recovery_deadline(std::time::Instant::now()) else {
+        // The declared request residence deadline is not a request-termination
+        // authority by itself. It bounds the wait only when no recovery
+        // opportunity remains for any non-permanent candidate: a due probe, a
+        // declared window that will reopen, or a recoverable attempt whose
+        // success revision can still advance. While such an opportunity
+        // remains, the request keeps waiting with keepalives and typed
+        // evidence instead of ending.
+        let now = std::time::Instant::now();
+        let residence_deadline = attempt_budget.residence_deadline();
+        if now >= residence_deadline {
+            if !target_recovery_opportunity_remains(
+                expanded, &permanent, health, scope, current_ms,
+            )? {
+                return Ok(false);
+            }
+            // Past the residence deadline a recovery opportunity still exists:
+            // do not burn CPU. Wake on the next typed health change or after a
+            // bounded recheck, then re-evaluate whether the opportunity
+            // resolved. The recovery step cursor is not advanced here; that
+            // path belongs to the pre-residence due time below.
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+                changed = health.wait_for_target_availability_change(observed_generation) => {
+                    changed.map_err(|error| build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
+                        "target_availability_wait_failed", error))?;
+                }
+            }
+            current_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .map_err(|error| build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
+                    "target_recovery_wait_clock_failed", error))?;
+            continue;
+        }
+        let Some(due_at) = attempt_budget.current_target_recovery_deadline(now) else {
             return Ok(false);
         };
-        let now = std::time::Instant::now();
+        // Wake no later than the residence deadline even when the declared
+        // recovery step is scheduled further out, so the conditional bound
+        // above is actually re-evaluated on time.
+        let wake_at = due_at.min(residence_deadline);
         if now >= due_at {
             attempt_budget.advance_target_recovery_step_if_due(now);
             *excluded = permanent.clone();
@@ -775,7 +812,7 @@ pub(crate) async fn wait_for_target_recovery(
             return Ok(true);
         }
         tokio::select! {
-            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(due_at)) => {}
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(wake_at)) => {}
             changed = health.wait_for_target_availability_change(observed_generation) => {
                 changed.map_err(|error| build_v3_error_01_source_raised(
                     V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
@@ -787,6 +824,59 @@ pub(crate) async fn wait_for_target_recovery(
                 V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
                 "target_recovery_wait_clock_failed", error))?;
     }
+}
+
+/// Whether any non-permanent candidate can still become selectable for this
+/// request through a declared recovery path. This uses the same admission
+/// basis as selection and probe recovery: context ineligibility is permanent,
+/// a request-local exclusion is permanent, a cooled identity with a due probe
+/// recovers, and an outside-window candidate reopens. A health-available
+/// in-window candidate that reaches this predicate was already attempted and
+/// not re-admitted by a success revision, so it is a health-neutral terminal
+/// state for this request, not a future recovery opportunity.
+fn target_recovery_opportunity_remains(
+    expanded: &V3Target09CandidateSetExpanded,
+    permanent: &BTreeSet<String>,
+    health: &V3ProviderFailureRuntimeHealth,
+    scope: &V3ProviderFailureSessionScope,
+    now_ms: u64,
+) -> Result<bool, V3Error01SourceRaised> {
+    let availability = health.session_bound_availability(scope);
+    for candidate in &expanded.candidates {
+        let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
+        if permanent.contains(&key) {
+            continue;
+        }
+        if !V3TargetInterpreter::candidate_context_fits_request(
+            candidate,
+            expanded.route.request_input_tokens,
+        ) {
+            continue;
+        }
+        if !V3TargetInterpreter::candidate_in_availability_window(candidate, now_ms) {
+            return Ok(true);
+        }
+        let projection = availability
+            .availability_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                now_ms,
+            )
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ProviderHealthRead",
+                    "provider_health_read_failed",
+                    format!("{}/{}/{}/{}: {error}", candidate.provider_id, candidate.interface_id, candidate.auth_alias, candidate.model_id),
+                )
+            })?;
+        if crate::provider_failure_runtime_policy::v3_availability_is_cooldown_recovery_only(&projection) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn candidate_health_available<R: V3ProviderAvailabilityReader>(

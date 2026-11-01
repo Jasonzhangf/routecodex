@@ -160,32 +160,64 @@ impl V3ProviderFailureRuntimeHealth {
 
 pub(crate) fn v3_exhaustion_is_cooldown_only(
     expanded: &V3Target09CandidateSetExpanded,
-    request_local_excluded_candidates: &BTreeSet<String>,
+    permanent_exclusions: &BTreeSet<String>,
     failure_session_scope: &V3ProviderFailureSessionScope,
     provider_health: &V3ProviderFailureRuntimeHealth,
     now_ms: u64,
 ) -> Result<bool, routecodex_v3_provider_responses::V3ProviderHealthError> {
     let availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut nonfailed_candidates = expanded.candidates.iter().filter(|candidate| {
-        !request_local_excluded_candidates.contains(&v3_relay_provider_candidate_key(candidate))
-    });
-    let Some(first) = nonfailed_candidates.next() else {
+    let request_input_tokens = expanded.route.request_input_tokens;
+    let mut recovery_opportunity = false;
+    for candidate in &expanded.candidates {
+        let key = v3_relay_provider_candidate_key(candidate);
+        // `permanent_exclusions` carries only request-local permanent exclusions
+        // (request-shape/compat failures and the identity that just failed).
+        // A recoverable attempt is NOT in this set: it can be re-admitted by a
+        // due probe or a matching success revision. Check permanent exclusion
+        // first so an identity excluded for this request can never be counted
+        // as a recovery opportunity merely because another session cooled it.
+        if permanent_exclusions.contains(&key) {
+            continue;
+        }
+        // Context capacity is a permanent per-request exclusion: a candidate
+        // over its context limit can never serve this request, regardless of
+        // its window or health.
+        if !V3TargetInterpreter::candidate_context_fits_request(candidate, request_input_tokens) {
+            continue;
+        }
+        let in_window = V3TargetInterpreter::candidate_in_availability_window(candidate, now_ms);
+        let projection = availability.availability_for_interface(
+            &candidate.provider_id,
+            &candidate.interface_id,
+            Some(&candidate.auth_alias),
+            Some(&candidate.model_id),
+            now_ms,
+        )?;
+        if !projection.available {
+            // Health-blocked. A cooled identity with a pending probe is a real
+            // recovery opportunity. Any other health block is permanent for
+            // this request and must not erase another candidate's pending
+            // probe, so it neither counts as recovery nor returns false.
+            if v3_availability_is_cooldown_recovery_only(&projection) {
+                recovery_opportunity = true;
+            }
+            continue;
+        }
+        if !in_window {
+            // Healthy but outside its declared window: the window reopens, so
+            // this is a temporary recovery opportunity rather than a selectable
+            // peer.
+            recovery_opportunity = true;
+            continue;
+        }
+        // A genuinely selectable candidate means the pool is not exhausted by
+        // cooldown/window alone.
         return Ok(false);
-    };
-    for candidate in std::iter::once(first).chain(nonfailed_candidates) {
-            let projection = availability.availability_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-                now_ms,
-            )?;
-            if !v3_availability_is_cooldown_recovery_only(&projection) { return Ok(false); }
     }
-    Ok(true)
+    Ok(recovery_opportunity)
 }
 
-fn v3_availability_is_cooldown_recovery_only(
+pub(crate) fn v3_availability_is_cooldown_recovery_only(
     projection: &V3ProviderAvailabilityProjection,
 ) -> bool {
     !projection.available

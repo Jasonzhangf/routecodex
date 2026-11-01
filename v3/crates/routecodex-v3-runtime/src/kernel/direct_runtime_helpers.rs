@@ -551,9 +551,18 @@ async fn run_v3_direct_provider_failure_policy_inner<R: V3ProviderAvailabilityRe
     };
     let target_recovery_pending = match context.expanded {
         Some(_) if !is_health_neutral_failure => true,
-        Some(expanded) if remaining == 0 => crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
-            expanded, &failed_with_current, context.failure_session_scope, context.provider_health, context.now_epoch_ms,
-        ).map_err(|error| direct_policy_failure(&source, "V3ProviderHealthRead", error))?,
+        Some(expanded) if remaining == 0 => {
+            // Permanent exclusions for this request are the request-local
+            // compat exclusions and the just-failed identity. Prior health
+            // attempts stay recoverable through a due probe or a matching
+            // success revision, so they are not passed as permanent.
+            let mut permanent_exclusions = state.failed_candidates.clone();
+            permanent_exclusions.extend(request_local_excluded.iter().cloned());
+            crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
+                expanded, &permanent_exclusions, context.failure_session_scope,
+                context.provider_health, context.now_epoch_ms,
+            ).map_err(|error| direct_policy_failure(&source, "V3ProviderHealthRead", error))?
+        }
         _ => false,
     };
     let decision = run_v3_direct_policy_error_02_to_05_decision(

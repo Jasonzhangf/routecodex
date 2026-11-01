@@ -98,6 +98,144 @@ fn acquire_rescue_probe(
         .expect("rescue probe must be acquired")
 }
 
+fn closed_availability_for_current_utc_minute(
+) -> routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+    let now_seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("test clock must be after the unix epoch")
+        .as_secs();
+    let current_minute = (now_seconds / 60) % 1_440;
+    let start_minute = (current_minute + 2) % 1_440;
+    let end_minute = (start_minute + 1) % 1_440;
+    routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
+        timezone: "UTC".to_string(),
+        guard_minutes: 0,
+        periods: vec![routecodex_v3_config::V3DailyTimeWindowAuthoringConfig {
+            start: format!("{:02}:{:02}", start_minute / 60, start_minute % 60),
+            end: format!("{:02}:{:02}", end_minute / 60, end_minute % 60),
+        }],
+    }
+}
+
+fn append_emergency_third_candidate(
+    expanded: &mut V3Target09CandidateSetExpanded,
+    selected_provider_id: &str,
+    sibling_provider_id: &str,
+) -> V3TargetCandidate {
+    let initial_pool_id = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("expanded route must have an initial plan")
+        .pool_id
+        .clone();
+    let selected = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == selected_provider_id)
+        .expect("selected candidate");
+    selected.pool_ids = vec![initial_pool_id];
+    let sibling = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == sibling_provider_id)
+        .expect("sibling candidate");
+    sibling.pool_ids = vec!["fallback".to_string()];
+    let mut third = sibling.clone();
+    third.provider_id = "third".to_string();
+    third.pool_ids = vec!["emergency".to_string()];
+    expanded.candidates.push(third.clone());
+
+    let target_kind = expanded
+        .route
+        .target_plan
+        .first()
+        .expect("expanded route must have an initial plan")
+        .target_kind
+        .clone();
+    expanded.route.target_plan.push(
+        routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
+            tier_index: 1,
+            pool_id: "fallback".to_string(),
+            target_index: 0,
+            target_kind: target_kind.clone(),
+            target_id: None,
+            interface: None,
+            priority: 1,
+            weight: 1,
+            session_sticky: false,
+            direct_provider_model: Some((sibling_provider_id.to_string(), "gpt-test".to_string())),
+        },
+    );
+    expanded.route.target_plan.push(
+        routecodex_v3_virtual_router::V3Router07OpaqueTargetPlanEntry {
+            tier_index: 2,
+            pool_id: "emergency".to_string(),
+            target_index: 0,
+            target_kind,
+            target_id: None,
+            interface: None,
+            priority: 1,
+            weight: 1,
+            session_sticky: false,
+            direct_provider_model: Some(("third".to_string(), "gpt-test".to_string())),
+        },
+    );
+    third
+}
+
+fn mixed_policy_fixture(
+    server_id: &str,
+    session_id: &str,
+) -> (
+    V3Config05ManifestPublished,
+    V3ProviderFailureRuntimeHealth,
+    V3ProviderFailureSessionScope,
+    V3Target10ConcreteProviderSelected,
+    V3Target09CandidateSetExpanded,
+    String,
+    String,
+) {
+    let manifest = global_pool_alive_manifest(server_id);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let failure_session_scope =
+        test_provider_failure_scope(server_id, server_id, session_id)
+            .expect("failure session scope");
+    let selected = match resolve_target(&manifest, server_id, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("a healthy provider must be selected"),
+    };
+    let target = V3TargetInterpreter::default();
+    let mut expanded = target
+        .expand_candidates(
+            &manifest,
+            target.classify_kind(selected.route.clone()),
+            0,
+        )
+        .expect("captured target expansion");
+    let selected_provider_id = selected.candidate.provider_id.clone();
+    let sibling_provider_id = expanded
+        .candidates
+        .iter()
+        .map(|candidate| candidate.provider_id.clone())
+        .find(|provider_id| provider_id != &selected_provider_id)
+        .expect("the manifest must declare one non-selected sibling provider");
+    append_emergency_third_candidate(
+        &mut expanded,
+        &selected_provider_id,
+        &sibling_provider_id,
+    );
+    (
+        manifest,
+        health,
+        failure_session_scope,
+        selected,
+        expanded,
+        selected_provider_id,
+        sibling_provider_id,
+    )
+}
+
 async fn serve_one_responses_probe(listener: TcpListener) {
     let (mut socket, _) = listener
         .accept()
@@ -1388,4 +1526,332 @@ async fn later_tier_selection_skips_in_flight_rescue_probes_without_waiting() {
             "skipping a probe in flight must preserve the preceding candidate cooldown"
         );
     }
+}
+
+#[tokio::test]
+async fn health_neutral_mixed_window_keeps_pending_probe_recovery() {
+    let (
+        manifest,
+        health,
+        failure_session_scope,
+        selected,
+        mut expanded,
+        _selected_provider_id,
+        sibling_provider_id,
+    ) = mixed_policy_fixture("mixed_window_probe", "mixed-window-probe-session");
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current policy epoch");
+    let third = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "third")
+        .expect("third candidate");
+    third.model_availability = Some(closed_availability_for_current_utc_minute());
+    assert!(
+        V3TargetInterpreter::candidate_context_fits_request(
+            third,
+            expanded.route.request_input_tokens,
+        ),
+        "the window-closed candidate must remain context-compliant"
+    );
+    assert!(
+        !V3TargetInterpreter::candidate_in_availability_window(third, now_ms),
+        "the test must construct a genuinely closed availability window"
+    );
+
+    put_identity_in_global_cooldown(&health, &sibling_provider_id, "key1", "gpt-test", now_ms);
+    let b_permit = acquire_rescue_probe(&health, &sibling_provider_id, "key1", "gpt-test");
+
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut last_external_http = None;
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&expanded),
+        failure_session_scope,
+        provider_health: &health,
+        attempt_budget: None,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "ProviderReqCompat06ProviderCompat",
+        400,
+        Some("provider_request_compat_error".to_string()),
+        "arguments must be valid JSON".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+    )
+    .await
+    .expect("mixed window failure must classify recovery");
+    assert_eq!(
+        result.event.action, "wait_target_recovery",
+        "a closed window must not erase a pending cooldown probe"
+    );
+    assert!(result.terminal_projection.is_none());
+    assert!(result.retry_selected.is_none());
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_with_permit(&b_permit, now_ms)
+        .expect("pending probe success");
+    assert!(
+        health
+            .availability(&sibling_provider_id, Some("key1"), Some("gpt-test"), now_ms)
+            .unwrap()
+            .available,
+        "the retained probe must still be able to recover its own identity"
+    );
+}
+
+#[tokio::test]
+async fn health_neutral_closed_window_does_not_forge_recovery_when_context_is_permanent() {
+    let (
+        manifest,
+        health,
+        failure_session_scope,
+        selected,
+        mut expanded,
+        selected_provider_id,
+        _sibling_provider_id,
+    ) = mixed_policy_fixture("mixed_window_context", "mixed-window-context-session");
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current policy epoch");
+    expanded.route.request_input_tokens = 100;
+    for candidate in expanded
+        .candidates
+        .iter_mut()
+        .filter(|candidate| candidate.provider_id != selected_provider_id.as_str())
+    {
+        candidate.max_context_tokens = Some(1);
+    }
+    let third = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "third")
+        .expect("third candidate");
+    third.model_availability = Some(closed_availability_for_current_utc_minute());
+    assert!(
+        !V3TargetInterpreter::candidate_context_fits_request(third, 100),
+        "the window-closed candidate must also be permanently context ineligible"
+    );
+
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut last_external_http = None;
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&expanded),
+        failure_session_scope,
+        provider_health: &health,
+        attempt_budget: None,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected.clone(),
+        "ProviderReqCompat06ProviderCompat",
+        400,
+        Some("provider_request_compat_error".to_string()),
+        "arguments must be valid JSON".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+    )
+    .await
+    .expect("mixed context failure must classify terminal");
+    assert_eq!(
+        result.event.action,
+        "terminal_request_local_provider_compat_exhausted",
+        "a closed window must not fabricate recovery for a context-ineligible candidate"
+    );
+    assert!(result.terminal_projection.is_some());
+    assert!(result.retry_selected.is_none());
+    assert_eq!(result.event.wait_ms, None);
+}
+
+#[tokio::test]
+async fn health_neutral_permanent_context_does_not_erase_other_pending_probe() {
+    let (
+        manifest,
+        health,
+        failure_session_scope,
+        selected,
+        mut expanded,
+        _selected_provider_id,
+        sibling_provider_id,
+    ) = mixed_policy_fixture("mixed_context_probe", "mixed-context-probe-session");
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current policy epoch");
+    expanded.route.request_input_tokens = 100;
+    let third = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "third")
+        .expect("third candidate");
+    third.max_context_tokens = Some(1);
+    assert!(
+        !V3TargetInterpreter::candidate_context_fits_request(third, 100),
+        "the third candidate must have a permanent context restriction"
+    );
+
+    put_identity_in_global_cooldown(&health, &sibling_provider_id, "key1", "gpt-test", now_ms);
+    let b_permit = acquire_rescue_probe(&health, &sibling_provider_id, "key1", "gpt-test");
+
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut last_external_http = None;
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&expanded),
+        failure_session_scope,
+        provider_health: &health,
+        attempt_budget: None,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected.clone(),
+        "ProviderReqCompat06ProviderCompat",
+        400,
+        Some("provider_request_compat_error".to_string()),
+        "arguments must be valid JSON".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+    )
+    .await
+    .expect("mixed context recovery must classify");
+    assert_eq!(
+        result.event.action, "wait_target_recovery",
+        "one permanent context restriction must not erase another pending probe"
+    );
+    assert!(result.terminal_projection.is_none());
+    assert!(result.retry_selected.is_none());
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_with_permit(&b_permit, now_ms)
+        .expect("pending probe success");
+    assert!(
+        health
+            .availability(&sibling_provider_id, Some("key1"), Some("gpt-test"), now_ms)
+            .unwrap()
+            .available
+    );
+}
+
+#[tokio::test]
+async fn health_neutral_permanent_exclusion_survives_unrelated_probe_success() {
+    let (
+        manifest,
+        health,
+        failure_session_scope,
+        selected,
+        mut expanded,
+        selected_provider_id,
+        sibling_provider_id,
+    ) = mixed_policy_fixture(
+        "mixed_permanent_exclusion",
+        "mixed-permanent-exclusion-session",
+    );
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("current policy epoch");
+    let third = expanded
+        .candidates
+        .iter_mut()
+        .find(|candidate| candidate.provider_id == "third")
+        .expect("third candidate");
+    third.model_availability = Some(closed_availability_for_current_utc_minute());
+
+    put_identity_in_global_cooldown(&health, &sibling_provider_id, "key1", "gpt-test", now_ms);
+    let b_permit = acquire_rescue_probe(&health, &sibling_provider_id, "key1", "gpt-test");
+
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut last_external_http = None;
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: Some(&expanded),
+        failure_session_scope,
+        provider_health: &health,
+        attempt_budget: None,
+        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected.clone(),
+        "ProviderReqCompat06ProviderCompat",
+        400,
+        Some("provider_request_compat_error".to_string()),
+        "arguments must be valid JSON".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+    )
+    .await
+    .expect("mixed permanent-exclusion failure must classify recovery");
+    assert_eq!(result.event.action, "wait_target_recovery");
+    assert!(result.terminal_projection.is_none());
+
+    health
+        .store
+        .complete_provider_cooldown_probe_success_with_permit(&b_permit, now_ms)
+        .expect("unrelated pending probe success");
+
+    // The original failed candidate stays request-locally excluded. Once the
+    // pending probe recovers its own identity, the policy must switch to that
+    // identity and must not reselect the excluded candidate.
+    let mut failed_candidates = BTreeSet::new();
+    let mut same_candidate_retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let mut last_external_http = None;
+    let reselected = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "ProviderReqCompat06ProviderCompat",
+        400,
+        Some("provider_request_compat_error".to_string()),
+        "arguments must be valid JSON".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+    )
+    .await
+    .expect("recovered alternative must be selected");
+    assert_eq!(
+        reselected.event.action, "switch_provider",
+        "recovered alternative must be selected without clearing the permanent exclusion"
+    );
+    let retry = reselected
+        .retry_selected
+        .expect("recovered alternative must be selected");
+    assert_eq!(retry.candidate.provider_id, sibling_provider_id);
+    assert_ne!(retry.candidate.provider_id, selected_provider_id);
 }

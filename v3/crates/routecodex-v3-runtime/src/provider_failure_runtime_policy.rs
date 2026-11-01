@@ -1211,17 +1211,27 @@ async fn run_v3_relay_provider_failure_policy_with_response_source_inner(
     let recovery_now_ms =
         v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?;
     let target_recovery_pending = match context.captured_target_09 {
+        // Request-local incompatibility failures are never a recovery signal:
+        // the just-failed identity stays permanently excluded for this request
+        // no matter what its health looks like after another session cools it.
         Some(_) if !is_request_local_compat_failure => true,
-        Some(expanded) => v3_exhaustion_is_cooldown_only(
-            expanded, &excluded_with_failed, &context.failure_session_scope,
-            context.provider_health, recovery_now_ms,
-        ).map_err(|error| Err(V3RelayErrorOperatorFault {
-            policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure, "V3ProviderHealthRead",
-                "provider_health_read_failed", error.to_string(),
-            ),
-            original_source: Some(attempt_source.clone()),
-        }))?,
+        Some(expanded) => {
+            let mut permanent_exclusions = state.failed_candidates.clone();
+            permanent_exclusions.insert(candidate_key.clone());
+            v3_exhaustion_is_cooldown_only(
+                expanded,
+                &permanent_exclusions,
+                &context.failure_session_scope,
+                context.provider_health,
+                recovery_now_ms,
+            ).map_err(|error| Err(V3RelayErrorOperatorFault {
+                policy_failure: routecodex_v3_error::build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure, "V3ProviderHealthRead",
+                    "provider_health_read_failed", error.to_string(),
+                ),
+                original_source: Some(attempt_source.clone()),
+            }))?
+        }
         None => false,
     };
     if target_recovery_pending {

@@ -465,6 +465,18 @@ impl V3TargetInterpreter {
             && context_window_exceeded_reason(request_input_tokens, candidate).is_none()
     }
 
+    /// Context capacity alone, independent of the declared availability window.
+    /// A candidate over its context limit can never serve the request, so it is
+    /// a permanent per-request exclusion rather than a temporary recovery
+    /// opportunity. Recovery classification uses this to separate permanent
+    /// context ineligibility from a temporarily closed availability window.
+    pub fn candidate_context_fits_request(
+        candidate: &V3TargetCandidate,
+        request_input_tokens: u64,
+    ) -> bool {
+        context_window_exceeded_reason(request_input_tokens, candidate).is_none()
+    }
+
     /// Number of candidates within declared availability and context capacity.
     pub fn admitted_candidate_count(
         expanded: &V3Target09CandidateSetExpanded,

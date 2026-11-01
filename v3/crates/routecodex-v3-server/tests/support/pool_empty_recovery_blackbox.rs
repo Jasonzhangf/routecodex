@@ -130,8 +130,9 @@ async fn assert_mixed_pool_first_ladder_keeps_failed_identity(direct: bool) {
         &peers.b_url,
         &peers.c_url,
         &peers.d_url,
+        None,
     )
-    .await;
+        .await;
     let client = reqwest::Client::new();
 
     add_mixed_pool_b_cooldown(&client, &base, &second).await;
@@ -202,14 +203,7 @@ async fn assert_mixed_pool_first_ladder_keeps_failed_identity(direct: bool) {
         0
     );
 
-    trigger_mixed_pool_b_probe(
-        &client,
-        &base,
-        &second,
-        &mut peers.b_probe_rx,
-        mode,
-    )
-    .await;
+    trigger_mixed_pool_b_probe(&client, &base, &second, &mut peers.b_probe_rx, mode).await;
     assert_eq!(
         peers.b_business.load(std::sync::atomic::Ordering::SeqCst),
         0
@@ -5329,9 +5323,9 @@ async fn spawn_mixed_pool_peers(mode: MixedPoolWireMode) -> MixedPoolPeerSet {
                 async move {
                     c_business.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     match mode {
-                        MixedPoolWireMode::Chat => {
-                            mixed_pool_chat_success("availability-inactive candidate must never answer")
-                        }
+                        MixedPoolWireMode::Chat => mixed_pool_chat_success(
+                            "availability-inactive candidate must never answer",
+                        ),
                         MixedPoolWireMode::Responses => mixed_pool_responses_success(
                             "availability-inactive candidate must never answer",
                         ),
@@ -5350,9 +5344,10 @@ async fn spawn_mixed_pool_peers(mode: MixedPoolWireMode) -> MixedPoolPeerSet {
         route_path,
         post(move || async move {
             match mode {
-                MixedPoolWireMode::Chat => {
-                    mixed_pool_chat_success_with_model("wire-side", "independent mixed route advanced")
-                }
+                MixedPoolWireMode::Chat => mixed_pool_chat_success_with_model(
+                    "wire-side",
+                    "independent mixed route advanced",
+                ),
                 MixedPoolWireMode::Responses => mixed_pool_responses_success_with_model(
                     "wire-side",
                     "independent mixed route advanced",
@@ -5410,12 +5405,26 @@ fn apply_mixed_pool_third_availability(
         .availability = Some(availability);
 }
 
+fn apply_mixed_pool_debug_log(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    debug_log: Option<&std::path::Path>,
+) {
+    if let Some(path) = debug_log {
+        manifest.debug.log_console = true;
+        manifest.debug.snapshots = true;
+        manifest.debug.codex_samples = true;
+        manifest.debug.full_codex_sampling = true;
+        manifest.debug.log_file = Some(path.display().to_string());
+    }
+}
+
 async fn spawn_mixed_pool_manifest_server(
     direct: bool,
     a_url: &str,
     b_url: &str,
     c_url: &str,
     d_url: &str,
+    debug_log: Option<&std::path::Path>,
 ) -> MixedPoolServerRig {
     let MixedPoolManifest {
         mut manifest,
@@ -5426,6 +5435,7 @@ async fn spawn_mixed_pool_manifest_server(
     } = mixed_pool_manifest(a_url, b_url, c_url, d_url, "chat");
     apply_mixed_pool_mode(&mut manifest, direct);
     apply_mixed_pool_third_availability(&mut manifest, &third);
+    apply_mixed_pool_debug_log(&mut manifest, debug_log);
 
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
@@ -5452,6 +5462,7 @@ async fn spawn_mixed_pool_responses_direct_server(
     b_url: &str,
     c_url: &str,
     d_url: &str,
+    debug_log: Option<&std::path::Path>,
 ) -> MixedPoolServerRig {
     let MixedPoolManifest {
         mut manifest,
@@ -5466,7 +5477,10 @@ async fn spawn_mixed_pool_responses_direct_server(
     // before the server starts, so this case cannot silently become Chat Relay.
     for provider in manifest.providers.values() {
         assert_eq!(
-            provider.responses.as_ref().map(|responses| responses.process.as_str()),
+            provider
+                .responses
+                .as_ref()
+                .map(|responses| responses.process.as_str()),
             Some("direct"),
             "provider {} must explicitly declare responses process=direct",
             provider.id
@@ -5491,6 +5505,7 @@ async fn spawn_mixed_pool_responses_direct_server(
     }
 
     apply_mixed_pool_third_availability(&mut manifest, &third);
+    apply_mixed_pool_debug_log(&mut manifest, debug_log);
 
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
@@ -5528,7 +5543,9 @@ async fn add_mixed_pool_b_cooldown(client: &reqwest::Client, base: &str, second:
         "B must enter a real probe cooldown"
     );
     assert!(
-        provider_cooldown_entry(client, base, second).await.is_some(),
+        provider_cooldown_entry(client, base, second)
+            .await
+            .is_some(),
         "B must be visible in the cooldown pool"
     );
 }
@@ -5677,8 +5694,9 @@ async fn assert_mixed_pool_empty_sse_recovers(direct: bool) {
         &peers.b_url,
         &peers.c_url,
         &peers.d_url,
+        None,
     )
-    .await;
+        .await;
     let client = reqwest::Client::new();
 
     add_mixed_pool_b_cooldown(&client, &base, &second).await;
@@ -5775,14 +5793,7 @@ async fn assert_mixed_pool_empty_sse_recovers(direct: bool) {
 
     // Make B's real recovery probe due. It reaches B's upstream and is held
     // there, so B cannot recover until this test releases the barrier.
-    trigger_mixed_pool_b_probe(
-        &client,
-        &base,
-        &second,
-        &mut peers.b_probe_rx,
-        mode,
-    )
-    .await;
+    trigger_mixed_pool_b_probe(&client, &base, &second, &mut peers.b_probe_rx, mode).await;
     assert!(
         timeout(Duration::from_millis(100), request.as_mut().unwrap())
             .await
@@ -5977,8 +5988,9 @@ async fn assert_mixed_pool_responses_direct_empty_sse_recovers() {
         &peers.b_url,
         &peers.c_url,
         &peers.d_url,
+        None,
     )
-    .await;
+        .await;
     let client = reqwest::Client::new();
 
     add_mixed_pool_b_cooldown(&client, &base, &second).await;
@@ -6070,14 +6082,7 @@ async fn assert_mixed_pool_responses_direct_empty_sse_recovers() {
     );
 
     // B's real recovery probe reaches its upstream and is held there.
-    trigger_mixed_pool_b_probe(
-        &client,
-        &base,
-        &second,
-        &mut peers.b_probe_rx,
-        mode,
-    )
-    .await;
+    trigger_mixed_pool_b_probe(&client, &base, &second, &mut peers.b_probe_rx, mode).await;
     assert!(
         timeout(Duration::from_millis(100), request.as_mut().unwrap())
             .await
@@ -6223,10 +6228,18 @@ async fn assert_mixed_pool_responses_direct_empty_sse_recovers() {
         a_business_dispatched, 1,
         "{mode}: A must receive exactly one business attempt; probe arrivals: {a_probe_dispatched}; wire: {a_arrivals:?}"
     );
+    let b_probe_count = b_arrivals
+        .iter()
+        .filter(|wire| mixed_pool_responses_is_probe(wire))
+        .count();
+    assert_eq!(
+        b_probe_count, 1,
+        "{mode}: B must receive exactly one recovery probe before the original request recovers: {b_arrivals:?}"
+    );
     assert_eq!(
         b_arrivals.len(),
-        1,
-        "{mode}: B must receive exactly one recovery probe before the original request recovers: {b_arrivals:?}"
+        2,
+        "{mode}: B must receive the recovery probe and then the recovered business request: {b_arrivals:?}"
     );
     assert!(
         b_arrivals
@@ -6234,5 +6247,448 @@ async fn assert_mixed_pool_responses_direct_empty_sse_recovers() {
             .map(mixed_pool_responses_is_probe)
             .unwrap_or(false),
         "{mode}: B's recorded wire must be the real recovery probe: {b_arrivals:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Mixed candidate pool: a health-neutral request-local failure must not turn
+// the exhaustion into a terminal while a cooled peer still owns a live recovery
+// probe and only a healthy-but-window-inactive candidate is otherwise present.
+//
+// A answers its business attempt with a recognized unharvestable tool marker.
+// That is a registered health-neutral response-processing failure: A is
+// excluded for this request only and is not cooled. B is driven into a real,
+// probe-owned cooldown through the public control entry. C is healthy but its
+// declared availability window does not cover this request, so selection skips
+// it while it stays in the captured candidate set. The original request must
+// keep waiting for B's real probe and then serve B's real business result; C
+// must never be dispatched, A must not be re-sent, and the client must never
+// receive a provider/proxy error or a fabricated empty success.
+//
+// This is the health-neutral counterpart of the empty-SSE fixture: the empty
+// SSE body is a ProviderFailure, which takes the unconditional recovery path
+// and therefore cannot reach the cooldown-only classification. Only the
+// health-neutral failure reaches `v3_exhaustion_is_cooldown_only`, where a
+// healthy-but-window-inactive candidate must not hide the cooled peer's live
+// recovery probe.
+// ---------------------------------------------------------------------------
+
+const MIXED_POOL_UNHARVESTABLE_MARKUP: &str =
+    "must-not-deliver\n<|DSML|tool_calls>\n<|exec_command\">";
+
+fn mixed_pool_exec_command_tools() -> Value {
+    json!([{
+        "type": "function",
+        "name": "exec_command",
+        "description": "Run one bounded command.",
+        "parameters": {
+            "type": "object",
+            "properties": {"cmd": {"type": "string"}},
+            "required": ["cmd"]
+        }
+    }])
+}
+
+fn mixed_pool_markup_response(direct: bool, text: &str) -> Response<Body> {
+    if direct {
+        mixed_pool_responses_success_with_model("wire-test", text)
+    } else {
+        mixed_pool_chat_success_with_model("wire-test", text)
+    }
+}
+
+fn mixed_pool_debug_tail(text: &str, max_chars: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let start = chars.len().saturating_sub(max_chars);
+    chars[start..].iter().collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue44cc3af_mixed_pool_direct_health_neutral_keeps_cooled_probe() {
+    assert_mixed_pool_health_neutral_recovers(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue44cc3af_mixed_pool_relay_health_neutral_keeps_cooled_probe() {
+    assert_mixed_pool_health_neutral_recovers(false).await;
+}
+
+async fn assert_mixed_pool_health_neutral_recovers(direct: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new(if direct {
+        "44cc3af-mixed-health-neutral-direct"
+    } else {
+        "44cc3af-mixed-health-neutral-relay"
+    });
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let mode = if direct { "ResponsesDirect" } else { "Relay" };
+
+    // A: selectable and healthy. Its complete response carries a recognized
+    // unharvestable tool marker, so the attempt fails with a health-neutral
+    // typed cause and A is excluded for this request only.
+    let a_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let a_url = format!("http://{}/v1", a_listener.local_addr().unwrap());
+    let a_wire = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let a_business = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let a_probe = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (a_business_tx, mut a_business_rx) = mpsc::unbounded_channel::<()>();
+    let a_release = Arc::new(Semaphore::new(0));
+    let a_route: &'static str = if direct {
+        "/v1/responses"
+    } else {
+        "/v1/chat/completions"
+    };
+    let a_app = Router::new().route(
+        a_route,
+        post({
+            let a_wire = a_wire.clone();
+            let a_business = a_business.clone();
+            let a_probe = a_probe.clone();
+            let a_business_tx = a_business_tx.clone();
+            let a_release = a_release.clone();
+            move |axum::Json(body): axum::Json<Value>| {
+                let a_wire = a_wire.clone();
+                let a_business = a_business.clone();
+                let a_probe = a_probe.clone();
+                let a_business_tx = a_business_tx.clone();
+                let a_release = a_release.clone();
+                async move {
+                    let is_probe = if direct {
+                        mixed_pool_responses_is_probe(&body)
+                    } else {
+                        mixed_pool_is_probe(&body)
+                    };
+                    a_wire.lock().unwrap().push(body.clone());
+                    if is_probe {
+                        // A answers its own probe channel instead of holding it,
+                        // so a probe cannot stall this test.
+                        a_probe.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        return Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "application/json")
+                            .body(Body::from(r#"{"probe":"qualified"}"#))
+                            .unwrap();
+                    }
+                    a_business.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = a_business_tx.send(());
+                    let _permit = a_release.acquire_owned().await.unwrap();
+                    mixed_pool_markup_response(direct, MIXED_POOL_UNHARVESTABLE_MARKUP)
+                }
+            }
+        }),
+    );
+    let a_task = tokio::spawn(async move { axum::serve(a_listener, a_app).await.unwrap() });
+
+    let mut peers = spawn_mixed_pool_peers(if direct {
+        MixedPoolWireMode::Responses
+    } else {
+        MixedPoolWireMode::Chat
+    })
+    .await;
+
+    // Reuse the shared spawn helpers, attaching a debug log file so the test
+    // can read back the registered health-neutral typed cause instead of
+    // inferring it from recovery alone.
+    let debug_log = std::env::temp_dir().join(format!(
+        "rcc-mixed-health-neutral-{}-{}.log",
+        if direct { "direct" } else { "relay" },
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&debug_log);
+
+    // Direct keeps the Responses entry on the real ResponsesDirect process; the
+    // shared helper already asserts every provider/interface declares
+    // responses process=direct. Relay keeps the OpenAI Chat provider wire
+    // behind the Responses entry through the same shared Relay binding.
+    let MixedPoolServerRig {
+        handle,
+        base,
+        entry_endpoint,
+        endpoint,
+        first,
+        second,
+        third,
+        side,
+    } = if direct {
+        spawn_mixed_pool_responses_direct_server(
+            &a_url,
+            &peers.b_url,
+            &peers.c_url,
+            &peers.d_url,
+            Some(&debug_log),
+        )
+        .await
+    } else {
+        spawn_mixed_pool_manifest_server(
+            false,
+            &a_url,
+            &peers.b_url,
+            &peers.c_url,
+            &peers.d_url,
+            Some(&debug_log),
+        )
+        .await
+    };
+    let client = reqwest::Client::new();
+
+    add_mixed_pool_b_cooldown(&client, &base, &second).await;
+
+    // Prerequisites: the dry-run proves C stays in the captured candidate set
+    // and is unavailable only through its declared window, while A is the
+    // current selection and B is cooled.
+    let dry_request = json!({
+        "model": "client-test",
+        "input": "mixed health-neutral recovery",
+        "stream": false,
+        "tools": mixed_pool_exec_command_tools(),
+    });
+    let dry_run: Value = client
+        .post(format!(
+            "{base}/_routecodex/diagnostics/virtual-router/dry-run"
+        ))
+        .json(&json!({
+            "request": dry_request,
+            "metadata": {
+                "requestId": "mixed-health-neutral-dry-run",
+                "entryEndpoint": entry_endpoint,
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let decision = &dry_run["diagnostics"]["decision"];
+    assert!(
+        decision.is_object(),
+        "{mode}: virtual-router dry-run must expose a selection decision: {dry_run}"
+    );
+    let third_key = format!("{third}:default:key:test");
+    let candidate_keys = decision["candidateProviderKeys"].to_string();
+    let unavailable = decision["unavailableCandidates"].to_string();
+    assert!(
+        candidate_keys.contains(&third_key),
+        "{mode}: C must remain in the captured candidate set: {dry_run}"
+    );
+    assert!(
+        unavailable.contains(&third_key) && unavailable.contains("availability_inactive"),
+        "{mode}: C must be unavailable only through its declared availability window: {dry_run}"
+    );
+    assert!(
+        decision["selectedProviderKey"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with(&format!("{first}:")),
+        "{mode}: A must be selected while B is cooled and C is outside its window: {dry_run}"
+    );
+
+    // Start the original request. A receives the first attempt and holds it.
+    let mut request = Some(tokio::spawn({
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        let payload = dry_request.clone();
+        async move {
+            client
+                .post(endpoint)
+                .header("session-id", "44cc3af-mixed-health-neutral")
+                .header("thread-id", "44cc3af-mixed-health-neutral")
+                .json(&payload)
+                .send()
+                .await?
+                .text()
+                .await
+        }
+    }));
+    let a_arrived = timeout(Duration::from_secs(3), a_business_rx.recv()).await;
+    assert!(
+        matches!(a_arrived, Ok(Some(()))),
+        "{mode}: A must receive the first live attempt"
+    );
+    assert!(
+        timeout(Duration::from_millis(100), request.as_mut().unwrap())
+            .await
+            .is_err(),
+        "{mode}: the request must stay pending while A is held"
+    );
+    assert_eq!(
+        peers.b_business.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{mode}: B must not receive business while it is cooled"
+    );
+    assert_eq!(
+        peers.c_business.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{mode}: C must never be dispatched"
+    );
+
+    // B's real recovery probe reaches its upstream and is held there.
+    trigger_mixed_pool_b_probe(&client, &base, &second, &mut peers.b_probe_rx, mode).await;
+    assert!(
+        timeout(Duration::from_millis(100), request.as_mut().unwrap())
+            .await
+            .is_err(),
+        "{mode}: the request must stay pending while B's probe is held"
+    );
+    assert_eq!(
+        peers.b_business.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{mode}: B must not receive business before its probe recovers"
+    );
+    assert_eq!(
+        peers.c_business.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{mode}: C must never be dispatched"
+    );
+
+    // An independent healthy D request must still progress while the original
+    // request waits for B.
+    let independent_model = format!("{side}.side");
+    let independent = timeout(
+        Duration::from_secs(3),
+        client
+            .post(&endpoint)
+            .header("session-id", "44cc3af-mixed-health-independent")
+            .json(&json!({
+                "model": independent_model,
+                "input": "independent",
+                "stream": false
+            }))
+            .send(),
+    )
+    .await
+    .expect("an independent request must progress while the original waits")
+    .unwrap();
+    assert_eq!(independent.status(), StatusCode::OK);
+    let independent_body = independent.text().await.unwrap();
+    assert!(
+        independent_body.contains("independent mixed route advanced"),
+        "{mode}: independent request must receive its healthy business result: {independent_body}"
+    );
+    assert_eq!(
+        peers.b_business.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{mode}: the independent request must not dispatch B"
+    );
+    assert_eq!(
+        peers.c_business.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "{mode}: C must never be dispatched"
+    );
+
+    // Release A. Its unharvestable tool marker is a health-neutral
+    // request-local failure, so the mixed pool must keep waiting for B's live
+    // probe instead of terminating.
+    let started = tokio::time::Instant::now();
+    a_release.add_permits(1);
+    let early = timeout(Duration::from_millis(150), request.as_mut().unwrap()).await;
+    let ended_early = early.is_ok();
+    let ended_body = match early {
+        Ok(Ok(Ok(body))) => Some(body),
+        Ok(Ok(Err(error))) => Some(format!("request error: {error}")),
+        Ok(Err(join)) => Some(format!("join error: {join}")),
+        Err(_) => None,
+    };
+    let elapsed = started.elapsed();
+
+    let mut recovered_body = None;
+    if !ended_early {
+        peers
+            .b_ready
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        peers.b_probe_release.add_permits(1);
+        recovered_body = timeout(
+            Duration::from_secs(5),
+            request.take().expect("pending request handle"),
+        )
+        .await
+        .ok()
+        .and_then(|joined| joined.ok())
+        .and_then(|result| result.ok());
+    }
+    let b_dispatched = peers.b_business.load(std::sync::atomic::Ordering::SeqCst);
+    let c_dispatched = peers.c_business.load(std::sync::atomic::Ordering::SeqCst);
+    let a_business_dispatched = a_business.load(std::sync::atomic::Ordering::SeqCst);
+    let a_probe_dispatched = a_probe.load(std::sync::atomic::Ordering::SeqCst);
+
+    // Release every held barrier so the aborts below cannot strand a handler.
+    a_release.add_permits(8);
+    peers.b_probe_release.add_permits(8);
+    handle.shutdown().await;
+    a_task.abort();
+    peers.b_task.abort();
+    peers.c_task.abort();
+    peers.d_task.abort();
+    if let Some(request) = request {
+        request.abort();
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    // Record every A arrival with its classification, in wire order.
+    let a_arrivals = a_wire.lock().unwrap().clone();
+    for (index, wire) in a_arrivals.iter().enumerate() {
+        let is_probe = if direct {
+            mixed_pool_responses_is_probe(wire)
+        } else {
+            mixed_pool_is_probe(wire)
+        };
+        eprintln!("[{mode}] A wire #{index} is_probe={is_probe} body={wire}");
+    }
+
+    // Typed-cause prerequisite: A must actually produce the registered
+    // health-neutral unharvestable-tool-markup cause. Without it the failure
+    // would be a ProviderFailure and the request would take the unconditional
+    // recovery path, so this fixture would not exercise the cooldown-only
+    // classification that the production fix owns.
+    let debug_text = std::fs::read_to_string(&debug_log).unwrap_or_default();
+    let typed_cause_present = if direct {
+        debug_text.contains("V3DirectResp14UnharvestableToolMarkup")
+            || debug_text.contains("direct_tool_markup_unharvestable")
+    } else {
+        debug_text.contains("V3HubRelayResp03UnharvestableToolMarkup")
+            || debug_text.contains("relay_unharvestable_tool_markup")
+    };
+    assert!(
+        typed_cause_present,
+        "{mode}: A must produce the registered health-neutral unharvestable-tool-markup typed cause; debug log tail: {}",
+        mixed_pool_debug_tail(&debug_text, 6000)
+    );
+
+    assert!(
+        !ended_early,
+        "{mode}: mixed pool terminated after {elapsed:?} while cooled B still had a live probe and only window-inactive C blocked the cooldown-only fast path: {ended_body:?}"
+    );
+    let recovered_body = recovered_body
+        .expect("the original request must finish with B's real business result after B recovers");
+    assert!(
+        recovered_body.contains("cooled mixed peer recovered"),
+        "{mode}: the original request must carry B's real business result: {recovered_body}"
+    );
+    assert!(
+        !recovered_body.contains("\"error\""),
+        "{mode}: the client must not receive a provider/proxy error payload: {recovered_body}"
+    );
+    assert_eq!(
+        b_dispatched, 1,
+        "{mode}: B must carry the recovered business request exactly once"
+    );
+    assert_eq!(c_dispatched, 0, "{mode}: C must never be dispatched");
+    let a_is_probe = |wire: &Value| {
+        if direct {
+            mixed_pool_responses_is_probe(wire)
+        } else {
+            mixed_pool_is_probe(wire)
+        }
+    };
+    assert!(
+        a_arrivals
+            .first()
+            .map(|wire| !a_is_probe(wire))
+            .unwrap_or(false),
+        "{mode}: A's first arrival must be the original business request, not a probe: {a_arrivals:?}"
+    );
+    assert_eq!(
+        a_business_dispatched, 1,
+        "{mode}: A must receive exactly one business attempt and must not be re-sent; probe arrivals: {a_probe_dispatched}; wire: {a_arrivals:?}"
     );
 }

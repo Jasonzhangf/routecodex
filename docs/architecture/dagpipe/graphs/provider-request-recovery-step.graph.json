@@ -1,7 +1,7 @@
 {
   "id": "v3.provider_request.recovery_step",
   "version": "2",
-  "description": "单请求恢复步骤；VR 将 typed 冷却状态只用于候选可见性，请求没有业务并发准入、permit 或共享等待队列。依次扫描当前 route 全部 tier、声明的后续选择池和 default；任一位置有合规可选 provider 即立即派发，不等待错误返回延迟。已失败身份的请求内约束不因扫描结束、健康仍可用、无关身份成功或恢复阶梯到期而整批清除；仅匹配身份的有效恢复事实可以解除相应可恢复失败约束，永久不兼容及最后候选的失败约束遵循其声明策略。所有合规候选当前都不可选时保持客户端连接与 keepalive，并按原预算及声明恢复策略复核；不因等待续期原始预算。仅合法最终错误结束前独立延迟两秒并复核恢复机会，Probe 仅更新健康。派发、保持连接、取消及合法结束汇入该请求处置出口。",
+  "description": "单请求恢复步骤；VR 将 typed 冷却状态只用于候选可见性，请求没有业务并发准入、permit 或共享等待队列。依次扫描当前 route 全部 tier、声明的后续选择池和 default；任一位置有合规可选 provider 即立即派发，不等待错误返回延迟。无当前可选候选时，在完整候选链内区分永久上下文不匹配、永久请求不兼容、可恢复失败约束、声明时间窗和 typed 健康状态；某个候选不可用不否决另一候选已确认的冷却或时间窗恢复机会。已失败身份的请求内约束不因扫描结束、健康仍可用、无关身份成功或恢复阶梯到期而整批清除；仅匹配身份的有效恢复事实可以解除相应可恢复失败约束，永久不兼容及最后候选的失败约束遵循其声明策略。所有合规候选当前都不可选时保持客户端连接与 keepalive，并按原预算及声明恢复策略复核；不因等待续期原始预算。仅合法最终错误结束前独立延迟两秒并复核恢复机会，Probe 仅更新健康。派发、保持连接、取消及合法结束汇入该请求处置出口。",
   "inputs": [{"id":"request-recovery","schema":"Any","schema_ref":"v3.provider_request.arc.recovery"}],
   "nodes": [
     {"id":"检查取消与期限","operator":"routecodex.v3.runtime.recovery_check_request","operator_version":"1","inputs":["request-recovery"],"output":{"id":"checked-request","schema":"Any","schema_ref":"v3.provider_request.arc.checked_request"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.runtime.request_control"],"writes":[]}},
