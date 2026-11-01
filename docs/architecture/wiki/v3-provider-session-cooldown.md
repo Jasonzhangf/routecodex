@@ -35,7 +35,7 @@ flowchart TD
 - Missing session fails before provider send. No request/conversation/continuation/MetadataCenter or
   routing-group substitution exists.
 - Session A failure, cooldown, waiter, permit, success and terminal transitions never touch B.
-- Global configured-disable, health-disable, quota and concurrency facts still block every session.
+- Global configured-disable, health-disable and quota facts still block every session.
 - Runtime recovery uses `selected.route.target_plan`; it never invokes Virtual Router a second time.
 - Target remains read-only and Virtual Router remains health-blind.
 - Sibling evidence must be explicit. Missing record is not healthy.

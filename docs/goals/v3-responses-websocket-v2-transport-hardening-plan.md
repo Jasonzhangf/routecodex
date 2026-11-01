@@ -7,7 +7,7 @@ client disconnect、provider/protocol error、并发请求均 fail-closed 且不
 
 验收标准：
 
-- 同一 provider/model/auth/url session 同时只允许一个 in-flight response。
+- 每条物理连接只允许一个 in-flight response；缓存连接忙时其他请求使用独立连接。
 - WebSocket handshake 必须发送 Codex/OpenAI Responses WebSocket mode 要求的
   `OpenAI-Beta: responses_websockets=2026-02-06`；`websocket_v2` 仅是 RouteCodex
   内部 transport 名称，不冒充官方协议名。
@@ -35,6 +35,7 @@ Out of scope：
 - Provider Runtime 是 socket/session 唯一 owner。
 - Provider Runtime 是上游 WebSocket handshake header 唯一 owner；Server/Runtime 不复制 socket state。
 - 单 connection guard 覆盖一次 response 生命周期。
+- 取得连接槽即绑定默认清理；future 丢弃、错误或取消时先清槽后解锁，完整 JSON 或 SSE 排空后才能保留缓存连接。
 - terminal drain 才允许复用；其他退出均物理丢弃连接。
 - transport 只做 event/framing/cancellation，不判断 tool/servertool/continuation 业务语义。
 - fail-fast、无 fallback、无重试补偿。
@@ -52,7 +53,7 @@ Out of scope：
 
 - async stream drop 无法 await close：Drop 必须同步移除 connection owner，底层 socket 随即释放。
 - env 测试串台：每个测试使用独立 auth env handle，禁止依赖执行顺序。
-- lock 跨 await：Owned guard 只属于单 response stream；测试证明并发严格串行且无死锁。
+- 连接所有权：Owned guard 只属于单 response stream。共享连接忙时，新请求使用独占连接，不等待其他请求；每条物理连接仍只由一个 response stream 收发。
 - terminal 后未拉取 DONE：视为未完整 drain，连接不得复用。
 
 ## 6. 测试计划
@@ -63,7 +64,7 @@ Out of scope：
 - cancellation before connect/send/read；均 client_disconnect。
 - provider error/failed/incomplete/malformed/missing type/close before terminal。
 - ping/pong、text/binary、split UTF-8。
-- concurrent creates 串行；第二请求不能与第一响应事件交叉。
+- 同身份的独立请求可同时推进；第二请求须在第一请求释放前到达上游，且两条连接的响应事件不得串流。
 - source/mutation gate：Vec accumulation、collect、HTTP retry、fallback、Server socket owner 必红。
 - fmt/clippy/provider package/full V3 workspace/architecture review。
 

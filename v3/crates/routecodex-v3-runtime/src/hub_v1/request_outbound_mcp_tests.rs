@@ -1083,8 +1083,6 @@ fn project_namespace_history(
         priority: 0,
         weight: 1,
         sse_first_frame_timeout_ms: None,
-        initial_concurrency_budget: 8,
-        concurrency_acquire_timeout_ms: 60_000,
         compatibility_profile: None,
         headers: Default::default(),
         env_name: Some("V3_NAMESPACE_HISTORY_TEST_KEY".into()),

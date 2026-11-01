@@ -1,4 +1,40 @@
 #[tokio::test]
+async fn relay_policy_records_candidate_in_request_scan() {
+    let scope = "relay_failure_revision";
+    let manifest = transport_thrash_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("fixture must select a provider"),
+    };
+    let candidate = selected.candidate.clone();
+    let target = V3TargetInterpreter::default();
+    let expanded = target.expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0).unwrap();
+    let budget = crate::execution_control::V3AttemptBudget::test_with_residence_timeout(std::time::Duration::from_secs(60));
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest, captured_target_09: Some(&expanded), attempt_budget: Some(&budget),
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session").unwrap(),
+        provider_health: &health, retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+        deterministic_sample: 0,
+    };
+    let mut failed = BTreeSet::new();
+    let mut retries = BTreeMap::new();
+    let mut trace = Vec::new();
+    let result = run_v3_relay_provider_failure_policy(
+        &context, selected, "V3ProviderRespInbound01Raw", 429,
+        Some("provider_http_429".into()), "limited".into(), None,
+        &mut V3RelayProviderFailurePolicyState { failed_candidates: &mut failed,
+            same_candidate_retries: &mut retries, trace: &mut trace, last_external_http: &mut None },
+    ).await;
+    assert!(result.is_ok(), "429 must enter Relay provider error policy");
+    let candidate_key = v3_relay_provider_candidate_key(&candidate);
+    assert!(budget.request_candidate_attempts().unwrap().contains(&candidate_key),
+        "the failed complete identity must be retained in this request scan");
+    assert!(!failed.contains(&candidate_key),
+        "an ordinary 429 must not become a permanent request exclusion");
+}
+
+#[tokio::test]
 async fn unmatched_transient_error_releases_transient_admission_before_terminal_wait() {
     let scope = "unmatched_transient_terminal";
     let source = r#"
@@ -38,6 +74,7 @@ targets = [
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             scope,
             scope,
@@ -101,6 +138,7 @@ async fn unmatched_transient_reselect_keeps_healthy_alternative_independent() {
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             "unmatched_transient_reselect",
             "unmatched_transient_reselect",

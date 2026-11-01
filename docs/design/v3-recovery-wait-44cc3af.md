@@ -1,6 +1,21 @@
 # 44cc3af: recovery waiting before terminal exhaustion
 
-## Current pool-empty recovery contract
+## Current policy
+
+The user's later instructions override the historical policy below. Business
+concurrency control and shared concurrency waits are removed; requests remain
+independent. Three consecutive real 429 responses cool the exact identity only
+for that session, starting at 10 seconds. Subsequent real 429 responses double
+the cooldown, and from the tenth real 429 probes run once per hour until the
+Beijing midnight reset. Across sessions, ten consecutive real errors trigger
+identity-wide cooldown; when the triggering error is 429, the interval from
+the first to the latest real 429 must exceed two minutes. Matching real session
+success or a valid matching probe restores the identity across sessions. While
+recovery remains possible, accepted requests stay open; only after all eligible
+route tiers and declared route priorities are exhausted do they wait with
+keepalive.
+
+## Historical pool-empty recovery design (superseded where it differs)
 
 ### Sustained 429 policy override, 2026-10-26
 
@@ -15,6 +30,22 @@ the Error chain; no status or transport error is rewritten as success. Recovery
 must satisfy the minimum and all remaining health restrictions. The existing
 Store and probe owner carry and persist this typed state; no second scheduler
 or payload control fields are introduced. Healthy alternatives remain usable.
+
+### Independent request admission round
+
+One round takes the captured target and the exact listener/provider/interface/
+model/key control state. It returns one typed disposition: admit, wait, reselect,
+or cancel/deadline. A waiting request holds no business lease. An in-flight
+request's recovery permit must not by itself prevent another request from using
+remaining declared capacity. Cancellation, success, failure and late permit
+release are associated with their own attempt; an old release must not alter a
+newer successful transition. The shared maxInFlight limit and the original
+recovery deadline remain authoritative. The round does not reenter the router.
+
+The action-gate tests must reject both cross-request serialization while
+capacity remains and premature recovery or loss of another live attempt's state.
+The public entry must prove that a second request reaches a controlled upstream
+before the first is released, and separately enforce the shared capacity limit.
 
 ### 4945 public-entry gap: every captured candidate failed transport
 
@@ -126,6 +157,63 @@ request exhausts, occupied capacity, all-cooled probes, recovery during a long
 interval, cancelled capacity owners, cancellation and original request deadlines.
 Complete-attempt buffering and active-stream lifetime work remain a separate
 milestone under the same issue; this candidate delivers the pool recovery policy.
+## Historical temporary pool exhaustion backoff
+
+When the captured target has no presently eligible candidate, the request waits
+asynchronously for 1, 3, 15, 35 and 90 seconds, then rechecks every 1 second.
+These are per-request intervals, not cumulative deadlines or the provider's
+health-probe ladder. A matching recovery or capacity release wakes the request
+early so a healthy candidate can be used without waiting out a long interval.
+Waiting holds no business-capacity lease and does not block other requests.
+Every fresh request starts its own sequence. Client cancellation and the
+original explicit request deadline remain effective.
+
+The former candidate-acquisition-derived total recovery cutoff is inconsistent
+with this policy: a 60-second acquisition timeout cannot execute its 90-second
+interval. The independent pool-ladder amendment must resolve that boundary
+before code changes. Single-candidate acquisition, 429 identity admission and
+provider probe budgets must remain distinct; reselecting must never renew the
+original request deadline. Earlier timing sections below describe the prior
+implementation and its evidence, not the new interval contract.
+
+## Live 4941 blocking stream failure: 9a4fc39 / 803d7ba
+
+Original sample17175 failed again after 120007 ms while emitting business
+deltas. Actual upstream status is unknown. Source shows a reqwest total body
+timer and pre-terminal client projection; controlled public REDs must establish
+each cause before implementation. The independent amended plan is retained in
+the issue run as `plan-first-semantic-corrected.md`. No old PR379 code is copied.
+
+The existing `responses-sse-client-frame-commit.graph.json` is topologically
+SESE but its early-commit ordering violates the current full-attempt contract.
+Its commit must follow complete terminal validation. Provider semantic progress
+is internal attempt control and does not commit the client or prove success.
+
+```mermaid
+flowchart TD
+ I([已获准的尝试]) --> A[核对原始获取与恢复预算]
+ A --> H[在首字期限内等待响应头和首个语义输出]
+ H --> B[完整缓冲尝试并保留容量限制与取消]
+ B --> T{已达到可交付终态？}
+ T -->|是| G[完成响应治理并封存]
+ G --> C[向客户端发送已封存响应]
+ T -->|提供方失败| E[保留错误链并释放失败尝试]
+ H -->|提供方失败| E
+ E --> R[在原始预算内选择下一个可用候选]
+ B -->|本地容量不足或取消| L[记录本地错误且不改变提供方健康]
+ C --> O([请求处置结果])
+ R --> O
+ L --> O
+```
+
+This graph describes one attempt/disposition round; subsequent attempts enter
+through the same round. A failed attempt contributes zero client payload bytes.
+Only the active attempt's stream timers disarm on semantic progress. Original
+preplan, acquisition and recovery budgets never renew. Capacity and cancellation
+remain enforced. Headers, comments and empty envelopes are not semantic progress.
+The first focused gate is public `issue44cc3af_stream_*` under
+`multi_listener_server`; it separates provider total timeout, runtime residence
+timeout and pre-terminal leakage instead of changing several causes together.
 
 ## Follow-up: failure with only cooled peers remaining
 
@@ -293,6 +381,18 @@ Keep actual failed identities excluded.
 This preserves the existing SESE round's two outcome edges without carrying
 temporary capacity state into the request's failed-candidate history.
 
+Each new client request owns a fresh declared acquisition budget even when a
+previous request has exhausted its own recovery budget. Shared identity health,
+capacity and probe ownership persist; a previous request's terminal disposition
+must not become a server-wide admission rejection. The existing admission-round
+graph is unchanged. Public Direct and Relay regressions cover successive new
+sessions while both providers remain occupied and while all identities remain
+cooled with stalled shared probes. Each request must wait independently, remain
+bounded, and end transport detectably without business error payload or a normal
+empty completion. Occupied providers must receive no additional business calls.
+The required gate selects `issue44cc3af_*repeated*after_exhaustion*` and
+`issue44cc3af_*repeated_all_cooled_requests*` in `multi_listener_server`.
+
 Required public cases cover both Direct and Relay: A fails while B is occupied,
 then B releases and succeeds; A is occupied while B is selected, then A releases
 before B fails and the request recovers on A. Assert one failed-provider attempt,
@@ -312,3 +412,26 @@ that phase as before. Otherwise an immediate repeated probe-initiation round
 can spin without yielding and starve its own detached recovery probe and timer.
 The existing Direct/Relay busy-preferred/cooled-peer public cases and the bounded
 runtime `busy_preferred_candidate_preserves_cooled_peer_recovery` case guard it.
+
+## Current request-local complete-scan correction
+
+Probe is only the cooldown-health owner. It never joins business dispatch,
+selects a candidate, or grants a recovered send. A request owns a short-lived
+set of complete provider/interface/auth/model identities that reached its wire
+send boundary in the current scan. Selection excludes that set in addition to
+permanent request exclusions and typed health. Each eligible identity is sent
+at most once per scan. Only full captured-pool exhaustion enters that request's
+keepalive recovery. The wait registers the current availability generation;
+either a later generation or the existing request recovery cadence clears only
+the scan set and starts a new normal selection. It never clears permanent
+request exclusions or provider cooldown.
+
+The cumulative wire-attempt number remains diagnostic. The old fixed ordinary
+attempt ceiling and the requirement for a newer recovery-success revision after
+that ceiling are not dispatch authority: they can truncate a pool larger than
+the configured count and can leave a request unable to produce its own recovery
+success. Byte, frame, request and process resident-memory limits remain owned by
+the attempt store. The focused Direct and Relay public regressions must prove
+two failed identities are not sent again inside one scan, another session
+progresses while the original waits, and the original starts a later legal scan
+without a synthetic probe or pre-existing success receipt.

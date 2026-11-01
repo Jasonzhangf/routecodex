@@ -25,7 +25,7 @@ const copied = [
   'v3/package.json',
 ];
 const cases = [
-  ['early drop keeps socket', websocket, '*self.connection = None;', '// mutated: keep socket', /connection/],
+  ['early drop keeps socket', websocket, '*self.slot = None;', '// mutated: keep socket', /slot|connection/],
   ['JSON missing type keeps socket', transport, 'None => {\n                    *connection = None;\n                    return Err(websocket_protocol_error(', 'None => {\n                    return Err(websocket_protocol_error(', /connection/],
   ['WebSocket event accumulation', transport, '        if connection.is_none() {', '        let mut response_events = Vec::new(); response_events.push(1);\n        if connection.is_none() {', /Vec/],
   ['WebSocket JSON accumulator removed', websocket, 'struct V3ResponsesWebSocketProtocolAggregate', 'struct V3WsProtocolAggregateRemoved', /V3ResponsesWebSocketProtocolAggregate/],
@@ -35,7 +35,8 @@ const cases = [
   ['Codex status_code parsing removed', websocket, '.or_else(|| server_event.get("status_code"))', '', /status_code/],
   ['Codex error type parsing removed', websocket, '.or_else(|| error.get("type"))', '', /error parsing|error\.get\("type"\)/],
   ['Server socket owner', server, 'pub struct V3ServerAggregateHandle {', 'struct SharedResponsesWebSocket;\npub struct V3ServerAggregateHandle {', /socket owner|SharedResponsesWebSocket/],
-  ['concurrency case removed', tests, 'websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leakage', 'websocket_v2_concurrency_case_removed', /concurrent/],
+  ['concurrency case removed', tests, 'websocket_v2_concurrent_streams_progress_independently_without_cross_frame_leakage', 'websocket_v2_concurrency_case_removed', /concurrent/],
+  ['busy shared connection waits', websocket, 'session.clone().try_lock_owned()', 'session.lock_owned()', /busy shared connection/],
 ];
 
 const failures = [];

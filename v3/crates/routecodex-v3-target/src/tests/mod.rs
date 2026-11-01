@@ -1,6 +1,6 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_provider_responses::V3ProviderAvailabilityProjection;
+use routecodex_v3_provider_responses::{V3ProviderAvailabilityProjection, V3ProviderHealthError};
 use routecodex_v3_virtual_router::RouteClassification;
 
 fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
@@ -12,6 +12,13 @@ fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
             .map(|candidate| (*candidate).to_string())
             .collect(),
         required_capabilities: Vec::new(),
+    }
+}
+
+fn expect_exhausted(error: V3TargetSelectionError) -> V3TargetExhaustion {
+    match error {
+        V3TargetSelectionError::Exhausted(exhausted) => exhausted,
+        other => panic!("expected exhausted selection, got {other:?}"),
     }
 }
 use routecodex_v3_virtual_router::{V3RouterRequestFacts, V3VirtualRouter};
@@ -28,13 +35,13 @@ impl V3ProviderAvailabilityReader for Availability {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         _now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         let label = format!(
             "{provider_id}:{interface_id}:{}:{}",
             auth_alias.unwrap_or(""),
             model_id.unwrap_or("")
         );
-        V3ProviderAvailabilityProjection {
+        Ok(V3ProviderAvailabilityProjection {
             provider_id: provider_id.into(),
             interface_id: interface_id.into(),
             auth_alias: auth_alias.map(Into::into),
@@ -46,7 +53,7 @@ impl V3ProviderAvailabilityReader for Availability {
                 .then_some(label)
                 .into_iter()
                 .collect(),
-        }
+        })
     }
 
     fn availability(
@@ -55,7 +62,7 @@ impl V3ProviderAvailabilityReader for Availability {
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
         self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
     }
 }
@@ -108,6 +115,37 @@ targets = [{ kind = "provider_model", provider = "a", model = "m", key = "ka", p
 fn expanded() -> V3Target09CandidateSetExpanded {
     let manifest = manifest();
     expanded_with(&manifest, &V3TargetInterpreter::default(), 0)
+}
+
+#[test]
+fn health_read_failure_is_not_empty_pool_or_healthy_candidate() {
+    struct FailedRead(std::cell::Cell<usize>);
+    impl V3ProviderSchedulingReader for FailedRead {
+        fn scheduling_projection(
+            &self,
+            _provider_id: &str,
+            _auth_alias: &str,
+            _model_id: &str,
+            _priority: i32,
+            _base_weight: u32,
+            _now_ms: u64,
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
+            self.0.set(self.0.get() + 1);
+            Err(V3ProviderHealthError::Poisoned("controlled".into()))
+        }
+    }
+    let reader = FailedRead(std::cell::Cell::new(0));
+    let candidates = expanded();
+    let first = &candidates.candidates[0];
+    let expected = (first.provider_id.clone(), first.interface_id.clone(), first.auth_alias.clone(), first.model_id.clone());
+    let result = V3TargetInterpreter::default().select_available_with_health(candidates, &reader, 0, 0);
+    match result {
+        Err(V3TargetSelectionError::Health { provider_id, interface_id, auth_alias, model_id, source: V3ProviderHealthError::Poisoned(_) }) => {
+            assert_eq!((provider_id, interface_id, auth_alias, model_id), expected);
+        }
+        other => panic!("health read failure must not become selection or pool exhaustion: {other:?}"),
+    }
+    assert_eq!(reader.0.get(), 1, "a failed health read must not advance to a later candidate");
 }
 
 fn expanded_with(
@@ -523,13 +561,9 @@ fn provider_model_availability_omitted_keeps_model_available_any_time() {
 }
 
 #[test]
-fn provider_model_availability_admitted_count_ignores_window_inactive_siblings() {
-    // The single-candidate automatic-cooldown exemption must count only
-    // candidates admitted by capability and availability. Here provider a is
-    // the only candidate admitted at 10:00 Asia/Shanghai (b and c declare
-    // windows that exclude that instant), so a cooled provider a must still be
-    // exempted: a window-inactive sibling must never inflate the pool size and
-    // suppress the exemption.
+fn cooled_single_admitted_candidate_is_not_visible_to_selection() {
+    // Inactive siblings do not make a cooled singleton eligible. The caller
+    // retains the request and follows the declared recovery path instead.
     let mut manifest = provider_priority_schedule_manifest();
     let window_excluding_ten_am =
         routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
@@ -568,7 +602,7 @@ fn provider_model_availability_admitted_count_ignores_window_inactive_siblings()
             priority: i32,
             base_weight: u32,
             _now_ms: u64,
-        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
@@ -583,13 +617,14 @@ fn provider_model_availability_admitted_count_ignores_window_inactive_siblings()
                 projection.available = false;
                 projection.blocked_scopes = vec!["provider_key_health_cooldown".to_string()];
             }
-            projection
+            Ok(projection)
         }
     }
-    let selected = target
+    let exhausted = target
         .select_available_with_health(expanded, &OnlyProviderACooled, now_ms, 0)
-        .expect("a must stay usable as the only admitted candidate");
-    assert_eq!(selected.candidate.provider_id, "a");
+        .expect_err("a cooled candidate must remain invisible even when it is the only admitted candidate");
+    let exhausted = expect_exhausted(exhausted);
+    assert!(exhausted.attempted_candidates.iter().any(|candidate| candidate.contains("provider_key_health_cooldown")));
 }
 
 #[test]
@@ -615,7 +650,7 @@ fn provider_model_availability_sibling_in_window_keeps_automatic_cooldown() {
             priority: i32,
             base_weight: u32,
             _now_ms: u64,
-        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
@@ -630,7 +665,7 @@ fn provider_model_availability_sibling_in_window_keeps_automatic_cooldown() {
                 projection.available = false;
                 projection.blocked_scopes = vec!["provider_key_health_cooldown".to_string()];
             }
-            projection
+            Ok(projection)
         }
     }
     let selected = target
@@ -707,7 +742,7 @@ fn expanded_tools() -> V3Target09CandidateSetExpanded {
 fn direct_selected(
     requested_model: &str,
     blocked: BTreeSet<String>,
-) -> Result<V3Target10ConcreteProviderSelected, V3TargetExhaustion> {
+) -> Result<V3Target10ConcreteProviderSelected, V3TargetSelectionError> {
     let manifest = manifest();
     let router = V3VirtualRouter::default();
     let target = V3TargetInterpreter::default();
@@ -745,6 +780,7 @@ fn direct_provider_model_expands_pinned_provider_but_respects_health_cooldown() 
 
     let cooled = direct_selected("a.m", BTreeSet::from(["a:default:ka:m".into()]))
         .expect_err("health cooldown must veto an explicit pin");
+    let cooled = expect_exhausted(cooled);
     assert_eq!(
         cooled.attempted_candidates,
         vec!["a:default:ka:m:availability(a:default:ka:m)"],
@@ -791,7 +827,7 @@ fn synthetic_direct_target_preserves_configured_priority_for_health_selection() 
             priority: i32,
             base_weight: u32,
             _now_ms: u64,
-        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
@@ -803,7 +839,7 @@ fn synthetic_direct_target_preserves_configured_priority_for_health_selection() 
                     base_weight,
                 );
             projection.available = priority > 0;
-            projection
+            Ok(projection)
         }
     }
 
@@ -826,7 +862,7 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
             priority: i32,
             base_weight: u32,
             _now_ms: u64,
-        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
@@ -838,7 +874,7 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
                     base_weight,
                 );
             projection.available = false;
-            projection
+            Ok(projection)
         }
     }
 
@@ -871,6 +907,7 @@ fn direct_provider_model_never_selects_an_unavailable_candidate_without_a_scope_
     let exhausted = target
         .select_available_with_health(expanded, &UnavailableWithoutScope, 0, 0)
         .expect_err("unavailable direct candidate must remain unavailable");
+    let exhausted = expect_exhausted(exhausted);
     assert_eq!(
         exhausted.attempted_candidates,
         vec!["a:default:ka:m:health_cooldown"]
@@ -912,20 +949,21 @@ fn direct_provider_model_respects_request_local_exclusion() {
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             _now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
-            V3ProviderAvailabilityProjection {
+        ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
+            Ok(V3ProviderAvailabilityProjection {
                 provider_id: provider_id.into(),
                 interface_id: "default".into(),
                 auth_alias: auth_alias.map(Into::into),
                 model_id: model_id.map(Into::into),
                 available: false,
                 blocked_scopes: vec!["request_local_provider_failure".into()],
-            }
+            })
         }
     }
     let exhausted = target
         .select_available(expanded, &ExcludedAvailability, 0)
         .unwrap_err();
+    let exhausted = expect_exhausted(exhausted);
     assert_eq!(
         exhausted.attempted_candidates,
         vec!["a:default:ka:m:availability(request_local_provider_failure)"]
@@ -1067,25 +1105,6 @@ targets = [{ kind = "forwarder", id = "client", priority = 1 }]
         expanded.candidates[0].visible_model_ids,
         vec!["client-model", "wire-model"]
     );
-}
-
-#[test]
-fn unconfigured_provider_concurrency_defaults_to_forty_as_the_hard_maximum() {
-    // The declared static `maxInFlight` is only the hard ceiling for the
-    // adaptive budget; a provider that omits it gets the documented default of
-    // forty, not the retired default of eight.
-    let expanded = expanded();
-    assert!(
-        !expanded.candidates.is_empty(),
-        "default manifest must expand at least one candidate"
-    );
-    for candidate in &expanded.candidates {
-        assert_eq!(
-            candidate.initial_concurrency_budget, 40,
-            "provider {} must default to a static hard maximum of 40",
-            candidate.provider_id
-        );
-    }
 }
 
 #[test]
@@ -1564,10 +1583,7 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
 }
 
 #[test]
-fn optional_exhaustion_continues_inside_selected_pool_tiers() {
-    // The request hits one pool. Inside that pool the provider tiers keep the
-    // user-confirmed order: an unavailable higher tier continues to the next
-    // tier, and the selected pool is never left for another pool.
+fn optional_exhaustion_continues_in_pool_then_default() {
     let mut manifest = manifest();
     let pool = manifest
         .route_groups
@@ -1586,8 +1602,7 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
         priority: Some(2),
         weight: Some(1),
     });
-    // The default pool stays reachable only through its own pool: a distinct
-    // provider c exists there and must never appear when the tools pool is hit.
+    // A distinct provider c exists only in the fallback pool.
     let mut provider_c = manifest.providers.get("b").unwrap().clone();
     provider_c.id = "c".into();
     provider_c.base_url = "http://c.invalid/v1".into();
@@ -1632,21 +1647,17 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.hit_count, 1);
     assert_eq!(hit.pool_id, "tools");
-    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
+    assert!(hit.target_plan.iter().any(|entry| entry.pool_id == "default"));
 
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    assert_eq!(expanded.candidates.len(), 2);
+    assert_eq!(expanded.candidates.len(), 3);
     assert!(expanded
         .candidates
         .iter()
-        .all(|candidate| candidate.pool_ids == vec!["tools".to_string()]));
-    assert!(expanded
-        .candidates
-        .iter()
-        .all(|candidate| candidate.provider_id != "c"));
+        .any(|candidate| candidate.provider_id == "c"));
 
     let selected = target
         .select_available(
@@ -1664,7 +1675,7 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
     assert_eq!(selected.candidate.path[0], "pool:tools");
     assert_eq!(selected.attempts, 2, "the lower tier is the next attempt");
 
-    let exhausted = target
+    let fallback = target
         .select_available(
             expanded,
             &Availability {
@@ -1672,15 +1683,8 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
             },
             0,
         )
-        .expect_err("the selected pool must never fall through to another pool");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "b:default:kb:m:availability(b:default:kb:m)".to_string(),
-            "a:default:ka:m:availability(a:default:ka:m)".to_string(),
-        ],
-        "exhaustion reports only the candidates of the selected pool"
-    );
+        .expect("default receives the request after tools candidates are unavailable");
+    assert_eq!(fallback.candidate.provider_id, "c");
 }
 
 #[test]
@@ -1710,7 +1714,7 @@ fn streaming_is_not_a_candidate_capability_filter() {
     candidate.model_capabilities = vec!["text".into(), "tools".into()];
 
     assert!(
-        candidate_satisfies_required_capabilities(&candidate),
+        V3TargetInterpreter::candidate_admitted(&candidate, 0),
         "stream is a transport intent and must not make an otherwise valid candidate unavailable"
     );
 }
@@ -1727,13 +1731,13 @@ fn tools_are_route_signals_not_target_capability_filters() {
     candidate.model_capabilities = vec!["text".into()];
 
     assert!(
-        candidate_satisfies_required_capabilities(&candidate),
+        V3TargetInterpreter::candidate_admitted(&candidate, 0),
         "tools are a request/route/protocol surface, not a provider model hard capability"
     );
 }
 
 #[test]
-fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
+fn web_search_and_vision_do_not_filter_candidates() {
     let expanded = expanded_tools();
     let mut search_candidate = expanded
         .candidates
@@ -1744,8 +1748,8 @@ fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
     search_candidate.model_capabilities = vec!["text".into()];
 
     assert!(
-        !candidate_satisfies_required_capabilities(&search_candidate),
-        "web_search/search requires an explicit model/provider capability because the model may not have search"
+        V3TargetInterpreter::candidate_admitted(&search_candidate, 0),
+        "hosted search does not exclude a candidate"
     );
 
     let mut vision_candidate = search_candidate.clone();
@@ -1753,8 +1757,8 @@ fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
     vision_candidate.model_capabilities = vec!["text".into(), "web_search".into()];
 
     assert!(
-        !candidate_satisfies_required_capabilities(&vision_candidate),
-        "vision/multimodal requires an explicit model/provider capability because the model may not read images"
+        V3TargetInterpreter::candidate_admitted(&vision_candidate, 0),
+        "image routing does not exclude a candidate"
     );
 }
 
@@ -1775,8 +1779,8 @@ fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_misma
     candidate.model_capabilities = vec!["text".into(), "tools".into(), "web_search".into()];
 
     assert!(
-        candidate_satisfies_required_capabilities(&candidate),
-        "reasoning/thinking is a soft proxy compatibility request for no-image traffic; only hard execution semantics such as tools and vision should make a candidate unavailable"
+        V3TargetInterpreter::candidate_admitted(&candidate, 0),
+        "capability metadata does not exclude a candidate"
     );
 }
 
@@ -1802,6 +1806,7 @@ fn health_cooldown_removes_default_floor_candidate_from_selection() {
             0,
         )
         .expect_err("health cooldown must remove every cooled candidate");
+    let exhausted = expect_exhausted(exhausted);
     assert_eq!(exhausted.attempted_candidates.len(), 2);
 }
 
@@ -1815,21 +1820,22 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             _now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
-            V3ProviderAvailabilityProjection {
+        ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
+            Ok(V3ProviderAvailabilityProjection {
                 provider_id: provider_id.into(),
                 interface_id: "default".into(),
                 auth_alias: auth_alias.map(Into::into),
                 model_id: model_id.map(Into::into),
                 available: false,
                 blocked_scopes: vec!["request_local_provider_failure".into()],
-            }
+            })
         }
     }
 
     let exhausted = V3TargetInterpreter::default()
         .select_available(expanded(), &RequestLocalFailureAvailability, 0)
         .expect_err("default floor must not override current-request provider failure exclusion");
+    let exhausted = expect_exhausted(exhausted);
     assert_eq!(
         exhausted.attempted_candidates,
         vec![
@@ -1840,30 +1846,28 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
 }
 
 #[test]
-fn optional_candidate_keeps_only_selected_pool_provenance() {
+fn optional_candidate_preserves_primary_and_fallback_provenance() {
     let expanded = expanded_tools();
     let first = expanded
         .candidates
         .first()
         .expect("tools route must keep first candidate");
     assert_eq!(first.provider_id, "a");
-    // Provider `a` is also declared in the default pool, but the request hit the
-    // tools pool. Provenance must describe the selected pool only: no default
-    // floor membership may leak into the candidate.
-    assert_eq!(first.pool_ids, vec!["tools".to_string()]);
+    // The same identity in both routes retains both declarations, with tools first.
+    assert_eq!(first.pool_ids, vec!["tools".to_string(), "default".to_string()]);
     assert!(
-        !first.default_pool_member,
-        "a candidate reached through another pool must not carry default pool membership"
+        first.default_pool_member,
+        "the declared fallback membership is retained"
     );
     assert!(expanded
         .route
         .target_plan
         .iter()
-        .all(|entry| entry.pool_id == "tools"));
+        .any(|entry| entry.pool_id == "default"));
 }
 
 #[test]
-fn multimodal_route_skips_text_only_candidate_even_when_text_candidate_is_available() {
+fn multimodal_route_does_not_filter_text_only_candidates() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1923,7 +1927,7 @@ targets = [
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
 
-    let vision_first = target
+    let first = target
         .select_available(
             expanded.clone(),
             &Availability {
@@ -1931,9 +1935,9 @@ targets = [
             },
             0,
         )
-        .expect("an available vision candidate serves the multimodal request");
-    assert_eq!(vision_first.candidate.provider_id, "vision");
-    assert_eq!(vision_first.route.pool_id, "default");
+        .expect("the configured highest-priority candidate remains selectable");
+    assert_eq!(first.candidate.provider_id, "text");
+    assert_eq!(first.route.pool_id, "default");
 
     let selected = target
         .select_available(
@@ -1943,14 +1947,12 @@ targets = [
             },
             0,
         )
-        .expect("the same pool keeps a projectable text candidate after vision cools");
+        .expect("a text-only candidate remains selectable after vision cools");
     assert_eq!(selected.candidate.provider_id, "text");
-    assert_eq!(selected.route.pool_id, "default");
     assert!(selected
         .unavailable_candidates
         .iter()
         .any(|reason| reason == "vision:default:key:m:availability(vision:default:key:m)"));
-    assert!(selected.candidate.required_capabilities.is_empty());
 
     let exhausted = target
         .select_available(
@@ -1964,6 +1966,7 @@ targets = [
             0,
         )
         .expect_err("the same pool must exhaust without falling to another pool");
+    let exhausted = expect_exhausted(exhausted);
     assert_eq!(
         exhausted.attempted_candidates,
         vec![
@@ -1974,9 +1977,7 @@ targets = [
 }
 
 #[test]
-fn multimodal_pool_exhaustion_never_falls_back_to_default_pool() {
-    // A routed multimodal pool that only contains an incapable candidate must
-    // exhaust itself and never cross into another pool for service.
+fn multimodal_pool_keeps_configured_text_candidate() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2035,20 +2036,13 @@ targets = [
     assert!(hit
         .target_plan
         .iter()
-        .all(|entry| entry.pool_id == "multimodal"));
+        .any(|entry| entry.pool_id == "default"));
 
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    assert!(
-        expanded
-            .candidates
-            .iter()
-            .all(|candidate| candidate.provider_id != "vision"),
-        "the incapable-by-capability default pool must not be expanded at all"
-    );
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -2056,16 +2050,14 @@ targets = [
             },
             0,
         )
-        .expect_err("a multimodal pool without a capable candidate exhausts itself");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec!["text:key:m:capability_mismatch".to_string()],
-        "exhaustion stays inside the selected multimodal pool"
-    );
+        .expect("the configured route candidate remains selectable");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert_eq!(selected.route.pool_id, "multimodal");
+    assert!(selected.unavailable_candidates.is_empty());
 }
 
 #[test]
-fn image_bearing_longcontext_route_keeps_request_multimodal_as_target_requirement() {
+fn image_bearing_longcontext_does_not_filter_text_candidate() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2128,7 +2120,7 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
-    assert_eq!(hit.pool_id, "longcontext");
+    assert_eq!(hit.pool_id, "default");
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
@@ -2141,17 +2133,14 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
             },
             0,
         )
-        .expect("image-bearing longcontext request must skip text-only candidates");
+        .expect("image-bearing requests retain all configured candidates");
 
     assert_eq!(selected.candidate.provider_id, "vision");
-    assert_eq!(
-        selected.unavailable_candidates,
-        vec!["text:key:m:capability_mismatch"]
-    );
+    assert!(selected.unavailable_candidates.is_empty());
 }
 
 #[test]
-fn cooled_hosted_search_tier_exhausts_without_crossing_to_default_pool() {
+fn cooled_hosted_search_tier_uses_declared_default() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2216,7 +2205,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
     assert!(hit
         .target_plan
         .iter()
-        .all(|entry| entry.pool_id == "web_search"));
+        .any(|entry| entry.pool_id == "default"));
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
@@ -2240,7 +2229,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         .iter()
         .any(|reason| reason == "search:default:key:m:availability(search:default:key:m)"));
 
-    let exhausted = target
+    let selected_default = target
         .select_available(
             expanded,
             &Availability {
@@ -2251,14 +2240,9 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
             },
             0,
         )
-        .expect_err("a fully cooled web_search pool must not cross into the default pool");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "search2:default:key:m:availability(search2:default:key:m)".to_string(),
-            "search:default:key:m:availability(search:default:key:m)".to_string(),
-        ]
-    );
+        .expect("declared default stays selectable after search providers cool");
+    assert_eq!(selected_default.candidate.provider_id, "text");
+    assert_eq!(selected_default.route.pool_id, "default");
 }
 
 #[test]
@@ -2329,30 +2313,27 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
             auth_alias: Option<&str>,
             model_id: Option<&str>,
             _now_ms: u64,
-        ) -> V3ProviderAvailabilityProjection {
-            V3ProviderAvailabilityProjection {
+        ) -> Result<V3ProviderAvailabilityProjection, V3ProviderHealthError> {
+            Ok(V3ProviderAvailabilityProjection {
                 provider_id: provider_id.into(),
                 interface_id: "default".into(),
                 auth_alias: auth_alias.map(Into::into),
                 model_id: model_id.map(Into::into),
                 available: false,
                 blocked_scopes: vec!["provider_key_health_cooldown".into()],
-            }
+            })
         }
     }
 
-    let selected = target
+    let exhausted = target
         .select_available(expanded, &AutomaticCooldown, 0)
-        .expect("a pool with a recovery opportunity keeps its provider selectable");
-    assert_eq!(selected.candidate.provider_id, "search");
-    assert_eq!(
-        selected.route.pool_id, "web_search",
-        "the recovery opportunity stays inside the selected pool"
-    );
+        .expect_err("cooled providers are temporarily unavailable");
+    let exhausted = expect_exhausted(exhausted);
+    assert!(exhausted.attempted_candidates.iter().all(|reason| reason.contains("cooldown")));
 }
 
 #[test]
-fn missing_web_search_pool_uses_default_without_hosted_capability() {
+fn default_pool_does_not_filter_hosted_search_request() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2415,14 +2396,8 @@ targets = [
             },
             0,
         )
-        .expect("default tier remains available when hosted search is unavailable");
-
+        .expect("text-only default remains selectable");
     assert_eq!(selected.candidate.provider_id, "text");
-    assert!(!selected
-        .candidate
-        .required_capabilities
-        .iter()
-        .any(|capability| capability == "web_search"));
 }
 
 #[test]
@@ -2594,10 +2569,7 @@ targets = [
         )
         .unwrap();
     assert_eq!(selected_oversized.candidate.provider_id, "long");
-    assert!(
-        selected_oversized.unavailable_candidates.is_empty(),
-        "an eligible over-estimate candidate remains selectable and is not recorded unavailable"
-    );
+    assert!(selected_oversized.unavailable_candidates.iter().any(|reason| reason.contains("short:key:m:context_window_exceeded")));
 
     let classified = router
         .classify_request_with_facts(
@@ -2621,10 +2593,8 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    // The estimate over-runs both windows, but the estimate is advisory: the
-    // higher-priority candidate stays selectable so the request still reaches a
-    // provider that can accept it, and the reason is kept as ordering evidence.
-    let selected_scaled = target
+    // Both candidates exceed their configured context limits.
+    let exhausted_scaled = target
         .select_available(
             expanded,
             &Availability {
@@ -2632,12 +2602,9 @@ targets = [
             },
             0,
         )
-        .expect("an estimate over every declared window must not exhaust the pool");
-    assert_eq!(selected_scaled.candidate.provider_id, "long");
-    assert!(
-        selected_scaled.unavailable_candidates.is_empty(),
-        "eligible over-estimate ordering evidence is not recorded as unavailable"
-    );
+        .expect_err("no candidate fits the request context");
+    let exhausted_scaled = expect_exhausted(exhausted_scaled);
+    assert!(exhausted_scaled.attempted_candidates.iter().all(|reason| reason.contains("context_window_exceeded")));
 
     let classified = router
         .classify_request_with_facts(
@@ -2661,7 +2628,7 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_all_over = target
+    let exhausted_all_over = target
         .select_available(
             expanded,
             &Availability {
@@ -2669,12 +2636,9 @@ targets = [
             },
             0,
         )
-        .expect("every candidate over the estimate still yields a selectable candidate");
-    assert_eq!(selected_all_over.candidate.provider_id, "long");
-    assert!(
-        selected_all_over.unavailable_candidates.is_empty(),
-        "the estimate cannot make every otherwise-eligible candidate unavailable"
-    );
+        .expect_err("all candidates exceed their context limits");
+    let exhausted_all_over = expect_exhausted(exhausted_all_over);
+    assert!(exhausted_all_over.attempted_candidates.iter().all(|reason| reason.contains("context_window_exceeded")));
 }
 
 #[test]
@@ -2749,10 +2713,7 @@ targets = [
         .unwrap();
 
     assert_eq!(selected.candidate.provider_id, "long");
-    assert!(
-        selected.unavailable_candidates.is_empty(),
-        "an eligible default-floor over-estimate is ordering evidence, not unavailability"
-    );
+    assert!(selected.unavailable_candidates.iter().any(|reason| reason.contains("implicit:key:m:context_window_exceeded")));
 }
 
 #[test]
@@ -3035,7 +2996,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected = target
+    let exhausted = target
         .select_available(
             expanded,
             &Availability {
@@ -3043,12 +3004,9 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect("an exact pin stays selectable so the upstream owns the context verdict");
-    assert_eq!(selected.candidate.provider_id, "pinned");
-    assert!(
-        selected.unavailable_candidates.is_empty(),
-        "an eligible exact pin stays selectable without being marked unavailable"
-    );
+        .expect_err("an exact pin cannot exceed its context capacity");
+    let exhausted = expect_exhausted(exhausted);
+    assert!(exhausted.attempted_candidates.iter().any(|reason| reason.contains("context_window_exceeded")));
 
     let classified = router
         .classify_request_with_facts(
@@ -3072,7 +3030,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_over_limit = target
+    let exhausted_over_limit = target
         .select_available(
             expanded,
             &Availability {
@@ -3080,12 +3038,9 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect("an over-estimate candidate remains selectable");
-    assert_eq!(selected_over_limit.candidate.provider_id, "pinned");
-    assert!(
-        selected_over_limit.unavailable_candidates.is_empty(),
-        "eligible context overflow stays outside unavailable_candidates"
-    );
+        .expect_err("a candidate cannot exceed its context capacity");
+    let exhausted_over_limit = expect_exhausted(exhausted_over_limit);
+    assert!(exhausted_over_limit.attempted_candidates.iter().any(|reason| reason.contains("context_window_exceeded")));
 }
 
 #[test]
@@ -3135,7 +3090,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected = target
+    let exhausted = target
         .select_available(
             expanded,
             &Availability {
@@ -3143,12 +3098,9 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect("an oversized exact pin stays selectable for the upstream verdict");
-    assert_eq!(selected.candidate.provider_id, "pinned");
-    assert!(
-        selected.unavailable_candidates.is_empty(),
-        "eligible context overflow stays outside unavailable_candidates"
-    );
+        .expect_err("an oversized exact pin cannot be selected");
+    let exhausted = expect_exhausted(exhausted);
+    assert!(exhausted.attempted_candidates.iter().any(|reason| reason.contains("context_window_exceeded")));
 }
 
 #[test]
@@ -3198,7 +3150,7 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    let selected_floor = target
+    let exhausted_floor = target
         .select_available(
             expanded,
             &Availability {
@@ -3206,12 +3158,9 @@ targets = [{ kind = "provider_model", provider = "pinned", model = "m", key = "k
             },
             0,
         )
-        .expect("the default floor candidate stays selectable for the upstream verdict");
-    assert_eq!(selected_floor.candidate.provider_id, "pinned");
-    assert!(
-        selected_floor.unavailable_candidates.is_empty(),
-        "eligible context overflow stays outside unavailable_candidates"
-    );
+        .expect_err("default candidates must also fit the context");
+    let exhausted_floor = expect_exhausted(exhausted_floor);
+    assert!(exhausted_floor.attempted_candidates.iter().any(|reason| reason.contains("context_window_exceeded")));
 }
 
 #[test]
@@ -3705,8 +3654,8 @@ impl V3ProviderSchedulingReader for AlwaysHealthy {
         priority: i32,
         base_weight: u32,
         _now_ms: u64,
-    ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
-        routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
+    ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
+        Ok(routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
             provider_id,
             "default",
             auth_alias,
@@ -3714,7 +3663,7 @@ impl V3ProviderSchedulingReader for AlwaysHealthy {
             priority,
             1_000,
             base_weight,
-        )
+        ))
     }
 }
 
@@ -3799,7 +3748,7 @@ fn sticky_pool_rolls_to_standby_when_primary_cools_and_does_not_pull_back() {
             priority: i32,
             base_weight: u32,
             _now_ms: u64,
-        ) -> routecodex_v3_provider_responses::V3ProviderSchedulingProjection {
+        ) -> Result<routecodex_v3_provider_responses::V3ProviderSchedulingProjection, V3ProviderHealthError> {
             let mut projection =
                 routecodex_v3_provider_responses::V3ProviderSchedulingProjection::new(
                     provider_id,
@@ -3814,7 +3763,7 @@ fn sticky_pool_rolls_to_standby_when_primary_cools_and_does_not_pull_back() {
                 projection.available = false;
                 projection.blocked_scopes = vec!["provider_key_health_cooldown".to_string()];
             }
-            projection
+            Ok(projection)
         }
     }
 

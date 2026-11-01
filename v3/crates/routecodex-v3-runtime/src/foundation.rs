@@ -343,7 +343,7 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
                 diagnostic_cause: None,
             }
         }
-        Err(exhausted) => {
+        Err(routecodex_v3_target::V3TargetSelectionError::Exhausted(exhausted)) => {
             for candidate in &exhausted.attempted_candidates {
                 if let Err(error) = debug.record_node_event(
                     &scope,
@@ -371,6 +371,15 @@ pub fn execute_v3_p5_routing_runtime<R: V3ProviderAvailabilityReader>(
                 format!(
                     "all {} candidates unavailable",
                     exhausted.attempted_candidates.len()
+                ),
+            )
+        }
+        Err(error @ routecodex_v3_target::V3TargetSelectionError::Health { .. }) => {
+            foundation_output_from_error_sdk_result(
+                "V3ProviderHealthRead", Vec::new(), None,
+                project_v3_server_boundary_error_via_sdk(
+                    V3ErrorSourceKind::RuntimeFailure, "V3ProviderHealthRead",
+                    "provider_health_read_failed", error.to_string(), None,
                 ),
             )
         }

@@ -1,6 +1,6 @@
 use super::V3HubProviderWireProtocol;
 use routecodex_v3_provider_responses::{
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
+    build_v3_transport_13_responses_http_request_from_parts_with_timeouts,
     build_v3_transport_13_responses_request_from_wire_parts, V3Provider12ResponsesWirePayload,
     V3ProviderRequestHeader, V3ResponsesProviderTarget, V3ResponsesRequestEndpoint,
     V3ResponsesStreamIntent, V3Transport13ResponsesHttpRequest,
@@ -164,7 +164,7 @@ pub(crate) fn build_v3_provider_transport_request_from_parts(
                 .iter()
                 .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
                 .collect();
-            build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            build_v3_transport_13_responses_http_request_from_parts_with_timeouts(
                 request_id,
                 target.provider_id,
                 url,
@@ -173,14 +173,13 @@ pub(crate) fn build_v3_provider_transport_request_from_parts(
                 body,
                 headers,
                 Some(Duration::from_millis(target.request_timeout_ms)),
-                target.concurrency_acquire_timeout_ms,
                 target.sse_first_frame_timeout_ms,
             )
             .map_err(|error| error.to_string())
         }
         V3HubProviderWireProtocol::Anthropic => {
             let url = anthropic_messages_url(&target.base_url);
-            build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
+            build_v3_transport_13_responses_http_request_from_parts_with_timeouts(
                 request_id,
                 target.provider_id,
                 url,
@@ -189,7 +188,6 @@ pub(crate) fn build_v3_provider_transport_request_from_parts(
                 body,
                 provider_headers,
                 Some(Duration::from_millis(target.request_timeout_ms)),
-                target.concurrency_acquire_timeout_ms,
                 target.sse_first_frame_timeout_ms,
             )
             .map_err(|error| error.to_string())
@@ -287,8 +285,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({
                 "model": "deepseek-v4.1-flash-free",
@@ -358,8 +354,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({
                 "model": "deepseek-v4.1-flash-free",
@@ -423,8 +417,6 @@ mod tests {
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
             sse_first_frame_timeout_ms: None,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
         };
         let wire = build_v3_provider_12_responses_wire_payload(
             "req-unrelated-deepseek-arguments",
@@ -475,8 +467,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: Some(123_000),
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({"model": "deepseek-v4.1-flash"}),
         )
@@ -520,8 +510,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({"model": "deepseek-v4.1-flash", "input": "hello"}),
         )
@@ -572,8 +560,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({"model":"step-5-preview-free","stream":true,"tools":[{"type":"function","function":{"name":"bash"}}]}),
         )
@@ -619,8 +605,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: Some(456_000),
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({"model": "claude-sonnet-5", "max_tokens": 100}),
         )
@@ -659,8 +643,6 @@ mod tests {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: Some(789_000),
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             json!({"model": "gemini-2.5-flash", "contents": []}),
         )

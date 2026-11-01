@@ -5,6 +5,78 @@ use routecodex_v3_provider_responses::{
     V3ProviderCooldownKey, V3ProviderHealthStore, V3ProviderSessionAvailabilityReader,
 };
 
+#[test]
+fn retired_capacity_records_do_not_survive_health_persistence() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    let key = V3ProviderCooldownKey {
+        provider_id: "p".into(), interface_id: "responses".into(),
+        auth_alias: Some("k".into()), model_id: Some("m".into()),
+        failure_class: V3ProviderCooldownFailureClass::Transport,
+    };
+    let mut initial = V3ProviderCooldownCoordinator::new(path.clone());
+    initial.replace_entries(vec![(key.clone(), 100, 100)]).unwrap();
+    let mut old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    old["capacity_budgets"] = serde_json::json!([[{
+        "provider_id":"p", "interface_id":"responses", "auth_alias":"k", "model_id":"m"
+    }, 8]]);
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let mut restored = V3ProviderCooldownCoordinator::load(path.clone()).unwrap();
+    assert_eq!(restored.persisted_entries(), vec![(key.clone(), 100, 100)]);
+    restored.replace_entries(vec![(key, 200, 200)]).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert!(saved.get("capacity_budgets").is_none());
+    assert!(saved.get("capacity_revisions").is_none());
+    assert!(saved.get("capacity_proposals").is_none());
+}
+
+#[test]
+fn stale_health_snapshot_cannot_erase_newer_health_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    let key = |model: &str| V3ProviderCooldownKey {
+        provider_id: "p".into(), interface_id: "responses".into(),
+        auth_alias: Some("k".into()), model_id: Some(model.into()),
+        failure_class: V3ProviderCooldownFailureClass::Transport,
+    };
+    let mut initial = V3ProviderCooldownCoordinator::new(path.clone());
+    initial.replace_entries(vec![(key("first"), 100, 100)]).unwrap();
+    let mut stale = V3ProviderCooldownCoordinator::load(path.clone()).unwrap();
+    let mut current = V3ProviderCooldownCoordinator::load(path.clone()).unwrap();
+    current.replace_entries(vec![(key("first"), 200, 200)]).unwrap();
+    assert!(stale.replace_entries(vec![(key("first"), 100, 100)]).is_err());
+    assert!(stale.replace_entries_and_rate_limit_episodes(vec![(key("first"), 100, 100)], vec![]).is_err());
+    assert_eq!(V3ProviderCooldownCoordinator::load(path).unwrap().persisted_entries(), vec![(key("first"), 200, 200)]);
+}
+
+#[test]
+fn issue44cc3af_restart_preserves_rate_limit_probe_deadline() {
+    let path = std::env::temp_dir().join(format!(
+        "rcc-44cc3af-429-restart-{}.json",
+        std::process::id()
+    ));
+    let key = V3ProviderCooldownKey {
+        provider_id: "p".into(),
+        interface_id: "responses".into(),
+        auth_alias: Some("k".into()),
+        model_id: Some("m".into()),
+        failure_class: V3ProviderCooldownFailureClass::RateLimit,
+    };
+    let mut coordinator = V3ProviderCooldownCoordinator::new(path.clone());
+    coordinator
+        .replace_entries(vec![(key, 33_000, 33_000)])
+        .unwrap();
+    coordinator.reset_probe_schedule_for_startup().unwrap();
+    let entries = V3ProviderCooldownCoordinator::load(path.clone())
+        .unwrap()
+        .persisted_entries();
+    assert_eq!(
+        entries[0].2, 33_000,
+        "restart must not make a 429 probe immediately due"
+    );
+    std::fs::remove_file(path).unwrap();
+}
+
 fn health_disabled_manifest() -> routecodex_v3_config::V3Config05ManifestPublished {
     compile_v3_config_05_manifest(
         parse_v3_config_02_authoring(
@@ -61,6 +133,7 @@ fn health_disabled_provider_ignores_persisted_cooldown_and_never_writes_one() {
     assert!(
         reader
             .availability("p", Some("k"), Some("m"), 2_000)
+                .unwrap()
             .available,
         "health.enabled=false must not inherit a persisted cooldown"
     );
@@ -140,7 +213,9 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
     let reader = V3ProviderSessionAvailabilityReader::new(restored.clone(), scope.clone());
-    let projection = reader.availability("p", Some("k"), Some("m"), 2_000);
+    let projection = reader
+        .availability("p", Some("k"), Some("m"), 2_000)
+        .unwrap();
     assert_ne!(
         restored
             .cooldown_entries(2_000)
@@ -166,6 +241,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     assert!(
         !reader
             .availability("p", Some("k"), Some("m"), 2_002)
+            .unwrap()
             .available
     );
 
@@ -183,6 +259,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     assert!(
         reader
             .availability("p", Some("k"), Some("m"), 62_003)
+            .unwrap()
             .available
     );
     restored
@@ -192,6 +269,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     assert!(
         V3ProviderSessionAvailabilityReader::new(reloaded, scope)
             .availability("p", Some("k"), Some("m"), 62_004)
+            .unwrap()
             .available,
         "successful probe must not resurrect after restart"
     );
@@ -450,12 +528,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn persisted_429_minimum_requires_current_probe_and_stays_removed() {
+fn persisted_short_429_cooldown_accepts_business_success() {
     assert_persisted_429_recovery(false);
 }
 
 #[test]
-fn persisted_429_hour_lock_requires_current_probe_after_reconstruction() {
+fn persisted_hourly_429_cooldown_accepts_probe_success() {
     assert_persisted_429_recovery(true);
 }
 
@@ -469,7 +547,7 @@ fn assert_persisted_429_recovery(hour: bool) {
         .as_mut()
         .unwrap()
         .enabled = true;
-    // Advisory probe scheduling cannot bypass a persisted mandatory hour lock.
+    // An advisory setting cannot bypass a persisted 429 schedule.
     manifest
         .providers
         .get_mut("p")
@@ -501,14 +579,10 @@ fn assert_persisted_429_recovery(hour: bool) {
     );
     let action =
         routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified);
-    for time in [100, 120100] {
+    let count = if hour { 10 } else { 3 };
+    for time in 100..100 + count {
         store
             .record_provider_failure_action("p", "k", "m", &action, time)
-            .unwrap();
-    }
-    if hour {
-        store
-            .record_provider_failure_action("p", "k", "m", &action, 3600100)
             .unwrap();
     }
     // An active physical acquisition is deliberately abandoned across restart.
@@ -523,25 +597,18 @@ fn assert_persisted_429_recovery(hour: bool) {
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         !restored
-            .scheduling_projection("p", "k", "m", 1, 1, 120101)
+            .scheduling_projection("p", "k", "m", 1, 1, 110)
             .unwrap()
             .available,
         "a persisted 429 hold must block during its window"
     );
-    let now = if hour { 3600101 } else { 120101 };
-    assert!(
-        !restored
-            .record_provider_key_success("p", "k", "m", now)
-            .unwrap()
-            .available,
-        "late business success cannot bypass a persisted minimum or required probe"
-    );
+    let now = 110;
     let entries = V3ProviderCooldownCoordinator::load(path.clone())
         .unwrap()
         .persisted_rate_limit_episodes();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].1.probe_required, hour);
-    assert_eq!(entries[0].1.not_before_ms, Some(1920100));
+    assert_eq!(entries[0].1.total_429, count as u32);
+    assert_eq!(entries[0].1.not_before_ms, Some(if hour { 3_600_109 } else { 10_102 }));
     assert!(
         restored
             .cooldown_entries(now)
@@ -549,35 +616,19 @@ fn assert_persisted_429_recovery(hour: bool) {
             .all(|entry| entry.state != "probing"),
         "restart cannot inherit an active physical owner"
     );
-    let permit = restored
-        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
-        .unwrap()
-        .unwrap();
-    if !hour {
-        assert!(
-            !restored
-                .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now)
-                .unwrap(),
-            "even a current probe cannot shorten the minimum"
-        );
+    if hour {
+        let permit = restored.acquire_provider_cooldown_probe("p", Some("k"), Some("m")).unwrap().unwrap();
+        assert!(restored.complete_provider_cooldown_probe_success_if_current_with_permit(&permit, 3_600_109).unwrap());
     } else {
-        // Keep the hourly qualification for the final completion below.
-        restored.cancel_provider_cooldown_probe(&permit).unwrap();
+        assert!(restored.record_provider_key_success("p", "k", "m", now).unwrap().available);
     }
-    let permit = restored
-        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
-        .unwrap()
-        .unwrap();
-    assert!(restored
-        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now.max(1920100))
-        .unwrap());
     restored.flush_persistence().unwrap();
     drop(restored);
     let restored =
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         restored
-            .scheduling_projection("p", "k", "m", 1, 1, now.max(1920100))
+            .scheduling_projection("p", "k", "m", 1, 1, 3_600_109)
             .unwrap()
             .available
     );

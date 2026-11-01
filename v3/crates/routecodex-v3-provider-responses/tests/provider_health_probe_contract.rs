@@ -1,44 +1,85 @@
-use routecodex_v3_provider_responses::V3ProviderHealthStore;
+use routecodex_v3_error::V3ProviderFailureSessionScope;
+use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderHealthStore};
 
-fn real_http_failure_action(
-    status: u16,
-    code: &str,
-) -> routecodex_v3_provider_responses::V3ProviderFailureAction {
-    let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
-        routecodex_v3_error::build_v3_error_01_source_raised_external(
-            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            code,
-            "controlled provider failure",
-            routecodex_v3_error::V3ExternalErrorLink {
-                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
-                status: Some(status),
-                code: Some(code.into()),
-                provider_id: Some("p".into()),
-                upstream_request_id: None,
-                message: Some("controlled provider failure".into()),
-            },
-        ),
+fn session_scope() -> V3ProviderFailureSessionScope {
+    V3ProviderFailureSessionScope::new("server", "group", "session-a").unwrap()
+}
+
+fn record_global_errors(
+    store: &V3ProviderHealthStore,
+    provider_id: &str,
+    interface_id: &str,
+    auth_alias: &str,
+    model_id: &str,
+    status: Option<u16>,
+    first_at_ms: u64,
+    count: u64,
+) {
+    for offset in 0..count {
+        store
+            .record_real_provider_failure_for_interface(
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                status,
+                first_at_ms + offset,
+            )
+            .unwrap();
+    }
+}
+
+fn establish_non429_global_cooldown(
+    store: &V3ProviderHealthStore,
+    provider_id: &str,
+    interface_id: &str,
+    auth_alias: &str,
+    model_id: &str,
+    first_at_ms: u64,
+) -> u64 {
+    record_global_errors(
+        store,
+        provider_id,
+        interface_id,
+        auth_alias,
+        model_id,
+        Some(503),
+        first_at_ms,
+        10,
     );
-    routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified)
+    let cooled_at = first_at_ms + 9;
+    assert!(
+        !store
+            .scheduling_projection_for_key_with_interface(
+                provider_id,
+                interface_id,
+                auth_alias,
+                model_id,
+                1,
+                1,
+                cooled_at,
+            )
+            .unwrap()
+            .available,
+        "ten real non-429 errors must establish the global cooldown"
+    );
+    cooled_at
 }
 
 #[test]
 fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b() {
     for late in ["cancel", "success", "failure"] {
         let store = V3ProviderHealthStore::default();
-        let mut action =
-            routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
-        action.failure_threshold = 1;
-        store
-            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 100)
-            .unwrap();
+        establish_non429_global_cooldown(&store, "p", "alternate", "k", "m", 100);
         let a = store
             .acquire_provider_cooldown_probe_for_interface("p", "alternate", Some("k"), Some("m"))
             .unwrap()
             .unwrap();
+        store
+            .record_real_provider_failure_for_interface("p", "alternate", "k", "m", Some(503), 200)
+            .unwrap();
         let newer = store
-            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 200)
+            .scheduling_projection_for_key_with_interface("p", "alternate", "k", "m", 1, 1, 200)
             .unwrap();
         assert!(newer.score_generation > a.expected_generation());
         store.cancel_provider_cooldown_probe(&a).unwrap();
@@ -147,70 +188,105 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
 #[test]
 fn business_success_resets_early_429_window_without_count_based_cooling() {
     let store = V3ProviderHealthStore::default();
-    let action = real_http_failure_action(429, "rate_limit_error");
-    for time in [100, 101, 102, 60100] {
+    let session = session_scope();
+    for time in [100, 101] {
         let projection = store
-            .record_provider_failure_action("p", "a", "m", &action, time)
+            .record_session_rate_limit_for_interface(&session, "p", "responses", "a", "m", time)
             .unwrap();
-        assert!(!projection.cooldown, "count alone cannot cool");
-    }
-    let recovered = store
-        .record_provider_key_success("p", "a", "m", 60101)
-        .unwrap();
-    assert!(recovered.available);
-    assert!(!recovered.cooldown);
-    assert_eq!(recovered.success_streak, 1, "one real success counts once");
-    for time in [120100, 180100] {
         assert!(
-            store
-                .record_provider_failure_action("p", "a", "m", &action, time)
-                .unwrap()
-                .available,
-            "matching success starts a new unresolved window"
+            projection.available,
+            "the first two 429s stay session-local"
         );
     }
+    let cooled = store
+        .record_session_rate_limit_for_interface(&session, "p", "responses", "a", "m", 102)
+        .unwrap();
+    assert!(!cooled.available);
+    assert_eq!(cooled.cooldown_until_ms, Some(10_102));
+    store
+        .record_provider_success_in_session_for_interface(
+            &session,
+            "p",
+            "responses",
+            Some("a"),
+            Some("m"),
+            103,
+        )
+        .unwrap();
     assert!(
         store
-            .record_provider_failure_action("p", "a", "m", &action, 240100)
+            .availability_for_session_for_interface(
+                &session,
+                "p",
+                "responses",
+                Some("a"),
+                Some("m"),
+                103,
+            )
             .unwrap()
-            .cooldown
+            .available,
+        "matching session success must reset the session 429 episode"
+    );
+
+    record_global_errors(&store, "p", "responses", "a", "m", Some(429), 1_000, 10);
+    assert!(
+        store
+            .availability_for_interface("p", "responses", Some("a"), Some("m"), 1_009)
+            .unwrap()
+            .available,
+        "ten 429s within two minutes must not establish a global cooldown"
+    );
+    store
+        .record_real_provider_failure_for_interface("p", "responses", "a", "m", Some(429), 121_001)
+        .unwrap();
+    assert!(
+        !store
+            .availability_for_interface("p", "responses", Some("a"), Some("m"), 121_001)
+            .unwrap()
+            .available,
+        "the tenth 429 more than two minutes after the first must cool globally"
+    );
+    store
+        .record_provider_key_success_for_interface("p", "responses", "a", "m", 121_002)
+        .unwrap();
+    assert!(
+        store
+            .availability_for_interface("p", "responses", Some("a"), Some("m"), 121_002)
+            .unwrap()
+            .available,
+        "matching business success must reset the global 429 episode"
     );
 }
 
 #[test]
 fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_probe() {
     let store = V3ProviderHealthStore::default();
-    let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
-    for (time, code) in [
-        (100, "rate_limit"),
-        (60100, "insufficient_quota"),
-        (120100, "other"),
-    ] {
-        action.failure_fingerprint = Some(
-            routecodex_v3_error::V3ProviderErrorFingerprint::new(
-                "recoverable_upstream",
-                code,
-                429,
-                code,
-            )
-            .unwrap(),
+    record_global_errors(&store, "p", "default", "a", "m", Some(429), 100, 9);
+    assert!(
+        store
+            .scheduling_projection("p", "a", "m", 1, 1, 108)
+            .unwrap()
+            .available,
+        "nine real 429s must not establish the global cooldown"
+    );
+    store
+        .record_real_provider_failure_for_interface("p", "default", "a", "m", Some(429), 120_101)
+        .unwrap();
+    assert!(
+        !store
+            .scheduling_projection("p", "a", "m", 1, 1, 120_101)
+            .unwrap()
+            .available,
+        "the tenth 429 more than two minutes after the first must cool globally"
+    );
+    for (key, model) in [("a", "other-model"), ("sibling", "m")] {
+        assert!(
+            store
+                .scheduling_projection("p", key, model, 1, 1, 120_101)
+                .unwrap()
+                .available,
+            "a cooled exact identity must not block sibling identities"
         );
-        let projection = store
-            .record_provider_failure_action("p", "a", "m", &action, time)
-            .unwrap();
-        assert_eq!(
-            projection.failure_streak, 0,
-            "429 does not penalize transport health"
-        );
-        assert_eq!(projection.cooldown, time == 120100);
-        for (key, model) in [("a", "other-model"), ("sibling", "m")] {
-            assert!(
-                store
-                    .scheduling_projection("p", key, model, 1, 1, time)
-                    .unwrap()
-                    .available
-            );
-        }
     }
     let permit = store
         .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
@@ -235,9 +311,12 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
         .unwrap()
         .is_empty());
     for time in [1920104, 1920105] {
+        store
+            .record_real_provider_failure_for_interface("p", "default", "a", "m", Some(429), time)
+            .unwrap();
         assert!(
             store
-                .record_provider_failure_action("p", "a", "m", &action, time)
+                .scheduling_projection("p", "a", "m", 1, 1, time)
                 .unwrap()
                 .available
         );
@@ -247,28 +326,20 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
 #[test]
 fn early_429_preserves_non429_cooldown_until_matching_business_success() {
     let store = V3ProviderHealthStore::default();
-    let mut action = real_http_failure_action(503, "provider_http_503");
-    action.failure_threshold = 1;
-    assert!(
-        store
-            .record_provider_failure_action("p", "a", "m", &action, 100)
-            .unwrap()
-            .cooldown
-    );
-    action = real_http_failure_action(429, "rate_limit_error");
+    establish_non429_global_cooldown(&store, "p", "default", "a", "m", 100);
     store
-        .record_provider_failure_action("p", "a", "m", &action, 101)
+        .record_real_provider_failure_for_interface("p", "default", "a", "m", Some(429), 110)
         .unwrap();
     assert!(
         !store
-            .scheduling_projection("p", "a", "m", 1, 1, 101)
+            .scheduling_projection("p", "a", "m", 1, 1, 110)
             .unwrap()
             .available,
         "a429 diagnostic cannot release the existing503 exclusion"
     );
     assert!(
         store
-            .record_provider_key_success("p", "a", "m", 102)
+            .record_provider_key_success("p", "a", "m", 111)
             .unwrap()
             .available
     );

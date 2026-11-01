@@ -91,7 +91,8 @@ for (const phrase of [
   'Gemini SSE ended without terminal finishReason',
   'Gemini SSE emitted a frame after terminal finishReason',
   'gemini_model_from_endpoint_path',
-  'execute_v3_relay_runtime_core::<V3GeminiRelayCodec, T>',
+  'execute_v3_relay_runtime_with_chat_process_refill::<',
+  'execute_v3_relay_runtime_core::<C, T>',
 ]) requireText(runtimeSurface, `${runtimePath}+${relayCorePath}+${relaySharedPath}`, phrase);
 
 for (const node of [
@@ -113,7 +114,7 @@ for (const phrase of [
   'sse_runtime_commits_complete_attempt_only_after_provider_terminal',
   'first Gemini SSE frame',
   'malformed_non_terminal_and_post_terminal_sse_fail_explicitly',
-  'provider_error_enters_error01_06_without_success_projection',
+  'recoverable_provider_429_stays_pending_past_residence_without_projection',
   'malformed_provider_error_body_projects_explicit_error_not_fallback',
   'business_names_reach_provider_without_steering_typed_target',
   'response_business_names_are_preserved_for_json_and_sse',

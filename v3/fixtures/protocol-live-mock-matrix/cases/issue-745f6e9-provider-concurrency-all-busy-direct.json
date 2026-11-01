@@ -14,11 +14,7 @@
     "candidate_ids": [
       "mock-responses/mock.responses-model"
     ],
-    "provider_concurrency": {
-      "maxInFlight": 1,
-      "acquireTimeoutMs": 1000,
-      "staleLeaseMs": 300000
-    },
+    "process": "direct",
     "attempt_store": {
       "residence_timeout_ms": 30000
     }
@@ -28,12 +24,12 @@
     "path": "/v1/responses",
     "headers": {
       "content-type": "application/json",
-      "session-id": "concurrency-held-direct",
-      "thread-id": "concurrency-held-direct"
+      "session-id": "independence-held-direct-1",
+      "thread-id": "independence-held-direct-1"
     },
     "body": {
       "model": "mock.responses-model",
-      "input": "hold the only provider capacity",
+      "input": "hold the first independent direct request",
       "stream": true
     }
   },
@@ -70,7 +66,7 @@
             "data": {
               "type": "response.created",
               "response": {
-                "id": "resp_concurrency_direct",
+                "id": "resp_independence_direct",
                 "status": "in_progress",
                 "output": []
               }
@@ -82,7 +78,7 @@
               "type": "response.output_text.delta",
               "output_index": 0,
               "content_index": 0,
-              "item_id": "msg_concurrency_direct",
+              "item_id": "msg_independence_direct",
               "delta": "held response released"
             }
           },
@@ -91,7 +87,7 @@
             "data": {
               "type": "response.completed",
               "response": {
-                "id": "resp_concurrency_direct",
+                "id": "resp_independence_direct",
                 "status": "completed",
                 "output": [
                   {
@@ -109,7 +105,7 @@
                     "summary": [
                       {
                         "type": "summary_text",
-                        "text": "concurrency holder completed"
+                        "text": "direct holder completed"
                       }
                     ]
                   }
@@ -141,36 +137,61 @@
     ],
     "semantic_terminal_required": true
   },
-  "concurrency_replay": {
-    "kind": "provider_concurrency_all_busy",
-    "exhaustion_client_request": {
-      "method": "POST",
-      "path": "/v1/responses",
-      "headers": {
-        "content-type": "application/json",
-        "session-id": "concurrency-exhausted-direct",
-        "thread-id": "concurrency-exhausted-direct"
+  "request_independence_replay": {
+    "kind": "provider_request_independence",
+    "shape": "held_concurrent_requests",
+    "concurrent_client_requests": [
+      {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "session-id": "independence-held-direct-1",
+          "thread-id": "independence-held-direct-2"
+        },
+        "body": {
+          "model": "mock.responses-model",
+          "input": "second independent direct request",
+          "stream": true
+        }
       },
-      "body": {
-        "model": "mock.responses-model",
-        "input": "must not reach the held provider",
-        "stream": true
+      {
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "session-id": "independence-held-direct-3",
+          "thread-id": "independence-held-direct-3"
+        },
+        "body": {
+          "model": "mock.responses-model",
+          "input": "third independent direct request",
+          "stream": true
+        }
       }
-    },
-    "expected_exhaustion_client": {
-      "transport": "closed",
-      "deadline_ms": 4000,
-      "error_codes_must_not": [
-        "ETIMEDOUT"
-      ]
-    },
-    "typed_error_codes": [
-      "provider_concurrency_busy"
     ],
-    "upstream_business_sends": 1
+    "expected_concurrent_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "held response released",
+        "status": "completed"
+      },
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "expected_upstream_business_sends": 3,
+    "typed_error_codes_must_not": [
+      "provider_concurrency_busy",
+      "selected_target_exhausted"
+    ]
   },
   "assertions": {
-    "provider_attempt_count": 1,
+    "provider_attempt_count": 3,
     "probe_attempts_may_occur": true,
     "no_control_leakage": true
   },
@@ -180,7 +201,8 @@
       "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
     ],
     "tests": [
-      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_all_full_exhausts_without_queueing"
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_same_listener_same_session_admits_independent_requests",
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_client_drop_releases_same_session_before_provider_eof"
     ]
   },
   "contract_differences": []

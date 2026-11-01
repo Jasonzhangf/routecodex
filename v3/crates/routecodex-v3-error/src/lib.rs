@@ -24,6 +24,7 @@ pub enum V3InternalErrorCode {
     V3Provider12ResponsesWirePayload,
     V3Transport13ResponsesHttpRequest,
     V3ProviderResp14Raw,
+    V3ExecutionResponsePayloadStore,
     V3DirectResp14ProviderProjectionPrepared,
     V3DirectResp14UnharvestableToolMarkup,
     V3HubRelayResp03UnharvestableToolMarkup,
@@ -165,6 +166,14 @@ impl V3InternalErrorCode {
                 owner_feature_id: "v3.debug_error_foundation",
                 module_block: "500-20x",
                 title: "provider raw response internal failure",
+            },
+            V3InternalErrorCode::V3ExecutionResponsePayloadStore => V3InternalErrorRegistryEntry {
+                code: "500-201",
+                lane: V3InternalErrorLane::Response,
+                node_id: "V3ExecutionAttemptPayloadStore",
+                owner_feature_id: "v3.execution_attempt_budget_store",
+                module_block: "500-20x",
+                title: "local response payload capacity failure",
             },
             V3InternalErrorCode::V3DirectResp14ProviderProjectionPrepared => {
                 V3InternalErrorRegistryEntry {

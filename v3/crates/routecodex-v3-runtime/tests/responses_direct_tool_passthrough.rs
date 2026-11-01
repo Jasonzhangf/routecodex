@@ -282,6 +282,153 @@ fn recovery_request(
     )
 }
 
+struct DirectHeldTransport {
+    arrivals: std::sync::atomic::AtomicUsize,
+    release: tokio::sync::Semaphore,
+}
+
+fn same_session_direct_request(id: &str) -> routecodex_v3_runtime::V3Server03HttpRequestRaw {
+    let scope = routecodex_v3_error::V3ProviderFailureSessionScope::new(
+        "s",
+        "test-group",
+        "shared-direct-session",
+    )
+    .unwrap()
+    .with_transport_handoff_scope("test-pipeline", 5555, 1)
+    .unwrap();
+    let mut raw = build_v3_server_03_http_request_raw_with_scope(
+        "s".into(),
+        scope,
+        id.into(),
+        format!("exec-{id}"),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"gpt-5.5","input":id,"stream":false}),
+    );
+    raw.port = Some(5555);
+    raw.pipeline_id = Some("test-pipeline".into());
+    raw
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectHeldTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        self.arrivals
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.release.acquire().await.unwrap().forget();
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"application/json".to_vec(),
+            }],
+            serde_json::to_vec(&json!({
+                "id": request.request_id(),
+                "status": "completed",
+                "output": [{"type": "output_text", "text": request.request_id()}]
+            }))
+            .unwrap(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn direct_same_session_requests_reach_transport_independently() {
+    let manifest = manifest();
+    let transport = DirectHeldTransport {
+        arrivals: std::sync::atomic::AtomicUsize::new(0),
+        release: tokio::sync::Semaphore::new(0),
+    };
+    let first = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        same_session_direct_request("direct-a"),
+        register_responses_direct_hooks(),
+        &transport,
+    );
+    let second = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        same_session_direct_request("direct-b"),
+        register_responses_direct_hooks(),
+        &transport,
+    );
+    let third = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        same_session_direct_request("direct-c"),
+        register_responses_direct_hooks(),
+        &transport,
+    );
+    let observe = async {
+        let all_arrived = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while transport.arrivals.load(std::sync::atomic::Ordering::SeqCst) < 3 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        transport.release.add_permits(3);
+        all_arrived
+    };
+    let (a, b, c, all_arrived) = tokio::join!(first, second, third, observe);
+    assert!(
+        all_arrived,
+        "all Direct requests must reach transport before any response is released"
+    );
+    for (output, id) in [(a, "direct-a"), (b, "direct-b"), (c, "direct-c")] {
+        assert_eq!(output.client_payload.status, 200, "{output:?}");
+        let V3ClientBody::Json(body) = output.client_payload.body else {
+            panic!("expected JSON response")
+        };
+        assert_eq!(body["id"], id);
+    }
+}
+
+#[tokio::test]
+async fn direct_same_session_cancel_does_not_block_other_request() {
+    let manifest = manifest();
+    let transport = DirectHeldTransport {
+        arrivals: std::sync::atomic::AtomicUsize::new(0),
+        release: tokio::sync::Semaphore::new(0),
+    };
+    let mut first = Box::pin(execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        same_session_direct_request("cancel-direct-a"),
+        register_responses_direct_hooks(),
+        &transport,
+    ));
+    let mut second = Box::pin(execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        same_session_direct_request("continue-direct-b"),
+        register_responses_direct_hooks(),
+        &transport,
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while transport.arrivals.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+            tokio::select! {
+                _ = &mut first => panic!("first request finished before release"),
+                _ = &mut second => panic!("second request finished before release"),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {},
+            }
+        }
+    })
+    .await
+    .expect("both requests must reach transport independently");
+    drop(first);
+    transport.release.add_permits(1);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+        .await
+        .expect("the remaining request must finish");
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let V3ClientBody::Json(body) = output.client_payload.body else {
+        panic!("expected JSON response")
+    };
+    assert_eq!(body["id"], "continue-direct-b");
+}
+
 async fn assert_failed_attempt_does_not_poison_fresh_request<T: ResponsesTransport>(
     failed_transport: &T,
     failed_request_id: &str,

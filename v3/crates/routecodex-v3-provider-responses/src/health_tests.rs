@@ -1,8 +1,288 @@
 use super::*;
+
+#[test]
+fn poisoned_health_read_is_typed_error_not_candidate_availability() {
+    let store = V3ProviderHealthStore::default();
+    let poison = store.clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = poison.state.write().unwrap();
+        panic!("controlled health store poisoning");
+    })
+    .join();
+
+    assert!(matches!(
+        store.scheduling_projection_for_interface("p", "i", "k", "m", 1, 1, 0),
+        Err(V3ProviderHealthError::Poisoned(_))
+    ));
+    assert!(matches!(
+        store.availability_for_interface("p", "i", Some("k"), Some("m"), 0),
+        Err(V3ProviderHealthError::Poisoned(_))
+    ));
+}
+
+#[test]
+fn startup_probe_permit_is_nonblocking_and_stale_success_is_rejected() {
+    let store = V3ProviderHealthStore::default();
+    let permit = store
+        .acquire_provider_startup_probe_for_interface(
+            "provider-a",
+            "default",
+            Some("key-a"),
+            Some("model-a"),
+        )
+        .unwrap()
+        .expect("startup observation must acquire a probe slot");
+    assert!(
+        store
+            .availability_for_interface(
+                "provider-a",
+                "default",
+                Some("key-a"),
+                Some("model-a"),
+                100
+            )
+            .unwrap()
+            .available,
+        "a startup observation must not block business traffic"
+    );
+    store
+        .record_real_provider_failure_for_interface(
+            "provider-a",
+            "default",
+            "key-a",
+            "model-a",
+            Some(503),
+            101,
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .complete_provider_startup_probe_success_with_permit(&permit, 102)
+            .unwrap(),
+        crate::key_health::V3ProviderPrecoolObservationOutcome::Superseded,
+        "a late success cannot erase a newer real failure"
+    );
+    let current = store
+        .acquire_provider_startup_probe_for_interface(
+            "provider-a",
+            "default",
+            Some("key-a"),
+            Some("model-a"),
+        )
+        .unwrap()
+        .expect("stale probe must release its physical slot");
+    assert_eq!(
+        store
+            .complete_provider_startup_probe_success_with_permit(&current, 103)
+            .unwrap(),
+        crate::key_health::V3ProviderPrecoolObservationOutcome::Completed
+    );
+}
+
+#[test]
+fn startup_probe_stale_failure_does_not_count_after_success() {
+    let store = V3ProviderHealthStore::default();
+    let permit = store
+        .acquire_provider_startup_probe_for_interface("p", "default", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    store
+        .record_provider_key_success_for_interface("p", "default", "k", "m", 100)
+        .unwrap();
+    assert_eq!(
+        store
+            .complete_provider_startup_probe_failure_with_permit(&permit, Some(503), 101)
+            .unwrap(),
+        crate::key_health::V3ProviderPrecoolObservationOutcome::Superseded
+    );
+    for now in 102..111 {
+        store
+            .record_real_provider_failure_for_interface("p", "default", "k", "m", Some(503), now)
+            .unwrap();
+    }
+    assert!(
+        store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 111)
+            .unwrap()
+            .available,
+        "the stale probe must not become the tenth global error"
+    );
+}
+
+#[test]
+fn startup_probe_cannot_override_new_manual_hold() {
+    for kind in ["auth_key", "probe"] {
+        let store = V3ProviderHealthStore::default();
+        let permit = store
+            .acquire_provider_startup_probe_for_interface("p", "default", Some("k"), Some("m"))
+            .unwrap()
+            .unwrap();
+        store
+            .add_cooldown_entry_for_interface(
+                "p",
+                "default",
+                Some("k"),
+                Some("m"),
+                kind,
+                30_000,
+                100,
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .complete_provider_startup_probe_success_with_permit(&permit, 101)
+                .unwrap(),
+            crate::key_health::V3ProviderPrecoolObservationOutcome::Superseded
+        );
+        assert!(
+            !store
+                .availability_for_interface("p", "default", Some("k"), Some("m"), 101)
+                .unwrap()
+                .available
+        );
+    }
+}
+
+#[test]
+fn startup_probe_real_failure_joins_global_threshold_once() {
+    let store = V3ProviderHealthStore::default();
+    for now in 1..10 {
+        store
+            .record_real_provider_failure_for_interface("p", "default", "k", "m", Some(503), now)
+            .unwrap();
+    }
+    let permit = store
+        .acquire_provider_startup_probe_for_interface("p", "default", Some("k"), Some("m"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store
+            .complete_provider_startup_probe_failure_with_permit(&permit, Some(503), 10)
+            .unwrap(),
+        crate::key_health::V3ProviderPrecoolObservationOutcome::Completed
+    );
+    assert_eq!(
+        store
+            .complete_provider_startup_probe_failure_with_permit(&permit, Some(503), 11)
+            .unwrap(),
+        crate::key_health::V3ProviderPrecoolObservationOutcome::Superseded,
+        "one probe completion cannot count twice"
+    );
+    assert!(
+        !store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 11)
+            .unwrap()
+            .available,
+        "the tenth real failure must cool the exact identity"
+    );
+    assert!(
+        store
+            .availability_for_interface("p", "default", Some("other"), Some("m"), 11)
+            .unwrap()
+            .available
+    );
+}
+
+#[test]
+fn startup_probe_429_global_threshold_requires_over_two_minutes() {
+    let store = V3ProviderHealthStore::default();
+    for now in 1_000..1_009 {
+        store
+            .record_real_provider_failure_for_interface("p", "default", "k", "m", Some(429), now)
+            .unwrap();
+    }
+    let probe = || {
+        store
+            .acquire_provider_startup_probe_for_interface("p", "default", Some("k"), Some("m"))
+            .unwrap()
+            .unwrap()
+    };
+    store
+        .complete_provider_startup_probe_failure_with_permit(&probe(), Some(429), 121_000)
+        .unwrap();
+    assert!(
+        store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 121_000)
+            .unwrap()
+            .available,
+        "exactly two minutes is not over the threshold"
+    );
+    store
+        .complete_provider_startup_probe_failure_with_permit(&probe(), Some(429), 121_001)
+        .unwrap();
+    assert!(
+        !store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 121_001)
+            .unwrap()
+            .available,
+        "a new 429 after two minutes triggers the global threshold"
+    );
+}
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
 fn session(session_id: &str) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("server-a", "group-a", session_id).unwrap()
+}
+
+#[test]
+fn concurrent_health_changes_each_advance_availability_generation() {
+    let store = V3ProviderHealthStore::default();
+    let initial = store.availability_generation();
+    let workers = 8;
+    let changes = 2000;
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(workers));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let store = store.clone();
+            let barrier = barrier.clone();
+            scope.spawn(move || {
+                barrier.wait();
+                for _ in 0..changes {
+                    store.publish_availability_change();
+                }
+            });
+        }
+    });
+    assert_eq!(
+        store.availability_generation(),
+        initial + (workers * changes) as u64,
+        "concurrent health changes must not reuse a generation and lose a wakeup"
+    );
+}
+
+#[test]
+fn recovery_success_revision_tracks_only_exact_successful_identity() {
+    let store = V3ProviderHealthStore::default();
+    let revision = |interface, key, model| {
+        store
+            .recovery_success_revision_for_interface("p", interface, key, model)
+            .unwrap()
+    };
+    assert_eq!(revision("default", "k", "m"), 0);
+    store
+        .record_provider_key_success_for_interface("p", "default", "k", "m", 100)
+        .unwrap();
+    assert_eq!(revision("default", "k", "m"), 1);
+    assert_eq!(revision("default", "k2", "m"), 0);
+    assert_eq!(revision("default", "k", "m2"), 0);
+    assert_eq!(revision("other", "k", "m"), 0);
+    let action = V3ProviderFailureAction::recoverable("transport");
+    let failure = store
+        .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, 101)
+        .unwrap();
+    assert_eq!(
+        failure.recovery_success_revision, 1,
+        "failure must capture the revision in the same health transition"
+    );
+    assert_eq!(
+        revision("default", "k", "m"),
+        1,
+        "failure is not a successful recovery"
+    );
+    store
+        .complete_probe_success_for_interface("p", "default", "k", "m", 102)
+        .unwrap();
+    assert_eq!(revision("default", "k", "m"), 2);
 }
 
 fn probe_stored_snapshot(
@@ -47,6 +327,18 @@ fn old_probe_outcomes_release_only_their_owner_and_preserve_stored_health() {
         let store = V3ProviderHealthStore::default();
         let mut action = V3ProviderFailureAction::recoverable("transport");
         action.failure_threshold = 1;
+        for now_ms in 90..100 {
+            store
+                .record_real_provider_failure_for_interface(
+                    "p",
+                    "alternate",
+                    "k",
+                    "m",
+                    None,
+                    now_ms,
+                )
+                .unwrap();
+        }
         store
             .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 100)
             .unwrap();
@@ -272,32 +564,29 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
     assert!(
         !availability
             .availability("disabled", Some("k"), Some("m"), 0)
+            .unwrap()
             .available
     );
     assert!(
         availability
             .availability("enabled", Some("k"), Some("m"), 0)
+            .unwrap()
             .available
     );
 }
 
 #[test]
-fn three_failures_cool_the_same_provider_key_across_sessions() {
+fn ten_real_failures_cool_the_same_provider_key_across_sessions() {
     let store = V3ProviderHealthStore::default();
-    store
-        .record_provider_failure_in_session(
-            &session("session-a"),
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            Some("controlled failure"),
-            100,
-        )
-        .unwrap();
-    for now_ms in 101..103 {
+    for now_ms in 100..110 {
+        let session_id = if now_ms % 2 == 0 {
+            "session-a"
+        } else {
+            "session-b"
+        };
         store
             .record_provider_failure_in_session(
-                &session("session-b"),
+                &session(session_id),
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
@@ -305,6 +594,31 @@ fn three_failures_cool_the_same_provider_key_across_sessions() {
                 now_ms,
             )
             .unwrap();
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                "gpt-5.5",
+                Some(503),
+                now_ms,
+            )
+            .unwrap();
+        if now_ms < 109 {
+            assert!(
+                store
+                    .availability_for_session(
+                        &session("session-a"),
+                        "provider-a",
+                        Some("key-a"),
+                        Some("gpt-5.5"),
+                        now_ms,
+                    )
+                    .unwrap()
+                    .available,
+                "the first nine real errors must not trigger global cooldown"
+            );
+        }
     }
     assert!(
         !store
@@ -313,8 +627,9 @@ fn three_failures_cool_the_same_provider_key_across_sessions() {
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
-                103,
+                110,
             )
+            .unwrap()
             .available
     );
     assert!(
@@ -324,8 +639,9 @@ fn three_failures_cool_the_same_provider_key_across_sessions() {
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
-                103,
+                110,
             )
+            .unwrap()
             .available
     );
 }
@@ -355,20 +671,33 @@ fn operator_can_remove_exact_identity_cooldown_and_probe_state() {
             )
             .unwrap();
     }
+    for now_ms in 103..113 {
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                "gpt-5.5",
+                Some(503),
+                now_ms,
+            )
+            .unwrap();
+    }
     assert!(store
-        .cooldown_entries(103)
+        .cooldown_entries(113)
         .iter()
         .any(|entry| entry.kind == "probe" && entry.model_id.as_deref() == Some("gpt-5.5")));
     assert!(store
         .remove_cooldown_entry("provider-a", Some("key-a"), Some("gpt-5.5"), "probe")
         .unwrap());
     assert!(!store
-        .cooldown_entries(103)
+        .cooldown_entries(113)
         .iter()
         .any(|entry| entry.kind == "probe" && entry.model_id.as_deref() == Some("gpt-5.5")));
     assert!(
         store
-            .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 103)
+            .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 113)
+            .unwrap()
             .available
     );
 }
@@ -424,8 +753,18 @@ fn failures_in_other_session_share_provider_key_cooldown() {
             100,
         )
         .unwrap();
-    assert_eq!(first.state, "cooldown");
+    assert_eq!(first.state, "healthy");
     assert_eq!(first.failure_count, 1);
+    store
+        .record_real_provider_failure_for_interface(
+            "provider-a",
+            "default",
+            "key-a",
+            "gpt-5.5",
+            Some(503),
+            100,
+        )
+        .unwrap();
     let repeated = store
         .record_provider_failure_in_session(
             &session("session-b"),
@@ -436,8 +775,30 @@ fn failures_in_other_session_share_provider_key_cooldown() {
             101,
         )
         .unwrap();
-    assert_eq!(repeated.state, "cooldown");
+    assert_eq!(repeated.state, "healthy");
     assert_eq!(repeated.failure_count, 2);
+    store
+        .record_real_provider_failure_for_interface(
+            "provider-a",
+            "default",
+            "key-a",
+            "gpt-5.5",
+            Some(503),
+            101,
+        )
+        .unwrap();
+    for now_ms in 102..110 {
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                "gpt-5.5",
+                Some(503),
+                now_ms,
+            )
+            .unwrap();
+    }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
             store
@@ -446,8 +807,9 @@ fn failures_in_other_session_share_provider_key_cooldown() {
                     "provider-a",
                     Some(key),
                     Some("gpt-5.5"),
-                    105,
+                    110,
                 )
+                .unwrap()
                 .available,
             available
         );
@@ -492,8 +854,19 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
             Some(policy),
         )
         .unwrap();
-    assert_eq!(second.state, "cooldown");
-    assert_eq!(second.cooldown_until_ms, Some(5_101));
+    assert_eq!(second.state, "healthy");
+    for _ in 0..10 {
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                "gpt-5.5",
+                Some(401),
+                101,
+            )
+            .unwrap();
+    }
     assert_eq!(
         store.provider_cooldown_probe_keys_due(5_101).unwrap(),
         vec![(
@@ -538,6 +911,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
                 Some("gpt-5.5"),
                 102,
             )
+            .unwrap()
             .available
     );
     assert!(
@@ -549,6 +923,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
                 Some("other-model"),
                 102,
             )
+            .unwrap()
             .available,
         "provider+key+model identity must not block another model"
     );
@@ -561,6 +936,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
                 Some("gpt-5.5"),
                 102,
             )
+            .unwrap()
             .available
     );
     store
@@ -575,6 +951,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
                 Some("gpt-5.5"),
                 104,
             )
+            .unwrap()
             .available,
         "a sibling success must not reset the exact identity cooldown"
     );
@@ -590,6 +967,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
                 Some("gpt-5.5"),
                 180_102,
             )
+            .unwrap()
             .available
     );
 }
@@ -616,6 +994,7 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
                 Some("gpt-5.5"),
                 103,
             )
+            .unwrap()
             .available
     );
     // session-b 的真实成功恢复同一 provider:key:model 的 session 冷却。
@@ -637,6 +1016,7 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
                 Some("gpt-5.5"),
                 105,
             )
+            .unwrap()
             .available,
         "sibling session success must recover the exact provider key/model"
     );
@@ -649,6 +1029,7 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
                 Some("gpt-5.5"),
                 105,
             )
+            .unwrap()
             .available,
         "the successful session must remain available"
     );
@@ -661,6 +1042,7 @@ fn success_in_one_session_clears_sibling_session_cooldown_for_exact_key_model() 
                 Some("gpt-5.5"),
                 106,
             )
+            .unwrap()
             .available,
         "a different model must not be changed by this recovery"
     );
@@ -734,6 +1116,7 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
                 Some("gpt-5.5"),
                 105,
             )
+            .unwrap()
             .available,
         "a real success must not recover provider cooldown without probe success"
     );
@@ -754,6 +1137,7 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
                 Some("gpt-5.5"),
                 107,
             )
+            .unwrap()
             .available,
         "successful probe must recover the exact provider key/model"
     );
@@ -789,7 +1173,8 @@ fn cooldown_probe_pending_scope_is_projected_once_for_exact_and_auth_key_probes(
         Some("key-a"),
         Some("gpt-5.5"),
         101,
-    );
+    )
+    .unwrap();
     assert_eq!(
         projection
             .blocked_scopes
@@ -975,8 +1360,30 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                 100,
             )
             .unwrap();
-        assert_eq!(record.state, "cooldown");
+        assert_eq!(record.state, "healthy");
         assert_eq!(record.failure_count, index as u32 + 1);
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                "gpt-5.5",
+                Some(503),
+                100,
+            )
+            .unwrap();
+    }
+    for _ in 0..7 {
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                "gpt-5.5",
+                Some(503),
+                100,
+            )
+            .unwrap();
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
@@ -988,6 +1395,7 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                     Some("gpt-5.5"),
                     101,
                 )
+                .unwrap()
                 .available,
             available
         );
@@ -1016,6 +1424,7 @@ fn session_transient_bypass_isolated_between_models_while_active() {
                 Some("model-a"),
                 100,
             )
+            .unwrap()
             .available
     );
     assert!(
@@ -1027,6 +1436,7 @@ fn session_transient_bypass_isolated_between_models_while_active() {
                 Some("model-b"),
                 100,
             )
+            .unwrap()
             .available
     );
 }
@@ -1060,6 +1470,20 @@ fn real_success_resets_pre_cooldown_failure_window_for_declared_policy() {
         };
         assert_eq!(record(100).failure_count, 1);
         assert_eq!(record(101).failure_count, 2);
+        if cooldown_scope == V3ProviderFailureCooldownScope::ProviderKeyModel {
+            for now_ms in 100..102 {
+                store
+                    .record_real_provider_failure_for_interface(
+                        "provider-a",
+                        "default",
+                        "key-a",
+                        "model-a",
+                        Some(503),
+                        now_ms,
+                    )
+                    .unwrap();
+            }
+        }
         store
             .record_provider_success_in_session(
                 &scope,
@@ -1076,11 +1500,55 @@ fn real_success_resets_pre_cooldown_failure_window_for_declared_policy() {
         );
         assert_eq!(after_success.state, "healthy");
         assert_eq!(record(104).state, "healthy");
-        assert_eq!(
-            record(105).state,
-            "cooldown",
-            "explicit threshold 3 must remain effective"
-        );
+        let third = record(105);
+        if cooldown_scope == V3ProviderFailureCooldownScope::Session {
+            assert_eq!(
+                third.state, "cooldown",
+                "session policy retains its threshold"
+            );
+        } else {
+            assert_eq!(
+                third.state, "healthy",
+                "identity cooldown requires ten real errors"
+            );
+            for now_ms in 106..114 {
+                store
+                    .record_real_provider_failure_for_interface(
+                        "provider-a",
+                        "default",
+                        "key-a",
+                        "model-a",
+                        Some(503),
+                        now_ms,
+                    )
+                    .unwrap();
+            }
+            assert!(
+                store
+                    .availability("provider-a", Some("key-a"), Some("model-a"), 114)
+                    .unwrap()
+                    .available,
+                "the two real failures before success must not count in the new streak"
+            );
+            for now_ms in 114..116 {
+                store
+                    .record_real_provider_failure_for_interface(
+                        "provider-a",
+                        "default",
+                        "key-a",
+                        "model-a",
+                        Some(503),
+                        now_ms,
+                    )
+                    .unwrap();
+            }
+            assert!(
+                !store
+                    .availability("provider-a", Some("key-a"), Some("model-a"), 116)
+                    .unwrap()
+                    .available
+            );
+        }
     }
 }
 
@@ -1103,7 +1571,7 @@ fn neutral_failure_action_preserves_real_success_streak_and_score() {
 }
 
 #[test]
-fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
+fn quota_and_diagnostics_are_provider_owned_inputs() {
     let store = V3ProviderHealthStore::default();
     store
         .update_quota_state(
@@ -1119,22 +1587,25 @@ fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
     assert!(
         !store
             .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 101)
+            .unwrap()
             .available
     );
     assert!(
         store
             .availability("provider-a", Some("key-a"), Some("other-model"), 101)
+            .unwrap()
             .available
     );
-    store.update_concurrency_state("provider-b", 2, 2).unwrap();
     assert!(
-        !store
+        store
             .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
+            .unwrap()
             .available
     );
     assert!(
         store
             .availability("third", Some("key-a"), Some("gpt-5.5"), 101)
+            .unwrap()
             .available
     );
     assert_eq!(
@@ -1167,34 +1638,13 @@ fn legacy_quota_scope_migrates_to_default_interface_only() {
                 Some("gpt-5.5"),
                 101,
             )
+            .unwrap()
             .available
     );
     assert!(
         store
             .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
-            .available
-    );
-}
-
-#[test]
-fn concurrency_budget_is_shared_across_interfaces() {
-    let store = V3ProviderHealthStore::default();
-    store.update_concurrency_state("provider-a", 2, 2).unwrap();
-
-    assert!(
-        !store
-            .availability_for_interface(
-                "provider-a",
-                "default",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                101,
-            )
-            .available
-    );
-    assert!(
-        !store
-            .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
+            .unwrap()
             .available
     );
 }

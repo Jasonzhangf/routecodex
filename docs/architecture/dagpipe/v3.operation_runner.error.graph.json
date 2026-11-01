@@ -1,6 +1,7 @@
 {
   "id": "v3.operation_runner.error",
   "version": "2",
+  "description": "The Error flow preserves the actual source and decides recovery independently for the affected failure. Its target-recovery input reflects the complete declared candidate set, request-local exclusions, context, availability windows and typed health: one unavailable candidate cannot erase another candidate's actual recovery opportunity. Reselection, retry and recoverable pool exhaustion do not wait for the final-error delay. Applicable provider storm control delays only a lawful final error transport close for two seconds and rechecks recovery before close, with no shared request admission, queue or permit. Cancellation does not wait. Error decisions remain internal and do not project provider error bodies to clients.",
   "inputs": [
     { "id": "source-failure", "schema": "Object", "schema_ref": "v3.operation_runner.arc.source_failure" }
   ],
@@ -57,7 +58,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.error.chain", "v3.error.action_plan", "v3.error.provider_action_gate"],
+        "reads": ["v3.error.chain", "v3.error.action_plan"],
         "writes": ["v3.error.chain", "v3.error.exhaustion_decision"]
       }
     },

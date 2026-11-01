@@ -58,8 +58,8 @@ budget_contract:
   per_request: required
   process_global: required
   residence_or_deadline: required
-  provider_stream_deadline_guard: required_for_direct_and_relay_before_semantic_terminal
-  residence_expiry: typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty
+  provider_stream_deadline_guard: required_until_first_real_semantic_output
+  residence_expiry: preserve_original_budget_and_wait_without_business_lease_while_recovery_possible
   reserve_before_append_or_copy: true
   provider_attempt_and_client_replay_share_request_budget: true
   server_budget_construction: forbidden
@@ -80,10 +80,14 @@ failure_kinds:
   - ClientCancelled
 failure_attribution_contract:
   residence_deadline:
-    active_attempt: typed_provider_timeout_enters_Error_chain_before_client_commit
-    exhausted_request: typed_NoResponse_terminal_without_reselection
+    active_attempt: preserve_semantic_output_and_record_real_failure_in_Error_chain
+    exhausted_request: retain_typed_evidence_and_wait_while_declared_recovery_remains_possible
     unstarted_candidate_health_mutation: forbidden
     local_resource_exhaustion_classification: forbidden
+    cumulative_attempt_count_reset: forbidden
+    recovery_send: one_per_new_matching_real_recovery_fact_after_normal_admission
+    recovery_send_without_new_matching_fact: forbidden
+    original_acquisition_and_probe_budget_renewal: forbidden
   responses_client_replay:
     runtime_variant: ExecutionControlResponse
     source_kind: RuntimeFailure

@@ -2,10 +2,9 @@ use super::{run_v3_single_node_operator, OperationRunnerError, V3OperationGraph}
 use crate::hub_v1::{V3HubEntryProtocol, V3HubExecutionMode};
 use crate::nodes::V3Execution11ProtocolDecisionMode;
 use crate::provider_failure_runtime_policy::{
-    expand_v3_relay_target_candidates_from_opaque_hit,
-    initiate_v3_target_pre_exhaustion_rescue_probes, select_v3_target_with_session_then_global,
-    step_v3_target_planning_with_admission_sync, V3ProviderFailureRuntimeHealth,
-    V3SynchronousTargetAdmissionStep, V3SynchronousTargetPlanningInput,
+    expand_v3_relay_target_candidates_from_opaque_hit, select_v3_target_with_session_then_global,
+    step_v3_target_selection_sync, V3ProviderFailureRuntimeHealth,
+    V3SynchronousTargetSelectionStep, V3SynchronousTargetPlanningInput,
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -15,12 +14,12 @@ use routecodex_v3_error::{
 };
 use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
 use routecodex_v3_target::{
-    V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
-    V3TargetExhaustion, V3TargetInterpreter,
+    V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetExhaustion,
+    V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::V3Router07OpaqueTargetHitOnce;
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 const OPERATOR_NAME: &str = "routecodex.v3.operation.plan_execution";
@@ -52,7 +51,6 @@ enum V3PlanExecutionPhase {
 pub(crate) struct V3PlanExecutionCompleted {
     pub(crate) expanded: V3Target09CandidateSetExpanded,
     pub(crate) selected: V3Target10ConcreteProviderSelected,
-    pub(crate) admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
     pub(crate) request_local_excluded_candidates: BTreeSet<String>,
     pub(crate) request_local_busy_candidates: BTreeSet<String>,
     pub(crate) execution_mode: V3HubExecutionMode,
@@ -83,18 +81,6 @@ pub(crate) enum V3PlanExecutionOutcome {
     },
     Failed(V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-    NeedPreExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        rescue_candidates: Vec<V3TargetCandidate>,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
-    NeedExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        exhaustion: V3TargetExhaustion,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
 }
 
 enum PlanExecutionOperatorOutput {
@@ -106,7 +92,6 @@ enum PlanExecutionOperatorOutput {
     Selected {
         expanded: V3Target09CandidateSetExpanded,
         decision: crate::nodes::V3Execution11ProtocolDecision,
-        admission: crate::provider_failure_runtime_policy::V3RuntimeProviderAdmission,
         request_local_excluded_candidates: BTreeSet<String>,
         request_local_busy_candidates: BTreeSet<String>,
     },
@@ -119,18 +104,6 @@ enum PlanExecutionOperatorOutput {
     },
     Failed(V3Error01SourceRaised),
     OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-    NeedPreExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        rescue_candidates: Vec<V3TargetCandidate>,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
-    NeedExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        exhaustion: V3TargetExhaustion,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
 }
 
 struct PlanExecutionOperator {
@@ -143,11 +116,8 @@ struct PlanExecutionOperator {
     request_local_busy_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
-    allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
-    pre_exhaustion_probes_completed: bool,
-    exhaustion_probes_completed: bool,
     side_output: Arc<Mutex<Option<PlanExecutionOperatorOutput>>>,
 }
 
@@ -162,11 +132,8 @@ impl PlanExecutionOperator {
         request_local_busy_candidates: BTreeSet<String>,
         now_ms: u64,
         deterministic_sample: u64,
-        allow_exhaustion_rescue_probe: bool,
         preferred_selected: Option<V3Target10ConcreteProviderSelected>,
         mode_policy: V3PlanExecutionModePolicy,
-        pre_exhaustion_probes_completed: bool,
-        exhaustion_probes_completed: bool,
         side_output: Arc<Mutex<Option<PlanExecutionOperatorOutput>>>,
     ) -> Self {
         Self {
@@ -179,11 +146,8 @@ impl PlanExecutionOperator {
             request_local_busy_candidates,
             now_ms,
             deterministic_sample,
-            allow_exhaustion_rescue_probe,
             preferred_selected,
             mode_policy,
-            pre_exhaustion_probes_completed,
-            exhaustion_probes_completed,
             side_output,
         }
     }
@@ -244,7 +208,7 @@ impl PlanExecutionOperator {
                 self.deterministic_sample,
             ) {
                 Ok(selected) => selected,
-                Err(exhaustion) => {
+                Err(routecodex_v3_target::V3TargetSelectionError::Exhausted(exhaustion)) => {
                     return PlanExecutionOperatorOutput::Exhausted {
                         expanded,
                         exhaustion,
@@ -254,6 +218,14 @@ impl PlanExecutionOperator {
                             .clone(),
                         request_local_busy_candidates: self.request_local_busy_candidates.clone(),
                     }
+                }
+                Err(error @ routecodex_v3_target::V3TargetSelectionError::Health { .. }) => {
+                    return PlanExecutionOperatorOutput::Failed(build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure,
+                        "V3ProviderHealthRead",
+                        "provider_health_read_failed",
+                        error.to_string(),
+                    ));
                 }
             };
             return match self.decide_execution_mode(selected) {
@@ -268,8 +240,7 @@ impl PlanExecutionOperator {
                 Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
             };
         }
-        let step = step_v3_target_planning_with_admission_sync(V3SynchronousTargetPlanningInput {
-            manifest: &self.manifest,
+        let step = step_v3_target_selection_sync(V3SynchronousTargetPlanningInput {
             expanded: expanded.clone(),
             failure_session_scope: &self.failure_session_scope,
             provider_health: &self.provider_health,
@@ -277,50 +248,24 @@ impl PlanExecutionOperator {
             request_local_busy_candidates: &self.request_local_busy_candidates,
             now_ms: self.now_ms,
             deterministic_sample: self.deterministic_sample,
-            allow_exhaustion_rescue_probe: self.allow_exhaustion_rescue_probe,
             preferred_selected: self.preferred_selected.clone(),
-            pre_exhaustion_probes_completed: self.pre_exhaustion_probes_completed,
-            exhaustion_probes_completed: self.exhaustion_probes_completed,
         });
         match step {
-            V3SynchronousTargetAdmissionStep::Selected {
+            V3SynchronousTargetSelectionStep::Selected {
                 selected,
                 request_local_excluded_candidates,
                 request_local_busy_candidates,
-            } => match self.decide_execution_mode(selected.selected) {
+            } => match self.decide_execution_mode(selected) {
                 Ok(decision) => PlanExecutionOperatorOutput::Selected {
                     expanded,
                     decision,
-                    admission: selected.admission,
                     request_local_excluded_candidates,
                     request_local_busy_candidates,
                 },
                 Err(Ok(source)) => PlanExecutionOperatorOutput::Failed(source),
                 Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
             },
-            V3SynchronousTargetAdmissionStep::NeedPreExhaustionProbes {
-                expanded,
-                rescue_candidates,
-                request_local_excluded_candidates,
-                request_local_busy_candidates,
-            } => PlanExecutionOperatorOutput::NeedPreExhaustionProbes {
-                expanded,
-                rescue_candidates,
-                request_local_excluded_candidates,
-                request_local_busy_candidates,
-            },
-            V3SynchronousTargetAdmissionStep::NeedExhaustionProbes {
-                expanded,
-                exhaustion,
-                request_local_excluded_candidates,
-                request_local_busy_candidates,
-            } => PlanExecutionOperatorOutput::NeedExhaustionProbes {
-                expanded,
-                exhaustion,
-                request_local_excluded_candidates,
-                request_local_busy_candidates,
-            },
-            V3SynchronousTargetAdmissionStep::Exhausted {
+            V3SynchronousTargetSelectionStep::Exhausted {
                 exhaustion,
                 source,
                 request_local_excluded_candidates,
@@ -332,12 +277,7 @@ impl PlanExecutionOperator {
                 request_local_excluded_candidates,
                 request_local_busy_candidates,
             },
-            V3SynchronousTargetAdmissionStep::Failed(source) => {
-                PlanExecutionOperatorOutput::Failed(source)
-            }
-            V3SynchronousTargetAdmissionStep::OperatorFault(fault) => {
-                PlanExecutionOperatorOutput::OperatorFault(fault)
-            }
+            V3SynchronousTargetSelectionStep::Failed(source) => PlanExecutionOperatorOutput::Failed(source),
         }
     }
 }
@@ -390,11 +330,8 @@ pub(crate) fn run_v3_plan_execution_operator(
     request_local_busy_candidates: BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
-    allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
-    pre_exhaustion_probes_completed: bool,
-    exhaustion_probes_completed: bool,
 ) -> Result<V3PlanExecutionOutcome, OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
     let operator = PlanExecutionOperator::new(
@@ -407,11 +344,8 @@ pub(crate) fn run_v3_plan_execution_operator(
         request_local_busy_candidates,
         now_ms,
         deterministic_sample,
-        allow_exhaustion_rescue_probe,
         preferred_selected,
         mode_policy,
-        pre_exhaustion_probes_completed,
-        exhaustion_probes_completed,
         side_output.clone(),
     );
     let runner_result = run_v3_single_node_operator(
@@ -447,7 +381,6 @@ pub(crate) fn run_v3_plan_execution_operator(
                 PlanExecutionOperatorOutput::Selected {
                     expanded,
                     decision,
-                    admission,
                     request_local_excluded_candidates,
                     request_local_busy_candidates,
                 } => V3PlanExecutionOutcome::Selected {
@@ -455,7 +388,6 @@ pub(crate) fn run_v3_plan_execution_operator(
                     plan: V3PlanExecutionCompleted {
                         expanded,
                         selected: decision.target.clone(),
-                        admission,
                         request_local_excluded_candidates,
                         request_local_busy_candidates,
                         execution_mode: match decision.mode {
@@ -488,28 +420,6 @@ pub(crate) fn run_v3_plan_execution_operator(
                 PlanExecutionOperatorOutput::OperatorFault(fault) => {
                     V3PlanExecutionOutcome::OperatorFault(fault)
                 }
-                PlanExecutionOperatorOutput::NeedPreExhaustionProbes {
-                    expanded,
-                    rescue_candidates,
-                    request_local_excluded_candidates,
-                    request_local_busy_candidates,
-                } => V3PlanExecutionOutcome::NeedPreExhaustionProbes {
-                    expanded,
-                    rescue_candidates,
-                    request_local_excluded_candidates,
-                    request_local_busy_candidates,
-                },
-                PlanExecutionOperatorOutput::NeedExhaustionProbes {
-                    expanded,
-                    exhaustion,
-                    request_local_excluded_candidates,
-                    request_local_busy_candidates,
-                } => V3PlanExecutionOutcome::NeedExhaustionProbes {
-                    expanded,
-                    exhaustion,
-                    request_local_excluded_candidates,
-                    request_local_busy_candidates,
-                },
             })
         }
     }
@@ -543,11 +453,8 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         BTreeSet::new(),
         now_ms,
         deterministic_sample,
-        false,
         None,
         mode_policy,
-        false,
-        false,
         side_output.clone(),
     );
     let runner_result = run_v3_single_node_operator(
@@ -614,11 +521,7 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
             Err(V3PlanExecutionStop::OperatorFault(fault))
         }
-        Some(
-            PlanExecutionOperatorOutput::Selected { .. }
-            | PlanExecutionOperatorOutput::NeedPreExhaustionProbes { .. }
-            | PlanExecutionOperatorOutput::NeedExhaustionProbes { .. },
-        ) => Err(V3PlanExecutionStop::Failed(
+        Some(PlanExecutionOperatorOutput::Selected { .. }) => Err(V3PlanExecutionStop::Failed(
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3OperationRunnerPlanExecution",
@@ -638,27 +541,19 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
 }
 
 pub(crate) async fn await_v3_plan_execution_with_deadline(
-    deadline: std::time::Instant,
+    _deadline: std::time::Instant,
     planning: impl std::future::Future<
         Output = Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop>,
     >,
 ) -> Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop> {
-    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), planning)
-        .await
-        .unwrap_or_else(|_| {
-            Err(V3PlanExecutionStop::Failed(
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3OperationRunnerPlanExecution",
-                    "request_residence_deadline_exceeded",
-                    "target planning exceeded the request residence deadline",
-                ),
-            ))
-        })
+    // Planning includes cancellation-aware pool recovery. The original
+    // deadline still bounds acquisition and probe work inside that owner; it
+    // cannot by itself terminate an accepted request while recovery remains.
+    planning.await
 }
 
 #[inline(never)]
-pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
+pub(crate) fn run_v3_plan_execution_operator_with_recovery<'a>(
     attempt_budget: crate::execution_control::V3AttemptBudget,
     target_resolved_request: Value,
     manifest: &'a V3Config05ManifestPublished,
@@ -669,7 +564,6 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
     request_local_busy_candidates: &'a BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
-    allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> std::pin::Pin<
@@ -680,7 +574,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
             + 'a,
     >,
 > {
-    Box::pin(run_v3_plan_execution_with_probes_unboxed(
+    Box::pin(run_v3_plan_execution_with_recovery_unboxed(
         attempt_budget,
         target_resolved_request,
         manifest,
@@ -691,13 +585,12 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
         request_local_busy_candidates,
         now_ms,
         deterministic_sample,
-        allow_exhaustion_rescue_probe,
         preferred_selected,
         mode_policy,
     ))
 }
 
-async fn run_v3_plan_execution_with_probes_unboxed(
+async fn run_v3_plan_execution_with_recovery_unboxed(
     attempt_budget: crate::execution_control::V3AttemptBudget,
     target_resolved_request: Value,
     manifest: &V3Config05ManifestPublished,
@@ -708,30 +601,19 @@ async fn run_v3_plan_execution_with_probes_unboxed(
     request_local_busy_candidates: &BTreeSet<String>,
     mut now_ms: u64,
     deterministic_sample: u64,
-    allow_exhaustion_rescue_probe: bool,
     preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop> {
     let mut source = target_source;
     let mut preferred = preferred_selected;
-    let mut protected_busy = request_local_busy_candidates.clone();
-    // Carry busy provenance separately through Error policy. Only this planning
-    // scan masks it, until a paced wait authorizes a fresh admission check.
-    let mut request_local_excluded_candidates: BTreeSet<String> = request_local_excluded_candidates
-        .union(request_local_busy_candidates)
-        .cloned()
-        .collect();
+    let mut request_local_excluded_candidates = request_local_excluded_candidates.clone();
     let mut request_local_busy_candidates = request_local_busy_candidates.clone();
-    let mut pre_exhaustion_probes_completed = false;
-    let mut exhaustion_probes_completed = false;
-    let mut exhaustion_generation = None;
-    let recovery_started = attempt_budget.target_recovery_started();
     let current_time = |code| {
         crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().map_err(
             |error| {
                 build_v3_error_01_source_raised(
                     V3ErrorSourceKind::RuntimeFailure,
-                    "V3ProviderCooldownRescueProbe",
+                    "V3TargetRecoveryWait",
                     code,
                     error,
                 )
@@ -739,21 +621,32 @@ async fn run_v3_plan_execution_with_probes_unboxed(
         )
     };
     loop {
+        let scan_attempted = attempt_budget
+            .request_candidate_attempts()
+            .map_err(|error| {
+                V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3RequestExecutionControl",
+                    "request_candidate_scan_read_failed",
+                    error.to_string(),
+                ))
+            })?;
+        let effective_excluded: BTreeSet<String> = request_local_excluded_candidates
+            .union(&scan_attempted)
+            .cloned()
+            .collect();
         let outcome = match run_v3_plan_execution_operator(
             target_resolved_request.clone(),
             manifest.clone(),
             source,
             failure_session_scope.clone(),
             provider_health.clone(),
-            request_local_excluded_candidates.clone(),
+            effective_excluded,
             request_local_busy_candidates.clone(),
             now_ms,
             deterministic_sample,
-            allow_exhaustion_rescue_probe,
             preferred.take(),
             mode_policy.clone(),
-            pre_exhaustion_probes_completed,
-            exhaustion_probes_completed,
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
@@ -768,159 +661,20 @@ async fn run_v3_plan_execution_with_probes_unboxed(
             }
         };
         match outcome {
-            V3PlanExecutionOutcome::NeedPreExhaustionProbes {
-                expanded,
-                rescue_candidates,
-                request_local_excluded_candidates: admitted_exclusions,
-                request_local_busy_candidates: admitted_busy,
-            } => {
-                let did_work = match initiate_v3_target_pre_exhaustion_rescue_probes(
-                    provider_health,
-                    manifest,
-                    &rescue_candidates,
-                    now_ms,
-                )
-                .await
-                {
-                    Ok(did_work) => did_work,
-                    Err(Ok(source)) => return Err(V3PlanExecutionStop::Failed(source)),
-                    Err(Err(fault)) => return Err(V3PlanExecutionStop::OperatorFault(fault)),
-                };
-                request_local_excluded_candidates = admitted_exclusions;
-                request_local_busy_candidates = admitted_busy;
-                if did_work {
-                    reopen_local_admission_busy_after_probe(
-                        &mut request_local_excluded_candidates,
-                        &request_local_busy_candidates,
-                        &protected_busy,
-                    );
-                }
-                exhaustion_probes_completed = false;
-                exhaustion_generation = None;
-                now_ms = match current_time("target_pre_exhaustion_rescue_clock_failed") {
-                    Ok(now_ms) => now_ms,
-                    Err(source) => return Err(V3PlanExecutionStop::Failed(source)),
-                };
-                pre_exhaustion_probes_completed = true;
-                source = V3PlanExecutionTargetSource::Expanded(expanded);
-            }
-            V3PlanExecutionOutcome::NeedExhaustionProbes {
-                expanded,
-                exhaustion,
-                request_local_excluded_candidates: admitted_exclusions,
-                request_local_busy_candidates: admitted_busy,
-            } => {
-                request_local_excluded_candidates = admitted_exclusions;
-                request_local_busy_candidates = admitted_busy;
-                pre_exhaustion_probes_completed = false;
-                exhaustion_probes_completed = false;
-                let generation = provider_health.target_availability_generation();
-                if exhaustion_generation != Some(generation) {
-                    now_ms = match current_time("target_exhaustion_rescue_clock_failed") {
-                        Ok(now_ms) => now_ms,
-                        Err(source) => return Err(V3PlanExecutionStop::Failed(source)),
-                    };
-                    exhaustion_generation = Some(generation);
-                    source = V3PlanExecutionTargetSource::Expanded(expanded);
-                    continue;
-                }
-                let probe_result = match tokio::time::timeout(
-                    target_recovery_remaining(&expanded, recovery_started),
-                    provider_health.run_exhaustion_rescue_probes(manifest, &expanded, now_ms),
-                )
-                .await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        // Cancellation releases only our probe permit. Keep its
-                        // cooldown and perform one final selection, including
-                        // any success published concurrently by another session.
-                        now_ms = current_time("target_recovery_wait_clock_failed")
-                            .map_err(V3PlanExecutionStop::Failed)?;
-                        exhaustion_probes_completed = true;
-                        source = V3PlanExecutionTargetSource::Expanded(expanded);
-                        continue;
-                    }
-                };
-                match probe_result {
-                    Ok(outcome) if outcome.completed_all => {
-                        if outcome.did_work {
-                            reopen_local_admission_busy_after_probe(
-                                &mut request_local_excluded_candidates,
-                                &request_local_busy_candidates,
-                                &protected_busy,
-                            );
-                        }
-                        now_ms = match current_time("target_exhaustion_rescue_clock_failed") {
-                            Ok(now_ms) => now_ms,
-                            Err(source) => return Err(V3PlanExecutionStop::Failed(source)),
-                        };
-                        exhaustion_probes_completed = true;
-                        source = V3PlanExecutionTargetSource::Expanded(expanded);
-                    }
-                    Ok(_) => {
-                        let waited = wait_for_target_recovery(
-                            &expanded,
-                            provider_health,
-                            failure_session_scope,
-                            &mut request_local_excluded_candidates,
-                            &mut request_local_busy_candidates,
-                            now_ms,
-                            &attempt_budget,
-                        )
-                        .await
-                        .map_err(V3PlanExecutionStop::Failed)?;
-                        if waited {
-                            protected_busy
-                                .retain(|key| request_local_busy_candidates.contains(key));
-                            now_ms = current_time("target_recovery_wait_clock_failed")
-                                .map_err(V3PlanExecutionStop::Failed)?;
-                            source = V3PlanExecutionTargetSource::Expanded(expanded);
-                            exhaustion_generation = None;
-                            continue;
-                        }
-                        let source = match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
-                            &expanded,
-                            &request_local_excluded_candidates,
-                            &request_local_busy_candidates,
-                        ) {
-                            Ok(source) => source,
-                            Err(fault) => return Err(V3PlanExecutionStop::OperatorFault(fault)),
-                        };
-                        return Err(V3PlanExecutionStop::Exhausted {
-                            expanded,
-                            exhaustion,
-                            source,
-                        });
-                    }
-                    Err(error) => {
-                        return Err(V3PlanExecutionStop::Failed(
-                            build_v3_error_01_source_raised(
-                                V3ErrorSourceKind::RuntimeFailure,
-                                "V3ProviderCooldownRescueProbe",
-                                "target_exhaustion_rescue_probe_failed",
-                                error,
-                            ),
-                        ));
-                    }
-                }
-            }
             V3PlanExecutionOutcome::Selected {
                 execution_planned_request,
-                plan,
+                mut plan,
             } => {
+                plan.request_local_excluded_candidates = request_local_excluded_candidates.clone();
                 return Ok((execution_planned_request, plan));
             }
             V3PlanExecutionOutcome::Exhausted {
                 expanded,
                 exhaustion,
                 source: failure_source,
-                request_local_excluded_candidates: admitted_exclusions,
+                request_local_excluded_candidates: _,
                 request_local_busy_candidates: admitted_busy,
             } => {
-                // Exact admission provenance includes mixed permanent/busy
-                // exhaustion; the source label cannot reconstruct these sets.
-                request_local_excluded_candidates = admitted_exclusions;
                 request_local_busy_candidates = admitted_busy;
                 let waited = wait_for_target_recovery(
                     &expanded,
@@ -934,12 +688,8 @@ async fn run_v3_plan_execution_with_probes_unboxed(
                 .await
                 .map_err(V3PlanExecutionStop::Failed)?;
                 if waited {
-                    protected_busy.retain(|key| request_local_busy_candidates.contains(key));
                     now_ms = current_time("target_recovery_wait_clock_failed")
                         .map_err(V3PlanExecutionStop::Failed)?;
-                    pre_exhaustion_probes_completed = false;
-                    exhaustion_probes_completed = false;
-                    exhaustion_generation = None;
                     source = V3PlanExecutionTargetSource::Expanded(expanded);
                     continue;
                 }
@@ -959,30 +709,6 @@ async fn run_v3_plan_execution_with_probes_unboxed(
     }
 }
 
-fn reopen_local_admission_busy_after_probe(
-    excluded: &mut BTreeSet<String>,
-    busy: &BTreeSet<String>,
-    protected_busy: &BTreeSet<String>,
-) {
-    excluded.retain(|key| !busy.contains(key) || protected_busy.contains(key));
-}
-
-// Waiting owns no provider lease. Dropping the request future cancels the
-// timer; globally shared admission and probe ownership remain authoritative.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn target_recovery_remaining(
-    expanded: &V3Target09CandidateSetExpanded,
-    started: tokio::time::Instant,
-) -> std::time::Duration {
-    let budget_ms = expanded
-        .candidates
-        .iter()
-        .map(|candidate| candidate.concurrency_acquire_timeout_ms)
-        .max()
-        .unwrap_or(0);
-    std::time::Duration::from_millis(budget_ms).saturating_sub(started.elapsed())
-}
-
 pub(crate) async fn wait_for_target_recovery(
     expanded: &V3Target09CandidateSetExpanded,
     health: &V3ProviderFailureRuntimeHealth,
@@ -992,82 +718,233 @@ pub(crate) async fn wait_for_target_recovery(
     now_ms: u64,
     attempt_budget: &crate::execution_control::V3AttemptBudget,
 ) -> Result<bool, V3Error01SourceRaised> {
-    let Some(due_at) = attempt_budget.current_target_recovery_deadline(std::time::Instant::now())
-    else {
-        return Ok(false);
-    };
     let permanent: BTreeSet<String> = excluded.difference(busy).cloned().collect();
-    let availability = health.session_bound_availability(scope);
-    let concurrency = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared();
+    let mut current_ms = now_ms;
     loop {
-        let now = std::time::Instant::now();
-        if now >= attempt_budget.residence_deadline() {
-            return Ok(false);
+        let observed_generation = health.target_availability_generation();
+        let availability = health.session_bound_availability(scope);
+        let revisions = attempt_budget
+            .request_candidate_recovery_revisions()
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3RequestExecutionControl",
+                    "request_candidate_scan_read_failed",
+                    error.to_string(),
+                )
+            })?;
+        let recovered = attempted_candidates_recovered(
+            expanded, &revisions, &permanent, health, scope, current_ms,
+        )?;
+        if !recovered.is_empty() {
+            attempt_budget.clear_recovered_request_candidates(&recovered).map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure, "V3RequestExecutionControl",
+                    "request_candidate_scan_write_failed", error.to_string(),
+                )
+            })?;
+            for key in &recovered {
+                excluded.remove(key);
+                busy.remove(key);
+            }
         }
+        for candidate in &expanded.candidates {
+            let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
+            if !permanent.contains(&key)
+                && (!revisions.contains_key(&key) || recovered.contains(&key))
+                && V3TargetInterpreter::candidate_admitted_for_request(
+                candidate,
+                current_ms,
+                expanded.route.request_input_tokens,
+            )
+                && candidate_health_available(&availability, candidate, current_ms)?
+            {
+                excluded.remove(&key);
+                busy.remove(&key);
+                return Ok(true);
+            }
+        }
+        // The declared request residence deadline is not a request-termination
+        // authority by itself. It bounds the wait only when no recovery
+        // opportunity remains for any non-permanent candidate: a due probe, a
+        // declared window that will reopen, or a recoverable attempt whose
+        // success revision can still advance. While such an opportunity
+        // remains, the request keeps waiting with keepalives and typed
+        // evidence instead of ending.
+        let now = std::time::Instant::now();
+        let residence_deadline = attempt_budget.residence_deadline();
+        if now >= residence_deadline {
+            if !target_recovery_opportunity_remains(
+                expanded, &permanent, health, scope, current_ms,
+            )? {
+                return Ok(false);
+            }
+            // Past the residence deadline a recovery opportunity still exists:
+            // do not burn CPU. Wake on the next typed health change or after a
+            // bounded recheck, then re-evaluate whether the opportunity
+            // resolved. The recovery step cursor is not advanced here; that
+            // path belongs to the pre-residence due time below.
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+                changed = health.wait_for_target_availability_change(observed_generation) => {
+                    changed.map_err(|error| build_v3_error_01_source_raised(
+                        V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
+                        "target_availability_wait_failed", error))?;
+                }
+            }
+            current_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .map_err(|error| build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
+                    "target_recovery_wait_clock_failed", error))?;
+            continue;
+        }
+        let Some(due_at) = attempt_budget.current_target_recovery_deadline(now) else {
+            return Ok(false);
+        };
+        // Wake no later than the residence deadline even when the declared
+        // recovery step is scheduled further out, so the conditional bound
+        // above is actually re-evaluated on time.
+        let wake_at = due_at.min(residence_deadline);
         if now >= due_at {
             attempt_budget.advance_target_recovery_step_if_due(now);
-            *excluded = permanent;
-            busy.clear();
-            return Ok(true);
-        }
-        let observed_generation = health.target_availability_generation();
-        // A released admission lease is not recovery evidence for a transport
-        // that just reported busy. Only unmasked healthy alternatives may
-        // bypass this request's original due time.
-        let capacity_keys: BTreeSet<_> = expanded.candidates.iter()
-            .filter(|candidate| {
-                let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
-                !permanent.contains(&key) && !busy.contains(&key)
-                    && V3TargetInterpreter::candidate_admitted(candidate, now_ms)
-                    && availability.availability_for_interface(
-                        &candidate.provider_id, &candidate.interface_id,
-                        Some(&candidate.auth_alias), Some(&candidate.model_id), now_ms,
-                    ).available
-            })
-            .map(|candidate| (crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                &candidate.provider_id, &candidate.auth_alias),
-                Some(routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-                    interface_id: candidate.interface_id.clone(), model_id: candidate.model_id.clone(),
-                })))
-            .collect();
-        let capacity_keys: Vec<_> = capacity_keys.into_iter().collect();
-        let recovered_alternative = capacity_keys.iter().any(|(key, identity)| {
-            concurrency
-                .snapshot_for_scope(key, identity.as_ref())
-                .or_else(|| concurrency.snapshot(key))
-                .is_none_or(|state| {
-                    state.in_flight < state.budget
-                        && state.total_provider_in_flight < state.hard_max_in_flight
-                })
-        });
-        if recovered_alternative {
-            *excluded = permanent;
+            *excluded = permanent.clone();
             busy.clear();
             return Ok(true);
         }
         tokio::select! {
-            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(due_at)) => {}
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(wake_at)) => {}
             changed = health.wait_for_target_availability_change(observed_generation) => {
                 changed.map_err(|error| build_v3_error_01_source_raised(
                     V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
                     "target_availability_wait_failed", error))?;
             }
-            _ = concurrency.wait_for_scoped_capacity_change(&capacity_keys), if !capacity_keys.is_empty() => {}
+        }
+        current_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+            .map_err(|error| build_v3_error_01_source_raised(
+                V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
+                "target_recovery_wait_clock_failed", error))?;
+    }
+}
+
+/// Whether any non-permanent candidate can still become selectable for this
+/// request through a declared recovery path. This uses the same admission
+/// basis as selection and probe recovery: context ineligibility is permanent,
+/// a request-local exclusion is permanent, a cooled identity with a due probe
+/// recovers, and an outside-window candidate reopens. A health-available
+/// in-window candidate that reaches this predicate was already attempted and
+/// not re-admitted by a success revision, so it is a health-neutral terminal
+/// state for this request, not a future recovery opportunity.
+fn target_recovery_opportunity_remains(
+    expanded: &V3Target09CandidateSetExpanded,
+    permanent: &BTreeSet<String>,
+    health: &V3ProviderFailureRuntimeHealth,
+    scope: &V3ProviderFailureSessionScope,
+    now_ms: u64,
+) -> Result<bool, V3Error01SourceRaised> {
+    let availability = health.session_bound_availability(scope);
+    for candidate in &expanded.candidates {
+        let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
+        if permanent.contains(&key) {
+            continue;
+        }
+        if !V3TargetInterpreter::candidate_context_fits_request(
+            candidate,
+            expanded.route.request_input_tokens,
+        ) {
+            continue;
+        }
+        if !V3TargetInterpreter::candidate_in_availability_window(candidate, now_ms) {
+            return Ok(true);
+        }
+        let projection = availability
+            .availability_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                now_ms,
+            )
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3ProviderHealthRead",
+                    "provider_health_read_failed",
+                    format!("{}/{}/{}/{}: {error}", candidate.provider_id, candidate.interface_id, candidate.auth_alias, candidate.model_id),
+                )
+            })?;
+        if crate::provider_failure_runtime_policy::v3_availability_is_cooldown_recovery_only(&projection) {
+            return Ok(true);
         }
     }
+    Ok(false)
+}
+
+fn candidate_health_available<R: V3ProviderAvailabilityReader>(
+    availability: &R,
+    candidate: &routecodex_v3_target::V3TargetCandidate,
+    now_ms: u64,
+) -> Result<bool, V3Error01SourceRaised> {
+    availability.availability_for_interface(
+        &candidate.provider_id, &candidate.interface_id, Some(&candidate.auth_alias),
+        Some(&candidate.model_id), now_ms,
+    ).map(|projection| projection.available).map_err(|error| {
+        build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure, "V3ProviderHealthRead", "provider_health_read_failed",
+            format!("{}/{}/{}/{}: {error}", candidate.provider_id, candidate.interface_id, candidate.auth_alias, candidate.model_id),
+        )
+    })
+}
+
+fn attempted_candidates_recovered(
+    expanded: &V3Target09CandidateSetExpanded,
+    baseline: &BTreeMap<String, u64>,
+    permanent: &BTreeSet<String>,
+    health: &V3ProviderFailureRuntimeHealth,
+    scope: &V3ProviderFailureSessionScope,
+    now_ms: u64,
+) -> Result<BTreeSet<String>, V3Error01SourceRaised> {
+    let availability = health.session_bound_availability(scope);
+    let store = health.store();
+    let mut recovered = BTreeSet::new();
+    for candidate in &expanded.candidates {
+        let key =
+            crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
+        let Some(recovery_revision) = baseline.get(&key).filter(|_| !permanent.contains(&key)) else {
+            continue;
+        };
+        if !V3TargetInterpreter::candidate_admitted_for_request(candidate, now_ms, expanded.route.request_input_tokens)
+            || !candidate_health_available(&availability, candidate, now_ms)? {
+            continue;
+        }
+        let current_revision = store
+            .recovery_success_revision_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                &candidate.auth_alias,
+                &candidate.model_id,
+            )
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3TargetRecoveryWait",
+                    "target_recovery_health_read_failed",
+                    error,
+                )
+            })?;
+        if current_revision > *recovery_revision {
+            recovered.insert(key);
+        }
+    }
+    Ok(recovered)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-    use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
     use routecodex_v3_target::V3TargetInterpreter;
     use serde_json::json;
     use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-    use tokio::sync::{mpsc, oneshot};
 
     fn test_manifest(provider_id: &str) -> V3Config05ManifestPublished {
         let authoring = parse_v3_config_02_authoring(
@@ -1118,16 +995,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         )
         .expect("opaque hit");
         let request = json!({"model": "client-model", "input": "opaque"});
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let controller_key =
-            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                "r05_sdk_success",
-                "key1",
-            );
-        let before = controller
-            .snapshot(&controller_key)
-            .map(|value| value.in_flight)
-            .unwrap_or(0);
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .expect("clock");
@@ -1141,14 +1008,11 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             BTreeSet::new(),
             now_ms,
             0,
-            false,
             None,
             V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: V3HubEntryProtocol::Responses,
                 allowed_modes: vec!["direct".to_string(), "relay".to_string()],
             },
-            false,
-            false,
         )
         .expect("operator run");
         let V3PlanExecutionOutcome::Selected {
@@ -1163,21 +1027,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert!(plan.selected.candidate_count > 0);
         assert_eq!(plan.selected.candidate.provider_id, "r05_sdk_success");
         assert_eq!(plan.execution_mode, V3HubExecutionMode::Direct);
-        assert_eq!(
-            controller
-                .snapshot(&controller_key)
-                .expect("admission snapshot")
-                .in_flight,
-            before + 1
-        );
-        drop(plan);
-        assert_eq!(
-            controller
-                .snapshot(&controller_key)
-                .expect("released admission snapshot")
-                .in_flight,
-            before
-        );
     }
 
     #[test]
@@ -1212,11 +1061,8 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             BTreeSet::new(),
             0,
             0,
-            false,
             None,
             mode.clone(),
-            false,
-            false,
         )
         .unwrap();
         let V3PlanExecutionOutcome::Selected { plan, .. } = first else {
@@ -1239,11 +1085,8 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             mask,
             0,
             0,
-            false,
             Some(preferred),
             mode,
-            false,
-            false,
         )
         .unwrap();
         assert!(
@@ -1253,20 +1096,61 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     }
 
     #[tokio::test]
+    async fn healthy_candidate_must_not_wait_behind_a_stale_busy_mask() {
+        let manifest = test_manifest("r05_stale_busy");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "stale-busy").unwrap();
+        let request = json!({"model":"client-model","input":"opaque"});
+        let (_, expanded) = preplan_test_input(&manifest, &scope, &request);
+        let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(&expanded.candidates[0]);
+        let mut excluded = BTreeSet::from([key.clone()]);
+        let mut busy = BTreeSet::from([key]);
+        let budget = crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let now_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().unwrap();
+        let reselect = tokio::time::timeout(Duration::from_millis(100), wait_for_target_recovery(
+            &expanded, &health, &scope, &mut excluded, &mut busy, now_ms, &budget,
+        )).await.expect("healthy provider must not wait").unwrap();
+        assert!(reselect);
+        assert!(excluded.is_empty() && busy.is_empty());
+    }
+
+    #[test]
+    fn only_matching_success_releases_a_recoverable_attempt() {
+        let manifest = test_manifest("r05_revision_scope");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "revision-scope").unwrap();
+        let (_, expanded) = preplan_test_input(&manifest, &scope, &json!({"model":"client-model","input":"opaque"}));
+        let candidate = &expanded.candidates[0];
+        let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
+        let baseline = BTreeMap::from([(key.clone(), 0)]);
+        let now_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().unwrap();
+        health.store().record_provider_key_success_for_interface(
+            &candidate.provider_id, &candidate.interface_id, "unrelated-key", &candidate.model_id, now_ms,
+        ).unwrap();
+        assert!(attempted_candidates_recovered(&expanded, &baseline, &BTreeSet::new(), &health, &scope, now_ms).unwrap().is_empty());
+        health.store().record_provider_key_success_for_interface(
+            &candidate.provider_id, &candidate.interface_id, &candidate.auth_alias, &candidate.model_id, now_ms,
+        ).unwrap();
+        assert_eq!(attempted_candidates_recovered(&expanded, &baseline, &BTreeSet::new(), &health, &scope, now_ms).unwrap(), BTreeSet::from([key.clone()]));
+        assert!(attempted_candidates_recovered(&expanded, &baseline, &BTreeSet::from([key]), &health, &scope, now_ms).unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn target_recovery_does_not_reselect_ineligible_candidate() {
         let manifest = test_manifest("r05_ineligible_recovery");
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = V3ProviderFailureSessionScope::new("test", "default", "ineligible").unwrap();
         let request = json!({"model":"client-model", "input":"opaque"});
         let (_, mut expanded) = preplan_test_input(&manifest, &scope, &request);
-        expanded.candidates[0].model_capabilities = vec!["text".into()];
-        expanded.candidates[0].required_capabilities = vec!["vision".into()];
+        expanded.route.request_input_tokens = 2_000;
+        expanded.candidates[0].max_context_tokens = Some(1_000);
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .unwrap();
-        assert!(!V3TargetInterpreter::candidate_admitted(
+        assert!(!V3TargetInterpreter::candidate_admitted_for_request(
             &expanded.candidates[0],
-            now_ms
+            now_ms,
+            expanded.route.request_input_tokens,
         ));
         let budget =
             crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
@@ -1288,6 +1172,43 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert!(
             result.is_err(),
             "an ineligible candidate must not immediately trigger reselection"
+        );
+    }
+
+    #[tokio::test]
+    async fn selected_target_does_not_mutate_request_scan_before_send() {
+        let manifest = test_manifest("baseline_capture");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "baseline").unwrap();
+        let request = json!({"model":"client-model","input":"opaque"});
+        let (_, expanded) = preplan_test_input(&manifest, &scope, &request);
+        let candidate = expanded.candidates[0].clone();
+        let budget =
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let (_, plan) = run_v3_plan_execution_operator_with_recovery(
+            budget.clone(),
+            request,
+            &manifest,
+            V3PlanExecutionTargetSource::Expanded(expanded),
+            &scope,
+            &health,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            1,
+            0,
+            None,
+            V3PlanExecutionModePolicy::DirectEntry {
+                entry_protocol: V3HubEntryProtocol::Responses,
+                allowed_modes: vec!["direct".into(), "relay".into()],
+            },
+        )
+        .await
+        .ok()
+        .expect("healthy target must be selected");
+        assert_eq!(plan.selected.candidate.provider_id, candidate.provider_id);
+        assert!(
+            budget.request_candidate_attempts().unwrap().is_empty(),
+            "selection alone is not a real wire attempt"
         );
     }
 
@@ -1347,20 +1268,18 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .unwrap();
-        let action =
-            routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
-        for _ in 0..3 {
-            health
-                .record_provider_key_failure_action(
-                    provider_id,
-                    Some("key1"),
-                    Some("gpt-test"),
-                    &action,
-                    now_ms,
-                )
-                .unwrap();
-        }
         let store = health.store();
+        store
+            .record_provider_cooldown_failure_for_interface(
+                provider_id,
+                "default",
+                Some("key1"),
+                Some("gpt-test"),
+                "test cooldown awaiting a matching health probe",
+                now_ms,
+                60_000,
+            )
+            .unwrap();
         let permit = store
             .acquire_provider_cooldown_rescue_probe_for_interface(
                 provider_id,
@@ -1422,43 +1341,16 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     }
 
     #[test]
-    fn preplan_ignores_occupied_provider_capacity_while_admission_excludes_it() {
-        let mut manifest = test_manifest("r05_preplan_capacity");
-        manifest
-            .providers
-            .get_mut("r05_preplan_capacity")
-            .unwrap()
-            .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-            max_in_flight: 1,
-            acquire_timeout_ms: 1000,
-            stale_lease_ms: 30_000,
-        });
+    fn preplan_and_admission_do_not_acquire_provider_capacity() {
+        // Planning owns no provider lease: both the preplan scan and the
+        // admitting scan must select the only healthy target without observing
+        // any request-local capacity exclusion.
+        let manifest = test_manifest("r05_preplan_capacity");
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = V3ProviderFailureSessionScope::new("test", "default", "r05-preplan-capacity")
             .expect("session scope");
         let request = json!({"model": "client-model", "input": "opaque"});
         let (hit, expanded) = preplan_test_input(&manifest, &scope, &request);
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let provider_key =
-            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                "r05_preplan_capacity",
-                "key1",
-            );
-        controller
-            .ensure_initial_budget(&provider_key, 1)
-            .expect("initial budget");
-        let identity =
-            routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-                interface_id: "default".into(),
-                model_id: "gpt-test".into(),
-            };
-        let occupied = controller
-            .try_acquire_business_scoped(&provider_key, Some(&identity))
-            .expect("occupy sole provider permit");
-        let cleanup = TestLeaseCleanup {
-            controller: controller.clone(),
-            permit: Arc::new(std::sync::Mutex::new(Some(occupied.into_permit()))),
-        };
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .expect("clock");
@@ -1495,13 +1387,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             "r05_preplan_capacity"
         );
         assert!(preplan.request_local_excluded_candidates.is_empty());
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("occupied snapshot")
-                .in_flight,
-            1
-        );
 
         let admission = run_v3_plan_execution_operator(
             request,
@@ -1513,34 +1398,19 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             BTreeSet::new(),
             now_ms,
             0,
-            false,
             None,
             V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: V3HubEntryProtocol::Responses,
                 allowed_modes: vec!["direct".to_string(), "relay".to_string()],
             },
-            false,
-            false,
         )
         .expect("admission path run");
-        let V3PlanExecutionOutcome::Exhausted { .. } = admission else {
-            panic!("occupied sole-provider capacity must exclude admission");
+        let V3PlanExecutionOutcome::Selected { plan, .. } = admission else {
+            panic!("planning must admit the healthy target without a capacity gate");
         };
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("post-admission snapshot")
-                .in_flight,
-            1
-        );
-        drop(cleanup);
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("released snapshot")
-                .in_flight,
-            0
-        );
+        assert_eq!(plan.selected.candidate.provider_id, "r05_preplan_capacity");
+        assert!(plan.request_local_excluded_candidates.is_empty());
+        assert!(plan.request_local_busy_candidates.is_empty());
     }
 
     #[test]
@@ -1650,14 +1520,11 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             BTreeSet::new(),
             now_ms,
             0,
-            false,
             None,
             V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: V3HubEntryProtocol::Responses,
                 allowed_modes: vec![],
             },
-            false,
-            false,
             Arc::clone(&side_output),
         );
         let err01_before = crate::operation_runner::operators::err01_execution_count_for_test();
@@ -1720,14 +1587,11 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             BTreeSet::new(),
             now_ms,
             0,
-            false,
             None,
             V3PlanExecutionModePolicy::DirectEntry {
                 entry_protocol: V3HubEntryProtocol::Responses,
                 allowed_modes: vec![],
             },
-            false,
-            false,
         )
         .unwrap();
         let V3PlanExecutionOutcome::Failed(source) = outcome else {
@@ -1737,7 +1601,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     }
 
     #[test]
-    fn pre_exhaustion_resume_uses_the_callers_nonzero_selection_sample() {
+    fn planning_uses_the_callers_nonzero_selection_sample() {
         let mut manifest = test_manifest("r05_sample_a");
         let mut second_provider = manifest.providers["r05_sample_a"].clone();
         second_provider.id = "r05_sample_b".into();
@@ -1796,13 +1660,10 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             BTreeSet::new(),
             now_ms,
             sample,
-            true,
             None,
             V3PlanExecutionModePolicy::RelayOnly {
                 entry_protocol: V3HubEntryProtocol::Responses,
             },
-            true,
-            false,
         )
         .unwrap();
         let V3PlanExecutionOutcome::Selected {
@@ -1820,7 +1681,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert_ne!(plan.selected.candidate.provider_id, zero);
     }
 
-    fn three_tier_probe_manifest(listener: &TcpListener) -> V3Config05ManifestPublished {
+    fn three_tier_probe_manifest() -> V3Config05ManifestPublished {
         let authoring = parse_v3_config_02_authoring(&format!(
             r#"
 version = 3
@@ -1868,12 +1729,7 @@ targets = [
 "#
         ))
         .unwrap();
-        let mut manifest = compile_v3_config_05_manifest(authoring).unwrap();
-        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
-        let cooled = manifest.providers.get_mut("r05_cooled").unwrap();
-        cooled.base_url = base_url.clone();
-        cooled.interfaces.get_mut("default").unwrap().base_url = base_url;
-        manifest
+        compile_v3_config_05_manifest(authoring).unwrap()
     }
 
     fn three_tier_expanded(
@@ -1946,59 +1802,9 @@ targets = [
         expanded
     }
 
-    async fn serve_gated_probe(
-        listener: TcpListener,
-        arrivals: mpsc::UnboundedSender<()>,
-        release: oneshot::Receiver<()>,
-    ) {
-        let (mut socket, _) = listener.accept().await.expect("probe listener accept");
-        let mut request = Vec::new();
-        let mut chunk = [0_u8; 4096];
-        loop {
-            let read = socket.read(&mut chunk).await.expect("probe request read");
-            if read == 0 {
-                break;
-            }
-            request.extend_from_slice(&chunk[..read]);
-            if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                break;
-            }
-        }
-        arrivals.send(()).expect("probe arrival observation");
-        release.await.expect("probe release");
-        let body = r#"{"status":"completed"}"#;
-        socket
-            .write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-                .as_bytes(),
-            )
-            .await
-            .expect("probe response write");
-    }
-
     #[tokio::test]
-    async fn plan_execution_operator_suspends_for_rescue_probes_and_resumes_without_rerouting() {
-        assert_probe_resume_capacity(false, true).await;
-    }
-
-    #[tokio::test]
-    async fn actual_probe_does_not_release_inherited_transport_busy_before_due() {
-        assert_probe_resume_capacity(true, true).await;
-    }
-
-    #[tokio::test]
-    async fn actual_probe_rechecks_still_full_admission_without_restarting_phase() {
-        assert_probe_resume_capacity(false, false).await;
-    }
-
-    async fn assert_probe_resume_capacity(inherited_busy: bool, release_capacity: bool) {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("probe listener bind");
-        let manifest = three_tier_probe_manifest(&listener);
+    async fn plan_execution_operator_selects_healthy_tier_without_starting_probe() {
+        let manifest = three_tier_probe_manifest();
         std::env::set_var("ROUTECODEX_V3_PLAN_RESUME_KEY", "test-key");
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
         let scope = V3ProviderFailureSessionScope::new("test", "default", "plan-execution-resume")
@@ -2020,25 +1826,6 @@ targets = [
                 )
                 .expect("cooldown setup");
         }
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let busy_key = crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-            "r05_busy", "key1",
-        );
-        controller.ensure_initial_budget(&busy_key, 1).unwrap();
-        let busy_lease = controller
-            .try_acquire_business(&busy_key)
-            .expect("busy lease");
-        let busy_permit = Arc::new(std::sync::Mutex::new(Some(busy_lease.into_permit())));
-        let cleanup_permit = busy_permit.clone();
-        let cleanup = TestLeaseCleanup {
-            controller: controller.clone(),
-            permit: cleanup_permit,
-        };
-
-        let (arrivals_tx, mut arrivals_rx) = mpsc::unbounded_channel();
-        let (release_tx, release_rx) = oneshot::channel();
-        let probe_server = tokio::spawn(serve_gated_probe(listener, arrivals_tx, release_rx));
-
         let task_manifest = manifest.clone();
         let task_scope = scope.clone();
         let task_health = health.clone();
@@ -2051,21 +1838,16 @@ targets = [
                     .expect("later candidate"),
             ),
         ]);
-        let busy_identity =
+        let healthy_identity =
             crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key_parts(
                 "r05_busy",
                 Some("default"),
                 Some("key1"),
                 Some("gpt-test"),
             );
-        let initial_busy = if inherited_busy {
-            BTreeSet::from([busy_identity.clone()])
-        } else {
-            BTreeSet::new()
-        };
         let request = json!({"model": "client-model", "input": "opaque"});
-        let run = tokio::spawn(async move {
-            run_v3_plan_execution_operator_with_probes(
+        let outcome = tokio::time::timeout(Duration::from_millis(500), async move {
+            run_v3_plan_execution_operator_with_recovery(
                 crate::execution_control::V3AttemptBudget::process_default(),
                 request,
                 &task_manifest,
@@ -2073,10 +1855,9 @@ targets = [
                 &task_scope,
                 &task_health,
                 &initial_exclusions,
-                &initial_busy,
+                &BTreeSet::new(),
                 now_ms,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::DirectEntry {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -2084,31 +1865,9 @@ targets = [
                 },
             )
             .await
-        });
-
-        tokio::time::timeout(Duration::from_secs(2), arrivals_rx.recv())
-            .await
-            .expect("SDK must pause for the cooled-peer probe")
-            .expect("probe arrival channel");
-        assert!(
-            !run.is_finished(),
-            "exhaustion rescue must await the gated HTTP response"
-        );
-        if release_capacity {
-            busy_permit
-                .lock()
-                .expect("busy permit holder")
-                .take()
-                .map(|permit| controller.release(permit))
-                .expect("busy permit")
-                .expect("release busy lease");
-        }
-        release_tx.send(()).expect("release probe response");
-
-        let outcome = tokio::time::timeout(Duration::from_secs(2), run)
-            .await
-            .expect("probe resume must complete")
-            .expect("plan execution task");
+        })
+        .await
+        .expect("healthy business selection must not wait for a probe");
         let Ok((execution_planned_request, plan)) = outcome else {
             panic!("expected selected plan after resume");
         };
@@ -2117,18 +1876,12 @@ targets = [
             json!({"model": "client-model", "input": "opaque"})
         );
         assert_eq!(
-            plan.selected.candidate.provider_id,
-            if inherited_busy || !release_capacity {
-                "r05_cooled"
-            } else {
-                "r05_busy"
-            },
-            "only newly observed admission-busy may rejoin after its physical capacity is released"
+            plan.selected.candidate.provider_id, "r05_busy",
+            "a rescue probe must not reroute the healthy selected tier"
         );
-        assert_eq!(
-            plan.request_local_busy_candidates.contains(&busy_identity),
-            inherited_busy || !release_capacity,
-            "inherited or still-full busy provenance must survive probe continuation"
+        assert!(
+            plan.request_local_busy_candidates.is_empty(),
+            "planning records no provider capacity as request-local busy"
         );
         assert!(
             plan.request_local_excluded_candidates.contains(
@@ -2141,36 +1894,14 @@ targets = [
             ),
             "a physical probe must never release permanent request-local exclusions"
         );
-        assert!(!plan.request_local_excluded_candidates.contains(
-            &crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key_parts(
-                "r05_busy",
-                Some("default"),
-                Some("key1"),
-                Some("gpt-test"),
-            ),
-        ));
-        assert_eq!(
-            controller
-                .snapshot(&busy_key)
-                .expect("busy snapshot")
-                .in_flight,
-            u32::from(!release_capacity || !inherited_busy)
-        );
-        drop(plan);
-        drop(cleanup);
-        assert_eq!(
-            controller
-                .snapshot(&busy_key)
-                .expect("released snapshot")
-                .in_flight,
-            0
-        );
-        probe_server.await.expect("probe server");
+        assert!(!plan
+            .request_local_excluded_candidates
+            .contains(&healthy_identity));
         std::env::remove_var("ROUTECODEX_V3_PLAN_RESUME_KEY");
     }
 
     #[tokio::test]
-    async fn no_probe_work_keeps_inherited_busy_mask_until_original_residence() {
+    async fn no_probe_work_ignores_legacy_busy_mask_for_business_selection() {
         let mut manifest = test_manifest("probe_no_work_busy");
         manifest
             .servers
@@ -2185,26 +1916,6 @@ targets = [
         let scope = V3ProviderFailureSessionScope::new("test", "default", "no-probe-work").unwrap();
         let request = json!({"model":"client-model","input":"opaque"});
         let (_, expanded) = preplan_test_input(&manifest, &scope, &request);
-        let phase = health
-            .run_exhaustion_rescue_probes(&manifest, &expanded, 0)
-            .await
-            .unwrap();
-        assert!(phase.completed_all);
-        assert!(
-            !phase.did_work,
-            "no permit is not evidence that a physical probe ran"
-        );
-        assert!(
-            !initiate_v3_target_pre_exhaustion_rescue_probes(
-                &health,
-                &manifest,
-                &expanded.candidates,
-                0,
-            )
-            .await
-            .unwrap(),
-            "an absent probe owner cannot authorize a new admission scan"
-        );
         let busy = BTreeSet::from([
             crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
                 &expanded.candidates[0],
@@ -2213,8 +1924,8 @@ targets = [
         let budget =
             crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
         let outcome = tokio::time::timeout(
-            Duration::from_secs(3),
-            run_v3_plan_execution_operator_with_probes(
+            Duration::from_millis(200),
+            run_v3_plan_execution_operator_with_recovery(
                 budget.clone(),
                 request,
                 &manifest,
@@ -2225,7 +1936,6 @@ targets = [
                 &busy,
                 0,
                 0,
-                true,
                 None,
                 V3PlanExecutionModePolicy::DirectEntry {
                     entry_protocol: V3HubEntryProtocol::Responses,
@@ -2234,31 +1944,11 @@ targets = [
             ),
         )
         .await
-        .expect("metadata-only recovery must stay bounded by the original residence");
+        .expect("legacy busy metadata must not delay business selection");
         assert!(
-            matches!(outcome, Err(V3PlanExecutionStop::Exhausted { .. })),
-            "metadata-only rounds cannot select the inherited transport-busy identity"
+            matches!(outcome, Ok((_, _))),
+            "business planning must not treat a shared busy mask as admission control"
         );
         assert_eq!(budget.transport_attempts(), 0);
-        assert_eq!(
-            budget.current_target_recovery_deadline(std::time::Instant::now()),
-            None
-        );
-    }
-
-    struct TestLeaseCleanup {
-        controller: V3AdaptiveConcurrencyController,
-        permit:
-            Arc<std::sync::Mutex<Option<routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyPermit>>>,
-    }
-
-    impl Drop for TestLeaseCleanup {
-        fn drop(&mut self) {
-            if let Some(permit) = self.permit.lock().expect("cleanup permit holder").take() {
-                self.controller
-                    .release(permit)
-                    .expect("cleanup release busy lease");
-            }
-        }
     }
 }

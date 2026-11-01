@@ -57,7 +57,6 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         &transport,
         provider_health.runtime_health(),
         V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-        false,
         None,
         None,
         initial_selected_target.clone(),
@@ -157,6 +156,7 @@ pub fn project_v3_responses_relay_runtime_failure(
     match error {
         error => {
             let (source, status, terminal_disposition) = match error {
+                V3ResponsesRelayRuntimeError::RuntimeSource(source) => (Ok(source), 500, None),
                 V3ResponsesRelayRuntimeError::ProviderPoolExhausted {
                     attempted_candidates,
                 } => (

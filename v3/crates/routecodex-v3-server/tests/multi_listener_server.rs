@@ -70,10 +70,15 @@ static TEST_LOCK: TestLock = TestLock::new();
 #[path = "support/image_input_blackbox.rs"]
 mod image_input_blackbox;
 
+#[path = "support/due_429_independence_blackbox.rs"]
+mod due_429_independence_blackbox;
 #[path = "support/pool_empty_recovery_blackbox.rs"]
 mod pool_empty_recovery_blackbox;
 #[path = "support/sustained_429_window_blackbox.rs"]
 mod sustained_429_window_blackbox;
+
+#[path = "support/stream_attempt_recovery_blackbox.rs"]
+mod stream_attempt_recovery_blackbox;
 
 #[path = "multi_listener_server/issue127_disabled_health.rs"]
 mod issue127_disabled_health;
@@ -914,6 +919,21 @@ fn p6_manifest(
     p6_manifest_with_context_window(port_a, port_b, provider_base_url, 128_000)
 }
 
+fn p6_manifest_with_legacy_concurrency(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    max_in_flight: u32,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    p6_manifest_with_context_window_and_legacy_concurrency(
+        port_a,
+        port_b,
+        provider_base_url,
+        128_000,
+        Some(max_in_flight),
+    )
+}
+
 /// `max_context_tokens` bounds every candidate in the p6 route pools, so a
 /// window too small for the request forces a selection-time pool exhaustion
 /// with no provider attempt at all.
@@ -923,8 +943,31 @@ fn p6_manifest_with_context_window(
     provider_base_url: &str,
     max_context_tokens: u32,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    p6_manifest_with_context_window_and_legacy_concurrency(
+        port_a,
+        port_b,
+        provider_base_url,
+        max_context_tokens,
+        None,
+    )
+}
+
+fn p6_manifest_with_context_window_and_legacy_concurrency(
+    port_a: u16,
+    port_b: u16,
+    provider_base_url: &str,
+    max_context_tokens: u32,
+    legacy_max_in_flight: Option<u32>,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let hub_v1_declaration = HUB_V1_TEST_DECLARATION;
     let hub_v1_server_execution = HUB_V1_TEST_SERVER_EXECUTION;
+    let legacy_concurrency = legacy_max_in_flight
+        .map(|max_in_flight| {
+            format!(
+                "concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = 10000, stale_lease_ms = 60000 }}"
+            )
+        })
+        .unwrap_or_default();
     let source = format!(
         r#"
 version = 3
@@ -947,6 +990,7 @@ default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
 responses = {{ process = "chat", streaming = "always" }}
+{legacy_concurrency}
 [providers.test.models.test]
 wire_name = "wire-test"
 aliases = ["client-test"]
@@ -4031,7 +4075,6 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                 ),
             ]),
             responses: manifest.providers["test"].responses.clone(),
-            concurrency: manifest.providers["test"].concurrency.clone(),
             health: manifest.providers["test"].health.clone(),
             provider_request_cleanup: manifest.providers["test"].provider_request_cleanup.clone(),
             compatibility_profile: manifest.providers["test"].compatibility_profile.clone(),
@@ -5584,32 +5627,46 @@ async fn responses_client_anthropic_malformed_reasoning_breaks_transport_without
     std::env::set_var("V3_P6_TEST_KEY", "reasoning-controlled-key");
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_anthropic_reasoning_upstream().await;
-    let manifest = responses_relay_provider_protocol_manifest(
+    let mut manifest = responses_relay_provider_protocol_manifest(
         free_port(),
         free_port(),
         provider_base_url.trim_end_matches("/v1"),
         "anthropic",
         None,
     );
+    for server in manifest.servers.values_mut() {
+        server
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .residence_timeout_ms = 3000;
+    }
     let payload =
         json!({"model":"client-test","input":"malformed-reasoning-control","stream":true});
     // The real HTTP provider transport must reach the codec. A mere client
     // disconnect also occurs for missing auth or a content-type mismatch.
-    let typed = routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport(
-        &manifest,
-        routecodex_v3_runtime::V3ResponsesRelayRuntimeInput {
-            server_id: "a".to_owned(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "reasoning-control",
-                "default",
-                "typed-codec-control",
-            )
-            .unwrap(),
-            request_id: "reasoning-malformed-typed-control".to_owned(),
-            payload: payload.clone(),
-        },
+    let typed = timeout(
+        Duration::from_secs(10),
+        routecodex_v3_runtime::execute_v3_responses_relay_runtime_with_default_transport(
+            &manifest,
+            routecodex_v3_runtime::V3ResponsesRelayRuntimeInput {
+                server_id: "a".to_owned(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "reasoning-control",
+                    "default",
+                    "typed-codec-control",
+                )
+                .unwrap(),
+                request_id: "reasoning-malformed-typed-control".to_owned(),
+                payload: payload.clone(),
+            },
+        ),
     )
     .await
+    .expect(
+        "single failed identity must reach final disposition after its original recovery budget",
+    )
     .unwrap();
     assert!(typed.error_chain.is_some());
     let failure = &typed
@@ -6972,33 +7029,6 @@ async fn capture_node_preconnection_matches_responses_http_success_and_failure()
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
-fn p6_manifest_with_isolated_provider_capacity(
-    provider_base_url: &str,
-    max_in_flight: u32,
-) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let mut manifest = p6_manifest(free_port(), free_port(), provider_base_url);
-    let alias = format!("capacity-{}", manifest.servers["a"].port);
-    let provider = manifest.providers.get_mut("test").unwrap();
-    provider.auth.entries[0].alias = alias.clone();
-    provider.concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-        max_in_flight,
-        acquire_timeout_ms: 60_000,
-        stale_lease_ms: 300_000,
-    });
-    for pool in manifest
-        .route_groups
-        .get_mut("default")
-        .unwrap()
-        .pools
-        .values_mut()
-    {
-        for target in &mut pool.targets {
-            target.key = Some(alias.clone());
-        }
-    }
-    manifest
-}
-
 fn concurrency_switch_manifest(
     first_url: &str,
     second_url: &str,
@@ -7018,7 +7048,6 @@ base_url = "{url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.{id}.models.test]
 wire_name = "wire-test"
@@ -7082,135 +7111,6 @@ fn spawn_concurrency_client(
     })
 }
 
-#[tokio::test]
-async fn responses_provider_concurrency_full_switches_without_queueing() {
-    let _test_guard = TEST_LOCK.lock().await;
-    // This case counts upstream provider attempts, so the Chat Process
-    // continuation must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-switch");
-    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
-        .await
-        .unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "concurrency-first");
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "concurrency-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
-        .await
-        .expect("a full first provider must immediately switch to the second provider")
-        .unwrap();
-    assert!(
-        !first.is_finished(),
-        "the first provider must still be held"
-    );
-    assert!(
-        first_captures.try_recv().is_err(),
-        "the full provider must receive no extra request"
-    );
-    first_release.add_permits(1);
-    second_release.add_permits(1);
-    for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-        assert_responses_sse_delivered_business_text(&body, "held response released");
-    }
-    let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
-    timeout(Duration::from_millis(500), first_captures.recv())
-        .await
-        .expect("released capacity must restore the first provider's priority")
-        .unwrap();
-    assert!(second_captures.try_recv().is_err());
-    first_release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), third)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("response.completed"));
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_all_full_exhausts_after_wait_budget() {
-    let _test_guard = TEST_LOCK.lock().await;
-    // This case counts upstream provider attempts, so the Chat Process
-    // continuation must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
-    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "concurrency-held-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let wait_started = std::time::Instant::now();
-    let exhausted = timeout(
-        Duration::from_millis(500),
-        reqwest::Client::new()
-            .post(&endpoint)
-            .header("session-id", "concurrency-exhausted")
-            .header("thread-id", "concurrency-exhausted")
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    .expect("all full must finish after its declared wait budget");
-    assert!(wait_started.elapsed() >= Duration::from_millis(100));
-    assert!(
-        exhausted.is_err(),
-        "selection exhaustion must preserve the existing transport-break boundary"
-    );
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    assert!(!first.is_finished() && !second.is_finished());
-    first_release.add_permits(1);
-    second_release.add_permits(1);
-    for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-    }
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
 fn concurrency_switch_manifest_with_mode(
     first_url: &str,
     second_url: &str,
@@ -7223,7 +7123,9 @@ fn concurrency_switch_manifest_with_mode(
         }
     }
     match execution_mode {
-        V3EntryProtocolExecutionMode::Direct => {}
+        V3EntryProtocolExecutionMode::Direct => {
+            pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
+        }
         V3EntryProtocolExecutionMode::Relay => {
             let binding = manifest
                 .hub_v1
@@ -7279,403 +7181,71 @@ async fn concurrency_cooldown_entries(client: &reqwest::Client, base: &str) -> V
         .unwrap_or_else(|| panic!("cooldown pool must return entries: {pool}"))
 }
 
-fn concurrency_cooldown_signature(entries: &[Value]) -> Vec<String> {
-    let mut signature = entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}|{}|{}|{}|{}",
-                entry["provider_id"].as_str().unwrap_or("-"),
-                entry["interface_id"].as_str().unwrap_or("-"),
-                entry["auth_alias"].as_str().unwrap_or("-"),
-                entry["model_id"].as_str().unwrap_or("-"),
-                entry["kind"].as_str().unwrap_or("-"),
-            )
-        })
-        .collect::<Vec<_>>();
-    signature.sort();
-    signature
-}
-
-fn assert_no_concurrency_business_capture(
-    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
-    allow_recovery_probes: bool,
-    label: &str,
-) {
-    while let Ok(capture) = captures.try_recv() {
-        assert!(
-            allow_recovery_probes && capture.body.to_string().contains("ping; reply pong"),
-            "{label} must receive no business request: {capture:?}"
-        );
-    }
-}
-
-async fn assert_concurrency_execution_mode(
-    client: &reqwest::Client,
-    base: &str,
-    request_id: &str,
-    expected_mode: &str,
-) {
-    let logs: Value = client
-        .get(format!("{base}/_routecodex/debug/logs"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let events = logs["logs"]
-        .as_array()
-        .unwrap_or_else(|| panic!("debug logs must return events: {logs}"));
-    let event = events
-        .iter()
-        .find(|event| {
-            event["request_id"] == request_id
-                && event["node_id"] == "V3Server03HttpRequestRaw"
-                && event["event"] == "received"
-        })
-        .unwrap_or_else(|| {
-            panic!("missing V3Server03HttpRequestRaw event for request {request_id}: {logs}")
-        });
-    assert_eq!(
-        event["details"]["execution_mode"], expected_mode,
-        "actual request execution mode must be {expected_mode}, not inferred from the port: {event}"
-    );
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ConcurrencyExhaustionShape {
-    PureAllBusy,
-    MixedBusyAndExcluded,
-}
-
-async fn run_concurrency_typed_source_case(
-    execution_mode: V3EntryProtocolExecutionMode,
-    shape: ConcurrencyExhaustionShape,
-    label: &str,
-) {
-    let _test_guard = TEST_LOCK.lock().await;
-    let home_guard = TestHomeGuard::new(label);
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) = match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => start_controlled_held_upstream().await,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            start_controlled_probe_failing_held_upstream().await
-        }
-    };
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-typed-source");
-
-    let mut manifest =
-        concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
-    // Exercise the terminal source after a real bounded wait, rather than
-    // requiring immediate all-busy rejection (superseded by issue44cc3af).
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let base = format!("http://{}", handle.listeners[0].addr);
-    let endpoint = format!("{base}/v1/responses");
-    let client = reqwest::Client::new();
-
-    let baseline_entries = match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => {
-            let entries = concurrency_cooldown_entries(&client, &base).await;
-            assert!(
-                entries.is_empty(),
-                "pure all-busy baseline must not contain health exclusions: {entries:?}"
-            );
-            entries
-        }
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            let response = client
-                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
-                .json(&json!({
-                    "provider_id": second_id,
-                    "interface_id": "default",
-                    "auth_alias": "key",
-                    "model_id": "test",
-                    "kind": "auth_key",
-                    "duration_ms": 60_000
-                }))
-                .send()
-                .await
-                .unwrap();
-            let status = response.status();
-            let body = response.text().await.unwrap();
-            assert_eq!(status, StatusCode::OK, "{body}");
-
-            let entries = concurrency_cooldown_entries(&client, &base).await;
-            assert_eq!(
-                entries.len(),
-                2,
-                "mixed case must start with the typed auth-key cooldown/probe pair: {entries:?}"
-            );
-            for entry in &entries {
-                assert_eq!(entry["provider_id"], second_id.as_str());
-                assert_eq!(entry["interface_id"], "default");
-                assert_eq!(entry["auth_alias"], "key");
-                assert!(entry["model_id"].is_null());
-            }
-            let cooldown = entries
-                .iter()
-                .find(|entry| entry["kind"] == "auth_key")
-                .expect("mixed case must retain the auth-key cooldown entry");
-            assert_eq!(cooldown["state"], "auth_key_cooldown");
-            let probe = entries
-                .iter()
-                .find(|entry| entry["kind"] == "probe")
-                .expect("mixed case must retain the provider cooldown probe entry");
-            assert!(
-                matches!(
-                    probe["state"].as_str(),
-                    Some("blocked" | "waiting" | "probing")
-                ),
-                "mixed case probe must remain in a cooldown substate: {probe}"
-            );
-            entries
-        }
-    };
-    let baseline_health = concurrency_cooldown_signature(&baseline_entries);
-
-    let first = spawn_concurrency_client(&endpoint, &format!("{label}-held-first"));
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .expect("first provider must receive its held request")
-        .expect("first provider capture channel must stay open");
-
-    let second = if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
-        let task = spawn_concurrency_client(&endpoint, &format!("{label}-held-second"));
-        timeout(Duration::from_secs(2), second_captures.recv())
-            .await
-            .expect("second provider must receive its held request")
-            .expect("second provider capture channel must stay open");
-        Some(task)
-    } else {
-        None
-    };
-
-    let exhausted = match timeout(
-        Duration::from_millis(500),
-        client
-            .post(&endpoint)
-            .header("session-id", format!("{label}-exhausted"))
-            .header("thread-id", format!("{label}-exhausted"))
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => {
-            let first_activity = first_captures.try_recv().ok();
-            let second_activity = second_captures.try_recv().ok();
-            panic!(
-                "capacity exhaustion must complete after the declared wait budget; first_activity={first_activity:?} second_activity={second_activity:?}"
-            );
-        }
-    };
-    let error = exhausted.expect_err(
-        "a capacity terminal must break the client transport without an error payload or normal completion",
-    );
-    assert!(
-        !error.is_status(),
-        "the client must not receive a synthetic status payload: {error}"
-    );
-
-    if let Ok(capture) = first_captures.try_recv() {
-        panic!("the busy first provider must receive no extra request: {capture:?}");
-    }
-    match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => {
-            if let Ok(capture) = second_captures.try_recv() {
-                panic!("the busy second provider must receive no extra request: {capture:?}");
-            }
-        }
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            let capture = second_captures
-                .try_recv()
-                .expect("the mixed case must perform exactly one recovery probe");
-            assert!(
-                capture.body.to_string().contains("ping; reply pong"),
-                "the excluded second provider must receive no business retry: {capture:?}"
-            );
-        }
-    }
-
-    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
-    let evidence = wait_for_concurrency_failure_source(&samples_root).await;
-    let request_id = evidence["request_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("failure evidence must carry request_id: {evidence}"));
-    assert_eq!(
-        evidence["attempts"],
-        json!([]),
-        "capacity rejection must not record or perform an upstream attempt: {evidence}"
-    );
-    let (expected_mode, expected_source_kind, expected_code) = match (execution_mode, shape) {
-        (V3EntryProtocolExecutionMode::Direct, ConcurrencyExhaustionShape::PureAllBusy) => (
-            "direct",
-            "target_pool_exhausted",
-            "provider_concurrency_busy",
-        ),
-        (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::PureAllBusy) => (
-            "relay",
-            "target_pool_exhausted",
-            "provider_concurrency_busy",
-        ),
-        (
-            V3EntryProtocolExecutionMode::Direct,
-            ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        )
-        | (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::MixedBusyAndExcluded) => {
-            (
-                if execution_mode == V3EntryProtocolExecutionMode::Direct {
-                    "direct"
-                } else {
-                    "relay"
-                },
-                "provider_failure",
-                "selected_target_exhausted",
-            )
-        }
-        _ => panic!("unsupported concurrency typed-source case"),
-    };
-    assert_eq!(
-        evidence["terminal_source"]["source_kind"], expected_source_kind,
-        "{expected_mode} {shape:?} must retain the expected typed source kind: {evidence}"
-    );
-    assert_eq!(
-        evidence["terminal_source"]["code"], expected_code,
-        "{expected_mode} {shape:?} must retain the expected typed source code: {evidence}"
-    );
-    assert_concurrency_execution_mode(&client, &base, request_id, expected_mode).await;
-
-    let after_entries = concurrency_cooldown_entries(&client, &base).await;
-    if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
-        assert_eq!(
-            concurrency_cooldown_signature(&after_entries),
-            baseline_health,
-            "pure capacity rejection must not add, remove, or replace health exclusions: before={baseline_entries:?} after={after_entries:?}"
-        );
-    } else {
-        assert!(
-            after_entries
-                .iter()
-                .all(|entry| entry["provider_id"] == second_id.as_str()),
-            "mixed capacity rejection must not mutate first-provider health: before={baseline_entries:?} after={after_entries:?}"
-        );
-    }
-    assert_eq!(
-        after_entries.len(),
-        baseline_entries.len(),
-        "capacity rejection must not mutate cooldown entry count"
-    );
-    assert!(
-        !first.is_finished(),
-        "the first provider holder must remain pending before release"
-    );
-    if let Some(second) = &second {
-        assert!(
-            !second.is_finished(),
-            "the second provider holder must remain pending before release"
-        );
-    }
-
-    first_release.add_permits(1);
-    if second.is_some() {
-        second_release.add_permits(1);
-    }
-    let mut held = vec![first];
-    if let Some(second) = second {
-        held.push(second);
-    }
-    for task in held {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-    }
-    let after_release = spawn_concurrency_client(&endpoint, &format!("{label}-after-release"));
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .expect("released capacity must admit a subsequent normal request")
-        .expect("first provider capture channel must stay open");
-    assert_no_concurrency_business_capture(
-        &mut second_captures,
-        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
-        "the subsequent normal request on the second provider",
-    );
-    first_release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), after_release)
-        .await
-        .expect("the subsequent normal request must complete after release")
-        .expect("the subsequent request task must not panic");
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("response.completed"), "{body}");
-    assert_no_concurrency_business_capture(
-        &mut first_captures,
-        false,
-        "the exhausted request on the first provider",
-    );
-    assert_no_concurrency_business_capture(
-        &mut second_captures,
-        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
-        "the exhausted request on the second provider",
-    );
-
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_direct_all_busy_preserves_typed_source() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Direct,
-        ConcurrencyExhaustionShape::PureAllBusy,
-        "concurrency-direct-all-busy-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_direct_mixed_exclusion_stays_generic() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Direct,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        "concurrency-direct-mixed-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_relay_all_busy_preserves_typed_source() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Relay,
-        ConcurrencyExhaustionShape::PureAllBusy,
-        "concurrency-relay-all-busy-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_relay_mixed_exclusion_stays_generic() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Relay,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        "concurrency-relay-mixed-red",
-    )
-    .await;
-}
-
 #[tokio::test]
 async fn responses_same_listener_same_session_admits_independent_requests() {
     run_matching_identity_independence("session-overlap", "conversation-overlap").await;
+}
+
+#[tokio::test]
+async fn no_concurrency_direct_legacy_limit_one_allows_three_held_requests() {
+    assert_independent_held_direct_requests(Some(1), 3).await;
+}
+
+#[tokio::test]
+async fn no_concurrency_direct_exceeds_former_default_limit() {
+    assert_independent_held_direct_requests(None, 41).await;
+}
+
+async fn assert_independent_held_direct_requests(old_limit: Option<u32>, count: usize) {
+    let _test_guard = TEST_LOCK.lock().await;
+    let (provider_base_url, mut captures, release, shutdown) =
+        start_controlled_held_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-admission");
+    let manifest = if let Some(max_in_flight) = old_limit {
+        p6_manifest_with_legacy_concurrency(free_port(), free_port(), &provider_base_url, max_in_flight)
+    } else {
+        p6_manifest(free_port(), free_port(), &provider_base_url)
+    };
+    let mut manifest = manifest;
+    pool_empty_recovery_blackbox::use_native_direct_responses(&mut manifest);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let mut tasks = Vec::with_capacity(count);
+    for index in 0..count {
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        tasks.push(tokio::spawn(async move {
+            let response = client.post(endpoint)
+                .header("session-id", "no-concurrency-same-session")
+                .header("thread-id", "no-concurrency-same-conversation")
+                .json(&json!({"model":"client-test","input":format!("held {index}"),"stream":true}))
+                .send().await.unwrap();
+            let status = response.status();
+            (status, response.text().await.unwrap())
+        }));
+    }
+    let arrivals = timeout(Duration::from_secs(10), async {
+        for _ in 0..count {
+            captures.recv().await.expect("controlled upstream must remain available");
+        }
+    }).await;
+    release.add_permits(count);
+    if arrivals.is_err() {
+        for task in &tasks {
+            task.abort();
+        }
+    } else {
+        for task in tasks {
+            let (status, body) = timeout(Duration::from_secs(10), task).await.unwrap().unwrap();
+            assert_eq!(status, StatusCode::OK);
+            assert_responses_sse_delivered_business_text(&body, "held response released");
+        }
+    }
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(arrivals.is_ok(), "all {count} requests must reach upstream before any response is released");
 }
 
 #[tokio::test]
@@ -7949,9 +7519,10 @@ async fn responses_same_listener_different_session_remains_concurrent() {
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-concurrency");
-    let handle = spawn_v3_server_aggregate(p6_manifest_with_isolated_provider_capacity(
+    let handle = spawn_v3_server_aggregate(p6_manifest(
+        free_port(),
+        free_port(),
         &provider_base_url,
-        2,
     ))
     .await
     .unwrap();
@@ -8931,8 +8502,17 @@ async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
         ))
         .await
         .unwrap();
-    assert_websocket_closes_without_data(&mut socket).await;
-    assert_eq!(captures.recv().await.unwrap().body["model"], "wire-test");
+    let first = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the request must reach the controlled provider")
+        .expect("provider capture must remain open");
+    assert_eq!(first.body["model"], "wire-test");
+    assert!(
+        timeout(Duration::from_secs(2), socket.next())
+            .await
+            .is_err(),
+        "recoverable 429 must not project a payload or close the WebSocket"
+    );
 
     let _ = socket.close(None).await;
     handle.shutdown().await;
@@ -12597,21 +12177,23 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
         std::task::Poll::Ready(())
     })
     .await;
-    let mut queued = Box::pin(client
+    let during_cutoff = client
         .post(&endpoint)
         .json(&json!({
-            "model": "client-test", "input": "queued while draining accepted jobs", "stream": false
+            "model": "client-test", "input": "independent during sample cutoff", "stream": false
         }))
-        .send());
-    assert!(timeout(Duration::from_millis(100), &mut queued)
+        .send();
+    let response = timeout(Duration::from_millis(500), during_cutoff)
         .await
-        .is_err());
-    assert!(
-        captures.try_recv().is_err(),
-        "maintenance must block provider dispatch"
-    );
+        .expect("sample cutoff must not block business dispatch")
+        .unwrap();
+    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
+    assert!(captures.recv().await.is_some());
     drop(sample_lock);
     let preparation = preparation.await.unwrap();
+    assert!(preparation.codex_sample_persist_failures.iter().any(|failure| {
+        failure.reason.contains("codex sample refused during exec preparation")
+    }));
     for marker in ["accepted before cutoff", "second accepted before cutoff"] {
         assert_eq!(
             read_responses_sample_response_by_request_marker(&samples_root, marker)["id"],
@@ -12630,6 +12212,12 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
             }
         }
     }
+    let mut queued = Box::pin(client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "client-test", "input": "queued during final exec handoff", "stream": false
+        }))
+        .send());
     assert!(timeout(Duration::from_millis(100), &mut queued)
         .await
         .is_err());
@@ -12664,10 +12252,9 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
         "resp_json"
     );
     let failures = handle.shutdown().await;
-    assert!(
-        failures.is_empty(),
-        "queued requests must preserve diagnostics: {failures:?}"
-    );
+    assert!(failures.iter().all(|failure| {
+        failure.reason.contains("codex sample refused during exec preparation")
+    }), "unexpected diagnostic failure: {failures:?}");
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
 }
@@ -12791,7 +12378,7 @@ async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
     // Sampling acceptance needs capacity for all 80 concurrent clients. Use a
     // distinct auth identity so other tests' adaptive limits cannot affect it.
-    let mut manifest = p6_manifest_with_isolated_provider_capacity(&base_url, 80);
+    let mut manifest = p6_manifest(free_port(), free_port(), &base_url);
     manifest.debug.snapshots = true;
     manifest.debug.codex_samples = true;
     manifest.debug.full_codex_sampling = true;

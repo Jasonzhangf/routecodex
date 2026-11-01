@@ -1,5 +1,135 @@
 use super::*;
 
+#[tokio::test]
+async fn issue9bb26d4_direct_semantic_output_survives_original_residence_deadline() {
+    let delta = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\n".to_vec();
+    let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello\"}]}]}}\n\n".to_vec();
+    let source: V3SseAttemptStream = Box::pin(
+        stream::iter([Ok(V3SseAttemptFrame::new(
+            delta,
+            V3SseFrameDisposition::Continue,
+        ))])
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            Ok(V3SseAttemptFrame::new(
+                terminal,
+                V3SseFrameDisposition::SemanticTerminal,
+            ))
+        })),
+    );
+    let budget = crate::nodes::V3AttemptBudget::test_with_residence_timeout(
+        std::time::Duration::from_millis(30),
+    );
+    let result = collect_direct_sse_attempt_after_terminal(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        budget,
+    )
+    .await;
+    let frames = result
+        .expect("an active semantic response must survive the original residence deadline")
+        .collect::<Vec<_>>()
+        .await;
+    assert!(String::from_utf8(frames.concat())
+        .unwrap()
+        .contains("response.completed"));
+}
+
+#[tokio::test]
+async fn issue9bb26d4_direct_empty_envelope_does_not_extend_original_deadline() {
+    let envelope = b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\",\"status\":\"in_progress\",\"output\":[]}}\n\n".to_vec();
+    let source: V3SseAttemptStream = Box::pin(
+        stream::iter([Ok(V3SseAttemptFrame::new(
+            envelope,
+            V3SseFrameDisposition::Continue,
+        ))])
+        .chain(stream::once(async {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            Ok(V3SseAttemptFrame::new(
+                b"data: [DONE]\n\n".to_vec(),
+                V3SseFrameDisposition::SemanticTerminal,
+            ))
+        })),
+    );
+    let budget = crate::nodes::V3AttemptBudget::test_with_residence_timeout(
+        std::time::Duration::from_millis(30),
+    );
+    let source = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            source,
+            V3HubProviderWireProtocol::Responses,
+            budget,
+        )
+        .await,
+    );
+    assert_eq!(source.code, "provider_response_residence_timeout");
+}
+
+#[tokio::test]
+async fn issue9bb26d4_direct_reasoning_output_survives_original_deadline() {
+    let reasoning = b"event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"thinking\"}\n\n".to_vec();
+    let terminal = b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}]}}\n\n".to_vec();
+    let source: V3SseAttemptStream = Box::pin(
+        stream::iter([Ok(V3SseAttemptFrame::new(
+            reasoning,
+            V3SseFrameDisposition::Continue,
+        ))])
+        .chain(stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            Ok(V3SseAttemptFrame::new(
+                terminal,
+                V3SseFrameDisposition::SemanticTerminal,
+            ))
+        })),
+    );
+    let budget = crate::nodes::V3AttemptBudget::test_with_residence_timeout(
+        std::time::Duration::from_millis(30),
+    );
+    let result = collect_direct_sse_attempt_after_terminal(
+        source,
+        V3HubProviderWireProtocol::Responses,
+        budget,
+    )
+    .await;
+    let frames = result
+        .expect("real reasoning output must keep the active attempt alive")
+        .collect::<Vec<_>>()
+        .await;
+    assert!(String::from_utf8(frames.concat())
+        .unwrap()
+        .contains("response.completed"));
+}
+
+#[tokio::test]
+async fn issue9bb26d4_direct_signature_only_does_not_extend_original_deadline() {
+    let signature = b"event: response.reasoning_signature.delta\ndata: {\"type\":\"response.reasoning_signature.delta\",\"delta\":\"signature\"}\n\n".to_vec();
+    let source: V3SseAttemptStream = Box::pin(
+        stream::iter([Ok(V3SseAttemptFrame::new(
+            signature,
+            V3SseFrameDisposition::Continue,
+        ))])
+        .chain(stream::once(async {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            Ok(V3SseAttemptFrame::new(
+                b"data: [DONE]\n\n".to_vec(),
+                V3SseFrameDisposition::SemanticTerminal,
+            ))
+        })),
+    );
+    let budget = crate::nodes::V3AttemptBudget::test_with_residence_timeout(
+        std::time::Duration::from_millis(30),
+    );
+    let source = expect_ordinary_source(
+        collect_direct_sse_attempt_after_terminal(
+            source,
+            V3HubProviderWireProtocol::Responses,
+            budget,
+        )
+        .await,
+    );
+    assert_eq!(source.code, "provider_response_residence_timeout");
+}
+
 /// Concatenate the client-visible text carried by the projected delta events.
 ///
 /// The committed client channel carries raw provider SSE frames, so the residue

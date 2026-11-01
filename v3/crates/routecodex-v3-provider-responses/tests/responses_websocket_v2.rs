@@ -1,7 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::V3ResponsesTransportKind;
 use routecodex_v3_provider_responses::{
-    adaptive_concurrency::V3AdaptiveConcurrencyController,
     build_v3_provider_12_responses_wire_payload,
     build_v3_transport_13_responses_request_from_v3_provider_12, ProviderResponsesTransport,
     ResponsesTransport, V3ProviderAuthHandle, V3ProviderAuthSecretHandle, V3ProviderError,
@@ -262,8 +261,6 @@ fn target_with_env(url: &str, env: &str) -> V3ResponsesProviderTarget {
         provider_request_cleanup: Default::default(),
         request_timeout_ms: 300_000,
         sse_first_frame_timeout_ms: None,
-        initial_concurrency_budget: 8,
-        concurrency_acquire_timeout_ms: 60_000,
     }
 }
 
@@ -1093,7 +1090,7 @@ async fn websocket_v2_read_cancellation_discards_connection_before_reuse() {
 }
 
 #[tokio::test]
-async fn websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leakage() {
+async fn websocket_v2_concurrent_streams_progress_independently_without_cross_frame_leakage() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -1124,15 +1121,14 @@ async fn websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leak
             ))
             .await
             .unwrap();
-        tokio::select! {
-            _ = &mut release_first_rx => {}
-            _ = tokio::time::sleep(Duration::from_secs(10)) => panic!("first stream not released"),
-        }
-        socket
-            .send(completed_event("resp_first_stream", "first"))
+        let (second_stream, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+            .await
+            .expect("second request blocked on first stream")
+            .unwrap();
+        let mut second_socket = accept_hdr_async(second_stream, require_websocket_auth)
             .await
             .unwrap();
-        let second = socket.next().await.unwrap().unwrap();
+        let second = second_socket.next().await.unwrap().unwrap();
         let second_text = match second {
             Message::Text(text) => text.to_string(),
             Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
@@ -1142,8 +1138,16 @@ async fn websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leak
             .lock()
             .unwrap()
             .push(serde_json::from_str::<Value>(&second_text).unwrap());
-        socket
+        second_socket
             .send(completed_event("resp_second_stream", "second"))
+            .await
+            .unwrap();
+        tokio::select! {
+            _ = &mut release_first_rx => {}
+            _ = tokio::time::sleep(Duration::from_secs(10)) => panic!("first stream not released"),
+        }
+        socket
+            .send(completed_event("resp_first_stream", "first"))
             .await
             .unwrap();
     });
@@ -1183,16 +1187,14 @@ async fn websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leak
             .await
         }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        requests.lock().unwrap().len(),
-        1,
-        "second request must wait until first SSE stream terminal drain"
-    );
+    let second = tokio::time::timeout(Duration::from_secs(5), second_send)
+        .await
+        .expect("second request blocked on first stream")
+        .unwrap()
+        .unwrap();
+    assert_eq!(second["id"], "resp_second_stream");
     release_first_tx.send(()).unwrap();
     while first_body.next().await.is_some() {}
-    let second = second_send.await.unwrap().unwrap();
-    assert_eq!(second["id"], "resp_second_stream");
     let captured = requests.lock().unwrap();
     assert_eq!(captured.len(), 2);
     assert_eq!(captured[0]["input"], "first");
@@ -1202,10 +1204,11 @@ async fn websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leak
 }
 
 #[tokio::test]
-async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit() {
+async fn websocket_v2_overlapping_connection_can_cancel_independently() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (release_first_tx, mut release_first_rx) = oneshot::channel();
+    let (second_arrived_tx, second_arrived_rx) = oneshot::channel();
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_hdr_async(stream, require_websocket_auth)
@@ -1225,119 +1228,15 @@ async fn websocket_v2_busy_shared_connection_wait_does_not_hold_provider_permit(
             ))
             .await
             .unwrap();
-        tokio::select! {
-            _ = &mut release_first_rx => {}
-            _ = tokio::time::sleep(Duration::from_secs(10)) => panic!("first stream not released"),
-        }
-        socket
-            .send(completed_event("resp_busy_first_stream", "first"))
-            .await
-            .unwrap();
-    });
-
-    let url = format!("ws://{address}/v1/responses");
-    std::env::set_var("V3_WS_KEY_BUSY_SLOT", "websocket-secret");
-    let transport = ProviderResponsesTransport::default();
-    let provider_key = "ws-provider-busy-slot:busy-slot";
-    let mut selected = target_with_env(&url, "V3_WS_KEY_BUSY_SLOT");
-    selected.provider_id = "ws-provider-busy-slot".into();
-    selected.auth.alias = "busy-slot".into();
-    selected.initial_concurrency_budget = 1;
-    selected.concurrency_acquire_timeout_ms = 200;
-
-    let first_wire = build_v3_provider_12_responses_wire_payload(
-        "req-ws-busy-slot-1",
-        selected.clone(),
-        json!({"model":"model","input":"first","stream":true}),
-    )
-    .unwrap();
-    let first_raw = transport
-        .send(build_v3_transport_13_responses_request_from_v3_provider_12(first_wire).unwrap())
-        .await
-        .unwrap();
-    let mut first_body = match first_raw.into_body() {
-        routecodex_v3_provider_responses::V3ProviderResponseBody::Sse(body) => body,
-        routecodex_v3_provider_responses::V3ProviderResponseBody::Json(_) => {
-            panic!("expected SSE body")
-        }
-    };
-    assert!(String::from_utf8(first_body.next().await.unwrap().unwrap())
-        .unwrap()
-        .contains("held"));
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1
-    );
-
-    let second_cancellation = routecodex_v3_provider_responses::V3ProviderCancellation::new();
-    let second_wire = build_v3_provider_12_responses_wire_payload(
-        "req-ws-busy-slot-2",
-        selected,
-        json!({"model":"model","input":"second","stream":false}),
-    )
-    .unwrap();
-    let second_request = build_v3_transport_13_responses_request_from_v3_provider_12(second_wire)
-        .unwrap()
-        .with_cancellation(second_cancellation.clone());
-    let second_send = tokio::spawn({
-        let transport = transport.clone();
-        async move { transport.send(second_request).await }
-    });
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1,
-        "waiting for the shared WebSocket connection must not hold another provider permit"
-    );
-    second_cancellation.cancel();
-    assert!(matches!(
-        second_send.await.unwrap().unwrap_err(),
-        V3ProviderError::ClientDisconnect { .. }
-    ));
-
-    release_first_tx.send(()).unwrap();
-    while first_body.next().await.is_some() {}
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        0
-    );
-    std::env::remove_var("V3_WS_KEY_BUSY_SLOT");
-}
-
-#[tokio::test]
-async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let (release_first_tx, mut release_first_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let mut socket = accept_hdr_async(stream, require_websocket_auth)
+        let (second_stream, _) = listener.accept().await.unwrap();
+        let mut second_socket = accept_hdr_async(second_stream, require_websocket_auth)
             .await
             .unwrap();
         assert!(matches!(
-            socket.next().await.unwrap().unwrap(),
+            second_socket.next().await.unwrap().unwrap(),
             Message::Text(_) | Message::Binary(_)
         ));
-        socket
-            .send(Message::Text(
-                serde_json::to_string(&json!({
-                    "type":"response.output_text.delta",
-                    "delta":"held"
-                }))
-                .unwrap(),
-            ))
-            .await
-            .unwrap();
+        second_arrived_tx.send(()).unwrap();
         tokio::select! {
             _ = &mut release_first_rx => {}
             _ = tokio::time::sleep(Duration::from_secs(10)) => panic!("first stream not released"),
@@ -1351,12 +1250,9 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     let url = format!("ws://{address}/v1/responses");
     std::env::set_var("V3_WS_KEY_PRE_ACQUIRED_SLOT", "websocket-secret");
     let transport = ProviderResponsesTransport::default();
-    let provider_key = "ws-provider-pre-acquired-slot:pre-acquired-slot";
     let mut selected = target_with_env(&url, "V3_WS_KEY_PRE_ACQUIRED_SLOT");
     selected.provider_id = "ws-provider-pre-acquired-slot".into();
     selected.auth.alias = "pre-acquired-slot".into();
-    selected.initial_concurrency_budget = 2;
-    selected.concurrency_acquire_timeout_ms = 200;
 
     let first_wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-pre-acquired-slot-1",
@@ -1377,29 +1273,6 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     assert!(String::from_utf8(first_body.next().await.unwrap().unwrap())
         .unwrap()
         .contains("held"));
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1
-    );
-
-    let scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: selected.interface_id.clone(),
-            model_id: selected.canonical_model_id.clone(),
-        };
-    let pre_acquired = V3AdaptiveConcurrencyController::process_shared()
-        .try_acquire_business_scoped(provider_key, Some(&scope))
-        .expect("runtime-selected second request must reserve the remaining provider slot");
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        2
-    );
     let second_cancellation = routecodex_v3_provider_responses::V3ProviderCancellation::new();
     let second_wire = build_v3_provider_12_responses_wire_payload(
         "req-ws-pre-acquired-slot-2",
@@ -1409,66 +1282,40 @@ async fn websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admiss
     .unwrap();
     let second_request = build_v3_transport_13_responses_request_from_v3_provider_12(second_wire)
         .unwrap()
-        .with_pre_acquired_admission(pre_acquired)
         .with_cancellation(second_cancellation.clone());
     let second_send = tokio::spawn({
         let transport = transport.clone();
         async move { transport.send(second_request).await }
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1,
-        "a request queued for the shared WebSocket connection must not hold provider capacity"
-    );
-    let available_capacity = V3AdaptiveConcurrencyController::process_shared()
-        .try_acquire_business(provider_key)
-        .expect("queued WebSocket request must release its provider reservation");
-    V3AdaptiveConcurrencyController::process_shared()
-        .release(available_capacity.into_permit())
+    tokio::time::timeout(Duration::from_secs(5), second_arrived_rx)
+        .await
+        .expect("second request did not reach its independent connection")
         .unwrap();
     second_cancellation.cancel();
     assert!(matches!(
         second_send.await.unwrap().unwrap_err(),
         V3ProviderError::ClientDisconnect { .. }
     ));
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        1,
-        "cancelled waiting request must release its pre-acquired reservation"
-    );
-
     release_first_tx.send(()).unwrap();
-    while first_body.next().await.is_some() {}
-    assert_eq!(
-        V3AdaptiveConcurrencyController::process_shared()
-            .snapshot(provider_key)
-            .unwrap()
-            .in_flight,
-        0
-    );
+    let mut terminal = String::new();
+    while let Some(frame) = first_body.next().await {
+        terminal.push_str(&String::from_utf8(frame.unwrap()).unwrap());
+    }
+    assert!(terminal.contains("response.completed"));
     std::env::remove_var("V3_WS_KEY_PRE_ACQUIRED_SLOT");
 }
 
 #[tokio::test]
-async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner() {
+async fn websocket_v2_reuses_shared_connection_for_two_requests() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let (accepted_tx, accepted_rx) = oneshot::channel();
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_hdr_async(stream, require_websocket_auth)
             .await
             .unwrap();
-        let _ = accepted_tx.send(());
-        for (response_id, text) in [("resp-ws-admission-order-first", "first")] {
+        for (response_id, text) in [("resp-ws-order-first", "first"), ("resp-ws-order-second", "second")] {
             assert!(matches!(
                 socket.next().await.unwrap().unwrap(),
                 Message::Text(_) | Message::Binary(_)
@@ -1483,95 +1330,26 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
     let url = format!("ws://{address}/v1/responses");
     std::env::set_var("V3_WS_KEY_ADMISSION_ORDER", "websocket-secret");
     let transport = ProviderResponsesTransport::default();
-    let provider_key = "ws-provider-admission-order:admission-order";
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(provider_key, 3).unwrap();
     let mut selected = target_with_env(&url, "V3_WS_KEY_ADMISSION_ORDER");
     selected.provider_id = "ws-provider-admission-order".into();
     selected.auth.alias = "admission-order".into();
-    selected.initial_concurrency_budget = 3;
-    selected.concurrency_acquire_timeout_ms = 1_000;
-    let scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: selected.interface_id.clone(),
-            model_id: selected.canonical_model_id.clone(),
-        };
-    let held_elsewhere = controller
-        .try_acquire_business_scoped(provider_key, Some(&scope))
-        .unwrap();
-    let pre_acquired = controller
-        .try_acquire_business_scoped(provider_key, Some(&scope))
-        .unwrap();
-    controller
-        .observe_rate_limit_scoped(provider_key, Some(&scope), u64::MAX - 1_000_000)
-        .unwrap();
-
-    let waiting_wire = build_v3_provider_12_responses_wire_payload(
-        "req-ws-admission-order-waiting",
+    let first_wire = build_v3_provider_12_responses_wire_payload(
+        "req-ws-order-first",
         selected.clone(),
         json!({"model":"model","input":"waiting","stream":false}),
     )
     .unwrap();
-    let ready_wire = build_v3_provider_12_responses_wire_payload(
-        "req-ws-admission-order-ready",
+    let second_wire = build_v3_provider_12_responses_wire_payload(
+        "req-ws-order-second",
         selected,
         json!({"model":"model","input":"ready","stream":false}),
     )
     .unwrap();
-    let ready_request = build_v3_transport_13_responses_request_from_v3_provider_12(ready_wire)
-        .unwrap()
-        .with_pre_acquired_admission(pre_acquired);
-    let waiting_request =
-        build_v3_transport_13_responses_request_from_v3_provider_12(waiting_wire).unwrap();
-    assert_eq!(waiting_request.provider_key(), provider_key);
-    let saturated = controller
-        .snapshot_for_scope(provider_key, Some(&scope))
-        .unwrap();
-    assert_eq!(saturated.budget, 1);
-    assert_eq!(saturated.in_flight, 2);
-    assert!(saturated.saturated);
-    let waiting_send = tokio::spawn({
-        let transport = transport.clone();
-        async move { transport.send(waiting_request).await }
-    });
-    let waiting_opened_session = tokio::time::timeout(Duration::from_millis(150), accepted_rx)
-        .await
-        .is_ok();
-    assert!(
-        waiting_send.is_finished(),
-        "a request without capacity must fail immediately"
-    );
-    assert_eq!(
-        controller.snapshot(provider_key).unwrap().in_flight,
-        2,
-        "full concurrency must not create another lease"
-    );
-    let mut ready_send = tokio::spawn({
-        let transport = transport.clone();
-        async move { transport.send(ready_request).await }
-    });
-
-    let ready_early_result =
-        tokio::time::timeout(Duration::from_millis(250), &mut ready_send).await;
-    let ready_completed_while_capacity_busy = ready_early_result.is_ok();
-    controller.release(held_elsewhere.into_permit()).unwrap();
-    let ready_result = match ready_early_result {
-        Ok(result) => result.unwrap(),
-        Err(_) => ready_send.await.unwrap(),
-    };
-    let waiting_result = waiting_send.await.unwrap();
+    let first = build_v3_transport_13_responses_request_from_v3_provider_12(first_wire).unwrap();
+    let second = build_v3_transport_13_responses_request_from_v3_provider_12(second_wire).unwrap();
+    transport.send(first).await.unwrap();
+    transport.send(second).await.unwrap();
     std::env::remove_var("V3_WS_KEY_ADMISSION_ORDER");
-
-    assert!(
-        ready_completed_while_capacity_busy,
-        "waiting admission must not hold the shared WebSocket session ahead of a request that already owns capacity; waiting_opened_session={waiting_opened_session}"
-    );
-    ready_result.unwrap();
-    assert!(matches!(
-        waiting_result,
-        Err(routecodex_v3_provider_responses::V3ProviderError::ConcurrencyBusy { .. })
-    ));
-    assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 0);
 }
 
 #[tokio::test]
@@ -1720,4 +1498,172 @@ async fn websocket_v2_cancellation_before_connect_or_reused_send_is_client_disco
     assert_eq!(controlled.requests.lock().unwrap().len(), 2);
     std::env::remove_var("V3_WS_KEY_CANCEL_BEFORE_SEND");
     let _ = controlled.shutdown.send(());
+}
+
+struct JsonFutureDropServer {
+    url: String,
+    connection_count: Arc<Mutex<usize>>,
+    requests: Arc<Mutex<Vec<Value>>>,
+    a_delta_sent: oneshot::Receiver<()>,
+    release_a_terminal: oneshot::Sender<()>,
+}
+
+async fn start_json_future_drop_server() -> JsonFutureDropServer {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let connection_count = Arc::new(Mutex::new(0usize));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let connection_count_task = connection_count.clone();
+    let requests_task = requests.clone();
+    let (a_delta_sent_tx, a_delta_sent_rx) = oneshot::channel();
+    let (release_a_terminal_tx, release_a_terminal_rx) = oneshot::channel();
+    let mut a_delta_sent_tx = Some(a_delta_sent_tx);
+    let mut release_a_terminal_rx = Some(release_a_terminal_rx);
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let turn = {
+                let mut count = connection_count_task.lock().unwrap();
+                *count += 1;
+                *count
+            };
+            let requests_task = requests_task.clone();
+            let a_delta_sent_tx = if turn == 1 {
+                a_delta_sent_tx.take()
+            } else {
+                None
+            };
+            let release_a_terminal_rx = if turn == 1 {
+                release_a_terminal_rx.take()
+            } else {
+                None
+            };
+            tokio::spawn(async move {
+                let mut socket = match accept_hdr_async(stream, require_websocket_auth).await {
+                    Ok(socket) => socket,
+                    Err(_) => return,
+                };
+                let Some(Ok(message)) = socket.next().await else {
+                    return;
+                };
+                let text = match message {
+                    Message::Text(text) => text.to_string(),
+                    Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).unwrap(),
+                    _ => return,
+                };
+                requests_task
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::from_str(&text).unwrap());
+                if turn == 1 {
+                    socket
+                        .send(Message::Text(
+                            serde_json::to_string(&json!({
+                                "type":"response.output_text.delta",
+                                "delta":"stale-a"
+                            }))
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                    if let Some(sender) = a_delta_sent_tx {
+                        let _ = sender.send(());
+                    }
+                    if let Some(release) = release_a_terminal_rx {
+                        let _ = release.await;
+                    }
+                    // On the stale-reuse path the same socket is handed to B and
+                    // receives B's request before the stale terminal is read, so
+                    // wait briefly for that write instead of closing in a race.
+                    // On the corrected path the client has already discarded this
+                    // connection and the read ends promptly.
+                    let _ = tokio::time::timeout(Duration::from_secs(1), socket.next()).await;
+                    let _ = socket.send(completed_event("resp_a", "stale")).await;
+                    // Keep the stale socket open briefly so the stale terminal
+                    // remains readable by a reusing client.
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(1), socket.next()).await;
+                } else {
+                    socket
+                        .send(completed_event("resp_b", "fresh"))
+                        .await
+                        .unwrap();
+                }
+            });
+        }
+    });
+    JsonFutureDropServer {
+        url: format!("ws://{address}/v1/responses"),
+        connection_count,
+        requests,
+        a_delta_sent: a_delta_sent_rx,
+        release_a_terminal: release_a_terminal_tx,
+    }
+}
+
+#[tokio::test]
+async fn websocket_v2_json_future_drop_discards_connection_before_next_turn() {
+    let server = start_json_future_drop_server().await;
+    let JsonFutureDropServer {
+        url,
+        connection_count,
+        requests,
+        a_delta_sent,
+        release_a_terminal,
+    } = server;
+    let mut a_delta_sent = a_delta_sent;
+    std::env::set_var("V3_WS_KEY_JSON_DROP", "websocket-secret");
+    let transport = ProviderResponsesTransport::default();
+
+    let a_wire = build_v3_provider_12_responses_wire_payload(
+        "req-ws-json-drop-a",
+        target_with_env(&url, "V3_WS_KEY_JSON_DROP"),
+        json!({"model":"model","input":"held-a","stream":false}),
+    )
+    .unwrap();
+    let a_request = build_v3_transport_13_responses_request_from_v3_provider_12(a_wire).unwrap();
+    let mut a_send = Box::pin(transport.send(a_request));
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::select! {
+            seen = &mut a_delta_sent => seen.expect("server must confirm A receipt and emit a nonterminal event"),
+            _ = &mut a_send => panic!("A send must stay in flight until the barrier"),
+        }
+    })
+    .await
+    .expect("server must confirm A receipt and emit a nonterminal event");
+
+    // Drop the in-flight JSON-read future after the barrier. A stale connection
+    // must not be handed to B.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut a_send)
+            .await
+            .is_err(),
+        "A must not produce a response before its terminal is released"
+    );
+    drop(a_send);
+
+    // Release A's stale terminal so both the old and corrected server paths
+    // terminate deterministically.
+    let _ = release_a_terminal.send(());
+
+    let b = send_json_body(
+        &transport,
+        "req-ws-json-drop-b",
+        &url,
+        "V3_WS_KEY_JSON_DROP",
+        json!({"model":"model","input":"after-drop","stream":false}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(b["id"], "resp_b");
+    assert_eq!(*connection_count.lock().unwrap(), 2);
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["input"], "held-a");
+    assert_eq!(requests[1]["input"], "after-drop");
+    drop(requests);
+    std::env::remove_var("V3_WS_KEY_JSON_DROP");
 }

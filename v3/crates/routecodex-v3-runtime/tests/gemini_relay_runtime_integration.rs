@@ -511,7 +511,18 @@ impl ResponsesTransport for MalformedErrorTransport {
 }
 
 #[tokio::test]
-async fn provider_error_enters_error01_06_without_success_projection() {
+async fn recoverable_provider_429_stays_pending_past_residence_without_projection() {
+    struct Counting429(std::sync::atomic::AtomicUsize);
+    #[async_trait]
+    impl ResponsesTransport for Counting429 {
+        async fn send(
+            &self,
+            request: V3Transport13ResponsesHttpRequest,
+        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            ErrorTransport.send(request).await
+        }
+    }
     let server_id = "gemini_provider_error_projection";
     let mut manifest = manifest_for_action_gate_scope(server_id);
     manifest
@@ -523,7 +534,8 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         .expect("execution policy")
         .attempt_store
         .residence_timeout_ms = 500;
-    let error = execute_v3_gemini_relay_runtime(
+    let transport = Counting429(std::sync::atomic::AtomicUsize::new(0));
+    let pending = execute_v3_gemini_relay_runtime(
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
@@ -540,17 +552,16 @@ async fn provider_error_enters_error01_06_without_success_projection() {
                 "stream":false
             }),
         },
-        &ErrorTransport,
-    )
-    .await
-    .expect_err("a 429-only Gemini pool must remain recoverable until the residence bound");
+        &transport,
+    );
+    let result = tokio::time::timeout(Duration::from_millis(1_200), pending).await;
     assert!(
-        matches!(
-            &error,
-            routecodex_v3_runtime::V3GeminiRelayRuntimeError::Target(message)
-                if message.contains("provider action wait exceeded request residence deadline")
-        ),
-        "provider failure must wait for recovery and terminate only at the declared residence bound: {error}"
+        transport.0.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the pending request must have received the controlled provider 429"
+    );
+    assert!(
+        result.is_err(),
+        "a recoverable 429 must not end or project a response when the residence budget expires: {result:?}"
     );
 }
 
@@ -1043,6 +1054,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             !provider_health
                 .store()
                 .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
+                .expect("failed identity availability")
                 .available,
             "{case} first non-429 failure cools this exact identity"
         );
@@ -1050,6 +1062,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             provider_health
                 .store()
                 .availability(server_id, Some(server_id), Some("other-model"), u64::MAX)
+                .expect("sibling model availability")
                 .available
         );
         // Recover this complete identity before exercising a second real
@@ -1241,6 +1254,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
         !provider_health
             .store()
             .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
+            .expect("failed identity availability")
             .available
     );
     revive_cooled_provider(&provider_health, server_id).await;
@@ -1322,7 +1336,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
 }
 
 #[tokio::test]
-async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_seconds() {
+async fn broker_terminal_validation_does_not_block_another_request() {
     use futures_util::StreamExt;
     let server_id = "gemini_active_recovery";
     const FAILURE_SESSION_ID: &str = "gemini-active-recovery-session";
@@ -1411,10 +1425,15 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    let independent = tokio::time::timeout(Duration::from_secs(5), waiter)
+        .await
+        .expect("a separate request must not wait for the first provider EOF")
+        .expect("independent Gemini request task panicked")
+        .expect("independent Gemini request failed");
+    assert_eq!(independent.status, 200);
     assert!(
-        !waiter.is_finished(),
-        "active Broker recovery permit expired before validated terminal EOF"
+        !first_runtime.is_finished(),
+        "the first provider attempt must remain buffered until its own EOF"
     );
 
     drop(terminal_sender);
@@ -1424,8 +1443,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         .expect("first Gemini recovery task panicked")
         .expect("first Gemini recovery attempt failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the controlled committed SSE must be a recovery action"
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the first response must come from the selected recovery provider"
     );
     let first_stream = match first.client_body {
         V3GeminiRelayClientBody::Sse(stream) => stream,
@@ -1439,18 +1458,6 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         .unwrap()
         .contains("done"));
 
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("validated terminal did not release the queued Gemini recovery action")
-        .expect("queued Gemini recovery task panicked")
-        .expect("queued Gemini recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing Gemini request must also enter Error05 recovery"
-    );
 }
 
 #[tokio::test]
@@ -1497,7 +1504,8 @@ async fn sse_client_disconnect_is_health_neutral_and_never_enters_action_wait() 
         Some(server_id),
         Some("gemini-wire"),
         u64::MAX,
-    );
+    )
+    .expect("client disconnect availability");
     assert!(availability.available);
     assert!(availability.blocked_scopes.is_empty());
 
@@ -1739,7 +1747,8 @@ async fn run_json_client_with_chat_sse(
             Some("controlled"),
             Some("gemini-wire"),
             u64::MAX,
-        );
+        )
+        .expect("resource exhaustion availability");
         assert!(
             availability.available,
             "local resource exhaustion must not cool the provider"

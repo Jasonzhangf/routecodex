@@ -557,6 +557,16 @@ pub struct V3ResponsesSseReducerState {
     pub extensions: Vec<V3ResponsesSseExtension>,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum V3ResponsesRetainedSlot {
+    OutputText,
+    ItemData(usize),
+    ResponseContainer,
+}
+
+pub(crate) type V3ResponsesReducerCapacity =
+    crate::execution_control::V3MaterializationSlots<V3ResponsesRetainedSlot>;
+
 /// Typed representation of a non-streaming Responses JSON document.
 ///
 /// JSON and SSE share the same response container and output-item nodes. The
@@ -658,6 +668,112 @@ impl Default for V3ResponsesSseReducerState {
 }
 
 impl V3ResponsesSseReducerState {
+    /// Admission is a separate control resource. The existing reducer still
+    /// owns every payload mutation and identity match.
+    pub(crate) fn admit_retained_text_mutation(
+        &self,
+        event: &Value,
+        capacity: &mut V3ResponsesReducerCapacity,
+    ) -> Result<Option<crate::execution_control::V3MaterializationReplacement<V3ResponsesRetainedSlot>>, crate::execution_control::V3AttemptStoreError> {
+        use crate::execution_control::{materialization_value_bytes, materialization_serialized_bytes};
+        use V3ResponsesRetainedSlot::{OutputText, ItemData, ResponseContainer};
+        let kind = event.get("type").and_then(Value::as_str);
+        match kind {
+            Some("response.created" | "response.in_progress") => {
+                return event.get("response")
+                    .map(|response| capacity.prepare_replace(ResponseContainer, materialization_value_bytes(response)?))
+                    .transpose();
+            }
+            Some("response.output_text.delta") => {
+                let delta = event
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .map_or(0, str::len);
+                capacity.grow(OutputText, delta)?;
+                return Ok(None);
+            }
+            Some("response.output_text.done") => match event.get("text").and_then(Value::as_str) {
+                Some(text) => return capacity.prepare_replace(OutputText, text.len()).map(Some),
+                None => return Ok(None),
+            },
+            _ => {}
+        }
+        // Invalid metadata is still handled by apply_event, with its original
+        // codec error. Admission does not add a new payload admission rule.
+        let Ok(metadata) = V3ResponsesSseProtocolMetadata::from_event(event) else { return Ok(None) };
+        if matches!(kind, Some("response.output_item.added" | "response.output_item.done")) {
+            let Some(item) = event.get("item") else { return Ok(None) };
+            let index = self.output_item_position(
+                item.get("id").and_then(Value::as_str),
+                item.get("output_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).or(metadata.output_index),
+            ).unwrap_or(self.items.len());
+            return capacity.prepare_replace(ItemData(index), materialization_value_bytes(item)?).map(Some);
+        }
+        let Some(index) = self.item_position_for_event(&metadata) else { return Ok(None) };
+        let payload = &self.items[index].item().payload;
+        if let V3ResponsesSseItemPayload::Message { content, .. } = payload {
+            if matches!(kind, Some("response.content_part.added" | "response.content_part.done")) {
+                let Some(part) = event.get("part").or_else(|| event.get("content_part")) else { return Ok(None) };
+                let part_index = part.get("index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()).unwrap_or(content.len());
+                let missing = part_index.saturating_add(1).saturating_sub(content.len());
+                let structural_bytes = missing.checked_mul(std::mem::size_of::<V3ResponsesSseMessageContentPart>() + "output_text".len()).ok_or_else(|| {
+                    crate::execution_control::V3AttemptStoreError::LocalResourceExhausted("message content storage overflow".into())
+                })?;
+                capacity.grow(ItemData(index), structural_bytes)?;
+                let old_bytes = content.get(part_index).map(|old| materialization_serialized_bytes(&BorrowedResponsePart::message(old))).transpose()?.unwrap_or(0);
+                return capacity.prepare_field_replace(ItemData(index), old_bytes, materialization_value_bytes(part)?).map(Some);
+            }
+        }
+        if let V3ResponsesSseItemPayload::Reasoning { summary, .. } = payload {
+            if !matches!(kind, Some("response.reasoning_summary_text.delta" | "response.reasoning_summary_text.done" | "response.reasoning_summary_part.added" | "response.reasoning_summary_part.done")) {
+                return Ok(None);
+            }
+            let Some(summary_index) = event.get("summary_index").and_then(Value::as_u64).and_then(|value| usize::try_from(value).ok()) else { return Ok(None) };
+            let missing = summary_index.saturating_add(1).saturating_sub(summary.len());
+            let structural_bytes = missing.checked_mul(std::mem::size_of::<V3ResponsesSseReasoningSummary>() + "summary_text".len()).ok_or_else(|| {
+                crate::execution_control::V3AttemptStoreError::LocalResourceExhausted("reasoning summary storage overflow".into())
+            })?;
+            capacity.grow(ItemData(index), structural_bytes)?;
+            if matches!(kind, Some("response.reasoning_summary_part.added" | "response.reasoning_summary_part.done")) {
+                let Some(part) = event.get("part") else { return Ok(None) };
+                let old_bytes = summary.get(summary_index).map(|old| materialization_serialized_bytes(&BorrowedResponsePart::reasoning(old))).transpose()?.unwrap_or(0);
+                return capacity.prepare_field_replace(ItemData(index), old_bytes, materialization_value_bytes(part)?).map(Some);
+            }
+            if kind == Some("response.reasoning_summary_text.delta") {
+                if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                    capacity.grow(ItemData(index), delta.len())?;
+                }
+            } else if let Some(text) = event.get("text").and_then(Value::as_str) {
+                let old_bytes = summary.get(summary_index).and_then(|part| part.text.as_ref()).map_or(0, String::len);
+                return capacity.prepare_field_replace(ItemData(index), old_bytes, text.len()).map(Some);
+            }
+            return Ok(None);
+        }
+        let (delta_kind, done_kind, field, current) = match payload {
+            V3ResponsesSseItemPayload::FunctionCall { arguments, .. } => (
+                "response.function_call_arguments.delta", "response.function_call_arguments.done", "arguments", arguments.as_ref()),
+            V3ResponsesSseItemPayload::CustomToolCall { input, .. } => (
+                "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done", "input", input.as_ref()),
+            _ => return Ok(None),
+        };
+        if kind == Some(delta_kind) {
+            if let Some(delta) = event.get("delta").and_then(Value::as_str) {
+                if current.is_none_or(Value::is_string) {
+                    capacity.grow(ItemData(index), delta.len())?;
+                } else {
+                    let old_bytes = current.map(materialization_value_bytes).transpose()?.unwrap_or(0);
+                    return capacity.prepare_field_replace(ItemData(index), old_bytes, old_bytes.saturating_add(delta.len())).map(Some);
+                }
+            }
+        } else if kind == Some(done_kind) {
+            if let Some(value) = event.get(field) {
+                let old_bytes = current.map(materialization_value_bytes).transpose()?.unwrap_or(0);
+                return capacity.prepare_field_replace(ItemData(index), old_bytes, materialization_value_bytes(value)?).map(Some);
+            }
+        }
+        Ok(None)
+    }
+
     pub fn apply_event(&mut self, event: &Value) -> Result<(), V3ResponsesSseTreeError> {
         let metadata = V3ResponsesSseProtocolMetadata::from_event(event)?;
         self.sequence_number = metadata.sequence_number.or(self.sequence_number);
@@ -678,14 +794,9 @@ impl V3ResponsesSseReducerState {
                 if typed.item().identity().output_index.is_none() {
                     typed.item_mut().identity.output_index = metadata.output_index;
                 }
-                let identity = typed.item().identity().clone();
-                if let Some(existing) = self.items.iter_mut().find(|existing| {
-                    let current = existing.item().identity();
-                    (identity.item_id.is_some() && current.item_id == identity.item_id)
-                        || (identity.output_index.is_some()
-                            && current.output_index == identity.output_index)
-                }) {
-                    *existing = typed;
+                let identity = typed.item().identity();
+                if let Some(index) = self.output_item_position(identity.item_id.as_deref(), identity.output_index) {
+                    self.items[index] = typed;
                 } else {
                     self.items.push(typed);
                 }
@@ -787,17 +898,30 @@ impl V3ResponsesSseReducerState {
         &mut self,
         metadata: &V3ResponsesSseProtocolMetadata,
     ) -> Option<&mut V3ResponsesSseOutputItem> {
+        let index = self.item_position_for_event(metadata)?;
+        Some(self.items[index].item_mut())
+    }
+
+    fn output_item_position(&self, item_id: Option<&str>, output_index: Option<usize>) -> Option<usize> {
+        self.items.iter().position(|existing| {
+            let current = existing.item().identity();
+            (item_id.is_some() && current.item_id.as_deref() == item_id)
+                || (output_index.is_some() && current.output_index == output_index)
+        })
+    }
+
+    fn item_position_for_event(&self, metadata: &V3ResponsesSseProtocolMetadata) -> Option<usize> {
         self.items
-            .iter_mut()
+            .iter()
             .enumerate()
             .find_map(|(position, item)| {
-                let candidate = item.item_mut();
+                let candidate = item.item();
                 let identity = candidate.identity();
                 if metadata.item_id.as_deref() == identity.item_id.as_deref()
                     || metadata.output_index == identity.output_index
                     || metadata.output_index == Some(position)
                 {
-                    Some(candidate)
+                    Some(position)
                 } else {
                     None
                 }
@@ -1489,33 +1613,40 @@ fn parse_reasoning_summary_part(
 }
 
 fn message_content_part_value(part: &V3ResponsesSseMessageContentPart) -> Value {
-    let mut value = serde_json::Map::new();
-    value.insert("type".to_owned(), Value::String(part.part_type.clone()));
-    if let Some(text) = &part.text {
-        value.insert("text".to_owned(), Value::String(text.clone()));
-    }
-    if let Some(refusal) = &part.refusal {
-        value.insert("refusal".to_owned(), Value::String(refusal.clone()));
-    }
-    for extension in &part.extensions {
-        value.insert(extension.name.clone(), extension.value.clone());
-    }
-    Value::Object(value)
+    serde_json::to_value(BorrowedResponsePart::message(part)).expect("JSON response part is serializable")
 }
 
 fn reasoning_summary_value(summary: &V3ResponsesSseReasoningSummary) -> Value {
-    let mut value = serde_json::Map::new();
-    value.insert(
-        "type".to_owned(),
-        Value::String(summary.summary_type.clone()),
-    );
-    if let Some(text) = &summary.text {
-        value.insert("text".to_owned(), Value::String(text.clone()));
+    serde_json::to_value(BorrowedResponsePart::reasoning(summary)).expect("JSON reasoning part is serializable")
+}
+
+/// One borrowed mapping is used for pre-copy size admission and normalization.
+struct BorrowedResponsePart<'a> {
+    kind: &'a str,
+    text: Option<&'a str>,
+    refusal: Option<&'a str>,
+    extensions: &'a [V3ResponsesSseExtension],
+}
+
+impl<'a> BorrowedResponsePart<'a> {
+    fn message(part: &'a V3ResponsesSseMessageContentPart) -> Self {
+        Self { kind: &part.part_type, text: part.text.as_deref(), refusal: part.refusal.as_deref(), extensions: &part.extensions }
     }
-    for extension in &summary.extensions {
-        value.insert(extension.name.clone(), extension.value.clone());
+    fn reasoning(part: &'a V3ResponsesSseReasoningSummary) -> Self {
+        Self { kind: &part.summary_type, text: part.text.as_deref(), refusal: None, extensions: &part.extensions }
     }
-    Value::Object(value)
+}
+
+impl serde::Serialize for BorrowedResponsePart<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("type", self.kind)?;
+        if let Some(text) = self.text { map.serialize_entry("text", text)?; }
+        if let Some(refusal) = self.refusal { map.serialize_entry("refusal", refusal)?; }
+        for extension in self.extensions { map.serialize_entry(&extension.name, &extension.value)?; }
+        map.end()
+    }
 }
 
 fn string_field(object: &serde_json::Map<String, Value>, field: &str) -> Option<String> {

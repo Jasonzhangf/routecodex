@@ -9,68 +9,17 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
 
-// Test the post-observation policy separately from the public hold tests.
-// Await the real declared action gate, then finish a qualified physical
-// observation. No sleep, forced due time or synthetic cooldown is used.
-pub(crate) async fn complete_due_precool_failures(
-    health: &V3ProviderFailureRuntimeHealth,
-    now_ms: u64,
-) {
-    let tickets: Vec<_> = health
-        .precool
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(identity, action)| (identity.clone(), action.ticket.clone()))
-        .collect();
-    for (identity, ticket) in tickets {
-        let transition = tokio::time::timeout(
-            Duration::from_secs(15),
-            health
-                .action_gate
-                .wait_for_recovery_ticket(&ticket, ticket.key().provider_scope.clone()),
-        )
+#[tokio::test]
+async fn issue44cc3af_error_return_holds_are_independent() {
+    let start = tokio::time::Instant::now();
+    let first = tokio::spawn(hold_provider_error_return());
+    let second = tokio::spawn(hold_provider_error_return());
+    first.abort();
+    tokio::time::timeout(Duration::from_millis(2600), second)
         .await
-        .expect("declared observation gate must become due")
-        .unwrap();
-        let V3ProviderActionRecoveryTransition::Admitted(mut admission) = transition else {
-            panic!("isolated test observation must retain its current action: {transition:?}");
-        };
-        let permit = health
-            .store
-            .acquire_provider_precool_probe_for_interface(
-                &identity.provider_id,
-                &identity.interface_id,
-                identity.auth_alias.as_deref(),
-                identity.model_id.as_deref(),
-            )
-            .unwrap()
-            .expect("test observation must own the exact physical probe");
-        let observation = V3PrecoolObservationGuard {
-            health: health.clone(),
-            identity: identity.clone(),
-            generation: ticket.generation(),
-            _admission: admission.take_permit().expect("current action admission"),
-        };
-        let cancellation = V3ProviderProbeCancellationGuard {
-            store: health.store.clone(),
-            permit,
-        };
-        health
-            .complete_precool_observation(
-                &observation,
-                &cancellation,
-                Err(V3ProviderHealthProbeFailure::Provider(
-                    V3ProviderError::Transport {
-                        request_id: "controlled-negative-observation".into(),
-                        provider_id: identity.provider_id.clone(),
-                        reason: "controlled failed observation after declared hold".into(),
-                    },
-                )),
-                now_ms,
-            )
-            .unwrap();
-    }
+        .expect("one cancelled error must not hold another error return")
+        .expect("the independent error return must complete");
+    assert!(start.elapsed() >= Duration::from_secs(2), "the applicable error hold must last two seconds");
 }
 
 #[path = "tests/terminal_projection.rs"]
@@ -143,8 +92,6 @@ fn late_failure_of_already_cooled_identity_does_not_shadow_recovery_owner() {
             101,
         )
         .unwrap();
-    assert!(health.precool_probe_keys().unwrap().is_empty(),
-        "an already-cooled identity must stay with its cooldown recovery owner, not a new unacquirable precool lane");
     assert_eq!(record.state, "cooldown");
     let permit = health
         .store
@@ -159,6 +106,7 @@ fn late_failure_of_already_cooled_identity_does_not_shadow_recovery_owner() {
         health
             .session_bound_availability(&scope)
             .availability_for_interface("primary", "default", Some("key1"), Some("gpt-test"), 6001)
+            .unwrap()
             .available,
         "qualified recovery must not remain hidden behind a late precool entry"
     );
@@ -526,6 +474,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                 assert!(
                     health
                         .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                        .unwrap()
                         .available,
                     "early 429 must stay capacity-neutral"
                 );
@@ -539,6 +488,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                             Some("gpt-test"),
                             now_ms
                         )
+                        .unwrap()
                         .available
                 );
             } else {
@@ -550,7 +500,9 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                 );
                 assert_eq!(record.state, "pre_cool_observation");
                 assert_eq!(record.cooldown_until_ms, None);
-                let observed = health.availability("first", Some("key1"), Some("gpt-test"), now_ms);
+                let observed = health
+                    .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                    .unwrap();
                 assert!(
                     !observed.available,
                     "status {status} must hold the exact identity for its observation"
@@ -569,6 +521,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                             Some("gpt-test"),
                             now_ms
                         )
+                        .unwrap()
                         .available,
                     "status {status} must not cool before its declared observation gate"
                 );
@@ -585,11 +538,11 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                         Some("gpt-test"),
                         10_000
                     )
+                    .unwrap()
                     .available,
                 "only the observed 429 case stays health-neutral in this failure matrix"
             );
         } else {
-            complete_due_precool_failures(&health, 10_010).await;
             assert!(
                 !health
                     .store()
@@ -600,6 +553,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                         Some("gpt-test"),
                         10_010
                     )
+                    .unwrap()
                     .available,
                 "status {status} must commit its declared cooldown after a failed observation"
             );
@@ -613,6 +567,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
                         Some("gpt-test"),
                         10_010
                     )
+                    .unwrap()
                     .available,
                 "status {status} cooldown must remain exact to the failed identity"
             );
@@ -651,6 +606,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
         assert!(
             rate_limited
                 .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+                .unwrap()
                 .available,
             "early429 must remain health-neutral; attempt={attempt}"
         );
@@ -658,6 +614,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
     assert!(
         rate_limited
             .availability("first", Some("key1"), Some("gpt-test"), 10_000 + 5 + 60_001)
+            .unwrap()
             .available,
         "time alone cannot create a health restriction"
     );
@@ -699,17 +656,18 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
         let available = health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), now_ms)
+            .unwrap()
             .available;
         assert!(
             available,
             "generic rejection must stay health-neutral before its observation; attempt={attempt}"
         );
     }
-    complete_due_precool_failures(&health, 20_010).await;
     assert!(
         !health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_010)
+            .unwrap()
             .available,
         "a failed observation must cool the generic rejection under the current typed threshold"
     );
@@ -785,7 +743,8 @@ fn session_transient_bypass_is_not_labeled_as_global_probe_pending() {
     };
     let scheduling = V3ProviderSchedulingReader::scheduling_projection(
         &reader, "first", "key1", "gpt-test", 1, 1, 2_000_001,
-    );
+    )
+    .unwrap();
     assert!(!scheduling.available);
     assert!(!scheduling
         .blocked_scopes
@@ -797,7 +756,8 @@ fn session_transient_bypass_is_not_labeled_as_global_probe_pending() {
         Some("key1"),
         Some("gpt-test"),
         2_000_001,
-    );
+    )
+    .unwrap();
     assert!(!projection.available);
     assert!(projection
         .blocked_scopes
@@ -928,7 +888,8 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
             1,
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
-        );
+        )
+        .unwrap();
     assert_eq!(projection.score_milli, 85);
     assert!(!projection.available);
 }
@@ -979,7 +940,8 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
             1,
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
-        );
+        )
+        .unwrap();
     assert_eq!(projection.score_milli, 85);
     assert!(
         !projection.available,
@@ -991,7 +953,8 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
         Some("key1"),
         Some("gpt-test"),
         v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
-    );
+    )
+    .unwrap();
     assert!(
         !fresh_projection.available,
         "global cooldown must be visible to a fresh session"
@@ -1032,6 +995,7 @@ fn incomplete_key_identity_fails_before_provider_cooldown_write() {
         health
             .store()
             .availability_for_session(&scope, "primary", None, None, u64::MAX)
+            .unwrap()
             .available
     );
 }
@@ -1055,7 +1019,8 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
     let before =
         routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
             &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
-        );
+        )
+        .unwrap();
 
     for _ in 0..3 {
         health
@@ -1081,6 +1046,7 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
                 Some("gpt-test"),
                 now_ms,
             )
+            .unwrap()
             .available
     );
     assert!(!health
@@ -1090,7 +1056,8 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
         .is_empty());
     let after = routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
         &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
-    );
+    )
+    .unwrap();
     assert!(!after.available);
     assert_eq!(after.effective_priority, before.effective_priority);
 }
@@ -1110,6 +1077,7 @@ async fn target_resolution_failure_projects_itself_instead_of_prior_provider_429
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             "resolution_policy",
             "resolution_policy",
@@ -1197,6 +1165,7 @@ async fn captured_relay_protocol_admission_does_not_truncate_failure_reselection
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             "relay_protocol_filter",
             "relay_protocol_filter",
@@ -1370,6 +1339,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             "transport_thrash",
             "transport_thrash",
@@ -1426,7 +1396,9 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
     // Only the failed exact identity is held; its sibling key and the other
     // provider stay eligible for the same request.
-    let held = health.availability("first", Some("key1"), Some("gpt-test"), 10_000);
+    let held = health
+        .availability("first", Some("key1"), Some("gpt-test"), 10_000)
+        .unwrap();
     assert!(
         !held.available,
         "the failed exact key must be held by its own observation"
@@ -1438,16 +1410,17 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
     assert!(
         health
             .availability("first", Some("key2"), Some("gpt-test"), 10_000)
+            .unwrap()
             .available,
         "the untried sibling key must stay eligible"
     );
     assert!(
         health
             .availability("second", Some("key1"), Some("gpt-test"), 10_000)
+            .unwrap()
             .available,
         "another provider must stay eligible"
     );
-    complete_due_precool_failures(&health, 10_000).await;
     assert!(
         !health
             .store()
@@ -1458,6 +1431,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
                 Some("gpt-test"),
                 10_000,
             )
+            .unwrap()
             .available,
         "the failed observation must commit the cooldown for the exact failed key"
     );
@@ -1471,6 +1445,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
                 Some("gpt-test"),
                 10_000,
             )
+            .unwrap()
             .available,
         "the sibling key must keep its own health"
     );
@@ -1484,6 +1459,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
                 Some("gpt-test"),
                 10_000,
             )
+            .unwrap()
             .available,
         "another provider must keep its own health"
     );
@@ -1543,6 +1519,7 @@ public_code = "E_PATH_RATE_LIMIT"
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-path-project")
             .expect("test failure session scope"),
         provider_health: &health,
@@ -1650,6 +1627,7 @@ targets = [
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
             .expect("test failure session scope"),
         provider_health: &health,
@@ -1705,6 +1683,7 @@ async fn provider_response_event_codec_failure_never_retries_same_candidate() {
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-codec")
             .expect("test failure session scope"),
         provider_health: &health,

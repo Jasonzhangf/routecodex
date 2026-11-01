@@ -34,8 +34,6 @@ mod tests {
                 sse_first_frame_timeout_ms: None,
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 300_000,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
             },
             body,
         )
@@ -354,8 +352,6 @@ mod tests {
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
         };
         assert!(matches!(
             build_v3_provider_12_responses_wire_payload("req-array", target.clone(), json!([])),
@@ -1318,8 +1314,6 @@ mod tests {
             websocket_v2_url: None,
             provider_request_cleanup: Default::default(),
             request_timeout_ms: 300_000,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
         }
     }
 

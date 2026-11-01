@@ -91,6 +91,10 @@ _Empty._
 - tags: `architecture`, `baseline`, `v2-retired`, `v3`, `v4`
 - details: [L3/plan.routecodex.version-baseline.md](L3/plan.routecodex.version-baseline.md)
 
+### 能力用于路由分类，不得过滤 provider
+- tags: `proxy-compatibility`, `routecodex`, `routing`
+- details: [L3/route-capability-classification-not-provider-admission.md](L3/route-capability-classification-not-provider-admission.md)
+
 ## Skill description candidates
 
 Base budget: 8 lines. Copy the compact lines into the project Skill `description` after manual architecture deduplication. Fill level 1 first; use level 2, then level 3, only for remaining slots.

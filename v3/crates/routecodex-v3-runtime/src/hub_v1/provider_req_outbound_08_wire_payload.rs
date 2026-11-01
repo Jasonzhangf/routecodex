@@ -286,8 +286,6 @@ mod tests {
             priority: 0,
             weight: 1,
             sse_first_frame_timeout_ms: None,
-            initial_concurrency_budget: 8,
-            concurrency_acquire_timeout_ms: 60_000,
             compatibility_profile: None,
             headers: Default::default(),
             env_name: Some("TEST_KEY".to_string()),
@@ -325,8 +323,6 @@ mod tests {
             provider_request_cleanup: selected.provider_request_cleanup,
             request_timeout_ms: selected.request_timeout_ms,
             sse_first_frame_timeout_ms: selected.sse_first_frame_timeout_ms,
-            initial_concurrency_budget: selected.initial_concurrency_budget,
-            concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
         }
     }
 

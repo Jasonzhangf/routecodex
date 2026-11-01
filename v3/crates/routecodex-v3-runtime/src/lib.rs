@@ -10,7 +10,6 @@ pub mod nodes;
 pub mod operation_runner;
 pub mod projection_drop_log;
 pub mod protocol_tables;
-mod provider_action_gate;
 mod provider_error_policy_matching;
 mod provider_failure_global_probe;
 mod provider_failure_runtime_policy;
@@ -61,7 +60,6 @@ pub use kernel::{
     V3ResponsesProtocolRelayHandoff,
 };
 pub use nodes::*;
-pub use provider_action_gate::*;
 pub use provider_failure_runtime_policy::{
     build_v3_provider_global_probe_target, probe_v3_provider_global_target,
     V3ProviderFailureRuntimeHealth, V3ProviderHealthObservationClock, V3ProviderHealthProbeFailure,

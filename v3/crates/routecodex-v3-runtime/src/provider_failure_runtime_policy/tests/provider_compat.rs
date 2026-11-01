@@ -50,6 +50,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             "compat_default_floor",
             "compat_default_floor",
@@ -118,6 +119,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             scope,
             scope,
@@ -179,6 +181,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
                 Some("test"),
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
             )
+            .unwrap()
             .available
     );
     assert!(
@@ -191,6 +194,7 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
                 Some("sibling"),
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
             )
+            .unwrap()
             .available
     );
     assert!(same_candidate_retries.is_empty());
@@ -216,6 +220,7 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             scope,
             scope,
@@ -262,7 +267,9 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
         "a held provider HTTP 400 must not count before its observation"
     );
     assert_eq!(result.event.health_record.cooldown_until_ms, None);
-    let held = health.availability("first", Some("key"), Some("test"), u64::MAX);
+    let held = health
+        .availability("first", Some("key"), Some("test"), u64::MAX)
+        .unwrap();
     assert!(
         !held.available,
         "the failed exact identity must be held for observation"
@@ -275,19 +282,21 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
         health
             .store()
             .availability("first", Some("key"), Some("test"), u64::MAX)
+            .unwrap()
             .available,
         "the observation must not cool the identity before its declared gate"
     );
-    complete_due_precool_failures(&health, 20_000).await;
     assert!(
         !health
             .availability("first", Some("key"), Some("test"), u64::MAX)
+            .unwrap()
             .available
     );
     assert!(
         !health
             .store()
             .availability("first", Some("key"), Some("test"), u64::MAX)
+            .unwrap()
             .available,
         "the failed observation must commit the typed cooldown for the exact identity"
     );
@@ -302,6 +311,7 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     assert!(
         health
             .availability("first", Some("key"), Some("sibling"), u64::MAX)
+            .unwrap()
             .available
     );
     assert!(result.terminal_projection.is_none());
@@ -328,6 +338,7 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: Some(&captured_target_09),
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             scope,
             scope,
@@ -400,6 +411,7 @@ async fn relay_provider_failure_projects_target_expansion_error() {
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
+        attempt_budget: None,
         failure_session_scope: test_provider_failure_scope(
             scope,
             scope,
@@ -460,6 +472,7 @@ async fn relay_provider_failure_projects_target_expansion_error() {
     assert!(
         health
             .availability("first", Some("key1"), Some("gpt-test"), 20_000)
+            .unwrap()
             .available,
         "a terminal target-resolution projection must not mutate provider health"
     );

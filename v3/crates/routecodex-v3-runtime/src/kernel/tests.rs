@@ -1,6 +1,93 @@
 include!("../../tests/support/kernel_unit.rs");
 
-async fn assert_first_byte_timeout_excludes_same_provider_siblings(
+#[tokio::test]
+async fn direct_policy_records_candidate_in_request_scan() {
+    let manifest =
+        provider_concurrency_two_key_then_other_provider_manifest("revision_a", "revision_b", 80);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "revision".into(),
+        "revision-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+    let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+        route: plan.expanded.route.clone(),
+        candidate: plan.expanded.candidates[0].clone(),
+        candidate_count: plan.expanded.candidates.len(),
+        unavailable_candidates: Vec::new(),
+        attempts: 1,
+        default_floor_protected: false,
+    };
+    let candidate = &selected.candidate;
+    let identity = (
+        candidate.provider_id.as_str(),
+        candidate.interface_id.as_str(),
+        candidate.auth_alias.as_str(),
+        candidate.model_id.as_str(),
+    );
+    let budget = crate::execution_control::V3AttemptBudget::test_with_residence_timeout(
+        Duration::from_secs(60),
+    );
+    let source = crate::shared::direct_external_error(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_429",
+        "limited",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("HTTP_429".into()),
+            provider_id: Some(identity.0.into()),
+            upstream_request_id: None,
+            message: Some("limited".into()),
+        },
+    )
+    .expect("typed 429");
+    let availability = health.session_bound_availability(&scope);
+    let mut failed = BTreeSet::new();
+    let mut retries = std::collections::BTreeMap::new();
+    let mut trace = Vec::new();
+    let result = run_v3_direct_provider_failure_policy(
+        &V3DirectProviderFailurePolicyContext {
+            failure_session_scope: &scope,
+            provider_health: &health,
+            attempt_budget: Some(&budget),
+            availability: &availability,
+            expanded: Some(&plan.expanded),
+            provider_pinned: false,
+            now_epoch_ms: 2,
+        },
+        &selected,
+        source,
+        429,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut failed,
+            same_candidate_retries: &mut retries,
+            trace: &mut trace,
+        },
+    )
+    .await;
+    assert!(result.is_ok(), "429 must enter the provider error policy");
+    assert!(
+        budget
+            .request_candidate_attempts()
+            .unwrap()
+            .contains(&candidate_key(&selected.candidate)),
+        "the failed complete identity must be retained in this request scan"
+    );
+    assert!(
+        !failed.contains(&candidate_key(&selected.candidate)),
+        "an ordinary 429 must not become a permanent request exclusion"
+    );
+}
+
+async fn assert_first_byte_timeout_excludes_only_exact_identity(
     source_stage: &'static str,
     code: &'static str,
 ) {
@@ -69,6 +156,7 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         &V3DirectProviderFailurePolicyContext {
             failure_session_scope: &scope,
             provider_health: &health,
+            attempt_budget: None,
             availability: &availability,
             expanded: Some(&plan.expanded),
             provider_pinned: false,
@@ -102,16 +190,16 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         .and_then(|event| event.next_provider_key.clone())
         .expect("first-byte timeout must publish the concrete next candidate");
     assert_eq!(
-        retry_key, other_provider_key,
-        "{code} must skip the same provider's sibling auth key"
+        retry_key, sibling_key,
+        "{code} must keep the same provider's healthy sibling auth key eligible"
     );
     assert!(
         failed_candidates.contains(&selected_key),
         "the failed exact key stays request-local excluded"
     );
     assert!(
-        failed_candidates.contains(&sibling_key),
-        "the same provider's sibling auth key is excluded for this request"
+        !failed_candidates.contains(&sibling_key),
+        "the same provider's sibling auth key stays eligible for this request"
     );
     assert!(
         !failed_candidates.contains(&other_provider_key),
@@ -120,8 +208,8 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
 }
 
 #[tokio::test]
-async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn transport_hang_excludes_only_exact_identity_for_the_request() {
+    assert_first_byte_timeout_excludes_only_exact_identity(
         "V3Transport13ResponsesHttpRequest",
         routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE,
     )
@@ -129,8 +217,8 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
 }
 
 #[tokio::test]
-async fn sse_first_event_timeout_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn sse_first_event_timeout_excludes_only_exact_identity_for_the_request() {
+    assert_first_byte_timeout_excludes_only_exact_identity(
         "V3ProviderResp14Raw",
         "provider_response_sse_first_event_timeout",
     )
@@ -179,6 +267,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
                 Some(&candidate.model_id),
                 0,
             )
+            .expect("provider availability before failure")
         })
         .collect();
     let mut failed = BTreeSet::new();
@@ -189,6 +278,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         &V3RelayProviderFailurePolicyContext {
             manifest: &manifest,
             captured_target_09: Some(&plan.expanded),
+            attempt_budget: None,
             failure_session_scope: scope.clone(),
             provider_health: &health,
             retry_policy: V3RelayProviderFailureRetryPolicy::default(),
@@ -245,7 +335,8 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
                 Some(&candidate.auth_alias),
                 Some(&candidate.model_id),
                 0
-            ),
+            )
+            .expect("provider availability after failure"),
             before
         );
     }
@@ -287,6 +378,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
                 Some(&c.model_id),
                 0,
             )
+            .expect("provider availability before failure")
         })
         .collect();
     let source = crate::hooks::direct_complete_response_hook_failure_source(
@@ -301,6 +393,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         &V3DirectProviderFailurePolicyContext {
             failure_session_scope: &scope,
             provider_health: &health,
+            attempt_budget: None,
             availability: &availability,
             expanded: Some(&plan.expanded),
             provider_pinned: false,
@@ -349,7 +442,8 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
             Some(&candidate.auth_alias),
             Some(&candidate.model_id),
             0,
-        );
+        )
+        .expect("provider availability after failure");
         assert_eq!(after, before, "no provider health mutation");
     }
 }
@@ -674,6 +768,7 @@ async fn direct_provider_failure_blocks_after_configured_threshold() {
     assert!(
         !health
             .availability("openai", Some("key1"), Some("gpt-test"), 101)
+            .expect("unmatched success availability")
             .available,
         "another model's success cannot release this exact pending identity"
     );
@@ -687,11 +782,10 @@ async fn direct_provider_failure_blocks_after_configured_threshold() {
             102,
         )
         .unwrap();
-    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 103)
-        .await;
     assert!(
         health
             .availability("openai", Some("key1"), Some("gpt-test"), 103)
+            .expect("matched success availability")
             .available,
         "matching success cancels pending; an old observation must not revive it"
     );
@@ -708,8 +802,6 @@ async fn direct_provider_failure_blocks_after_configured_threshold() {
         104,
     )
     .expect("a new failure opens its own observation");
-    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 105)
-        .await;
     let projection = health
         .store()
         .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 105)
@@ -802,8 +894,6 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
                 "status{status} must not commit cooldown before observation"
             );
         }
-        crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 101)
-            .await;
         assert!(
             !health
                 .store()
@@ -815,6 +905,7 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         assert!(
             health
                 .availability("openai", Some("key1"), Some("other-model"), 102)
+                .expect("sibling model availability")
                 .available,
             "the observed failure cannot cool a sibling identity"
         );
@@ -831,6 +922,7 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         assert!(
             health
                 .availability("openai", Some("key1"), Some("gpt-test"), 103)
+                .expect("observed failure availability")
                 .available
         );
     }

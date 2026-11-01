@@ -152,8 +152,6 @@ async fn every_protocol_builder_uses_the_same_status_only_transport() {
                 provider_request_cleanup: Default::default(),
                 request_timeout_ms: 500,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 500,
             };
             let built =
                 build_v3_provider_global_probe_request(target, "protocol-matrix".into()).unwrap();
@@ -198,7 +196,7 @@ async fn every_protocol_builder_uses_the_same_status_only_transport() {
 }
 
 #[tokio::test]
-async fn streaming_probe_non_2xx_unfinished_body_keeps_status_and_releases_admission() {
+async fn streaming_probe_non_2xx_unfinished_body_keeps_status() {
     for status in [429, 503] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -237,10 +235,5 @@ async fn streaming_probe_non_2xx_unfinished_body_keeps_status_and_releases_admis
             .headers
             .iter()
             .any(|header| header.name == "x-evidence"));
-        let snapshot=routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared().snapshot("status-contract:test").unwrap();
-        assert_eq!(
-            snapshot.in_flight, 0,
-            "probe failure must release admission"
-        );
     }
 }

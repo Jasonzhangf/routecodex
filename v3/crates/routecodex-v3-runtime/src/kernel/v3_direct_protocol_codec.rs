@@ -58,6 +58,7 @@ pub(crate) fn build_direct_response_compat_context(
         custom_tool_function_binding,
         namespace_tool_identities,
         runtime_timing: crate::runtime_timing::V3RuntimeTimingState::start(),
+        attempt_budget: None,
     })
 }
 

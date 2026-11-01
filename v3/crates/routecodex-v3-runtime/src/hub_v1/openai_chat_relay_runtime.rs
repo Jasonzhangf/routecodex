@@ -1,7 +1,6 @@
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
-use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
@@ -116,6 +115,10 @@ pub enum V3OpenAiChatRelayRuntimeError {
     StaticRegistry(String),
     #[error("V3 OpenAI Chat target resolution failed: {0}")]
     Target(String),
+    #[error("V3 OpenAI Chat typed runtime source: {0:?}")]
+    RuntimeSource(routecodex_v3_error::V3Error01SourceRaised),
+    #[error("V3 OpenAI Chat local response control failed: {0}")]
+    ExecutionControlResponse(String),
     #[error("V3 OpenAI Chat provider pool exhausted after {attempted_candidates:?}")]
     ProviderPoolExhausted { attempted_candidates: Vec<String> },
     #[error("V3 OpenAI Chat provider contract failed: {0}")]
@@ -269,6 +272,9 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
         .await
         .map_err(|(error, failure_events)| {
             let source = match error {
+                V3RelayCoreError::ExecutionControlResponse(error) => {
+                    V3OpenAiChatRelayRuntimeError::ExecutionControlResponse(error.to_string())
+                }
                 V3RelayCoreError::ProviderPoolExhausted {
                     attempted_candidates,
                 } => V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
@@ -277,6 +283,7 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
                 V3RelayCoreError::ResponseGovernance(error) => {
                     V3OpenAiChatRelayRuntimeError::Response(error)
                 }
+                V3RelayCoreError::RuntimeSource(source) => V3OpenAiChatRelayRuntimeError::RuntimeSource(source),
                 // 直接取内部消息，不叠加 V3RelayCoreError 的 Display 前缀（与原实现消息一致）。
                 V3RelayCoreError::Target(message)
                 | V3RelayCoreError::StaticRegistry(message)
@@ -315,6 +322,16 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted { .. }
     );
     let source = match error {
+        V3OpenAiChatRelayRuntimeError::RuntimeSource(source) => Ok(source),
+        V3OpenAiChatRelayRuntimeError::ExecutionControlResponse(message) => {
+            crate::shared::direct_internal_error(
+                V3ErrorSourceKind::RuntimeFailure,
+                "V3ExecutionAttemptPayloadStore",
+                "relay_local_response_control",
+                message,
+                routecodex_v3_error::V3InternalErrorCode::V3ExecutionResponsePayloadStore,
+            )
+        }
         V3OpenAiChatRelayRuntimeError::ProviderPoolExhausted {
             attempted_candidates,
         } => provider_pool_exhausted_source(
@@ -562,7 +579,6 @@ pub(crate) struct V3OpenAiChatSseProviderOutcome {
     auth_alias: String,
     model_id: String,
     recorded: bool,
-    _provider_action_permit: Option<V3ProviderActionPermit>,
 }
 
 impl V3OpenAiChatSseProviderOutcome {
@@ -570,7 +586,6 @@ impl V3OpenAiChatSseProviderOutcome {
         if self.recorded || self.response_control.has_response_governance_failure()? {
             return Ok(());
         }
-        drop(self._provider_action_permit.take());
         let source = build_v3_error_01_source_raised(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
@@ -1348,7 +1363,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         auth_alias: String,
         model_id: String,
         recorded: bool,
-        permit: Option<V3ProviderActionPermit>,
     ) -> V3OpenAiChatSseProviderOutcome {
         V3OpenAiChatSseProviderOutcome {
             response_control: V3RuntimeStreamObservation::default(),
@@ -1359,7 +1373,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             auth_alias,
             model_id,
             recorded,
-            _provider_action_permit: permit,
         }
     }
 

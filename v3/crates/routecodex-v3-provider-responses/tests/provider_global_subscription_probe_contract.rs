@@ -5,53 +5,115 @@ fn scope(session_id: &str) -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("server-a", "group-a", session_id).unwrap()
 }
 
-fn fail(store: &V3ProviderHealthStore, session_id: &str, model_id: &str, now_ms: u64) {
-    store
-        .record_provider_failure_in_session(
-            &scope(session_id),
-            "provider-a",
-            Some("key-a"),
-            Some(model_id),
-            Some("subscription_invalid"),
-            now_ms,
-        )
-        .unwrap();
+fn record_global_failures(
+    store: &V3ProviderHealthStore,
+    model_id: &str,
+    status: u16,
+    first_at_ms: u64,
+    count: u64,
+) {
+    for offset in 0..count {
+        store
+            .record_real_provider_failure_for_interface(
+                "provider-a",
+                "default",
+                "key-a",
+                model_id,
+                Some(status),
+                first_at_ms + offset,
+            )
+            .unwrap();
+    }
 }
 
-#[test]
-fn default_failure_blocks_exact_key_model_across_sessions() {
-    let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 10);
+fn establish_global_cooldown(
+    store: &V3ProviderHealthStore,
+    model_id: &str,
+    first_at_ms: u64,
+) -> u64 {
+    record_global_failures(store, model_id, 503, first_at_ms, 10);
+    let cooled_at = first_at_ms + 9;
     assert!(
         !store
             .availability_for_session(
                 &scope("session-a"),
                 "provider-a",
                 Some("key-a"),
-                Some("model-a"),
-                10,
+                Some(model_id),
+                cooled_at,
             )
+            .unwrap()
+            .available,
+        "ten real errors must establish the global cooldown"
+    );
+    cooled_at
+}
+
+#[test]
+fn default_failure_blocks_exact_key_model_across_sessions() {
+    let store = V3ProviderHealthStore::default();
+    record_global_failures(&store, "model-a", 401, 10, 9);
+    assert!(
+        store
+            .availability_for_session(
+                &scope("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                18,
+            )
+            .unwrap()
             .available
     );
-    fail(&store, "session-b", "model-a", 11);
     assert!(
-        !store
+        store
             .availability_for_session(
                 &scope("session-b"),
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                13,
+                18,
             )
+            .unwrap()
             .available
     );
+
+    record_global_failures(&store, "model-a", 401, 19, 1);
+    for session_id in ["session-a", "session-b"] {
+        assert!(
+            !store
+                .availability_for_session(
+                    &scope(session_id),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("model-a"),
+                    19,
+                )
+                .unwrap()
+                .available,
+            "the tenth real error must cool the matching identity across sessions"
+        );
+    }
 }
 
 #[test]
 fn different_keys_and_models_do_not_combine() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 10);
-    fail(&store, "session-a", "model-a", 12);
+    record_global_failures(&store, "model-a", 503, 10, 9);
+    record_global_failures(&store, "model-b", 503, 10, 9);
+    assert!(
+        store
+            .availability_for_session(
+                &scope("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                18,
+            )
+            .unwrap()
+            .available,
+        "nine errors on each model must not combine into a global cooldown"
+    );
     assert!(
         store
             .availability_for_session(
@@ -59,8 +121,9 @@ fn different_keys_and_models_do_not_combine() {
                 "provider-a",
                 Some("key-b"),
                 Some("model-a"),
-                13,
+                18,
             )
+            .unwrap()
             .available
     );
     assert!(
@@ -70,8 +133,9 @@ fn different_keys_and_models_do_not_combine() {
                 "provider-a",
                 Some("key-a"),
                 Some("model-b"),
-                13,
+                18,
             )
+            .unwrap()
             .available
     );
 }
@@ -79,9 +143,8 @@ fn different_keys_and_models_do_not_combine() {
 #[test]
 fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
-    let first_due = 5_002;
+    let cooled_at = establish_global_cooldown(&store, "model-a", 1);
+    let first_due = cooled_at + 5_000;
     assert!(store
         .provider_cooldown_probe_keys_due(first_due - 1)
         .unwrap()
@@ -102,6 +165,7 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
                 Some("model-a"),
                 first_due,
             )
+            .unwrap()
             .available
     );
     let permit = store
@@ -120,6 +184,7 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
                 Some("model-a"),
                 first_due + 2,
             )
+            .unwrap()
             .available
     );
 }
@@ -127,15 +192,15 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
 #[test]
 fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
+    let cooled_at = establish_global_cooldown(&store, "model-a", 1);
     let due = store
-        .cooldown_entries(2)
+        .cooldown_entries(cooled_at)
         .into_iter()
         .find(|entry| entry.kind == "probe")
         .unwrap()
         .until_ms
         .unwrap();
+    assert_eq!(due, cooled_at + 5_000);
     let mut permit = None;
     for in_flight in [false, true] {
         if in_flight {
@@ -194,11 +259,15 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
 #[test]
 fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
-    let first_due = 5_002;
+    let cooled_at = establish_global_cooldown(&store, "model-a", 1);
+    let first_due = cooled_at + 5_000;
     let permit = store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .acquire_provider_cooldown_probe_if_due(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            first_due,
+        )
         .unwrap()
         .unwrap();
     store
@@ -213,6 +282,7 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
                 Some("model-a"),
                 first_due + 1,
             )
+            .unwrap()
             .available
     );
     assert!(store
@@ -237,14 +307,14 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
 #[test]
 fn probe_acquisition_is_single_flight() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
+    let cooled_at = establish_global_cooldown(&store, "model-a", 1);
+    let due = cooled_at + 5_000;
     assert!(store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("model-a"), due,)
         .unwrap()
         .is_some());
     assert!(!store
-        .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
+        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("model-a"), due,)
         .unwrap()
         .is_some());
 }

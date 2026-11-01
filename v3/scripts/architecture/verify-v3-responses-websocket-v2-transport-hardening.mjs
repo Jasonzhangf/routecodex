@@ -42,13 +42,13 @@ for (const [owner, text, phrases] of [
     'const OPENAI_BETA_HEADER: &str = "openai-beta";',
     'const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";',
     'websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>',
-    'let lock = session.lock_owned();',
-    'connection = lock => Ok(Some(connection))',
-    'None => Ok(Some(lock.await)),',
+    'session.clone().try_lock_owned()',
     'struct WebSocketSseState',
-    'impl Drop for WebSocketSseState',
-    'if !self.finished {',
-    '*self.connection = None;',
+    'impl<T> Drop for WebSocketAttemptSlot<T>',
+    'if !self.clean {',
+    '*self.slot = None;',
+    'websocket_attempt_slot_future_drop_discards_before_unlock',
+    'websocket_attempt_slot_transfer_is_not_clean_completion',
     'state.finished = true;',
     'V3ProviderError::ClientDisconnect',
     'V3ProviderError::WebSocketProviderEvent',
@@ -71,7 +71,8 @@ for (const [owner, text, phrases] of [
     'websocket_v2_provider_and_protocol_errors_discard_connection_before_reuse',
     'websocket_v2_codex_error_event_discards_connection_and_allows_client_retry_with_previous_response_id',
     'websocket_v2_read_cancellation_discards_connection_before_reuse',
-    'websocket_v2_concurrent_streams_are_serialized_without_cross_frame_leakage',
+    'websocket_v2_concurrent_streams_progress_independently_without_cross_frame_leakage',
+    'websocket_v2_overlapping_connection_can_cancel_independently',
     'websocket_v2_ping_pong_and_split_utf8_frames_preserve_one_terminal_event',
     'websocket_v2_cancellation_before_connect_or_reused_send_is_client_disconnect',
     'websocket_v2_json_preserves_mixed_output_items_when_terminal_output_is_empty',
@@ -129,6 +130,9 @@ for (const script of [
 const wsStart = transport.indexOf('async fn send_websocket_v2(');
 const wsEnd = transport.indexOf('fn content_type_header(', wsStart);
 const wsSseStart = websocket.indexOf('fn websocket_sse_stream(');
+if (/session\.lock_owned\s*\(/.test(websocket)) {
+  failures.push(`${websocketPath}: busy shared connection must not block another request`);
+}
 if (wsStart < 0 || wsEnd <= wsStart || wsSseStart < 0) {
   failures.push(`${transportPath}: missing WebSocket transport owner boundary`);
 } else {

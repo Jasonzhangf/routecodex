@@ -523,7 +523,8 @@ pub struct V3ProviderAuthoringConfig {
     pub models: BTreeMap<String, V3ProviderModelAuthoringConfig>,
     #[serde(default)]
     pub responses: Option<V3ProviderResponsesAuthoringConfig>,
-    #[serde(default)]
+    /// Accepted for compatibility with existing files; runtime ignores it.
+    #[serde(default, skip_serializing)]
     pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
@@ -549,7 +550,7 @@ pub struct V3ProviderAuthoringConfig {
     /// per-request 总超时（毫秒）；默认 60_000（60s）。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
-    /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
+    /// provider SSE 首帧超时（毫秒）；默认 60_000（60s）。
     /// Remote providers are capped at 120_000 by compile-time validation.
     /// A declared local provider may raise it (for example a local runtime with
     /// minutes of cold-start latency); most providers need no configuration.
@@ -572,9 +573,9 @@ pub fn default_provider_request_timeout_ms() -> u64 {
 /// healthy stream is not cut off.
 pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 120_000;
 
-/// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
+/// provider SSE 首帧超时默认值（毫秒）：60s。
 pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {
-    30_000
+    60_000
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1213,7 +1214,6 @@ pub struct V3ProviderManifest {
     pub default_model: String,
     pub auth: V3ProviderAuthManifest,
     pub models: BTreeMap<String, V3ProviderModelManifest>,
-    pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     pub reasoning_effort: Option<V3ReasoningEffort>,

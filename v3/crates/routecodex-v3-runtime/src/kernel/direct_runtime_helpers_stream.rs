@@ -328,19 +328,22 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     )>,
     client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
-    let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
-    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
-        .map_err(|error| {
-            crate::shared::direct_plain_error(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ExecutionAttemptPayloadStore",
-                "direct_sse_attempt_store_rejected",
-                error.to_string(),
-            )
-        })?;
+    let deadline = attempt_budget.attempt_deadline();
+    let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(
+        attempt_budget.clone(),
+    )
+    .map_err(|error| {
+        crate::shared::direct_plain_error(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3ExecutionAttemptPayloadStore",
+            "direct_sse_attempt_store_rejected",
+            error.to_string(),
+        )
+    })?;
     let mut terminal_seen = false;
     let mut business_decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
     let mut has_business_content = false;
+    let mut semantic_output_started = false;
     let mut client_committed = false;
     // A declared tool lets the complete-attempt DSML owner harvest tool markup
     // out of the output text, so the probe must treat that opener as governed
@@ -355,7 +358,10 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             declared_tools,
         );
     loop {
-        let next = match tokio::time::timeout_at(deadline, stream.next()).await {
+        let next = if semantic_output_started && !terminal_seen {
+            stream.next().await
+        } else {
+            match crate::execution_control::with_optional_attempt_deadline(deadline, stream.next()).await {
             Ok(next) => next,
             Err(_) if terminal_seen => break,
             Err(_) => {
@@ -366,6 +372,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                     "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
                 ))
             }
+        }
         };
         let Some(frame) = next else { break };
         // The attempt is complete at the protocol terminal.  A provider
@@ -404,11 +411,13 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         if client_committed && terminal_frame {
             committed.hold_client_flush();
         }
-        has_business_content |= direct_sse_chunk_has_business_content(
-            provider_protocol,
-            &frame,
-            &mut business_decoder,
-        )?;
+        let (business_content, semantic_output) =
+            direct_sse_chunk_content_facts(provider_protocol, &frame, &mut business_decoder)?;
+        has_business_content |= business_content;
+        semantic_output_started |= semantic_output;
+        if semantic_output_started {
+            committed.observe_semantic_output();
+        }
         for value in parse_direct_sse_json_frames(&frame) {
             commit_probe.observe_event(&value);
         }
@@ -714,12 +723,13 @@ fn direct_sse_post_commit_governance_break(detail: String) -> crate::shared::V3D
 /// Read business facts from validated, projected frames without buffering a
 /// second copy or running another response materializer. Decoder failures
 /// remain errors and cannot make an empty attempt appear successful.
-fn direct_sse_chunk_has_business_content(
+fn direct_sse_chunk_content_facts(
     provider_protocol: V3HubProviderWireProtocol,
     chunk: &[u8],
     decoder: &mut SseIncrementalDecoder,
-) -> crate::shared::V3DirectSourceResult<bool> {
+) -> crate::shared::V3DirectSourceResult<(bool, bool)> {
     let mut has_output = false;
+    let mut semantic_output = false;
     let frames = decoder
         .push(build_v3_sse_transport_in_01_raw_chunk(chunk))
         .map_err(build_v3_sse_transport_error_source)?;
@@ -739,9 +749,16 @@ fn direct_sse_chunk_has_business_content(
                 provider_protocol,
                 &payload,
             );
+            semantic_output |= has_output
+                || matches!(
+                    crate::hub_v1::classify_v3_provider_sse_json_data(provider_protocol, &data),
+                    Ok(Some(
+                        crate::hub_v1::V3ProviderResponsesJsonFrameOutcome::StartClientStream
+                    ))
+                );
         }
     }
-    Ok(has_output)
+    Ok((has_output, semantic_output))
 }
 
 fn rewrite_direct_sse_memory(
@@ -2725,14 +2742,14 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
         let mut projection = self.base.availability_for_interface(
             provider_id,
             interface_id,
             auth_alias,
             model_id,
             now_ms,
-        );
+        )?;
         let key = availability_key(provider_id, interface_id, auth_alias, model_id);
         if self.failed_candidates.contains(&key) {
             projection.available = false;
@@ -2740,7 +2757,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
                 .blocked_scopes
                 .push(format!("request_failed:{key}"));
         }
-        projection
+        Ok(projection)
     }
 
     fn availability(
@@ -2749,7 +2766,7 @@ impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
         auth_alias: Option<&str>,
         model_id: Option<&str>,
         now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
+    ) -> Result<V3ProviderAvailabilityProjection, routecodex_v3_provider_responses::V3ProviderHealthError> {
         self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
     }
 }
@@ -2783,28 +2800,24 @@ fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
     availability: &R,
     failed_candidates: &BTreeSet<String>,
     now_ms: u64,
-) -> usize {
+    request_input_tokens: u64,
+) -> Result<usize, routecodex_v3_provider_responses::V3ProviderHealthError> {
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
         failed_candidates,
     };
-    candidates
-        .iter()
-        .filter(|candidate| {
-            // A window-inactive or capability-mismatched sibling cannot take
-            // this request, so it is not a remaining candidate.
-            routecodex_v3_target::V3TargetInterpreter::candidate_admitted(candidate, now_ms)
-                && attempt_availability
-                    .availability_for_interface(
-                        &candidate.provider_id,
-                        &candidate.interface_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        0,
-                    )
-                    .available
-        })
-        .count()
+    let mut count = 0;
+    for candidate in candidates {
+        if routecodex_v3_target::V3TargetInterpreter::candidate_admitted_for_request(
+            candidate, now_ms, request_input_tokens,
+        ) && attempt_availability.availability_for_interface(
+            &candidate.provider_id, &candidate.interface_id, Some(&candidate.auth_alias),
+            Some(&candidate.model_id), now_ms,
+        )?.available {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
@@ -2812,26 +2825,23 @@ fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
     availability: &R,
     failed_candidates: &BTreeSet<String>,
     now_ms: u64,
-) -> Option<String> {
+    request_input_tokens: u64,
+) -> Result<Option<String>, routecodex_v3_provider_responses::V3ProviderHealthError> {
     let attempt_availability = V3RuntimeAttemptAvailability {
         base: availability,
         failed_candidates,
     };
-    candidates
-        .iter()
-        .find(|candidate| {
-            routecodex_v3_target::V3TargetInterpreter::candidate_admitted(candidate, now_ms)
-                && attempt_availability
-                    .availability_for_interface(
-                        &candidate.provider_id,
-                        &candidate.interface_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        0,
-                    )
-                    .available
-        })
-        .map(candidate_key)
+    for candidate in candidates {
+        if routecodex_v3_target::V3TargetInterpreter::candidate_admitted_for_request(
+            candidate, now_ms, request_input_tokens,
+        ) && attempt_availability.availability_for_interface(
+            &candidate.provider_id, &candidate.interface_id, Some(&candidate.auth_alias),
+            Some(&candidate.model_id), now_ms,
+        )?.available {
+            return Ok(Some(candidate_key(candidate)));
+        }
+    }
+    Ok(None)
 }
 
 fn require_static_hooks(hook_registry: &V3HookRegistry) {

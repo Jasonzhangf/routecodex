@@ -1,0 +1,18 @@
+{
+  "id": "v3.provider_session_health.observation",
+  "version": "2",
+  "description": "带 listener、session 和完整 provider 身份的健康观测：真实错误按发生顺序在健康 Store 即时记一次；分类动作和诊断分数不重复计真实错误。session 的真实 429 连续三次进入独立冷却；同一完整身份跨 session 连续十次真实错误触发全局冷却，若触发错误为 429 还需首尾真实 429 间隔严格超过两分钟。真实身份成功解除冷却，过期探测不得覆盖新状态。冷却只影响 VR 对候选的可见性，不持有或阻塞请求；错误链两秒返回延迟不持锁、不延迟健康记账、不再次记账。所有观测结果汇入同一处置出口。",
+  "inputs": [{"id":"health-observation","schema":"Any","schema_ref":"v3.provider_session_health.arc.observation"}],
+  "nodes": [
+    {"id":"分类并选择健康范围","operator":"routecodex.v3.provider.health_classify_scope","operator_version":"1","inputs":["health-observation"],"output":{"id":"scoped-observation","schema":"Any","schema_ref":"v3.provider_session_health.arc.scoped_observation"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.health_policy"],"writes":[]}},
+    {"id":"检查当前健康状态","operator":"routecodex.v3.provider.health_read_revision","operator_version":"1","inputs":["scoped-observation"],"output":{"id":"checked-observation","schema":"Any","schema_ref":"v3.provider_session_health.arc.checked_observation"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.listener_health"],"writes":[]}},
+    {"id":"更新所属健康状态","operator":"routecodex.v3.provider.health_apply_observation","operator_version":"1","inputs":["checked-observation"],"output":{"id":"health-update","schema":"Any","schema_ref":"v3.provider_session_health.arc.health_update"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.listener_health"],"writes":["v3.provider.listener_health"]}},
+    {"id":"持久化并通知","operator":"routecodex.v3.provider.health_publish_observation","operator_version":"1","inputs":["health-update"],"output":{"id":"observation-disposition","schema":"Any","schema_ref":"v3.provider_session_health.arc.observation_disposition"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.listener_health"],"writes":["v3.provider.health_persistence"]}}
+  ],
+  "edges": [
+    {"from":"分类并选择健康范围","to":"检查当前健康状态","arc_id":"scoped-observation"},
+    {"from":"检查当前健康状态","to":"更新所属健康状态","arc_id":"checked-observation"},
+    {"from":"更新所属健康状态","to":"持久化并通知","arc_id":"health-update"}
+  ],
+  "outputs": ["observation-disposition"]
+}

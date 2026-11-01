@@ -5,6 +5,78 @@ use crate::hub_v1::gemini_terminal_semantics::{
 };
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 
+pub(super) async fn materialize_v3_responses_stream_with_capacity(
+    provider: routecodex_v3_provider_responses::V3ProviderSseStream,
+    observation: &V3RuntimeStreamObservation,
+    context: crate::execution_control::V3AttemptMaterializationContext,
+    prefix: &mut crate::execution_control::V3RetainedPrefixReservation,
+) -> Result<
+    (
+        Value,
+        crate::hub_v1::responses_sse_tree::V3ResponsesReducerCapacity,
+    ),
+    V3ResponsesRelayRuntimeError,
+> {
+    use crate::execution_control::{V3MaterializationInputError, V3MaterializationInputStream};
+    use futures_util::StreamExt;
+    let mut provider = V3MaterializationInputStream::new(provider, context.clone(), prefix)
+        .map_err(V3ResponsesRelayRuntimeError::LocalResponseStore)?;
+    let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+    let mut decoder_storage = context
+        .reserve(0)
+        .map_err(V3ResponsesRelayRuntimeError::LocalResponseStore)?;
+    let mut reducer_storage =
+        crate::hub_v1::responses_sse_tree::V3ResponsesReducerCapacity::new(context);
+    let mut reducer = V3ResponsesSseReducerState::default();
+    while let Some(chunk) = provider.next().await {
+        let chunk = chunk.map_err(|error| match error {
+            V3MaterializationInputError::Provider(error) => {
+                V3ResponsesRelayRuntimeError::Provider(error)
+            }
+            V3MaterializationInputError::LocalStore(error) => {
+                V3ResponsesRelayRuntimeError::LocalResponseStore(error)
+            }
+        })?;
+        decoder_storage
+            .grow(chunk.bytes.len())
+            .map_err(V3ResponsesRelayRuntimeError::LocalResponseStore)?;
+        let frames = decoder
+            .push(build_v3_sse_transport_in_01_raw_chunk(&chunk.bytes))
+            .map_err(|error| {
+                V3ResponsesRelayRuntimeError::ProviderSseTransport(error.to_string())
+            })?;
+        for frame in frames {
+            if let Some(response) =
+                observe_v3_runtime_responses_sse_semantic_frame_typed_with_store(
+                    &frame,
+                    observation,
+                    &mut reducer,
+                    &mut reducer_storage,
+                )?
+            {
+                if !crate::hub_v1::v3_provider_attempt_has_deliverable_business_content(
+                    V3HubProviderWireProtocol::Responses,
+                    &response,
+                ) {
+                    return Err(crate::hub_v1::empty_provider_attempt_failure(
+                        V3HubProviderWireProtocol::Responses,
+                    ));
+                }
+                return Ok((response, reducer_storage));
+            }
+        }
+        // Completed event storage has dropped. Only the decoder's unfinished
+        // fragment remains; the input chunk has its own independent lease.
+        decoder_storage
+            .shrink_to(decoder.remaining_bytes().len())
+            .map_err(V3ResponsesRelayRuntimeError::LocalResponseStore)?;
+    }
+    finish_v3_responses_provider_sse_decoder_typed(decoder, observation, &mut reducer)?;
+    Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
+        V3_RESPONSES_RELAY_PROVIDER_EVENT_EOF_WITHOUT_TERMINAL_MESSAGE.to_string(),
+    ))
+}
+
 pub(super) async fn build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(
     mut provider: routecodex_v3_provider_responses::V3ProviderSseStream,
     observation: &V3RuntimeStreamObservation,

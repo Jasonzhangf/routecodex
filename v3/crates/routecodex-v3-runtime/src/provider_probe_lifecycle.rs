@@ -10,7 +10,6 @@ enum V3ProbeCompletion {
     Superseded,
     Recovered,
     ProviderFailed,
-    CapacityUnavailable,
 }
 
 // A probe is an observation, never a business attempt. Keep its real HTTP
@@ -90,28 +89,37 @@ mod probe_error_chain_tests {
             request_id: "probe-no-head".into(),
             provider_id: "p".into(),
             reason: "connection closed before response head".into(),
-        }).unwrap();
-        assert_eq!(status, None, "a transport classification is not an upstream HTTP status");
+        })
+        .unwrap();
+        assert_eq!(
+            status, None,
+            "a transport classification is not an upstream HTTP status"
+        );
     }
 
     #[test]
     fn probe_unreadable_error_body_retains_real429_head_in_error_chain() {
-        let (status, action) = classify_provider_probe_failure(V3ProviderError::ResponseBodyUnreadable {
-            request_id: "probe-unfinished-429".into(),
-            provider_id: "p".into(),
-            status: 429,
-            headers: Vec::new(),
-            reason: "body disconnected after real429 head".into(),
-        }).unwrap();
+        let (status, action) =
+            classify_provider_probe_failure(V3ProviderError::ResponseBodyUnreadable {
+                request_id: "probe-unfinished-429".into(),
+                provider_id: "p".into(),
+                status: 429,
+                headers: Vec::new(),
+                reason: "body disconnected after real429 head".into(),
+            })
+            .unwrap();
         assert_eq!(status, Some(429));
-        assert_eq!(action.failure_fingerprint.unwrap().http_status, 429,
-            "a real error head cannot be rewritten as transport502 or a non429 recovery");
+        assert_eq!(
+            action.failure_fingerprint.unwrap().http_status,
+            429,
+            "a real error head cannot be rewritten as transport502 or a non429 recovery"
+        );
     }
 }
 
 fn complete_v3_provider_health_probe(
     cancellation: &V3ProviderProbeCancellationGuard,
-    action_gate: &V3ProviderActionGate,
+    health: &V3ProviderFailureRuntimeHealth,
     result: Result<(), V3ProviderHealthProbeFailure>,
     now_ms: u64,
 ) -> Result<V3ProbeCompletion, String> {
@@ -124,28 +132,14 @@ fn complete_v3_provider_health_probe(
                     now_ms,
                 )
                 .map_err(|error| error.to_string())?;
-            let permit = &cancellation.permit;
-            if let (Some(auth), Some(model)) = (permit.auth_alias(), permit.model_id()) {
-                if recovered {
-                    action_gate.record_provider_success(
-                        &V3ProviderActionProviderScope::rate_limit_identity(
-                            v3_relay_provider_candidate_key_parts(
-                                permit.provider_id(),
-                                Some(permit.interface_id()),
-                                Some(auth),
-                                Some(model),
-                            ),
-                        ),
-                    )?;
-                    return Ok(V3ProbeCompletion::Recovered);
-                }
+            if recovered && cancellation.permit.auth_alias().is_some()
+                && cancellation.permit.model_id().is_some()
+            {
+                return Ok(V3ProbeCompletion::Recovered);
             }
             // A real2xx can still be inside the committed quota minimum or
             // superseded by a newer failure. It must not reopen admission.
             Ok(V3ProbeCompletion::Superseded)
-        }
-        Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
-            Ok(V3ProbeCompletion::CapacityUnavailable)
         }
         Err(error) => {
             if let V3ProviderHealthProbeFailure::Provider(error) = error {
@@ -165,8 +159,9 @@ fn complete_v3_provider_health_probe(
                 }
                 cancellation
                     .store
-                    .complete_provider_cooldown_probe_failure_with_permit(
+                    .complete_provider_cooldown_probe_real_failure_with_permit(
                         &cancellation.permit,
+                        status,
                         now_ms,
                     )
                     .map_err(|error| error.to_string())?;
@@ -179,7 +174,6 @@ fn complete_v3_provider_health_probe(
             match error {
                 V3ProviderHealthProbeFailure::Provider(_) => unreachable!(),
                 V3ProviderHealthProbeFailure::Internal(error) => Err(error),
-                V3ProviderHealthProbeFailure::ConcurrencyBusy => unreachable!(),
             }
         }
     }
@@ -189,15 +183,6 @@ fn complete_v3_provider_health_probe(
 struct V3ManagedProbeSender {
     sender: tokio::sync::mpsc::Sender<V3ManagedProbe>,
     capacity: std::sync::Arc<tokio::sync::Semaphore>,
-}
-
-#[derive(Debug)]
-enum V3ProbeInitiation {
-    Completed(V3ProbeCompletion),
-    Initiated,
-    AlreadyOwned,
-    CapacityUnavailable,
-    OwnerUnavailable,
 }
 
 impl V3ProviderFailureRuntimeHealth {
@@ -267,14 +252,11 @@ impl V3ProviderFailureRuntimeHealth {
                             Err(error) => { eprintln!("provider probe clock failed: {error}"); continue; }
                         };
                         let now_ms = health.observation_now_ms(now_ms);
-                        let mut keys = match health.store.provider_cooldown_probe_keys_with_interface(now_ms, startup) {
+                        let startup_sweep = startup;
+                        let mut keys = match health.store.provider_cooldown_scoped_probe_keys(now_ms, startup_sweep) {
                             Ok(keys) => keys,
                             Err(error) => { eprintln!("provider probe scheduling failed: {error}"); continue; }
                         };
-                        match health.precool_probe_keys() {
-                            Ok(observations) => keys.extend(observations),
-                            Err(error) => eprintln!("provider observation scheduling failed: {error}"),
-                        }
                         keys.sort();
                         keys.dedup();
                         startup = false;
@@ -287,22 +269,8 @@ impl V3ProviderFailureRuntimeHealth {
                             // Advance even if acquisition is denied or fails. Full
                             // capacity leaves this cursor at the last considered key.
                             last_considered = Some(key.clone());
-                            let (provider_id, interface_id, auth_alias, model_id) = key;
-                            let identity = precool_identity(&provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref());
-                            let observing = match health.precool.lock() {
-                                Ok(actions) => actions.contains_key(&identity),
-                                Err(error) => { eprintln!("provider observation state failed: {error}"); continue; }
-                            };
-                            if observing {
-                                match health.managed_precool_probe(&manifest, identity, slot) {
-                                    Ok(Some(probe)) => pending.push(probe),
-                                    Ok(None) => {},
-                                    Err(error) => eprintln!("provider observation acquisition failed: {error}"),
-                                }
-                                continue;
-                            }
-                            match health.store.acquire_provider_cooldown_probe_for_interface(
-                                &provider_id, &interface_id, auth_alias.as_deref(), model_id.as_deref(),
+                            match health.store.acquire_provider_cooldown_probe_for_key(
+                                &key, Some(now_ms), startup_sweep,
                             ) {
                                 Ok(Some(permit)) => pending.push(health.managed_probe(&manifest, permit, slot)),
                                 Ok(None) => {},
@@ -338,7 +306,7 @@ impl V3ProviderFailureRuntimeHealth {
                 let target = target.clone();
                 async move {
                     match target {
-                        Ok(target) => probe_v3_provider_global_target(target).await,
+                        Ok(target) => probe_v3_provider_global_target_impl(target).await,
                         Err(error) => Err(V3ProviderHealthProbeFailure::Internal(error)),
                     }
                 }
@@ -348,73 +316,8 @@ impl V3ProviderFailureRuntimeHealth {
             let _slot = slot;
             let (cancellation, result) = execution.await;
             let now_ms = health.observation_now_ms(v3_relay_provider_policy_now_epoch_ms()?);
-            complete_v3_provider_health_probe(&cancellation, &health.action_gate, result, now_ms)
+            complete_v3_provider_health_probe(&cancellation, &health, result, now_ms)
         })
     }
 
-    async fn initiate_cooldown_rescue_probe(
-        &self,
-        manifest: &V3Config05ManifestPublished,
-        candidate: &V3TargetCandidate,
-        now_ms: u64,
-    ) -> Result<V3ProbeInitiation, String> {
-        let owner = self
-            .probe_owner
-            .lock()
-            .map_err(|error| error.to_string())?
-            .clone();
-        let Some(owner) = owner.filter(|owner| !owner.sender.is_closed()) else {
-            return Ok(V3ProbeInitiation::OwnerUnavailable);
-        };
-        let Ok(slot) = owner.capacity.clone().try_acquire_owned() else {
-            return Ok(V3ProbeInitiation::CapacityUnavailable);
-        };
-        let permit = self
-            .store
-            .acquire_provider_cooldown_rescue_probe_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-            )
-            .map_err(|error| error.to_string())?;
-        let permit = match permit {
-            Some(permit) => Some(permit),
-            None => self
-                .store
-                .acquire_provider_cooldown_probe_if_due_for_interface(
-                    &candidate.provider_id,
-                    &candidate.interface_id,
-                    Some(&candidate.auth_alias),
-                    Some(&candidate.model_id),
-                    now_ms,
-                )
-                .map_err(|error| error.to_string())?,
-        };
-        let Some(permit) = permit else {
-            return Ok(V3ProbeInitiation::AlreadyOwned);
-        };
-        let mut work = self.managed_probe(manifest, permit, slot);
-        // One poll starts admitted transport locally. Pending DNS/headers/body
-        // are transferred; no remote observation is an admission prerequisite.
-        let completed = futures_util::future::poll_fn(|cx| {
-            std::task::Poll::Ready(match work.as_mut().poll(cx) {
-                std::task::Poll::Ready(result) => Some(result),
-                std::task::Poll::Pending => None,
-            })
-        })
-        .await;
-        if let Some(result) = completed {
-            return result.map(V3ProbeInitiation::Completed);
-        }
-        match owner.sender.try_send(work) {
-            Ok(()) => Ok(V3ProbeInitiation::Initiated),
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                Ok(V3ProbeInitiation::CapacityUnavailable)
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                Ok(V3ProbeInitiation::OwnerUnavailable)
-            }
-        }
-    }
 }

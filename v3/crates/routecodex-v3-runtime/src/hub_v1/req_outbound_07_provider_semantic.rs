@@ -111,6 +111,17 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request(
     provider_protocol: V3HubProviderWireProtocol,
     selected: &routecodex_v3_target::V3TargetCandidate,
 ) -> Result<V3HubReqOutbound07StandardProjection, String> {
+    let mut selected_payload = governed_payload.clone();
+    super::project_selected_provider_hosted_search(
+        &mut selected_payload,
+        &selected.model_capabilities,
+    );
+    super::project_selected_provider_images(
+        &mut selected_payload,
+        &selected.model_capabilities,
+        false,
+    );
+    let governed_payload = &selected_payload;
     let mut drops = Vec::new();
     let namespace_registry = NamespaceToolIdentityRegistry::from_request(
         governed_payload,

@@ -2,13 +2,10 @@ use super::relay_runtime_shared::bind_v3_selected_business_auth_kind;
 use super::responses_relay_failures::V3_RELAY_TRANSPORT_HANG_REASON;
 use super::*;
 use crate::operation_runner::plan_execution::{
-    run_v3_plan_execution_operator_with_probes, V3PlanExecutionModePolicy, V3PlanExecutionStop,
+    run_v3_plan_execution_operator_with_recovery, V3PlanExecutionModePolicy, V3PlanExecutionStop,
     V3PlanExecutionTargetSource,
 };
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
-use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
-};
 use serde_json::{json, Value};
 
 fn construct_responses_relay_transport_request(
@@ -75,7 +72,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
     transport: &'a T,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
-    allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
@@ -98,7 +94,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner<'a, T: ResponsesTransport
             transport,
             provider_health,
             retry_policy,
-            allow_exhaustion_rescue_probe,
             provider_failure_event_sink,
             route_selection_event_sink,
             initial_selected_target,
@@ -124,7 +119,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
     transport: &'a T,
     provider_health: V3ProviderFailureRuntimeHealth,
     retry_policy: V3ResponsesRelayRetryPolicy,
-    allow_exhaustion_rescue_probe: bool,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
@@ -165,9 +159,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             v3_responses_relay_transport_intent_from_stream_field(&input.payload);
         let provider_request_transport_intent = client_response_transport_intent;
         let local_tool_output_ids = find_responses_tool_output_ids(&input.payload)?;
-        // A request that declares tools enters Relay Chat Process tool
-        // governance, which may rewrite tool markup in the complete response.
-        // Such a request keeps the whole-attempt client projection.
         let relay_request_declares_tools = relay_request_declares_tools(&input.payload);
         if input
             .payload
@@ -282,7 +273,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 request_execution_control
                     .attempt_budget()
                     .residence_deadline(),
-                run_v3_plan_execution_operator_with_probes(
+                run_v3_plan_execution_operator_with_recovery(
                     request_execution_control.attempt_budget(),
                     target_resolved_request,
                     manifest,
@@ -294,7 +285,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     v3_relay_provider_policy_now_epoch_ms()
                         .map_err(V3ResponsesRelayRuntimeError::Target)?,
                     deterministic_sample,
-                    allow_exhaustion_rescue_probe,
                     retry_selected
                         .take()
                         .or_else(|| initial_selected_target.take()),
@@ -308,10 +298,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             {
                 Ok(plan) => plan,
                 Err(V3PlanExecutionStop::Failed(source)) => {
-                    return Err(V3ResponsesRelayRuntimeError::Target(format!(
-                        "{}: {}",
-                        source.code, source.message
-                    )));
+                    return Err(V3ResponsesRelayRuntimeError::RuntimeSource(source));
                 }
                 Err(V3PlanExecutionStop::OperatorFault(fault)) => {
                     return Ok(provider_failure_output(
@@ -321,28 +308,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     ));
                 }
                 Err(V3PlanExecutionStop::Exhausted {
-                    expanded: exhausted_expanded,
-                    exhaustion,
-                    source,
-                    ..
+                    exhaustion, source, ..
                 }) => {
-                    let source = match source {
-                        Some(source) => Some(source),
-                        None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
-                            &exhausted_expanded,
-                            &failed_candidates,
-                            &request_local_busy_candidates,
-                        ) {
-                            Ok(source) => source,
-                            Err(fault) => {
-                                return Ok(provider_failure_output(
-                                    V3ResponsesRelayProviderFailure::from(fault),
-                                    trace,
-                                    0,
-                                ))
-                            }
-                        },
-                    };
                     let failure = V3ResponsesRelayProviderFailure {
                         attempt_source: None,
                         status: 502,
@@ -380,9 +347,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let retained_expanded = initial_plan.expanded;
         failed_candidates = initial_plan.request_local_excluded_candidates;
         request_local_busy_candidates = initial_plan.request_local_busy_candidates;
-        let mut initial_admitted = Some((
+        let mut initial_selected = Some((
             initial_plan.selected,
-            initial_plan.admission,
             initial_plan.protocol_decision,
         ));
         let mut req02 = req02;
@@ -409,10 +375,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             initial_execution_mode,
         );
         trace.push("V3HubReqExecution05Planned");
-        let mut pending_provider_action_recovery = None;
-        let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
-        let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> =
-            None;
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
         let mut last_external_http = None;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -423,23 +385,23 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let failure_context = V3RelayProviderFailurePolicyContext {
             manifest,
             captured_target_09: Some(&retained_expanded),
+            attempt_budget: Some(&attempt_budget),
             failure_session_scope: input.failure_session_scope.clone(),
             provider_health: &provider_failure_health,
             retry_policy: shared_retry_policy,
             deterministic_sample,
         };
         loop {
-            let (selected, mut selected_admission, protocol_decision): (
+            let (selected, protocol_decision): (
                 routecodex_v3_target::V3Target10ConcreteProviderSelected,
-                Option<V3RuntimeProviderAdmission>,
                 crate::nodes::V3Execution11ProtocolDecision,
-            ) = if let Some((selected, admission, protocol_decision)) = initial_admitted.take() {
-                (selected, Some(admission), protocol_decision)
+            ) = if let Some((selected, protocol_decision)) = initial_selected.take() {
+                (selected, protocol_decision)
             } else {
                 let preferred_selected = retry_selected.take();
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
                     attempt_budget.residence_deadline(),
-                    run_v3_plan_execution_operator_with_probes(
+                    run_v3_plan_execution_operator_with_recovery(
                         attempt_budget.clone(),
                     (*req05.previous.previous.previous.payload.0).clone(),
                     manifest,
@@ -451,7 +413,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     v3_relay_provider_policy_now_epoch_ms()
                         .map_err(V3ResponsesRelayRuntimeError::Target)?,
                     deterministic_sample,
-                    allow_exhaustion_rescue_probe,
                     preferred_selected,
                     V3PlanExecutionModePolicy::DirectEntry {
                         entry_protocol: V3HubEntryProtocol::Responses,
@@ -465,13 +426,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             std::sync::Arc::new(execution_planned_request);
                         failed_candidates = plan.request_local_excluded_candidates;
                         request_local_busy_candidates = plan.request_local_busy_candidates;
-                        (plan.selected, Some(plan.admission), plan.protocol_decision)
+                        (plan.selected, plan.protocol_decision)
                     }
                     Err(V3PlanExecutionStop::Failed(source)) => {
-                        return Err(V3ResponsesRelayRuntimeError::Target(format!(
-                            "{}: {}",
-                            source.code, source.message
-                        )));
+                        return Err(V3ResponsesRelayRuntimeError::RuntimeSource(source));
                     }
                     Err(V3PlanExecutionStop::OperatorFault(fault)) => {
                         return Ok(provider_failure_output(
@@ -484,31 +442,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ));
                     }
                     Err(V3PlanExecutionStop::Exhausted {
-                        expanded: exhausted_expanded,
                         exhaustion,
                         source,
                         ..
                     }) => {
-                        let source = match source {
-                            Some(source) => Some(source),
-                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
-                                &exhausted_expanded,
-                                &failed_candidates,
-                                &request_local_busy_candidates,
-                            ) {
-                                Ok(source) => source,
-                                Err(fault) => {
-                                    return Ok(provider_failure_output(
-                                        terminalize_v3_responses_relay_provider_failure(
-                                            V3ResponsesRelayProviderFailure::from(fault),
-                                            last_external_http.clone(),
-                                        ),
-                                        trace,
-                                        0,
-                                    ))
-                                }
-                            },
-                        };
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,
@@ -548,17 +485,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     }
                 }
             };
-            if provider_action_permit_target
-                .as_ref()
-                .is_some_and(|target| {
-                    target.provider_id != selected.candidate.provider_id
-                        || target.auth_alias != selected.candidate.auth_alias
-                        || target.model_id != selected.candidate.model_id
-                })
-            {
-                drop(_provider_action_permit.take());
-                provider_action_permit_target = None;
-            }
             if matches!(
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -672,7 +598,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
-                                pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
@@ -756,88 +681,12 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
-            let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
-                admission.take_rate_limit_control(&mut pending_provider_action_recovery)
-            });
-            if pending_provider_action_recovery.is_some() {
-                drop(selected_admission.take());
-            }
-            if let Some(recovery) = pending_provider_action_recovery.take() {
-                match handle_error_before_resp03!(provider_health
-                    .wait_for_error05_recovery(
-                        &recovery,
-                        &selected,
-                        attempt_budget.residence_deadline()
-                    )
-                    .await
-                    .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
-                {
-                    V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
-                        _provider_action_permit = admission.take_permit();
-                        provider_action_permit_target = Some(selected.candidate.clone());
-                        match admit_v3_selected_target_after_recovery(&selected) {
-                            V3AdmitAfterRecovery::Admitted(admission) => {
-                                selected_admission = Some(admission)
-                            }
-                            V3AdmitAfterRecovery::Busy => {
-                                let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                                failed_candidates.insert(busy_key.clone());
-                                request_local_busy_candidates.insert(busy_key);
-                                drop(_provider_action_permit.take());
-                                provider_action_permit_target = None;
-                                continue;
-                            }
-                            V3AdmitAfterRecovery::Failed(reason) => {
-                                return Err(V3ResponsesRelayRuntimeError::Target(reason))
-                            }
-                        }
-                        trace.push("V3ProviderActionGateAdmission");
-                    }
-                    V3ProviderActionRecoveryTransition::Superseded(ticket) => {
-                        pending_provider_action_recovery =
-                            Some(handle_error_before_resp03!(ticket
-                                .recovery_witness()
-                                .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
-                        retry_selected = Some(selected);
-                        trace.push("V3ProviderActionGateTerminalReevaluation");
-                        continue;
-                    }
-                    V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {
-                        pending_provider_action_recovery =
-                            Some(handle_error_before_resp03!(ticket
-                                .recovery_witness()
-                                .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
-                        retry_selected = Some(selected);
-                        trace.push("V3ProviderActionGateTerminalReevaluation");
-                        continue;
-                    }
-                    V3ProviderActionRecoveryTransition::Consumed(_) => {
-                        pending_provider_action_recovery = None;
-                        retry_selected = Some(selected);
-                        trace.push("V3ProviderActionGateConsumedReevaluation");
-                        continue;
-                    }
-                }
-            }
-            provider_send_attempts = handle_error_before_resp03!(
-                crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
-                    &attempt_budget,
-                    &mut selected_admission,
-                    &mut _rate_limit_permit,
-                    &mut _provider_action_permit,
-                )
-                .await
-                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))
-            );
+            provider_send_attempts = handle_error_before_resp03!(attempt_budget
+                .admit_transport_attempt()
+                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())));
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-            let transport_request = match selected_admission.take() {
-                Some(admission) => {
-                    transport_request.with_pre_acquired_admission(admission.into_lease())
-                }
-                None => transport_request,
-            };
             let transport_result = match tokio::time::timeout(
                 v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
                 transport.send(transport_request),
@@ -853,23 +702,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             };
             let provider_raw = match transport_result {
                 Ok(raw) => raw,
-                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                    attempt_budget.release_unsent_transport_attempt();
-                    provider_send_attempts = attempt_budget.transport_attempts();
-                    handle_error_before_resp03!(runtime_timing
-                        .finish_external()
-                        .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                    failed_candidates.insert(busy_key.clone());
-                    request_local_busy_candidates.insert(busy_key);
-                    drop(_provider_action_permit.take());
-                    provider_action_permit_target = None;
-                    continue;
-                }
                 Err(V3ProviderError::HttpStatus { response }) => {
-                    if response.status == 429 {
-                        attempt_budget.record_rate_limited_attempt();
-                    }
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                     );
@@ -913,7 +746,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             response.body_read_failure.as_deref(),
                         ),
                     );
-                    drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(
                             &failure_context,
@@ -923,7 +755,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
-                                pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
@@ -959,7 +790,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         Some(selected_observability.clone()),
                     );
                     failure.failed_attempt_evidence = failed_attempt_evidence;
-                    drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(
                             &failure_context,
@@ -969,7 +799,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
-                                pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
@@ -999,9 +828,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
             }
             let provider_status = provider_raw.status();
-            if provider_status == 429 {
-                attempt_budget.record_rate_limited_attempt();
-            }
             selected_observability.provider_status = Some(provider_status);
             let provider_id = provider_raw.provider_id().to_string();
             match provider_raw.into_body() {
@@ -1020,7 +846,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );
-                            drop(_provider_action_permit.take());
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
@@ -1030,7 +855,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
-                                        pending_recovery: &mut pending_provider_action_recovery,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
                                             .as_ref(),
@@ -1086,7 +910,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             ));
-                        drop(_provider_action_permit.take());
                         let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
@@ -1096,7 +919,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
-                                    pending_recovery: &mut pending_provider_action_recovery,
                                     provider_failure_events: &mut provider_failure_events,
                                     provider_failure_event_sink: provider_failure_event_sink
                                         .as_ref(),
@@ -1151,7 +973,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     &selected_target_provider_id,
                                     Some(selected_observability.clone()),
                                 );
-                                drop(_provider_action_permit.take());
                                 let terminal_failure = handle_error_before_resp03!(
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
@@ -1161,7 +982,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
-                                            pending_recovery: &mut pending_provider_action_recovery,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
                                                 provider_failure_event_sink.as_ref(),
@@ -1286,25 +1106,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     });
                 }
                 V3ProviderResponseBody::Sse(stream) => {
-                    let sse_idle_timeout =
-                        crate::hub_v1::relay_runtime_core::v3_provider_sse_idle_timeout(
-                            manifest,
-                            &selected_target_provider_id,
-                        )
-                        .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                    let stream =
-                        crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
-                            &input.request_id,
-                            &selected_target_provider_id,
-                            stream,
-                            attempt_budget.residence_deadline(),
-                        );
                     let stream_observation = V3RuntimeStreamObservation::default();
-                    // Relay projects the client frames at provider arrival time
-                    // for the requests whose response governance cannot rewrite
-                    // already-projected business carriers. Everything else keeps
-                    // the whole-attempt buffering. The first business frame
-                    // commits; the server channel takes over from there.
                     let projection_handle = initial_relay_seeds.client_stream_projection.clone();
                     let mut relay_client_projection = if client_response_transport_intent
                         == V3HubTransportIntent::Sse
@@ -1317,13 +1119,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
                             if slot.is_none() {
                                 if let Some(sink) = initial_relay_seeds.client_frame_sink.clone() {
-                                    *slot = Some(
-                                            super::relay_client_frames::
-                                                V3RelayChatClientStreamProjector::new(
-                                                    sink,
-                                                    attempt_budget.clone(),
-                                                ),
-                                        );
+                                    *slot = Some(super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+                                        sink,
+                                        attempt_budget.clone(),
+                                    ));
                                 }
                             }
                             slot.take()
@@ -1331,25 +1130,88 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     } else {
                         None
                     };
-                    let provider_value_result =
-                    build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
-                        provider_wire_protocol,
-                        crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
+                    let mut retained_raw_prefix =
+                        crate::execution_control::V3RetainedPrefixReservation::default();
+                    let first_semantic = crate::execution_control::with_optional_attempt_deadline(
+                        attempt_budget.attempt_deadline(),
+                        crate::hub_v1::relay_runtime_core::guard_relay_sse_first_frame_with_budget(
                             &input.request_id,
                             &selected_target_provider_id,
+                            provider_wire_protocol,
                             stream,
-                            sse_idle_timeout,
+                            manifest.providers.get(&selected_target_provider_id)
+                                .and_then(|provider| provider.sse_first_frame_timeout_ms),
+                            true,
+                            attempt_budget.clone(),
+                            if provider_wire_protocol == V3HubProviderWireProtocol::Responses { Some(&mut retained_raw_prefix) } else { None },
                         ),
+                    ).await.unwrap_or_else(|_| Err(crate::hub_v1::relay_runtime_core::V3RelaySseGuardError::Provider(V3ProviderError::Transport {
+                        request_id: input.request_id.clone(),
+                        provider_id: selected_target_provider_id.clone(),
+                        reason: "provider SSE attempt exceeded the request residence deadline before semantic progress".to_string(),
+                    })));
+                    let materialization_context =
+                        crate::execution_control::V3AttemptMaterializationContext::new(
+                            attempt_budget.clone(),
+                        );
+                    let mut _materialized_storage = None;
+                    let provider_value_result = match first_semantic {
+                        Ok(guarded) => {
+                            let stream = guarded.into_attempt_stream(
+                                &attempt_budget,
+                                &input.request_id,
+                                &selected_target_provider_id,
+                                attempt_budget.attempt_deadline(),
+                            );
+                            if provider_wire_protocol == V3HubProviderWireProtocol::Responses {
+                                match materialize_v3_responses_stream_with_capacity(
+                                    stream,
+                                    &stream_observation,
+                                    materialization_context.clone(),
+                                    &mut retained_raw_prefix,
+                                )
+                                .await
+                                {
+                                    Ok((value, storage)) => {
+                                        _materialized_storage = Some(storage);
+                                        Ok(value)
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            } else {
+                                build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
+                        provider_wire_protocol,
+                        stream,
                         &stream_observation,
                         &anthropic_response_projection_context,
                         relay_client_projection.as_mut(),
                     )
-                    .await;
+                    .await
+                            }
+                        }
+                        Err(crate::hub_v1::relay_runtime_core::V3RelaySseGuardError::Provider(
+                            error,
+                        )) => Err(V3ResponsesRelayRuntimeError::Provider(error)),
+                        Err(
+                            crate::hub_v1::relay_runtime_core::V3RelaySseGuardError::LocalStore(
+                                error,
+                            ),
+                        ) => {
+                            return Err(V3ResponsesRelayRuntimeError::ExecutionControlResponse(
+                                error.to_string(),
+                            ))
+                        }
+                    };
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
                     let provider_value = match provider_value_result {
                         Ok(value) => value,
+                        Err(V3ResponsesRelayRuntimeError::LocalResponseStore(error)) => {
+                            return Err(V3ResponsesRelayRuntimeError::ExecutionControlResponse(
+                                error.to_string(),
+                            ));
+                        }
                         Err(error) => {
                             let failure = handle_error_before_resp03!(
                                 provider_response_stream_relay_failure(
@@ -1359,10 +1221,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     Some(selected_observability.clone()),
                                 )
                             );
-                            let residence_deadline_error = failure.policy_error_message.contains(
-                                "provider SSE attempt exceeded the request residence deadline",
-                            );
-                            drop(_provider_action_permit.take());
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
@@ -1372,7 +1230,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
-                                        pending_recovery: &mut pending_provider_action_recovery,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
                                             .as_ref(),
@@ -1383,8 +1240,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 )
                                 .await
                             );
-                            let deadline_expired =
-                                attempt_budget.residence_deadline() <= std::time::Instant::now();
                             if let Some(failure) = terminal_failure {
                                 return Ok(provider_failure_output_with_observation(
                                     failure,
@@ -1401,19 +1256,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 .as_ref()
                                 .is_some_and(|sink| sink.is_committed())
                             {
-                                return Ok(provider_failure_output_with_observation(
-                                    attach_v3_provider_failure_events_to_failure(
-                                        terminalize_v3_responses_relay_provider_failure(
-                                            failure,
-                                            last_external_http.clone(),
-                                        ),
-                                        &provider_failure_events,
-                                    ),
-                                    trace,
-                                    Some(stream_observation),
-                                ));
-                            }
-                            if residence_deadline_error || deadline_expired {
                                 return Ok(provider_failure_output_with_observation(
                                     attach_v3_provider_failure_events_to_failure(
                                         terminalize_v3_responses_relay_provider_failure(
@@ -1474,7 +1316,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     &selected_target_provider_id,
                                     Some(selected_observability.clone()),
                                 );
-                                drop(_provider_action_permit.take());
                                 let terminal_failure = handle_error_before_resp03!(
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
@@ -1484,7 +1325,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
-                                            pending_recovery: &mut pending_provider_action_recovery,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
                                                 provider_failure_event_sink.as_ref(),
@@ -1607,18 +1447,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         );
                     chat_process_refill.set(disposition);
                     let finalized_response = finalized_provider_value.clone();
-                    // A committed Relay attempt already handed its first
-                    // business frames to the client channel; the remaining
-                    // frames come from the projector's sealed tail. A failed
-                    // seal ends the committed transport without an error frame.
-                    // A committed projection already handed its first business
-                    // frames to the client channel. Its remaining tail is sealed
-                    // by the refill owner over the merged response, so this
-                    // execution reports no second client body.
-                    let committed_projection = relay_client_projection
+                    let client_body = if relay_client_projection
                         .as_ref()
-                        .is_some_and(|projection| projection.is_committed());
-                    let client_body = if committed_projection {
+                        .is_some_and(|projection| projection.is_committed())
+                    {
                         V3ResponsesRelayClientBody::Json(Value::Null)
                     } else {
                         project_v3_responses_relay_client_body(
@@ -1628,14 +1460,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 manifest,
                                 &input.server_id,
                             ),
-                            attempt_budget.clone(),
+                            attempt_budget.for_completed_semantic_storage(),
                         )?
                     };
                     if let (Some(handle), Some(projection)) =
                         (projection_handle.as_ref(), relay_client_projection.take())
                     {
-                        *handle.lock().unwrap_or_else(|error| error.into_inner()) =
-                            Some(projection);
+                        *handle.lock().unwrap_or_else(|error| error.into_inner()) = Some(projection);
                     }
                     commit_route_policy_if_present!();
                     return Ok(V3ResponsesRelayRuntimeOutput {

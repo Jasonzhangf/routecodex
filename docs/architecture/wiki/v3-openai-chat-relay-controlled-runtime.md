@@ -40,7 +40,7 @@ When Chat Direct selects a Relay provider, the existing typed handoff carries th
 target, captured plan, exclusions, request control, timing, and preceding failures into this
 same lifecycle. Target recovery uses that captured plan. Generic Direct registers its plan
 count before transport admission; the receiving Relay retains cumulative attempts and the
-configured hard ceiling.
+original request control.
 
 ## JSON, SSE, error, isolation
 

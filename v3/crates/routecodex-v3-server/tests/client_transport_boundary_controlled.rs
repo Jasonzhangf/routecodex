@@ -6,9 +6,9 @@
 //! - `chat_json_client_still_waits_for_the_runtime_outcome`
 //! - `chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client`
 //! - `chat_sse_head_commit_carries_a_json_success_for_an_sse_client`
-//! - `exec_preparation_drains_an_in_flight_client_response_before_closing_transports`
-//! - `exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal`
-//! - `borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse`
+//! - `exec_preparation_interrupts_held_response_without_waiting`
+//! - `exec_preparation_interrupts_without_fabricated_terminal`
+//! - `borrowed_exec_preparation_does_not_block_dispatch_and_cancellation_preserves_sse`
 //!
 //! Every case enters through the real `/v1/chat/completions` listener with a
 //! controlled provider. The controlled provider holds its response until the test
@@ -201,11 +201,9 @@ async fn start_controlled_entry_with_timeout_and_budget(
         }
     }
     if let Some(timeout_ms) = request_timeout_ms {
-        manifest
-            .providers
-            .get_mut("controlled")
-            .unwrap()
-            .request_timeout_ms = timeout_ms;
+        let provider = manifest.providers.get_mut("controlled").unwrap();
+        provider.request_timeout_ms = timeout_ms;
+        provider.sse_first_frame_timeout_ms = Some(timeout_ms);
     }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     ControlledEntry {
@@ -215,6 +213,56 @@ async fn start_controlled_entry_with_timeout_and_budget(
         release: release_tx,
         upstream_shutdown: upstream_shutdown_tx,
     }
+}
+
+#[tokio::test]
+async fn capacity_restart_flush_failure_retains_original_owner() {
+    let _guard = TEST_LOCK.lock().await;
+    let bad_parent =
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("not-a-directory");
+    std::fs::write(&bad_parent, b"file").unwrap();
+    let previous = std::env::var_os("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE");
+    std::env::set_var(
+        "ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE",
+        bad_parent.join("state.json"),
+    );
+    let mut entry = start_controlled_entry().await;
+    let preparation =
+        tokio::time::timeout(Duration::from_secs(5), entry.handle.prepare_exec_attempt()).await;
+    let rejected = matches!(&preparation, Ok(Err(_)));
+    let preparation_diagnostic = format!("{preparation:?}");
+    drop(preparation);
+    let endpoint = entry.endpoint.clone();
+    let response = tokio::spawn(async move {
+        reqwest::Client::new().post(endpoint)
+            .json(&json!({"model":"chat-client-alias","messages":[{"role":"user","content":"after-failed-preparation"}],"stream":false}))
+            .send().await?.text().await
+    });
+    let captured = tokio::time::timeout(Duration::from_secs(5), entry.captures.recv()).await;
+    entry.release_provider();
+    let response = tokio::time::timeout(Duration::from_secs(5), response).await;
+    entry.handle.shutdown().await;
+    let _ = entry.upstream_shutdown.send(());
+    match previous {
+        Some(value) => std::env::set_var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE", value),
+        None => std::env::remove_var("ROUTECODEX_V3_PROVIDER_COOLDOWN_STATE"),
+    }
+    assert!(
+        rejected,
+        "persistence failure must reject exec preparation: {preparation_diagnostic}"
+    );
+    assert!(
+        matches!(captured, Ok(Some(_))),
+        "original listener must dispatch to the real provider"
+    );
+    let body = response
+        .expect("original listener must remain available")
+        .unwrap()
+        .unwrap();
+    assert!(
+        body.contains("controlled json"),
+        "original owner must return real provider content: {body}"
+    );
 }
 
 async fn stop_controlled_entry(entry: ControlledEntry) {
@@ -341,8 +389,7 @@ async fn chat_json_client_still_waits_for_the_runtime_outcome() {
 #[tokio::test]
 async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client() {
     let _guard = TEST_LOCK.lock().await;
-    // A failed last identity waits the original declared recovery budget. It
-    // does not end the client channel immediately after the provider error.
+    // A failed last identity keeps the client channel open while recovery is possible.
     let mut entry = start_controlled_entry_with_timeout_and_budget(None, Some(1800)).await;
     let started = std::time::Instant::now();
     let client = reqwest::Client::new();
@@ -376,36 +423,35 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
 
     entry.release_provider();
     let mut received = Vec::new();
-    let mut aborted = false;
-    loop {
-        match tokio::time::timeout(Duration::from_secs(5), body.next()).await {
-            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
-            Ok(Some(Err(_))) | Err(_) => {
-                aborted = true;
-                break;
+    let outcome = tokio::time::timeout(Duration::from_millis(2200), async {
+        loop {
+            match body.next().await {
+                Some(Ok(chunk)) => received.extend_from_slice(&chunk),
+                Some(Err(_)) => break "transport error",
+                None => break "eof",
             }
-            Ok(None) => break,
         }
-    }
+    })
+    .await;
     assert!(
-        aborted,
-        "a provider terminal must stay an explicit client transport failure, not a clean end"
+        outcome.is_err(),
+        "recoverable request must remain open: {outcome:?}"
     );
     assert!(
         started.elapsed() >= Duration::from_millis(1500),
-        "provider failure must not shortcut the declared request recovery budget"
+        "provider failure must not close the request at the old recovery budget"
     );
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(
-        received.contains(":\n\n"),
-        "the terminal must reach the client behind a transport comment frame instead of a silent close: {received:?}"
+        received.lines().any(|line| line.starts_with(':')),
+        "recovery must keep the client alive with transport comment frames: {received:?}"
     );
     assert!(
         received
             .lines()
             .filter(|line| !line.is_empty())
             .all(|line| line.starts_with(':')),
-        "only transport comment frames may follow the committed head before the terminal: {received:?}"
+        "only transport comment frames may follow the committed head during recovery: {received:?}"
     );
     assert!(
         !received.contains("raw provider secret detail"),
@@ -415,6 +461,7 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
         !received.contains("data:"),
         "no error frame may be projected to the client: {received}"
     );
+    drop(body);
     stop_controlled_entry(entry).await;
 }
 
@@ -500,7 +547,7 @@ async fn chat_sse_head_commit_carries_a_json_success_for_an_sse_client() {
 /// finish. The provider attempt stays gated while `prepare_for_exec` runs, so the
 /// committed response can only complete if the preparation waited for it.
 #[tokio::test]
-async fn exec_preparation_drains_an_in_flight_client_response_before_closing_transports() {
+async fn exec_preparation_interrupts_held_response_without_waiting() {
     let _guard = TEST_LOCK.lock().await;
     let ControlledEntry {
         endpoint,
@@ -537,44 +584,33 @@ async fn exec_preparation_drains_an_in_flight_client_response_before_closing_tra
         .expect("the provider must hold the buffered attempt")
         .expect("the provider capture channel must stay open");
 
-    // Release the provider only after the preparation started, so a preparation
-    // that closes transports without draining cuts this response.
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let _ = release.send(true);
-    });
-    let started = std::time::Instant::now();
-    let _preparation = handle.prepare_for_exec().await;
-    assert!(
-        started.elapsed() >= Duration::from_millis(300),
-        "exec preparation must wait for the in-flight client response, waited {:?}",
-        started.elapsed()
-    );
-
-    let mut rest = Vec::new();
-    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(5), body.next())
+    // The provider remains held: consuming preparation must not wait for it.
+    let _preparation = tokio::time::timeout(Duration::from_secs(2), handle.prepare_for_exec())
         .await
-        .expect("the drained client response must stay readable until it completes")
-    {
-        rest.extend_from_slice(&chunk.expect("the drained client response must not break"));
-    }
+        .expect("exec preparation must not wait for a provider response");
+    let mut rest = Vec::new();
+    let interrupted = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match body.next().await {
+                Some(Ok(chunk)) => rest.extend_from_slice(&chunk),
+                Some(Err(_)) => break true,
+                None => break false,
+            }
+        }
+    })
+    .await
+    .expect("closed transport must be observable");
+    assert!(interrupted, "interruption must not look like a normal EOF");
     let rest = String::from_utf8(rest).unwrap();
-    assert!(
-        rest.contains("\"content\":\"first\""),
-        "the drained response must deliver its payload: {rest}"
-    );
-    assert!(
-        rest.contains("data: [DONE]"),
-        "the drained response must deliver its terminal frame: {rest}"
-    );
+    assert!(!rest.contains("data: [DONE]"), "{rest}");
+    let _ = release.send(true);
     let _ = upstream_shutdown.send(());
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
-/// The provider request deadline, rather than a restart drain cutoff, ends an
-/// unsuccessful attempt. Its error remains request-local with no client payload.
+/// An interrupted attempt never fabricates a business terminal for the client.
 #[tokio::test]
-async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal() {
+async fn exec_preparation_interrupts_without_fabricated_terminal() {
     let _guard = TEST_LOCK.lock().await;
     let ControlledEntry {
         endpoint,
@@ -610,36 +646,36 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
         .expect("the provider must hold the buffered attempt")
         .expect("the provider capture channel must stay open");
 
-    let started = std::time::Instant::now();
-    let _preparation = tokio::time::timeout(Duration::from_secs(20), handle.prepare_for_exec())
-        .await
-        .expect("exec preparation must never wait forever for an in-flight response");
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_millis(2500) && elapsed < Duration::from_secs(10),
-        "exec preparation must preserve the original recovery budget after the provider timeout, waited {elapsed:?}"
-    );
-
+    let mut preparation = tokio::spawn(handle.prepare_for_exec());
     let mut received = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_secs(5), body.next()).await {
-            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
-            Ok(Some(Err(_))) | Err(_) | Ok(None) => break,
+    let outcome = tokio::time::timeout(Duration::from_millis(3500), async {
+        loop {
+            match body.next().await {
+                Some(Ok(chunk)) => received.extend_from_slice(&chunk),
+                Some(Err(_)) => break "transport error",
+                None => break "eof",
+            }
         }
-    }
+    })
+    .await;
+    assert_eq!(outcome.unwrap(), "transport error");
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(
         !received.contains("data: [DONE]"),
         "an unfinished provider attempt must not project a terminal frame: {received}"
     );
+    tokio::time::timeout(Duration::from_secs(10), &mut preparation)
+        .await
+        .expect("exec preparation must complete without waiting for the provider")
+        .unwrap();
     let _ = upstream_shutdown.send(());
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
-/// Borrowed preparation must restore queued business dispatch when its caller
-/// cancels, while the already committed SSE remains healthy.
+/// Borrowed preparation must not pause business dispatch, and cancellation
+/// must leave the already committed SSE healthy.
 #[tokio::test]
-async fn borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse() {
+async fn borrowed_exec_preparation_does_not_block_dispatch_and_cancellation_preserves_sse() {
     let _guard = TEST_LOCK.lock().await;
     let ControlledEntry {
         endpoint,
@@ -677,25 +713,16 @@ async fn borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pend
     let mut queued = Box::pin(client.post(&endpoint).json(&json!({
         "model": "chat-client-alias", "messages": [{"role":"user", "content":"queued"}], "stream":false
     })).send());
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut queued)
-            .await
-            .is_err()
-    );
-    assert!(
-        captures.try_recv().is_err(),
-        "queued dispatch must not reach the provider"
-    );
-    drop(preparation);
-    // Poll the queued JSON concurrently: it reaches the still-held provider
-    // before that provider is released, proving cancellation reopened admission.
+    // The second request must reach the still-held provider while preparation
+    // remains alive; it must not wait behind a restart admission gate.
     tokio::select! {
         result = &mut queued => panic!("provider must still be held: {result:?}"),
         captured = captures.recv() => {
             assert_eq!(captured.unwrap()["messages"][0]["content"], "queued");
         }
-        _ = tokio::time::sleep(Duration::from_secs(5)) => panic!("cancelled preparation did not restore dispatch"),
+        _ = tokio::time::sleep(Duration::from_secs(5)) => panic!("preparation blocked business dispatch"),
     }
+    drop(preparation);
     release.send(true).unwrap();
     let queued = queued.await.unwrap();
     assert_eq!(queued.status(), StatusCode::OK);

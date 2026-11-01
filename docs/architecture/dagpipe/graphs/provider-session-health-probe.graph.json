@@ -1,0 +1,18 @@
+{
+  "id": "v3.provider_session_health.probe",
+  "version": "1",
+  "description": "仅对监听器冷却池中的完整身份执行恢复探测；session 与 global 各按其身份和作用域处理。未到期、占用、取消、过期、成功、失败与健康读取错误均经探测处置出口；探测许可只约束探测所有权，不阻塞业务请求。有效匹配成功恢复相应自动状态，过期结果不得覆盖较新状态。",
+  "inputs": [{"id":"scoped-probe-target","schema":"Any","schema_ref":"v3.provider_session_health.arc.probe_target"}],
+  "nodes": [
+    {"id":"取得探测许可","operator":"routecodex.v3.provider.health_acquire_scoped_probe","operator_version":"1","inputs":["scoped-probe-target"],"output":{"id":"probe-permit-result","schema":"Any","schema_ref":"v3.provider_session_health.arc.probe_permit_result"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.listener_health"],"writes":["v3.provider.probe_permits"]}},
+    {"id":"执行或跳过探测","operator":"routecodex.v3.provider.health_probe_transport","operator_version":"1","inputs":["probe-permit-result"],"output":{"id":"probe-result","schema":"Any","schema_ref":"v3.provider_session_health.arc.probe_result"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.probe_permits"],"writes":[]}},
+    {"id":"校验并提交结果","operator":"routecodex.v3.provider.health_complete_scoped_probe","operator_version":"1","inputs":["probe-result"],"output":{"id":"probe-completion","schema":"Any","schema_ref":"v3.provider_session_health.arc.probe_completion"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.probe_permits","v3.provider.listener_health"],"writes":["v3.provider.listener_health"]}},
+    {"id":"释放探测许可","operator":"routecodex.v3.provider.health_dispose_scoped_probe","operator_version":"1","inputs":["probe-completion"],"output":{"id":"probe-disposition","schema":"Any","schema_ref":"v3.provider_session_health.arc.probe_disposition"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole","resources":{"reads":["v3.provider.probe_permits"],"writes":["v3.provider.probe_permits"]}}
+  ],
+  "edges": [
+    {"from":"取得探测许可","to":"执行或跳过探测","arc_id":"probe-permit-result"},
+    {"from":"执行或跳过探测","to":"校验并提交结果","arc_id":"probe-result"},
+    {"from":"校验并提交结果","to":"释放探测许可","arc_id":"probe-completion"}
+  ],
+  "outputs": ["probe-disposition"]
+}

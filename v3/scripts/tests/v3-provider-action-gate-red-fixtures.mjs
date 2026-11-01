@@ -14,14 +14,11 @@ const copied = [
   '.github/workflows/test.yml',
   'v3/crates/routecodex-v3-error/src/lib.rs',
   'v3/crates/routecodex-v3-error/tests/typed_error05_terminal_contract.rs',
-  'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-  'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_session_isolation_contract.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs',
-  'v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs',
+  'v3/crates/routecodex-v3-runtime/src/provider_health_observation.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_events.rs',
-  'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_configured.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/tests.rs',
   'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy/provider_action_gate_tests.rs',
@@ -57,13 +54,13 @@ const copied = [
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_helpers.rs',
   'v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs',
-  'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
   'v3/crates/routecodex-v3-runtime/tests/openai_chat_relay_runtime_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
   'v3/crates/routecodex-v3-runtime/tests/hub_relay_runtime_closeout.rs',
   'v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs',
   'v3/crates/routecodex-v3-server/src/lib.rs',
   'v3/crates/routecodex-v3-server/src/tests/mod.rs',
+  'v3/crates/routecodex-v3-server/tests/support/pool_empty_recovery_blackbox.rs',
   'docs/architecture/function-map.yml',
   'docs/architecture/resource-operation-map.yml',
   'docs/architecture/mainline-call-map.yml',
@@ -115,25 +112,10 @@ const cases = [
     diagnostic: /forbidden removed Direct lifecycle symbol wrap_direct_sse_provider_handoff_stream/u,
   },
   {
-    name: 'isolated floor shrinks',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace('V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000', 'V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 100'),
-    diagnostic: /missing pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS/u,
-  },
-  {
     name: 'Relay revives request-local delay',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     mutate: (source) => source.replace('pub(crate) struct V3RelayProviderFailureRetryPolicy {', 'pub(crate) struct V3RelayProviderFailureRetryPolicy {\n    retry_delay_ms: u64,'),
     diagnostic: /forbidden legacy token retry_delay_ms/u,
-  },
-  {
-    name: 'runtime recreates a request-local gate',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
-    mutate: (source) => source.replaceAll(
-      'action_gate: V3ProviderActionGate::process_shared()',
-      'action_gate: V3ProviderActionGate::default()',
-    ),
-    diagnostic: /missing action_gate: V3ProviderActionGate::process_shared\(\)/u,
   },
   {
     name: 'OpenAI post-commit SSE failure loses fresh-request isolation coverage',
@@ -190,90 +172,6 @@ const cases = [
     diagnostic: /missing active Rust test responses_relay_content_filter_incomplete_preserves_output_without_reselect/u,
   },
   {
-    name: 'terminal transition is removed',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace('pub fn commit_terminal_admission(', 'pub fn bypass_terminal_transition('),
-    diagnostic: /missing pub fn commit_terminal_admission\(/u,
-  },
-  {
-    name: 'terminal Error06 projection bypasses the failure gate',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'record_failure_and_commit_terminal_projection',
-      'project_terminal_without_wait',
-    ),
-    diagnostic: /missing record_failure_and_commit_terminal_projection/u,
-  },
-  {
-    name: 'V3 admitted action permit loses explicit drop ownership',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'impl Drop for V3ProviderActionPermit',
-      'impl V3ProviderActionPermit',
-    ),
-    diagnostic: /missing impl Drop for V3ProviderActionPermit/u,
-  },
-  {
-    name: 'V3 waiter ignores an already-owned exact permit',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      '(!self.admit_action || !exact_has_active_admission)',
-      '(!self.admit_action || true)',
-    ),
-    diagnostic: /missing \(!self\.admit_action \|\| !exact_has_active_admission\)/u,
-  },
-  {
-    name: 'V3 success release drops the retained recovery ticket',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'ReleasedBySuccess(V3ProviderActionRecoveryTicket),',
-      'ReleasedBySuccess,',
-    ),
-    diagnostic: /success-released recovery transition must carry the exact retained recovery ticket/u,
-  },
-  {
-    name: 'Responses Relay success release bypasses the retained recovery generation',
-    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    mutate: (source) => source.replace(
-      'V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {',
-      'V3ProviderActionRecoveryTransition::ReleasedBySuccess(_ticket) => {',
-    ),
-    diagnostic: /Responses Relay must re-arm the exact retained recovery ticket/u,
-  },
-  {
-    name: 'V3 new failure revokes an already-owned exact permit',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'if !active_admission_owned {',
-      'if true {',
-    ),
-    diagnostic: /missing if !active_admission_owned \{/u,
-  },
-  {
-    name: 'V3 unrelated same-group provider success releases another provider permit',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'key.provider_scope == *provider_scope',
-      'key.provider_scope.server_id == provider_scope.server_id\n                        && key.provider_scope.routing_group == provider_scope.routing_group',
-    ),
-    diagnostic: /provider success may release only its exact provider scope/u,
-  },
-  {
-    name: 'Direct fresh requests enter the recovery gate by default',
-    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
-    mutate: (source) => source.replace(
-      'let mut pending_provider_action_recovery = None;',
-      'let mut pending_provider_action_gate = true;',
-    ),
-    diagnostic: /must not retain bool-only provider action recovery state/u,
-  },
-  {
-    name: 'provider change restarts isolated delay',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll('sustained_delay_ms()', 'bypassed_sustained_delay_ms()'),
-    diagnostic: /missing state\.next_admission_at/u,
-  },
-  {
     name: 'Direct mutates health before client disconnect classification',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
     mutate: (source) => source.replace(
@@ -307,7 +205,7 @@ const cases = [
     diagnostic: /Error06 builder must accept only V3Error05TerminalDecision/u,
   },
   {
-    name: 'V3 required atomic terminal commit edge is deleted',
+    name: 'V3 required health observation edge is deleted',
     path: 'docs/architecture/v3-mainline-call-map.yml',
     mutate: (source) => mutateYaml(source, (document) => removeEdge(
       document,
@@ -335,65 +233,11 @@ const cases = [
     diagnostic: /caller_symbol must equal execute_v3_responses_relay_runtime_inner/u,
   },
   {
-    name: 'V3 terminal admission caller stops invoking atomic commit',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'if !Self::commit_terminal_generation_locked(',
-      'if !Self::bypass_terminal_generation_locked(',
-    ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
-  },
-  {
-    name: 'V3 terminal projection revokes an active exact-key provider permit',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      '!require_admission && state.admitted_generation.is_some()',
-      'false',
-    ),
-    diagnostic: /missing !require_admission && state\.admitted_generation\.is_some\(\)/u,
-  },
-  {
-    name: 'V3 terminal admission leaves only a commented atomic commit',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'if !Self::commit_terminal_generation_locked(',
-      'if !Self::bypass_terminal_generation_locked( /* Self::commit_terminal_generation_locked( */',
-    ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
-  },
-  {
-    name: 'V3 terminal admission shadows the atomic commit symbol',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replace(
-      'if !Self::commit_terminal_generation_locked(',
-      'let commit_terminal_generation_locked = || true;\n        if !commit_terminal_generation_locked() {',
-    ),
-    diagnostic: /shadows declared callee V3ProviderActionGate::commit_terminal_generation_locked/u,
-  },
-  {
-    name: 'V3 terminal admission calls the right method name on the wrong receiver',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source
-      .replace(
-        'impl V3ProviderActionGate {\n',
-        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_generation(&self, _key: &V3ProviderActionGateKey, _generation: u64, _require_admission: bool) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
-      )
-      .replace(
-        'impl V3ProviderActionGate {\n',
-        'struct UnrelatedGate;\nimpl UnrelatedGate {\n    fn commit_terminal_generation_locked(_states: &mut HashMap<V3ProviderActionGateKey, V3ProviderActionGateState>, _key: &V3ProviderActionGateKey, _generation: u64, _require_admission: bool, _now: Instant) -> Result<bool, String> { Ok(true) }\n}\n\nimpl V3ProviderActionGate {\n',
-      )
-      .replace(
-        'if !Self::commit_terminal_generation_locked(',
-        'if !UnrelatedGate::commit_terminal_generation_locked(',
-      ),
-    diagnostic: /does not call V3ProviderActionGate::commit_terminal_generation_locked/u,
-  },
-  {
     name: 'V3 manifest endpoint drifts from map',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(
-      '    to: V3ProviderActionGateTerminalCommitted\n',
-      '    to: V3ProviderActionGateTerminalBypassed\n',
+      '    to: V3Error05ExecutionDecision\n',
+      '    to: V3Error06ClientProjected\n',
     ),
     diagnostic: /endpoints are out of sync/u,
   },
@@ -404,22 +248,31 @@ const cases = [
     diagnostic: /resources: missing binding v3\.error\.provider_action_gate/u,
   },
   {
-    name: 'V3 manifest revives wall-clock admission expiry',
+    name: 'V3 manifest shortens the request-local error hold',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(
-      '  wall_clock_expiry: forbidden\n',
-      '  wall_clock_expiry: after_5000ms\n',
+      '  hold_ms: 2000\n',
+      '  hold_ms: 1000\n',
     ),
-    diagnostic: /admission_permit must lock explicit ownership/u,
+    diagnostic: /Error return must be request-local/u,
   },
   {
-    name: 'V3 manifest allows fresh requests to bypass active HTTP 429 recovery',
+    name: 'V3 manifest permits a shared error-return admission lane',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(
-      '  fresh_request_consumes_active_recovery_lane: http_429_only\n',
-      '  fresh_request_consumes_active_recovery_lane: false\n',
+      '  shared_admission: forbidden\n',
+      '  shared_admission: allowed\n',
     ),
-    diagnostic: /admission_permit must lock explicit ownership/u,
+    diagnostic: /Error return must be request-local/u,
+  },
+  {
+    name: 'V3 manifest claims whole-lifecycle SESE for the multi-terminal action lifecycle',
+    path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
+    mutate: (source) => source.replace(
+      '  sese_scope: per_flow_only_whole_lifecycle_multi_terminal\n',
+      '  sese_scope: whole_lifecycle_sese\n',
+    ),
+    diagnostic: /must not be claimed as whole-lifecycle SESE/u,
   },
   {
     name: 'V3 manifest moves typed Error05 to the Server owner',
@@ -431,49 +284,49 @@ const cases = [
     diagnostic: /V3Error05ExecutionDecision owner must be routecodex-v3-error/u,
   },
   {
-    name: 'V3 resource map drops atomic terminal writer',
+    name: 'V3 resource map drops the request-local policy writer',
     path: 'docs/architecture/v3-resource-operation-map.yml',
     mutate: (source) => mutateYaml(source, (document) => {
       const resource = document.resources.find((item) => item.resource_id === 'v3.error.provider_action_gate');
       resource.allowed_writers = resource.allowed_writers.filter(
-        (writer) => writer !== 'V3ProviderActionGate::commit_terminal_admission',
+        (writer) => writer !== 'run_v3_relay_provider_failure_policy_with_response_source_inner',
       );
     }),
-    diagnostic: /allowed_writers: missing binding V3ProviderActionGate::commit_terminal_admission/u,
+    diagnostic: /allowed_writers: missing binding run_v3_relay_provider_failure_policy_with_response_source_inner/u,
   },
   {
     name: 'V3 resource lifecycle drifts from its chain',
     path: 'docs/architecture/v3-resource-operation-map.yml',
-    mutate: (source) => source.replace(
-      '    lifecycle: v3.provider_action_gate.mainline\n',
-      '    lifecycle: fake.v3.provider_action_gate.lifecycle\n',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => {
+      const resource = document.resources.find((item) => item.resource_id === 'v3.error.provider_action_gate');
+      resource.lifecycle = 'fake.v3.provider_action_gate.lifecycle';
+    }),
     diagnostic: /V3 lifecycle\/chain\/owner binding drift/u,
   },
   {
     name: 'V3 resource owner drifts from the Runtime gate',
     path: 'docs/architecture/v3-resource-operation-map.yml',
-    mutate: (source) => source.replace(
-      '  - resource_id: v3.error.provider_action_gate\n    resource_kind: process_local_control_side_channel\n    lifecycle: v3.provider_action_gate.mainline\n    owner_crate: routecodex-v3-runtime\n',
-      '  - resource_id: v3.error.provider_action_gate\n    resource_kind: process_local_control_side_channel\n    lifecycle: v3.provider_action_gate.mainline\n    owner_crate: routecodex-v3-server\n',
-    ),
+    mutate: (source) => mutateYaml(source, (document) => {
+      const resource = document.resources.find((item) => item.resource_id === 'v3.error.provider_action_gate');
+      resource.owner_crate = 'routecodex-v3-server';
+    }),
     diagnostic: /V3 lifecycle\/chain\/owner binding drift/u,
   },
   {
-    name: 'V3 wiki fabricates a terminal commit downstream edge',
+    name: 'V3 wiki revives the retired provider action admission node',
     path: 'docs/architecture/wiki/v3-provider-action-gate.md',
     mutate: (source) => source.replace(
-      '  TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit\n',
-      '  TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit\n  TerminalCommit -->|fabricated gate witness| E05\n',
+      '  ProviderOutcome[V3ProviderResponsesTerminalOrFailureObserved]\n',
+      '  ProviderOutcome[V3ProviderResponsesTerminalOrFailureObserved]\n  Gate[V3ProviderActionGateAdmission]\n',
     ),
-    diagnostic: /terminal commit cannot claim a downstream machine edge/u,
+    diagnostic: /retired provider action admission nodes must not be declared/u,
   },
   {
     name: 'V3 wiki changes the compat failure edge endpoint',
     path: 'docs/architecture/wiki/v3-provider-action-gate.md',
     mutate: (source) => source.replace(
       '  Compat -->|v3-provider-action-gate-01| E05\n',
-      '  Compat -->|v3-provider-action-gate-01| TerminalCommit\n',
+      '  Compat -->|v3-provider-action-gate-01| Health\n',
     ),
     diagnostic: /v3-provider-action-gate-01 must be Compat -> E05/u,
   },
@@ -483,10 +336,10 @@ const cases = [
     mutate: (source) => source
       .replace('  Compat -->|v3-provider-action-gate-01| E05\n', '')
       .replace(
-        '```\n\nThe gate',
-        '```\n\n<!-- Compat -->|v3-provider-action-gate-01| E05 -->\n\nThe gate',
+        '```\n\nThe action lifecycle',
+        '```\n\n%% Compat -->|v3-provider-action-gate-01| E05\n\nThe action lifecycle',
       ),
-    diagnostic: /machine edge IDs: missing binding v3-provider-action-gate-01/u,
+    diagnostic: /v3-provider-action-gate-01 must be Compat -> E05/u,
   },
   {
     name: 'V3 map duplicates a required edge ID',
@@ -543,12 +396,6 @@ const cases = [
     diagnostic: /target-resolution source errors must not be swallowed as provider-pool exhaustion/u,
   },
   {
-    name: 'Recovery ticket exact-key wait is removed',
-    path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
-    mutate: (source) => source.replaceAll('wait_for_recovery_ticket', 'wait_for_latest_group_lane'),
-    diagnostic: /missing wait_for_recovery_ticket/u,
-  },
-  {
     name: 'Error05 recovery witness generation is deleted',
     path: 'v3/crates/routecodex-v3-error/src/lib.rs',
     mutate: (source) => source.replace(
@@ -568,13 +415,97 @@ const cases = [
     diagnostic: /missing required edge v3-provider-action-gate-50/u,
   },
   {
-    name: 'Required gate test name survives only in a comment',
-    path: 'v3/crates/routecodex-v3-runtime/tests/provider_action_gate_contract.rs',
+    name: 'V3 restores the retired Error05 recovery wait in direct execution',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
     mutate: (source) => source.replace(
-      '#[tokio::test]\nasync fn isolated_failure_blocks_one_action_for_at_least_one_second()',
-      '// isolated_failure_blocks_one_action_for_at_least_one_second\nasync fn disabled_isolated_failure_test()',
+      '    let mut trace = vec![',
+      '    wait_for_error05_recovery();\n    let mut trace = vec![',
     ),
-    diagnostic: /missing active Rust test isolated_failure_blocks_one_action_for_at_least_one_second/u,
+    diagnostic: /request execution must not wait on a provider action permit/u,
+  },
+  {
+    name: 'V3 revives the retired provider action permit in direct execution',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
+    mutate: (source) => source.replace(
+      '    let mut trace = vec![',
+      '    let _provider_action_permit = V3ProviderActionPermit;\n    let mut trace = vec![',
+    ),
+    diagnostic: /request execution must not wait on a provider action permit/u,
+  },
+  {
+    name: 'V3 shortens the request-local error hold',
+    path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+    mutate: (source) => source.replace(
+      'std::time::Duration::from_secs(2)',
+      'std::time::Duration::from_secs(1)',
+    ),
+    diagnostic: /each applicable error return must hold independently for two seconds/u,
+  },
+  {
+    name: 'V3 Relay error path drops the independent return hold',
+    path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+    mutate: (source) => source.replaceAll('hold_provider_error_return().await;', ''),
+    diagnostic: /provider error policy must apply the independent return hold/u,
+  },
+  {
+    name: 'V3 Direct error path drops the independent return hold',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+    mutate: (source) => source.replaceAll('hold_provider_error_return().await;', ''),
+    diagnostic: /provider error policy must apply the independent return hold/u,
+  },
+  {
+    name: 'V3 Relay delays provider recovery actions',
+    path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+    mutate: (source) => source.replace(
+      'result.as_ref().is_ok_and(|outcome| {\n            matches!(outcome.decision.action, routecodex_v3_error::V3Error05ExecutionAction::ProjectTerminal)\n        })',
+      'result.is_ok()',
+    ),
+    diagnostic: /final error hold must not delay provider recovery actions/u,
+  },
+  {
+    name: 'V3 Direct delays provider recovery actions',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+    mutate: (source) => source.replace(
+      'result.as_ref().is_ok_and(|outcome| {\n            matches!(outcome.decision.action, V3Error05ExecutionAction::ProjectTerminal)\n        })',
+      'result.is_ok()',
+    ),
+    diagnostic: /final error hold must not delay provider recovery actions/u,
+  },
+  {
+    name: 'V3 Direct success bypasses the exact interface health binding',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs',
+    mutate: (source) => source.replace(
+      'record_provider_success_in_failure_scope_for_interface(',
+      'record_provider_success_in_failure_scope(',
+    ),
+    diagnostic: /does not call V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope_for_interface/u,
+  },
+  {
+    name: 'V3 provider error bypasses the exact interface health binding',
+    path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
+    mutate: (source) => source.replace(
+      'record_real_provider_error_for_interface(',
+      'record_real_provider_error_for_source(',
+    ),
+    diagnostic: /does not call V3ProviderFailureRuntimeHealth::record_real_provider_error_for_interface/u,
+  },
+  {
+    name: 'V3 Responses public-entry binding is removed',
+    path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
+    mutate: (source) => source.replaceAll(
+      'execute_v3_responses_relay_runtime_inner_with_refill',
+      'execute_v3_responses_relay_runtime_inner_without_refill',
+    ),
+    diagnostic: /declared symbol not found: execute_v3_responses_relay_runtime_inner_with_refill/u,
+  },
+  {
+    name: 'V3 Direct SSE terminal binding is removed',
+    path: 'v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers_stream.rs',
+    mutate: (source) => source.replaceAll(
+      'collect_direct_sse_attempt_after_terminal',
+      'collect_direct_sse_attempt_after_retired_terminal',
+    ),
+    diagnostic: /missing collect_direct_sse_attempt_after_terminal/u,
   },
   {
     name: 'CI drops canonical V3 verification',

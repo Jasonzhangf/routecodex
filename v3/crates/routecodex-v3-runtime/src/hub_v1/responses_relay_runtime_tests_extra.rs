@@ -262,7 +262,6 @@ async fn responses_tool_search_output_anthropic_json_relay_preserves_tool_roundt
         &AnthropicToolSearchJsonTransport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
         V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,

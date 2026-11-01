@@ -1650,6 +1650,7 @@ path = [
                 !health
                     .store()
                     .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+                    .expect("cooled identity availability")
                     .available
             );
             for (provider, key, model) in [
@@ -1661,6 +1662,7 @@ path = [
                     health
                         .store()
                         .availability(provider, Some(key), Some(model), u64::MAX)
+                        .expect("untried identity availability")
                         .available,
                     "untried identity was cooled: {provider}.{model}.{key}"
                 );
@@ -2372,6 +2374,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         !provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+            .expect("cooled identity availability")
             .available
     );
 
@@ -2940,11 +2943,13 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
                 Some("gpt-5.5"),
                 5_999,
             )
+            .expect("session availability")
             .available
     );
     assert!(
         store
             .availability("limited", Some("key1"), Some("other-model"), 5_999)
+            .expect("sibling model availability")
             .available
     );
 
@@ -3005,6 +3010,7 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
                 Some("gpt-5.5"),
                 46_001,
             )
+            .expect("session availability")
             .available
     );
 

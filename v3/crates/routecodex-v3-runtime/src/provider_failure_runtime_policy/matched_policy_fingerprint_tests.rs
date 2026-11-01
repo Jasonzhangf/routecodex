@@ -81,7 +81,6 @@ public_code = "E_MATCHED_CLASS"
         );
         assert_eq!(record.cooldown_until_ms, None);
     }
-    complete_due_precool_failures(&health, 101).await;
     let cooldown_until_ms = health
         .store()
         .cooldown_entries(5_100)
@@ -102,6 +101,7 @@ public_code = "E_MATCHED_CLASS"
         let available = health
             .store()
             .availability_for_session(&scope_handle, "first", Some("key1"), Some("gpt-test"), 101)
+            .expect("session availability")
             .available;
         assert!(
             !available,
@@ -118,11 +118,13 @@ public_code = "E_MATCHED_CLASS"
         assert!(
             health
                 .availability("first", Some("key1"), Some("other-model"), 101)
+                .expect("sibling model availability")
                 .available
         );
         assert!(
             health
                 .availability("first", Some("key2"), Some("gpt-test"), 101)
+                .expect("sibling key availability")
                 .available
         );
     }

@@ -210,7 +210,8 @@ async fn openai_chat_truncated_200_keeps_last_candidate_health_neutral() {
     let exact =
         provider_health
             .store()
-            .availability(scope, Some("key1"), Some("chat-wire-model"), now);
+            .availability(scope, Some("key1"), Some("chat-wire-model"), now)
+            .expect("exact availability");
     assert!(
         exact.available,
         "a truncated HTTP 200 SSE body must stay health-neutral without an alternative: attempts={attempts:?} body={body}"
@@ -219,6 +220,7 @@ async fn openai_chat_truncated_200_keeps_last_candidate_health_neutral() {
         provider_health
             .store()
             .availability(scope, Some("key1"), Some("other-model"), now)
+            .expect("sibling model availability")
             .available,
         "another model under the same provider and key must stay routable"
     );
@@ -226,6 +228,7 @@ async fn openai_chat_truncated_200_keeps_last_candidate_health_neutral() {
         provider_health
             .store()
             .availability(scope, Some("other-key"), Some("chat-wire-model"), now)
+            .expect("sibling key availability")
             .available,
         "another key under the same provider and model must stay routable"
     );
@@ -253,6 +256,7 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
         !provider_health
             .store()
             .availability(scope, Some("key1"), Some("chat-wire-model"), now)
+            .expect("failed identity availability")
             .available,
         "the exact failed identity must be cooled"
     );
@@ -260,6 +264,7 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
         provider_health
             .store()
             .availability(scope, Some("key1"), Some("other-model"), now)
+            .expect("sibling model availability")
             .available,
         "another model under the same provider and key must stay routable"
     );
@@ -267,6 +272,7 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
         provider_health
             .store()
             .availability(scope, Some("other-key"), Some("chat-wire-model"), now)
+            .expect("sibling key availability")
             .available,
         "another key under the same provider and model must stay routable"
     );
@@ -279,6 +285,7 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
                 Some("chat-wire-model"),
                 now
             )
+            .expect("secondary provider availability")
             .available,
         "the untried secondary provider must stay routable"
     );

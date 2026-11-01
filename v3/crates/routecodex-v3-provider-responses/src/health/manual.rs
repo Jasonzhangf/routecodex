@@ -1,14 +1,15 @@
 //! 手动冷却操作（WebUI 手动加入 / 人工探测）的 store 入口。
 //!
 //! 手动写入直接落在 `V3ProviderHealthState` 的既有 typed 控制面：
-//! `auth_key_cooldowns` 与 `provider_cooldown_probes`。没有标记字段、没有
-//! 第二份 map，selection 侧与失败驱动冷却完全同形。
+//! `auth_key_cooldowns` 与 `provider_cooldown_probes`。手工 probe 使用现有
+//! cooldown_cause 类型标记；selection 侧与失败驱动冷却使用同一状态。
 
 use super::persistence::persist_cooldown_state;
 use super::{
     V3ProviderCooldown, V3ProviderCooldownProbeState, V3ProviderHealthError, V3ProviderHealthState,
     V3ProviderHealthStore,
 };
+use crate::global_cooldown::V3ProviderCooldownFailureClass;
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
     V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
@@ -60,7 +61,7 @@ fn upsert_manual_probe_cooldown(
     state.provider_cooldown_probes.insert(
         key,
         V3ProviderCooldownProbeState {
-            cooldown_cause: existing.as_ref().and_then(|probe| probe.cooldown_cause),
+            cooldown_cause: Some(V3ProviderCooldownFailureClass::ManualAuth),
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(next_probe_at_ms),
             probe_interval_ms: existing
@@ -327,11 +328,14 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert!(
             !store
                 .availability("p", Some("k"), Some("m"), 1_000)
+                .unwrap()
                 .available
         );
         // 到点后仍不可用：冷却由「探针成功」而不是墙上时钟解除，配对 probe 条目
         // 仍 pending；这与失败驱动的 auth_key 冷却完全一致（D6 不可区分）。
-        let expired_but_probing = store.availability("p", Some("k"), Some("m"), 61_000);
+        let expired_but_probing = store
+            .availability("p", Some("k"), Some("m"), 61_000)
+            .unwrap();
         assert!(
             !expired_but_probing.available,
             "a cooled identity is released by a successful probe, not by wall-clock expiry"
@@ -358,7 +362,9 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         store
             .complete_provider_cooldown_probe_success_with_permit(&permit, 62_000)
             .expect("probe success");
-        let released = store.availability("p", Some("k"), Some("m"), 62_000);
+        let released = store
+            .availability("p", Some("k"), Some("m"), 62_000)
+            .unwrap();
         assert!(
             released.available,
             "a successful probe must release the identity: {:?}",
@@ -386,6 +392,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert!(
             !store
                 .availability("p", Some("k"), Some("m"), 1_000)
+                .unwrap()
                 .available
         );
         assert!(store
@@ -500,6 +507,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert!(
             !store
                 .availability("p", Some("k"), Some("other-model"), 1_000)
+                .unwrap()
                 .available
         );
         assert_eq!(
@@ -638,6 +646,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert!(
             !restored
                 .availability("p", Some("k"), Some("m"), 2_000)
+                .unwrap()
                 .available
         );
         // Restart re-arms the probe schedule for every persisted cooldown
@@ -673,6 +682,7 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         assert!(
             !restored
                 .availability("p", Some("k"), Some("m"), 2_000)
+                .unwrap()
                 .available,
             "the persisted probe half of the auth_key pair must keep blocking after restart"
         );

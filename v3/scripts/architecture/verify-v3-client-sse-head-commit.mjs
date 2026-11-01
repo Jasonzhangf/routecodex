@@ -22,8 +22,8 @@ if (feature?.owner_crate !== 'routecodex-v3-server') {
 if (!feature?.allowed_paths?.includes(sourcePath)) {
   failures.push('client SSE transport source must belong to the declared owner');
 }
-if (!feature?.resource_bindings?.includes('v3.front.request_activity_gate')) {
-  failures.push('client SSE transport must bind its request activity resource');
+if (feature?.resource_bindings?.includes('v3.front.request_activity_gate')) {
+  failures.push('client SSE transport must not bind a request admission gate');
 }
 if (!feature?.mainline_bindings?.includes(stepId)) {
   failures.push('client SSE transport must bind its mainline edge');

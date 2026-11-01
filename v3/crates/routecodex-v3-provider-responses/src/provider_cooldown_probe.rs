@@ -9,8 +9,29 @@ use std::collections::BTreeMap;
 /// 重启只重置 probe 历史，下一次冷却仍从 5s 档开始。
 pub const V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS: u64 = 5_000;
 
+/// Recoverable health belongs to one real session; identity-wide health is
+/// reserved for policies that explicitly apply across sessions.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum V3ProviderCooldownHealthScope {
+    Identity,
+    Session {
+        server_id: String,
+        session_id: String,
+    },
+}
+
+impl V3ProviderCooldownHealthScope {
+    pub fn from_session(scope: &routecodex_v3_error::V3ProviderFailureSessionScope) -> Self {
+        Self::Session {
+            server_id: scope.server_id().to_owned(),
+            session_id: scope.session_id().to_owned(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ProviderCooldownProbeKey {
+    pub scope: V3ProviderCooldownHealthScope,
     pub provider_id: String,
     pub interface_id: String,
     pub auth_alias: Option<String>,
@@ -52,10 +73,24 @@ pub fn provider_cooldown_probe_key_for_interface(
     model_id: Option<&str>,
 ) -> V3ProviderCooldownProbeKey {
     V3ProviderCooldownProbeKey {
+        scope: V3ProviderCooldownHealthScope::Identity,
         provider_id: provider_id.to_string(),
         interface_id: interface_id.to_string(),
         auth_alias: auth_alias.map(str::to_string),
         model_id: model_id.map(str::to_string),
+    }
+}
+
+pub(crate) fn session_cooldown_probe_key_for_interface(
+    session: &routecodex_v3_error::V3ProviderFailureSessionScope,
+    provider_id: &str,
+    interface_id: &str,
+    auth_alias: Option<&str>,
+    model_id: Option<&str>,
+) -> V3ProviderCooldownProbeKey {
+    V3ProviderCooldownProbeKey {
+        scope: V3ProviderCooldownHealthScope::from_session(session),
+        ..provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id)
     }
 }
 

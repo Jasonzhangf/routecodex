@@ -49,8 +49,8 @@ flowchart LR
 - Per request: `required`
 - Process global: `required`
 - Residence/deadline: `required`
-- Provider stream deadline guard: `required_for_direct_and_relay_before_semantic_terminal`
-- Residence expiry: `typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty`
+- Provider stream deadline guard: `required_until_first_real_semantic_output`
+- Residence expiry: `preserve_original_budget_and_wait_without_business_lease_while_recovery_possible`
 - Reserve before append/copy: `true`
 - Initial storage: `bounded_memory_only`
 - Disk spill: `forbidden`

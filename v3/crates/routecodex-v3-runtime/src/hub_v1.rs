@@ -87,6 +87,8 @@ pub use req_inbound_01_client_raw::*;
 mod req_inbound_02_normalized;
 pub use req_inbound_02_normalized::*;
 mod req_chat_process_04_governed;
+pub(crate) use req_chat_process_04_governed::project_selected_provider_images;
+pub(crate) use req_chat_process_04_governed::project_selected_provider_hosted_search;
 pub use req_chat_process_04_governed::build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02;
 pub use req_chat_process_04_governed::V3HubReqChatProcess04Governed;
 mod req_execution_05_planned;

@@ -8,14 +8,14 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::V3ProviderFailureSessionScope;
 use routecodex_v3_provider_responses::{
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderHealthError, V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 use routecodex_v3_runtime::{
     build_v3_execution_11_protocol_decision_from_v3_target_10,
     plan_v3_responses_protocol_execution_with_provider_health, V3Execution11ProtocolDecisionMode,
     V3HubProviderWireProtocol, V3ProviderFailureRuntimeHealth, V3Server03HttpRequestRaw,
 };
-use routecodex_v3_target::V3TargetInterpreter;
+use routecodex_v3_target::{V3TargetInterpreter, V3TargetSelectionError};
 use routecodex_v3_virtual_router::V3VirtualRouter;
 use serde_json::{json, Value};
 
@@ -271,7 +271,7 @@ fn target_public_boundary_reports_typed_selection_exhaustion() {
             priority: i32,
             base_weight: u32,
             _now_ms: u64,
-        ) -> V3ProviderSchedulingProjection {
+        ) -> Result<V3ProviderSchedulingProjection, V3ProviderHealthError> {
             let mut projection = V3ProviderSchedulingProjection::new(
                 provider_id,
                 "default",
@@ -285,7 +285,7 @@ fn target_public_boundary_reports_typed_selection_exhaustion() {
             projection
                 .blocked_scopes
                 .push("health_cooldown".to_string());
-            projection
+            Ok(projection)
         }
     }
 
@@ -307,6 +307,9 @@ fn target_public_boundary_reports_typed_selection_exhaustion() {
     let exhausted = target
         .select_available_with_health(expanded, &UnavailableScheduling, 500, 0)
         .expect_err("unavailable concrete candidates must return typed exhaustion");
+    let V3TargetSelectionError::Exhausted(exhausted) = exhausted else {
+        panic!("unavailable concrete candidates must return typed exhaustion");
+    };
 
     assert_eq!(
         exhausted.attempted_candidates,

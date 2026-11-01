@@ -618,7 +618,10 @@ fn classify_v3_provider_anthropic_json_event(
                     has_string(delta.get("thinking").or_else(|| delta.get("text")))?
                 }
                 "input_json_delta" => has_string(delta.get("partial_json"))?,
-                "signature_delta" => has_string(delta.get("signature"))?,
+                // Preserve signatures as opaque protocol data. A signature
+                // alone is no model text, reasoning or tool progress and must
+                // not disarm the first-semantic-output deadline.
+                "signature_delta" => false,
                 "citations_delta" => delta.get("citation").is_some(),
                 other => {
                     return Err(format!(
