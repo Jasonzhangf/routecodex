@@ -63,7 +63,7 @@ use axum::http::{
 };
 use axum::routing::{get, post};
 use axum::Router;
-use client_sse_transport::accept_v3_client_sse_transport;
+use client_sse_transport::{accept_v3_client_sse_transport, V3ClientDisconnectSlot};
 use debug_runtime_degradation::build_v3_debug_runtime_degrading_optional_log_sink;
 use futures_util::{stream, StreamExt};
 use libc::EINTR;
@@ -1228,6 +1228,9 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         }
         None => (None, None),
     };
+    let client_disconnect_slot = client_sse_channel
+        .is_some()
+        .then(V3ClientDisconnectSlot::new);
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
         Box::pin(pending_endpoint_after_json_parse(
             Arc::clone(&state),
@@ -1242,6 +1245,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             request_purpose,
             client_frame_sink,
             payload,
+            client_disconnect_slot.clone(),
         ));
     let response = match client_sse_channel {
         Some(keepalive_interval) => {
@@ -1263,6 +1267,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                 }),
                 keepalive_interval,
                 client_wire_capture,
+                client_disconnect_slot,
             )
             .await
         }
@@ -1413,6 +1418,7 @@ fn record_and_emit_v3_error_projection(
             error_chain: input.error_chain,
             health_action: input.health_action,
             upstream_request_id: input.upstream_request_id,
+            ..Default::default()
         },
     ) {
         let line = format_v3_console_timed_content(
