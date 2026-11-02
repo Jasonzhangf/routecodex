@@ -14,6 +14,7 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt;
 use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc};
 use tokio::{
@@ -11453,6 +11454,106 @@ fn namespace_public_provider_tools(body: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn namespace_public_flatten_declarations(tools: &[Value]) -> Result<Vec<(String, Value)>, String> {
+    fn visit(
+        tool: &Value,
+        namespace: &mut Vec<String>,
+        flattened: &mut Vec<(String, Value)>,
+    ) -> Result<(), String> {
+        match tool.get("type").and_then(Value::as_str) {
+            Some("namespace") => {
+                let namespace_name = tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                    .ok_or_else(|| "namespace declaration requires a name".to_string())?;
+                namespace.push(namespace_name.to_owned());
+                let children = tool
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| format!("namespace {namespace_name} requires a tools array"))?;
+                for child in children {
+                    visit(child, namespace, flattened)?;
+                }
+                namespace.pop();
+            }
+            Some("function" | "custom") => {
+                let leaf_name = namespace_public_tool_wire_name(tool)
+                    .ok_or_else(|| "tool declaration requires a name".to_string())?;
+                let wire_name = if namespace.is_empty() {
+                    leaf_name.to_owned()
+                } else {
+                    format!("{}__{leaf_name}", namespace.join("__"))
+                };
+                let mut declaration = tool.clone();
+                if declaration.get("name").is_some() {
+                    declaration["name"] = Value::String(wire_name.clone());
+                } else {
+                    declaration["function"]["name"] = Value::String(wire_name.clone());
+                }
+                flattened.push((wire_name, declaration));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    let mut flattened = Vec::new();
+    let mut namespace = Vec::new();
+    for tool in tools {
+        visit(tool, &mut namespace, &mut flattened)?;
+    }
+    Ok(flattened)
+}
+
+/// The controlled provider flattens nested namespaces itself, then merges the
+/// resulting declarations. It accepts a request only when both declaration
+/// surfaces resolve to the same wire name with the same declaration body.
+fn namespace_public_validate_declaration_surfaces(body: &Value) -> Result<(), String> {
+    let mut root = BTreeMap::new();
+    for (name, declaration) in
+        namespace_public_flatten_declarations(&namespace_public_provider_tools(body))?
+    {
+        if let Some(existing) = root.get(&name) {
+            if existing != &declaration {
+                return Err(format!(
+                    "root tools declare conflicting bodies for wire name {name}: {existing} vs {declaration}"
+                ));
+            }
+        } else {
+            root.insert(name, declaration);
+        }
+    }
+
+    for item in body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+    {
+        let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+            continue;
+        };
+        for (name, declaration) in namespace_public_flatten_declarations(tools)? {
+            match root.get(&name) {
+                Some(root_declaration) if root_declaration == &declaration => {}
+                Some(root_declaration) => {
+                    return Err(format!(
+                        "additional_tools declaration {name} conflicts with root declaration: {declaration} vs {root_declaration}"
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "additional_tools declaration {name} has no matching root declaration"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn namespace_public_upstream(
     State(state): State<Arc<NamespacePublicUpstreamState>>,
     headers: HeaderMap,
@@ -11462,6 +11563,20 @@ async fn namespace_public_upstream(
         .captures
         .send(ProviderCapture::from_http(&headers, body.clone()))
         .unwrap();
+    if let Err(error) = namespace_public_validate_declaration_surfaces(&body) {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"error": {"type": "invalid_request_error", "message": error}}).to_string(),
+            ))
+            .unwrap();
+    }
+    let provider_tools = namespace_public_provider_tools(&body);
+    let declared_call_ids: BTreeSet<&str> = provider_tools
+        .iter()
+        .filter_map(|tool| namespace_public_tool_description(tool)?.strip_prefix("NS_DECL:"))
+        .collect();
     let has_tool_output = body
         .get("input")
         .and_then(Value::as_array)
@@ -11470,7 +11585,10 @@ async fn namespace_public_upstream(
                 matches!(
                     item.get("type").and_then(Value::as_str),
                     Some("function_call_output" | "custom_tool_call_output")
-                )
+                ) && item
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|call_id| declared_call_ids.contains(call_id))
             })
         });
     let output = if has_tool_output {
@@ -12314,6 +12432,373 @@ async fn responses_direct_namespace_identity_covers_declaration_sources_and_coll
         collision_request,
     )
     .await;
+
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_PROTOCOL_DECISION_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_additional_tools_namespace_root_collision_round_trip_for_public_consumer()
+{
+    let _test_guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("additional-tools-root-collision-public");
+    // This case counts provider attempts, so the Chat Process continuation must
+    // not add an extra execution.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    std::env::set_var(
+        "V3_PROTOCOL_DECISION_KEY",
+        "additional-tools-root-collision-public",
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let (captures_tx, mut captures) = mpsc::unbounded_channel();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/responses", post(namespace_public_upstream))
+                .with_state(Arc::new(NamespacePublicUpstreamState {
+                    captures: captures_tx,
+                })),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    let handle = spawn_v3_server_aggregate(responses_direct_binding_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        "responses",
+        &base_url,
+        r#""direct""#,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap();
+    let call_id = "call_ns_additional_collision";
+    let history_call_id = "call_history_collision";
+
+    for stream in [false, true] {
+        let label = if stream {
+            "additional-tools-root-collision-sse"
+        } else {
+            "additional-tools-root-collision-json"
+        };
+        let request = json!({
+            "model": "client-test",
+            "stream": stream,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "NS_COLLISION_ROUNDTRIP"}]
+                },
+                {
+                    "type": "function_call",
+                    "call_id": history_call_id,
+                    "namespace": "functions",
+                    "name": "wait",
+                    "arguments": "{\"cell_id\":\"history_cell\"}"
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": history_call_id,
+                    "output": "HISTORY_KEPT"
+                },
+                {
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": [{
+                        "type": "namespace",
+                        "name": "functions",
+                        "tools": [{
+                            "type": "function",
+                            "name": "wait",
+                            "description": format!("NS_DECL:{call_id}"),
+                            "parameters": {"type": "object", "required": ["cell_id"]}
+                        }]
+                    }]
+                }
+            ],
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "functions",
+                    "tools": [{
+                        "type": "function",
+                        "name": "wait",
+                        "parameters": {"type": "object", "required": ["cell_id"]}
+                    }]
+                },
+                {
+                    "type": "function",
+                    "name": "functions__wait",
+                    "description": "NS_PLAIN:functions__wait",
+                    "parameters": {"type": "object"}
+                }
+            ]
+        });
+        let response = client
+            .post(&endpoint)
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&request)
+            .send()
+            .await;
+        let first = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap_or_else(|_| {
+                panic!("[{label}] first provider attempt must reach controlled upstream")
+            })
+            .unwrap_or_else(|| panic!("[{label}] controlled upstream must capture first request"));
+        let validation = namespace_public_validate_declaration_surfaces(&first.body);
+        assert!(
+            validation.is_ok(),
+            "[{label}] controlled provider must accept consistent declaration surfaces: {validation:?}; provider_body={}",
+            first.body
+        );
+        let response = response.unwrap_or_else(|error| {
+            panic!("[{label}] public request must complete through /v1/responses: {error}")
+        });
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "[{label}] first provider attempt must accept the request"
+        );
+        let wire = response.text().await.unwrap();
+
+        let provider_tools = namespace_public_provider_tools(&first.body);
+        let plain = provider_tools
+            .iter()
+            .find(|tool| {
+                namespace_public_tool_description(tool)
+                    .is_some_and(|description| description == "NS_PLAIN:functions__wait")
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "[{label}] provider-bound root tools must keep the colliding plain declaration: {}",
+                    first.body
+                )
+            });
+        assert_eq!(
+            namespace_public_tool_wire_name(plain),
+            Some("functions__wait"),
+            "[{label}] the plain root declaration keeps its name: {}",
+            first.body
+        );
+        let namespaced = provider_tools
+            .iter()
+            .find(|tool| {
+                namespace_public_tool_description(tool)
+                    .is_some_and(|description| description == format!("NS_DECL:{call_id}"))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "[{label}] provider-bound root tools must keep the namespaced declaration: {}",
+                    first.body
+                )
+            });
+        let wire_name = namespace_public_tool_wire_name(namespaced)
+            .unwrap_or_else(|| panic!("[{label}] namespaced declaration must have a wire name"))
+            .to_owned();
+        assert_ne!(
+            wire_name, "functions__wait",
+            "[{label}] the namespaced declaration must not reuse the plain root name"
+        );
+
+        let first_input = first.body["input"].as_array().unwrap();
+        let additional_item = first_input
+            .iter()
+            .find(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+            .unwrap_or_else(|| {
+                panic!("[{label}] provider request must retain additional_tools history")
+            });
+        let additional_tools = additional_item["tools"].as_array().unwrap();
+        assert!(
+            additional_tools
+                .iter()
+                .all(|tool| tool.get("type").and_then(Value::as_str) != Some("namespace")),
+            "[{label}] the collision-bound additional_tools surface must be flat: {additional_tools:?}"
+        );
+        let additional_flattened = namespace_public_flatten_declarations(additional_tools)
+            .unwrap_or_else(|error| {
+                panic!("[{label}] additional_tools declarations must be well formed: {error}")
+            });
+        assert_eq!(
+            additional_flattened.len(),
+            1,
+            "[{label}] one additional_tools declaration must reach the provider: {additional_tools:?}"
+        );
+        assert_eq!(
+            additional_flattened[0].0, wire_name,
+            "[{label}] both declaration surfaces must use the same bound name"
+        );
+        assert_eq!(
+            &additional_flattened[0].1, namespaced,
+            "[{label}] both declaration surfaces must carry the same declaration body"
+        );
+
+        let history_call = first_input
+            .iter()
+            .find(|item| item["type"] == "function_call" && item["call_id"] == history_call_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "[{label}] provider request must retain the history tool call: {}",
+                    first.body
+                )
+            });
+        assert_eq!(
+            history_call["name"], wire_name,
+            "[{label}] history call must use the same wire binding"
+        );
+        assert!(
+            history_call.get("namespace").is_none(),
+            "[{label}] provider history call must use its wire binding without a namespace: {history_call}"
+        );
+        assert_eq!(
+            history_call["arguments"], "{\"cell_id\":\"history_cell\"}",
+            "[{label}] history call arguments must survive"
+        );
+        let history_output = first_input
+            .iter()
+            .find(|item| {
+                item["type"] == "function_call_output" && item["call_id"] == history_call_id
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "[{label}] provider request must retain the paired history tool result: {}",
+                    first.body
+                )
+            });
+        assert_eq!(
+            history_output["output"], "HISTORY_KEPT",
+            "[{label}] paired history tool result must survive"
+        );
+
+        let call = namespace_public_client_call(&wire, stream, call_id);
+        assert_eq!(
+            call["namespace"], "functions",
+            "[{label}] client call: {call}"
+        );
+        assert_eq!(call["name"], "wait", "[{label}] client call: {call}");
+        assert_eq!(
+            call["type"], "function_call",
+            "[{label}] client call kind: {call}"
+        );
+        assert_eq!(
+            call["arguments"], "{\"probe\":1}",
+            "[{label}] client call arguments: {call}"
+        );
+        assert_eq!(call["call_id"], call_id, "[{label}] client call: {call}");
+
+        let output_text = json!({"handled": "wait", "read_only": true}).to_string();
+        let mut followup = request.clone();
+        followup["input"].as_array_mut().unwrap().push(call.clone());
+        followup["input"].as_array_mut().unwrap().push(json!({
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": output_text
+        }));
+        followup["tool_choice"] = json!("none");
+        let second_response = client
+            .post(&endpoint)
+            .header(
+                "accept",
+                if stream {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                },
+            )
+            .json(&followup)
+            .send()
+            .await;
+        let second = timeout(Duration::from_secs(5), captures.recv())
+            .await
+            .unwrap_or_else(|_| {
+                panic!("[{label}] follow-up provider attempt must reach controlled upstream")
+            })
+            .unwrap_or_else(|| {
+                panic!("[{label}] controlled upstream must capture follow-up request")
+            });
+        let validation = namespace_public_validate_declaration_surfaces(&second.body);
+        assert!(
+            validation.is_ok(),
+            "[{label}] follow-up declaration surfaces must stay consistent: {validation:?}; provider_body={}",
+            second.body
+        );
+        let second_response = second_response.unwrap_or_else(|error| {
+            panic!("[{label}] follow-up request must complete through /v1/responses: {error}")
+        });
+        assert_eq!(
+            second_response.status(),
+            StatusCode::OK,
+            "[{label}] follow-up provider attempt must accept the request"
+        );
+        let second_wire = second_response.text().await.unwrap();
+        assert!(
+            second_wire.contains("NS_CASE_DONE"),
+            "[{label}] follow-up client response must carry the business completion: {second_wire}"
+        );
+
+        let second_input = second.body["input"].as_array().unwrap();
+        for (paired_call_id, paired_arguments, paired_output) in [
+            (call_id, "{\"probe\":1}", output_text.as_str()),
+            (
+                history_call_id,
+                "{\"cell_id\":\"history_cell\"}",
+                "HISTORY_KEPT",
+            ),
+        ] {
+            let paired_call = second_input
+                .iter()
+                .find(|item| item["type"] == "function_call" && item["call_id"] == paired_call_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "[{label}] follow-up provider input must retain call {paired_call_id}: {}",
+                        second.body
+                    )
+                });
+            assert_eq!(
+                paired_call["name"], wire_name,
+                "[{label}] call {paired_call_id} must reuse the same wire binding"
+            );
+            assert_eq!(
+                paired_call["arguments"], paired_arguments,
+                "[{label}] call {paired_call_id} arguments must survive"
+            );
+            let paired_result = second_input
+                .iter()
+                .find(|item| {
+                    item["type"] == "function_call_output"
+                        && item["call_id"] == paired_call_id
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "[{label}] follow-up provider input must retain the paired result for {paired_call_id}: {}",
+                        second.body
+                    )
+                });
+            assert_eq!(
+                paired_result["output"], paired_output,
+                "[{label}] paired result for {paired_call_id} must survive"
+            );
+        }
+    }
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();
