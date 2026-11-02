@@ -48,6 +48,8 @@ const TOOL_NAME: &str = "lookup";
 const TOOL_CALL_ID: &str = "call_xcreate_lookup_1";
 const TOOL_QUERY: &str = "glm-prompt-cache";
 const TOOL_RECEIPT: &str = "XCREATE_LOOKUP_RECEIPT: prompt_cache_key omitted";
+const NVIDIA_MARKER: &str = "NVIDIA_GLM_PUBLIC_OK";
+const NVIDIA_INCLUDE_ERROR_BODY: &str = r#"{"message":"Validation: Unsupported parameter(s): `include`","type":"Bad Request","code":400}"#;
 
 #[derive(Clone)]
 struct Upstream {
@@ -147,6 +149,50 @@ async fn controlled_preserving_glm_upstream(
             "choices": [{
                 "index": 0,
                 "message": {"role": "assistant", "content": UNRELATED_MARKER},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}
+        })),
+    )
+}
+
+/// Faithful NVIDIA GLM Chat response for the retained 2026-10-25 sample: the
+/// free GLM endpoint rejects Responses-only `include` with this exact body.
+async fn controlled_nvidia_glm_upstream(
+    State(state): State<Upstream>,
+    Json(body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    state.captures.lock().await.push(body.clone());
+    if body.get("include").is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::from_str(NVIDIA_INCLUDE_ERROR_BODY)
+                    .expect("nvidia include 400 fixture must be json"),
+            ),
+        );
+    }
+    if body.get("prompt_cache_key").is_some() || body.get("verbosity").is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "invalid_request_error",
+                    "message": "prompt_cache_key and verbosity are not supported by this GLM endpoint"
+                }
+            })),
+        );
+    }
+    (
+        StatusCode::OK,
+        Json(json!({
+            "id": "chatcmpl-nvidia-glm-public-1",
+            "object": "chat.completion",
+            "model": NVIDIA_WIRE_MODEL,
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": NVIDIA_MARKER},
                 "finish_reason": "stop"
             }],
             "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}
@@ -441,7 +487,7 @@ async fn xcreate_free_glm_chat_public_entry_omits_prompt_cache_key_and_completes
 }
 
 #[tokio::test]
-async fn nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity() {
+async fn nvidia_glm_chat_public_entry_omits_unsupported_chat_fields() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(NVIDIA_KEY_ENV, "controlled-nvidia-secret");
 
@@ -454,7 +500,7 @@ async fn nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity() {
     let captures = Arc::new(Mutex::new(Vec::new()));
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let app = Router::new()
-        .route("/v1/chat/completions", post(controlled_glm_upstream))
+        .route("/v1/chat/completions", post(controlled_nvidia_glm_upstream))
         .with_state(Upstream {
             captures: captures.clone(),
         });
@@ -488,6 +534,8 @@ async fn nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity() {
         "input": [{"role": "user", "content": "hello from nvidia"}],
         "prompt_cache_key": "session-nvidia",
         "text": {"verbosity": "high"},
+        "include": ["reasoning.encrypted_content"],
+        "reasoning": {"effort": "medium", "summary": "detailed"},
         "tools": declared_tools(),
         "stream": false
     });
@@ -496,6 +544,16 @@ async fn nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity() {
         status,
         StatusCode::OK,
         "nvidia GLM Chat target must accept the public-entry request: {body}"
+    );
+    assert_eq!(
+        body["status"], "completed",
+        "nvidia GLM Chat target must complete: {body}"
+    );
+    assert_eq!(
+        body.pointer("/output/0/content/0/text")
+            .and_then(Value::as_str),
+        Some(NVIDIA_MARKER),
+        "client-visible provider content lost: {body}"
     );
 
     let observed = captures.lock().await;
@@ -516,6 +574,16 @@ async fn nvidia_glm_chat_public_entry_omits_prompt_cache_key_and_verbosity() {
     assert!(
         wire.get("verbosity").is_none(),
         "nvidia GLM wire must omit verbosity: {wire}"
+    );
+    assert!(
+        wire.get("include").is_none(),
+        "nvidia GLM wire must omit the Responses-only include field: {wire}"
+    );
+    // The retained 4939 wire carries reasoning_effort "high"; keep that
+    // supported field unchanged while removing only include.
+    assert_eq!(
+        wire["reasoning_effort"], "high",
+        "supported reasoning effort lost: {wire}"
     );
     assert!(wire.get("tools").is_some(), "supported tools lost: {wire}");
 

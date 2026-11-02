@@ -836,6 +836,125 @@ mod tests {
     }
 
     #[test]
+    fn glm_chat_include_follows_the_declared_provider_wire_scope() {
+        for (provider_id, interface_id, model_id, wire_model, profile, expect_removed) in [
+            (
+                "nvidia",
+                "default",
+                "z-ai/glm-5.3-flash",
+                "z-ai/glm-5.3-flash",
+                None,
+                true,
+            ),
+            (
+                "xcreate-free",
+                "default",
+                "z-ai/glm-5.3-flash",
+                "z-ai/glm-5.3-flash",
+                None,
+                true,
+            ),
+            (
+                "xcreate",
+                "openai_free",
+                "z-ai/glm-5.3-flash",
+                "z-ai/glm-5.3-flash",
+                None,
+                true,
+            ),
+            (
+                "xcreate",
+                "openai_paid",
+                "z-ai/glm-5.3-flash",
+                "z-ai/glm-5.3-flash",
+                None,
+                false,
+            ),
+            (
+                "future-glm-host",
+                "default",
+                "z-ai/glm-5.3-flash",
+                "z-ai/glm-5.3-flash",
+                None,
+                false,
+            ),
+            (
+                "nvidia",
+                "default",
+                "deepseek-ai/deepseek-v4.1-flash",
+                "deepseek-ai/deepseek-v4.1-flash",
+                None,
+                false,
+            ),
+            (
+                "xcreate-free",
+                "default",
+                "z-ai/glm-5.3-flash",
+                "z-ai/glm-5.3-flash",
+                Some("compat:passthrough"),
+                false,
+            ),
+        ] {
+            let mut req07 = relay_req07_for_entry(
+                V3HubEntryProtocol::Responses,
+                json!({
+                    "model": "client-route-alias",
+                    "input": "hello",
+                    "include": ["reasoning.encrypted_content"],
+                    "stream": false
+                }),
+                V3HubProviderWireProtocol::OpenAiChat,
+            );
+            req07.previous.selected_target.provider_id = provider_id.to_string();
+            req07.previous.selected_target.interface_id = interface_id.to_string();
+            req07.previous.selected_target.model_id = model_id.to_string();
+            req07.previous.selected_target.wire_model = wire_model.to_string();
+            req07.previous.selected_target.compatibility_profile = profile.map(str::to_string);
+
+            let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+                .expect("GLM include scope compat must remain valid");
+            let payload = req_compat.provider_semantic_payload();
+            if expect_removed {
+                assert!(
+                    payload.get("include").is_none(),
+                    "provider={provider_id} interface={interface_id} model={model_id}: {payload}"
+                );
+            } else {
+                assert_eq!(
+                    payload["include"],
+                    json!(["reasoning.encrypted_content"]),
+                    "provider={provider_id} interface={interface_id} model={model_id} profile={profile:?}: {payload}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn glm_responses_wire_keeps_include() {
+        let mut req07 = relay_req07_for_entry(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "include": ["reasoning.encrypted_content"],
+                "stream": false
+            }),
+            V3HubProviderWireProtocol::Responses,
+        );
+        req07.previous.selected_target.provider_id = "xcreate-free".to_string();
+        req07.previous.selected_target.model_id = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.wire_model = "z-ai/glm-5.3-flash".to_string();
+        req07.previous.selected_target.compatibility_profile = None;
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("GLM Responses compat must preserve the Responses field");
+        assert_eq!(
+            req_compat.provider_semantic_payload()["include"],
+            json!(["reasoning.encrypted_content"])
+        );
+    }
+
+    #[test]
     fn unrelated_glm_host_preserves_unsupported_fields() {
         for (model_id, wire_model) in [
             ("nvidia-glm-route-alias", "Z-AI/GLM-5.3-Flash"),
