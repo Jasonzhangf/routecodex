@@ -911,6 +911,16 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 .as_ref()
                 .and_then(|error| error.code.as_deref()),
         );
+    // A real upstream HTTP status (4xx/5xx) is a recoverable provider failure:
+    // keep the declared recovery budget even when this is the last candidate.
+    // A typed transport/body failure with no external status and no remaining
+    // candidate must instead project its typed terminal, or it is masked as a
+    // synthetic `selected_target_exhausted`.
+    let has_upstream_http_status = source
+        .external_error
+        .as_ref()
+        .and_then(|error| error.status)
+        .is_some_and(|external_status| external_status >= 400);
     let failed_key = candidate_key(&selected.candidate);
     let expanded_candidates = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => Some(&expanded.candidates),
@@ -924,6 +934,16 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         }
     };
     let provider_first_byte_hang = is_direct_first_byte_timeout_code(&source.code);
+    // Pre-head transport failures (connect/header/request timeout) are
+    // provider-reachability failures: with no remaining candidate they still
+    // honor the declared recovery budget before the transport disconnects,
+    // instead of projecting the typed terminal immediately. Post-head
+    // response-stage failures (body/SSE decode) project their own typed
+    // terminal so the ledger keeps the real error category.
+    let is_transport_stage_failure = matches!(
+        source.source_stage,
+        "V3Transport13ResponsesHttpRequest" | "V3ProviderReqOutbound09TransportRequest"
+    );
     let request_local_excluded = if provider_first_byte_hang {
         let mut excluded = BTreeSet::from([failed_key.clone()]);
         if let Some(candidates) = expanded_candidates {
@@ -1031,7 +1051,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         state
             .failed_candidates
             .extend(request_local_excluded.iter().cloned());
-    } else if !rate_limited && (is_health_neutral_failure || remaining == 0) {
+    } else if !rate_limited {
         state.failed_candidates.insert(failed_key.clone());
     }
     // Health changes are allowed only after the captured target proves that
@@ -1123,7 +1143,12 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         None => None,
     };
     let target_recovery_pending = context.expanded.is_some_and(|expanded| {
-        (!rate_limited && !is_health_neutral_failure)
+        (!rate_limited
+            && !is_health_neutral_failure
+            && (remaining > 0
+                || has_upstream_http_status
+                || provider_first_byte_hang
+                || is_transport_stage_failure))
             || (remaining == 0
                 && crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
                     expanded,

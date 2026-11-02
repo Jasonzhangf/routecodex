@@ -1535,6 +1535,13 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
+        // `health.enabled=false` means the provider is always available and
+        // no failure may create or join a cooldown or recovery probe. Short
+        // circuit before the cooled-only check so an `if_cooled` caller cannot
+        // route a health-disabled provider into the pre-cool probe path.
+        if state.health_disabled.contains(provider_id) {
+            return Ok(Some(key_health_projection(&state, &key, now_ms)));
+        }
         if only_if_cooled
             && !state
                 .provider_cooldown_probes
