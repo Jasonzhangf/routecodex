@@ -212,8 +212,7 @@ targets = [{{ kind = "provider_model", provider = "strict", model = "wire", key 
     let mut request = if chat {
         json!({"model":"wire","stream":false,"messages":[
         {"role":"user","content":"history"},
-        {"role":"assistant","content":[{"type":"text","text":TEXT,"annotations":[]}]},
-        {"role":"assistant","content":null,"tool_calls":[{"id":"call_history","type":"function","function":{"name":"acceptance_add","arguments":"{\"a\":1,\"b\":2}"}}]},
+        {"role":"assistant","content":[{"type":"text","text":TEXT,"annotations":[]}],"tool_calls":[{"id":"call_history","type":"function","function":{"name":"acceptance_add","arguments":"{\"a\":1,\"b\":2}"}}]},
         {"role":"tool","tool_call_id":"call_history","content":"3"},
         {"role":"user","content":"compute 17+25"}
     ],"tools":[{"type":"function","function":{"name":"acceptance_add","parameters":{"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"]}}}]})
