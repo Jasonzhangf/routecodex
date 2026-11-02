@@ -6,7 +6,8 @@ Use the project's canonical defect flow in `AGENTS.md` and issue contract in
 `.appsdk/skills/appsdk-project-governance/SKILL.md`. This reference supplies the
 per-issue DAG and the required post-restart Codex sample decision. Intake or
 deduplicate every execution-bound defect and carry its authoritative bug ID
-through its own worktree, evidence, review, merge, cleanup, and solution receipt.
+through its own LayerFS task branch/workspace, evidence, review, merge, cleanup,
+and solution receipt.
 The RouteCodex standard defect flow requires commit and merge to `main`; the
 normal repair authorization in the global `AGENTS.md` covers commit, merge, and
 push after the gates pass. The global host orchestrator owns the independent
@@ -15,10 +16,10 @@ merge/push remains an open disposition with its owner and recovery condition.
 
 Do not begin issue execution until the canonical AppSDK intake/dedup returns an
 authoritative bug ID. If intake is unavailable, report the exact blocker and
-recovery condition before creating a worktree or doing issue work; do not invent
-a shadow tracker or ID. The issue owner remains accountable for intake,
-worktree, reproduction, fix, candidate validation, runtime evidence, cleanup,
-and bug disposition. The independent overall review follows author verification
+recovery condition before opening a task branch/workspace or doing issue work; do
+not invent a shadow tracker or ID. The issue owner remains accountable for
+intake, task branch/workspace, reproduction, fix, candidate validation, runtime
+evidence, cleanup, and bug disposition. The independent overall review follows author verification
 and applicable candidate runtime acceptance. The authorized delivery owner
 performs commit/integration after review and applicable CI pass. Review pending
 keeps the integration and bug close open; integration failures go to the delivery owner (the live
@@ -30,10 +31,10 @@ Each issue run has one entry and one disposition exit:
 
 ```text
 bug intake / dedup
--> clean issue worktree at playground/<issue-id> from latest origin/main
+-> issue-owned LayerFS task branch from latest LayerFS main
 -> reproduce + feature DAG/map + first divergence + unique owner + red regression test
 -> minimal owner-scoped fix
--> fetch/combine latest origin/main in the issue worktree
+-> fetch/combine latest origin/main into the task branch
 -> mapped tests/build + author E2E + candidate install/restart/replay when runtime-impacting
 -> health + real-entry replay + post-restart sample audit
 -> effective independent overall architecture review on the tested changes -> candidate commit
@@ -59,8 +60,8 @@ Any failed gate, review finding, mainline drift requiring new validation, or
 explicit cancellation reaches that same node as `open`, with cause, owner,
 recovery condition, and retained-resource disposition. A later attempt starts a
 new DAG run from the persisted bug record; it is not a back-edge in the prior
-run. Keep an active or blocked issue's worktree. Do not emit a solved receipt or
-clean resources still needed for recovery on an incomplete run.
+run. Keep an active or blocked issue's task branch/workspace. Do not emit a
+solved receipt or clean resources still needed for recovery on an incomplete run.
 
 Record actual tests, runtime entry, restart time when applicable and sample
 window. Use ordinary Git operation receipts when integration occurs. Before
@@ -73,8 +74,8 @@ to claim that a test-only or documentation change was loaded. If a managed
 restart is otherwise required or performed, run the sample audit after it.
 
 If candidate or post-merge samples expose a local request failure, deduplicate
-or open its own bug and start an issue-bound run in that bug's own worktree. Do
-not fold independent defects into the current issue. A sample matching this bug,
+or open its own bug and start an issue-bound run in that bug's own task
+branch/workspace. Do not fold independent defects into the current issue. A sample matching this bug,
 recurring from its known baseline, or introduced by its candidate fails this
 issue's gate; independent known local failures require their own bug and
 pre-candidate evidence before they can be excluded from the regression
@@ -108,7 +109,7 @@ failure was local. Classify the attempt from its typed source, upstream status
 and error details, retained wire evidence, and bound probe:
 
 - **Local failure is demonstrated:** deduplicate or open its bug and fix it in
-  that bug's own issue worktree. A
+  that bug's own issue task branch/workspace. A
   matching/recurring failure or a regression introduced by the current
   candidate fails this issue's sample gate. An independent known local issue
   requires its own bug and pre-candidate evidence before exclusion from this
@@ -146,18 +147,20 @@ reported as passing samples.
 ## Resource Closeout DAG
 
 Each issue owner removes only resources created for that issue and proves their
-absence before its disposition receipt: its worktree, its `playground/<issue-id>`,
+absence before its disposition receipt: its LayerFS task branch/workspace,
 temporary files, logs, forwards, and issue-owned processes. Do not remove shared
-runtime processes or another issue's resources. Verify the worktree is absent
-from `git -C <repo> worktree list --porcelain`, `test ! -e <playground>` passes,
-and this run's temporary resources are gone. Preserve the worktree if removal
-fails because it is dirty or still in use; report the owner and blocker.
+runtime processes or another issue's resources. Verify the task branch/workspace
+is removed per the LayerFS Skill; for a pre-existing Git worktree still owned by
+this issue, verify absence from `git -C <repo> worktree list --porcelain` and
+`test ! -e <playground>` passes, and this run's temporary resources are gone.
+Preserve the task branch/workspace or worktree if removal fails because it is
+dirty or still in use; report the owner and blocker.
 
 At project scheduling close, the master owns a separate single-entry,
 single-exit residual-resource DAG:
 
 ```text
-inventory remaining worktrees/playgrounds/tmp/logs/forwards/processes
+inventory remaining Git worktrees, LayerFS task branches/workspaces, tmp/logs/forwards/processes
 -> bind each resource to owner and active/stale evidence
 -> obtain the resource owner's authorized terminal disposition
 -> remove only resources proven stale and authorized for cleanup

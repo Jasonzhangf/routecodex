@@ -107,6 +107,18 @@ Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply 
 | task memory | `docs/agent-routing/40-task-memory-routing.md` |
 | AppSDK governance and legacy ablation | installed `~/.agents/skills/appsdk-project-governance/SKILL.md` |
 
+## LayerFS Task Branch & Git Workflow
+
+RouteCodex 已启用 LayerFS 作为主开发与 Git 同步流程；新任务不再新建 Git worktree，按 LayerFS Skill 执行分支同步、publish、Git 集成与验收。
+
+- 新任务使用 LayerFS task branch 开发，在项目专属 Workspace 内运行；并发任务各有独占 task branch 和唯一 writer。已经同步、空闲且没有未交付内容的工作线可以复用，不为每个后续任务重建。
+- Git main 由 master 管理。Git 同步工作线只负责 Git main 与 LayerFS main 之间的同步（从 Git 获取主线变化，保存 LayerFS commit，并 publish 到 LayerFS main）；task 工作线只负责自身与 LayerFS main 之间的同步。Git main 与 task branch 不直接管理彼此，通过 LayerFS main 交换更新。具体步骤以 `layerfs` Skill 为准。
+- 每次 LayerFS publish 前，在实际待发布候选上运行并通过项目本地 CI。CI 失败时保留原错，修复并重新验证后再 publish；不得 publish 或绕过失败。
+- master 管理独立 Git 元数据与任务提交捕获；多个任务提交可汇合为一个 PR。PR 合并并核对远端后，由 Git 同步工作线更新 LayerFS main。
+- 已有 Git worktree 继续由原 owner 完成原任务和 PR；合并后按规则关闭。不强删、不覆盖、不中断活动、dirty 或尚有未交付内容的工作树；不动他人资源或共享 base。
+- 项目专属事实（`rccv3`、4444/7777、`~/.rcc/config.toml`）记录于本规则；通用分支复用、publish、Git 同步流程引用 `layerfs` Skill，不写入其他项目的路径、Store 或运行入口。
+- 运行入口使用通用 `layerfs --project routecodex`（或 `LAYERFS_PROJECT=routecodex`），项目的 Store 与运行环境差异由项目配置承载；不再写入项目专用命令包装或其他项目的固定路径。
+
 ## Evidence Boundary
 
 Report source, test, build, install, restart, health, same-entry replay, review, merge, and remote receipt separately. Never infer a later level from an earlier one.
@@ -124,10 +136,10 @@ contract and terminal conditions; it does not define a second command flow.
 Every execution-bound local defect, including one found in post-restart Codex
 samples, must be deduplicated or recorded in the project bug tracker and carry
 its authoritative issue ID to a solution receipt. Every repeated regression
-requires a regression test in the mapped required gate. Each issue gets its own
-clean worktree under `playground/<issue-id>` from the latest `origin/main`; do
-not reproduce or fix separate issues in one shared worktree. Classify provider
-sample errors from their typed cause and a probe bound to the same provider,
+requires a regression test in the mapped required gate. Each issue runs on its
+own LayerFS task branch from the latest LayerFS main; do not reproduce or fix
+separate issues in one shared branch, and do not create a new Git worktree.
+Classify provider sample errors from their typed cause and a probe bound to the same provider,
 interface, auth-key identity, and model. A later probe success is an independent
 attempt, not proof that an earlier payload failure was local. Confirmed local
 failures and unresolved causes keep the sample gate open. Confirmed upstream
@@ -138,7 +150,7 @@ and retention limits are in
 
 Do not start issue work until canonical AppSDK intake/dedup returns the bug ID.
 If intake is unavailable, report the blocker and recovery condition before
-creating a worktree; never substitute a local tracker or fabricated ID. The
+opening a task branch/workspace; never substitute a local tracker or fabricated ID. The
 issue owner carries the issue through its gates and cleanup, independent
 reviewers own their review verdicts, the authorized delivery owner handles
 merge/push, and the master owns the separate residual-resource inventory.
@@ -146,7 +158,7 @@ merge/push, and the master owns the separate residual-resource inventory.
 Each issue run has one entry and one disposition exit:
 
 ```text
-bug intake/dedup -> issue-owned clean worktree at latest origin/main
+bug intake/dedup -> issue-owned LayerFS task branch from latest LayerFS main
 -> reproduce + bind feature DAG/maps, first divergence, unique owner, and regression evidence
 -> minimal owner-scoped fix -> fetch/combine latest origin/main
 -> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
@@ -155,7 +167,7 @@ bug intake/dedup -> issue-owned clean worktree at latest origin/main
 -> applicable PR CI PASS -> recheck origin/main -> merge validated candidate into clean main -> push
 -> remote receipt
 -> post-merge verification: runtime path rebuild/install/restart -> health -> real-entry replay -> sample audit; otherwise scoped consumer check
--> issue-owner cleanup of its worktree/playground and temporary resources
+-> issue-owner cleanup of its task branch/workspace and temporary resources
 -> one bug disposition receipt: solved or open
 ```
 
@@ -183,14 +195,14 @@ changes; sample audit covers every managed restart in the issue run. Any failed
 or unavailable gate, resource-cleanup failure, review finding,
 unresolved/local regression sample, merge/push failure, or
 cancellation reaches the same `open` disposition with cause, owner, recovery
-condition, and retained-resource state. Keep an active or blocked worktree; do
+condition, and retained-resource state. Keep an active or blocked task branch/workspace; do
 not clean resources still needed for recovery. A candidate commit, review,
 artifact, restart, or health result alone never proves the bug solved.
 
 The master has a separate residual-resource DAG at scheduling close:
 
 ```text
-inventory remaining worktrees/playgrounds/tmp/logs/forwards/processes
+inventory remaining Git worktrees, LayerFS task branches/workspaces, tmp/logs/forwards/processes
 -> bind each to owner, active/stale status, and evidence
 -> coordinate the owner's authorized terminal disposition
 -> remove only resources proven stale and authorized for cleanup
