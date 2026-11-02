@@ -217,10 +217,10 @@ const cases = [
     name: 'V3 waiter ignores an already-owned exact permit',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs',
     mutate: (source) => source.replace(
-      '(!self.admit_action || !exact_has_active_admission)',
-      '(!self.admit_action || true)',
+      '(!reserve_action || !exact_has_active_admission)',
+      '(!reserve_action || true)',
     ),
-    diagnostic: /missing \(!self\.admit_action \|\| !exact_has_active_admission\)/u,
+    diagnostic: /missing \(!reserve_action \|\| !exact_has_active_admission\)/u,
   },
   {
     name: 'V3 success release drops the retained recovery ticket',
