@@ -2784,9 +2784,12 @@ features:
   status: active
   change_risk: low
   owner_kind: rust_v3_server_console_projection
-  owner_scope: Server owns the typed request identity allocation and console projection; request/response payloads never carry request-count state.
+  owner_scope: Server owns the typed request identity allocation, the idempotent success-only count commit, and the console projection; request/response payloads never carry request-count state.
   owner_modules:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/request_id.rs
+  - v3/crates/routecodex-v3-server/src/request_identity.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   contract:
   - docs/goals/v3-console-request-count-visibility-test-design.md
   - docs/architecture/v3-function-map.yml
@@ -2795,14 +2798,20 @@ features:
   - docs/architecture/manifests/v3.console_request_count_visibility.mainline.yml
   required_positive:
   - One aggregate-shared request counter handle is cloned into every V3 listener.
-  - One atomic V3AllocatedRequestIdentity carries request_id, total_count, and daily_count.
+  - One atomic V3AllocatedRequestIdentity carries request_id, predicted total_count, and predicted daily_count; allocation reserves the monotonic sequence only.
+  - totalCount and windowCount increment only when the allocated identity commits one success terminal.
+  - Relay and Direct SSE lanes commit the success count only when the committed stream reaches its completion terminal, so a dropped or disconnected stream never counts.
   - Request and response console headlines render the same typed total/daily request count.
+  - A version 1 counter file migrates with its success counts as the baseline and a sequence above them.
   required_negative:
   - Listeners must not create per-port request counter handles for the shared persisted file.
+  - Error terminals (admission rejection, error frame, provider exhaustion, SSE failure or disconnect) must never increment totalCount or windowCount.
+  - Provider retries, provider switches, continuation frames, and a repeated completion must not commit the same request twice.
   - Console must not parse total or daily counts from the long request id string.
   - Console must not emit a duplicate pre-route placeholder request block.
   integration:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity --lib -- --nocapture
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test request_count_success_only_public -- --nocapture
   smoke:
   - npm run verify:v3-console-request-count-visibility
   - npm run test:v3-console-request-count-visibility-red-fixtures
@@ -2813,7 +2822,7 @@ features:
   - v3-console-count-04
   completion_rule:
     source: Positive/negative Rust tests plus the request-count verifier and red fixtures pass.
-    runtime: After global install and managed restart, live V3 listeners allocate without request-counter publish failures and print stable typed request counts.
+    runtime: After global install and managed restart, live V3 listeners allocate without request-counter publish failures, print stable typed request counts, and only success terminals advance totalCount/windowCount.
 - feature_id: v3.console_human_readable_layering
   status: source_active_live_verified_5520_realtime_provider_failure
   change_risk: medium

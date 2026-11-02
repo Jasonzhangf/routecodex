@@ -554,8 +554,9 @@ owners:
     request and response headlines.
   owner_kind: rust_v3_server_console_projection
   owner_scope: File-scoped owner of the aggregate-shared V3RequestIdCounter typed
-    allocation extension and its console projection; no per-listener lock, request-id
-    parsing, second counter, or post-allocation reread.
+    allocation extension, its idempotent success-only commit, and its console
+    projection; no per-listener lock, request-id parsing, second counter, or
+    post-allocation reread.
   owner_module: v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
     reads:
@@ -572,11 +573,19 @@ owners:
   canonical_builders:
   - spawn_v3_server_aggregate
   - next_request_identity
+  - commit_request_success
   - format_v3_console_request_count
   allowed_paths:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/request_id.rs
+  - v3/crates/routecodex-v3-server/src/request_identity.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-server/tests/request_count_success_only_public.rs
   - docs/goals/v3-console-request-count-visibility-test-design.md
   - docs/architecture
+  - v3/scripts/architecture/verify-v3-console-request-count-visibility.mjs
+  - v3/scripts/tests/v3-console-request-count-visibility-red-fixtures.mjs
   - package.json
   - .github/workflows/test.yml
   forbidden_paths:

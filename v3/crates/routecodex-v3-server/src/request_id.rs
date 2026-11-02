@@ -3,7 +3,14 @@ use std::env;
 use std::fs;
 use std::io::Read as _;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Version 2 keeps success counts (`totalCount`/`windowCount`) separate from the
+/// monotonic allocation `sequence`. Only a confirmed successful response commits
+/// counts; every request (including errors) consumes a sequence number.
+pub(crate) const V3_REQUEST_ID_COUNTER_VERSION: u64 = 2;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct V3RequestCounterState {
@@ -11,14 +18,46 @@ pub(crate) struct V3RequestCounterState {
     pub(crate) window_count: u64,
     pub(crate) window_key: String,
     pub(crate) updated_at: String,
+    pub(crate) sequence: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct V3AllocatedRequestIdentity {
     pub(crate) request_id: String,
     pub(crate) pipeline_id: String,
+    /// Success count this request will have once it commits, used for display.
     pub(crate) total_count: u64,
+    /// Local-day success count this request will have once it commits.
     pub(crate) daily_count: u64,
+    success_commit: Arc<AtomicBool>,
+}
+
+impl V3AllocatedRequestIdentity {
+    /// Claims the single success commit for this request. Returns `true` only for
+    /// the first caller, so provider retries, provider switches and continuation
+    /// frames sharing one allocation cannot count twice.
+    pub(crate) fn claim_success_commit(&self) -> bool {
+        !self.success_commit.swap(true, Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+impl V3AllocatedRequestIdentity {
+    /// Typed fixture for projection tests that never touch the counter file.
+    pub(crate) fn for_test(
+        request_id: &str,
+        pipeline_id: &str,
+        total_count: u64,
+        daily_count: u64,
+    ) -> Self {
+        Self {
+            request_id: request_id.to_string(),
+            pipeline_id: pipeline_id.to_string(),
+            total_count,
+            daily_count,
+            success_commit: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -45,10 +84,44 @@ impl V3RequestIdCounter {
     ) -> Result<V3AllocatedRequestIdentity, String> {
         let clock = v3_request_id_clock_now()?;
         self.ensure_loaded(&clock)?;
-        if self.state.window_key != clock.local_date_key {
-            self.state.window_key = clock.local_date_key.clone();
-            self.state.window_count = 0;
-        }
+        self.roll_local_day(&clock);
+        // Allocation alone never proves a successful response, so it only
+        // advances the monotonic sequence that keeps request ids unique.
+        self.state.sequence = self
+            .state
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| "V3 request id sequence counter overflowed".to_string())?;
+        self.state.updated_at = clock.utc_iso.clone();
+        self.persist()?;
+        let total_count = self
+            .state
+            .total_count
+            .checked_add(1)
+            .ok_or_else(|| "V3 request id total counter overflowed".to_string())?;
+        let daily_count = self
+            .state
+            .window_count
+            .checked_add(1)
+            .ok_or_else(|| "V3 request id daily counter overflowed".to_string())?;
+        Ok(V3AllocatedRequestIdentity {
+            request_id: format!(
+                "{entry}-{provider}-{model}-{}-{}",
+                clock.local_timestamp, self.state.sequence
+            ),
+            pipeline_id: format!("{entry}-pipeline-{}", self.state.sequence),
+            total_count,
+            daily_count,
+            success_commit: Arc::new(AtomicBool::new(false)),
+        })
+    }
+
+    /// Commits one successful client response. Only this call advances
+    /// `totalCount`/`windowCount`; error responses never reach it.
+    pub(crate) fn commit_request_success(&mut self) -> Result<(), String> {
+        let clock = v3_request_id_clock_now()?;
+        self.ensure_loaded(&clock)?;
+        self.roll_local_day(&clock);
         self.state.total_count = self
             .state
             .total_count
@@ -60,19 +133,14 @@ impl V3RequestIdCounter {
             .checked_add(1)
             .ok_or_else(|| "V3 request id daily counter overflowed".to_string())?;
         self.state.updated_at = clock.utc_iso.clone();
-        self.persist()?;
-        Ok(V3AllocatedRequestIdentity {
-            request_id: format!(
-                "{entry}-{provider}-{model}-{}-{}-{}",
-                clock.local_timestamp, self.state.total_count, self.state.window_count
-            ),
-            pipeline_id: format!(
-                "{entry}-pipeline-{}-{}",
-                self.state.total_count, self.state.window_count
-            ),
-            total_count: self.state.total_count,
-            daily_count: self.state.window_count,
-        })
+        self.persist()
+    }
+
+    fn roll_local_day(&mut self, clock: &V3RequestIdClock) {
+        if self.state.window_key != clock.local_date_key {
+            self.state.window_key = clock.local_date_key.clone();
+            self.state.window_count = 0;
+        }
     }
 
     fn ensure_loaded(&mut self, clock: &V3RequestIdClock) -> Result<(), String> {
@@ -85,6 +153,7 @@ impl V3RequestIdCounter {
                 window_count: 0,
                 window_key: clock.local_date_key.clone(),
                 updated_at: clock.utc_iso.clone(),
+                sequence: 0,
             };
             self.loaded = true;
             return Ok(());
@@ -109,7 +178,7 @@ impl V3RequestIdCounter {
             )
         })?;
         let version = value.get("version").and_then(Value::as_u64).unwrap_or(0);
-        if version != 1 {
+        if version != 1 && version != V3_REQUEST_ID_COUNTER_VERSION {
             return Err(format!(
                 "unsupported V3 request id counter version {version} in {}",
                 self.state_file.display()
@@ -149,11 +218,19 @@ impl V3RequestIdCounter {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        // A version 1 file stored only success counts. Its counts stay the
+        // historical baseline, and the sequence starts at the larger one so a
+        // migrated counter can never re-issue an already published request id.
+        let sequence = value
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| total_count.max(window_count));
         self.state = V3RequestCounterState {
             total_count,
             window_count,
             window_key,
             updated_at,
+            sequence,
         };
         self.loaded = true;
         Ok(())
@@ -169,10 +246,11 @@ impl V3RequestIdCounter {
             })?;
         }
         let body = json!({
-            "version": 1,
+            "version": V3_REQUEST_ID_COUNTER_VERSION,
             "totalCount": self.state.total_count,
             "windowCount": self.state.window_count,
             "windowKey": self.state.window_key,
+            "sequence": self.state.sequence,
             "updatedAt": self.state.updated_at,
         });
         let tmp = self
