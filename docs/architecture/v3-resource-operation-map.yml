@@ -2252,18 +2252,26 @@ resources:
     owner_crate: routecodex-v3-build-tools
     owner_module: v3-independent-build-domain
     owner_node: V3BuildDomain01LocalContractsLoaded
-    identity: [versionSourcePath, buildVersion, sourceSha256]
-    allowed_writers: [v3_release_version_maintenance]
-    allowed_readers: [v3_build_entrypoint, v3_install_entrypoint, v3_pack_entrypoint, cargo_build]
+    identity: [versionSourcePath, buildVersion, ledgerCommittedVersion, ledgerReservedVersion]
+    allowed_writers: [v3_release_version_maintenance, v3_build_version_ledger]
+    allowed_readers: [v3_build_entrypoint, v3_build_version_ledger, v3_install_entrypoint, v3_pack_entrypoint, cargo_build]
     forbidden_writers: [routecodex-v3-runtime, routecodex-v3-server, MetadataCenter, request.normal_payload, provider.wire_payload, response.client_payload]
     canonical_path: v3/package.json
     forbidden_paths: [package.json, src/build-info.ts]
-    release_point: explicit_version_change
+    release_point: per_successful_logical_build
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: anchored
-    required_gates: [npm --prefix v3 run verify:isolation, npm --prefix v3 run verify:ci]
+    required_gates: [npm --prefix v3 run verify:isolation, npm --prefix v3 run test:v3-version-ledger, npm --prefix v3 run verify:ci]
+    notes: >-
+      Build-time allocation is owned by v3/scripts/version-ledger.mjs, whose
+      ledger lives in the shared git common dir (.git/routecodex-v3-build-version.json).
+      Every successful logical build reserves then commits exactly one patch
+      version; a failed build releases its reservation so the version is
+      neither duplicated nor skipped. v3/package.json remains the declared
+      release truth and the ledger seed, and is never rewritten by a build, so
+      CI stays source- and lockfile-read-only.
 
   - resource_id: v3.build.ordinary_cargo_target
     resource_kind: mutable_build_output
