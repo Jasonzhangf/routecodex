@@ -146,10 +146,16 @@ impl ResponsesTransport for TruncatedLimitedThenSuccessTransport {
                 request_id: request.request_id().to_string(),
                 provider_id: request.provider_id().to_string(),
                 status: 200,
-                headers: vec![V3ProviderResponseHeader {
-                    name: "content-type".to_string(),
-                    value: b"application/json".to_vec(),
-                }],
+                headers: vec![
+                    V3ProviderResponseHeader {
+                        name: "content-type".to_string(),
+                        value: b"application/json".to_vec(),
+                    },
+                    V3ProviderResponseHeader {
+                        name: "x-request-id".to_string(),
+                        value: b"upstream-truncated-request".to_vec(),
+                    },
+                ],
                 reason: "error decoding response body: connection closed while reading body"
                     .to_string(),
             });
@@ -336,6 +342,60 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
         "a last-candidate truncated HTTP 200 body must stay health-neutral"
+    );
+}
+
+#[tokio::test]
+async fn relay_stream_transport_failure_preserves_upstream_header_provenance() {
+    let server_id = "relay_stream_provenance";
+    let manifest = manifest(server_id);
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let transport = TruncatedLimitedThenSuccessTransport {
+        captures: Mutex::new(Vec::new()),
+        turn: AtomicUsize::new(0),
+    };
+    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                "test-server",
+                "test-group",
+                "relay-stream-provenance-session",
+            )
+            .expect("test provider failure session scope"),
+            request_id: "req-relay-stream-provenance".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"truncated provider body",
+                "stream":true
+            }),
+        },
+        &transport,
+        &provider_health,
+        V3ResponsesRelayRetryPolicy {
+            same_candidate_retries: 0,
+        },
+    )
+    .await
+    .expect("the failed Relay provider stream must reselect the healthy candidate");
+
+    assert_eq!(output.status, 200);
+    assert_eq!(
+        transport.captures.lock().unwrap().as_slice(),
+        &["limited".to_string(), "minimax".to_string()]
+    );
+    let event = output
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .expect("the failed Relay provider stream must publish one failure event");
+    assert_eq!(event.external_error_kind.as_deref(), Some("transport"));
+    assert_eq!(event.external_error_status, Some(200));
+    assert_eq!(
+        event.upstream_request_id.as_deref(),
+        Some("upstream-truncated-request")
     );
 }
 

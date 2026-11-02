@@ -1269,17 +1269,26 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             upstream_request_id: upstream_request_id_from_headers(&response.headers),
             message: Some(format!("provider returned HTTP {}", response.status)),
         },
+        V3ProviderError::ResponseBodyUnreadable {
+            provider_id,
+            status,
+            headers,
+            reason,
+            ..
+        } => V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Transport,
+            status: Some(*status),
+            code: Some("TRANSPORT_ERROR".to_string()),
+            provider_id: Some(provider_id.clone()),
+            upstream_request_id: upstream_request_id_from_headers(headers),
+            message: Some(reason.clone()),
+        },
         V3ProviderError::Transport {
             provider_id,
             reason,
             ..
         }
         | V3ProviderError::WebSocketTransport {
-            provider_id,
-            reason,
-            ..
-        }
-        | V3ProviderError::ResponseBodyUnreadable {
             provider_id,
             reason,
             ..
