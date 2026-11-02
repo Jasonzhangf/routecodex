@@ -161,19 +161,9 @@ fn apply_v3_typed_responses_event(
     if let Some(error) = extract_v3_provider_event_error(event) {
         return Err(error);
     }
-    if event
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|event_type| !is_supported_typed_responses_event(event_type))
-    {
-        let event_type = event
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        return Err(V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(
-            format!("V3 Responses Relay response event type {event_type} is unsupported"),
-        ));
-    }
+    // Event type names are not an admission boundary. The typed reducer performs
+    // protocol reduction, not business-content judgment; a stream that never
+    // reaches a terminal still fails as the typed EOF error.
     reducer.apply_event(event).map_err(|error| {
         V3ResponsesRelayRuntimeError::ProviderResponseEventCodec(error.to_string())
     })?;
@@ -196,38 +186,6 @@ fn apply_v3_typed_responses_event(
         }
         None => Ok(None),
     }
-}
-
-fn is_supported_typed_responses_event(event_type: &str) -> bool {
-    matches!(
-        event_type,
-        "response.created"
-            | "response.in_progress"
-            | "response.output_item.added"
-            | "response.output_item.done"
-            | "response.content_part.added"
-            | "response.content_part.done"
-            | "response.output_text.delta"
-            | "response.output_text.done"
-            | "response.reasoning_text.delta"
-            | "response.reasoning_text.done"
-            | "response.reasoning_summary_part.added"
-            | "response.reasoning_summary_part.done"
-            | "response.reasoning_summary_text.delta"
-            | "response.reasoning_summary_text.done"
-            | "response.function_call_arguments.delta"
-            | "response.function_call_arguments.done"
-            | "response.custom_tool_call_input.delta"
-            | "response.custom_tool_call_input.done"
-            | "response.completed"
-            | "response.incomplete"
-            | "response.failed"
-            | "response.cancelled"
-            | "response.canceled"
-            | "response.error"
-            | "response.requires_action"
-            | "response.done"
-    ) || !event_type.starts_with("response.")
 }
 
 fn build_typed_responses_terminal_response(
@@ -763,6 +721,38 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
     }
 
     #[test]
+    fn response_done_is_not_a_completed_terminal_alias() {
+        let observation = V3RuntimeStreamObservation::default();
+        let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
+        let mut reducer = V3ResponsesSseReducerState::default();
+        for event_type in ["response.requires_action", "response.done"] {
+            let chunk = format!("data: {{\"type\":\"{event_type}\"}}\n\n");
+            let terminal = observe_v3_runtime_responses_sse_transport_chunk_typed(
+                chunk.as_bytes(),
+                &mut decoder,
+                &observation,
+                &mut reducer,
+            )
+            .expect("compatibility event names must not be an admission failure");
+            match event_type {
+                "response.requires_action" | "response.done" => {
+                    assert!(terminal.is_none(), "{event_type} must not be terminal");
+                }
+                other => panic!("unexpected event type {other}"),
+            }
+        }
+        let completed = observe_v3_runtime_responses_sse_transport_chunk_typed(
+            b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_after_done\",\"status\":\"completed\"}}\n\n",
+            &mut decoder,
+            &observation,
+            &mut reducer,
+        )
+        .expect("a real completed terminal must still be accepted")
+        .expect("response.completed must be terminal");
+        assert_eq!(completed["id"], json!("resp_after_done"));
+    }
+
+    #[test]
     fn missing_type_is_rejected_even_when_sse_event_name_is_registered() {
         let observation = V3RuntimeStreamObservation::default();
         let mut decoder = SseIncrementalDecoder::new(SseTransportLimits::default());
@@ -776,14 +766,5 @@ data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_keepalive_1\"
         .expect_err("SSE event metadata must not supply the semantic type");
         assert!(error.to_string().contains("missing type"));
         assert!(reducer.output_text.is_empty());
-    }
-
-    #[test]
-    fn event_name_registry_is_not_a_semantic_type_source() {
-        assert!(is_supported_typed_responses_event(
-            "response.output_text.delta"
-        ));
-        assert!(is_supported_typed_responses_event("response.completed"));
-        assert!(!is_supported_typed_responses_event("response.unknown"));
     }
 }
