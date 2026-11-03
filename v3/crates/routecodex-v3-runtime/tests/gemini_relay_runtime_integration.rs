@@ -1322,7 +1322,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
 }
 
 #[tokio::test]
-async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_seconds() {
+async fn broker_terminal_validation_holds_while_healthy_alternative_completes_independently() {
     use futures_util::StreamExt;
     let server_id = "gemini_active_recovery";
     const FAILURE_SESSION_ID: &str = "gemini-active-recovery-session";
@@ -1331,8 +1331,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     // The action gate is process-shared, while this second handle keeps the
     // competing request's availability snapshot independent. That lets the
-    // test exercise the same Error05 lane instead of skipping the cooled
-    // primary before an action can be admitted.
+    // test prove a healthy alternative is NOT serialized behind the first
+    // request's Broker terminal validation or recovery lane.
     let competing_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
@@ -1411,10 +1411,24 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    // The second request has a healthy alternative. It must complete while the
+    // first request is still held inside Broker terminal validation, proving
+    // the alternative is not serialized behind another request's recovery lane.
+    let released = tokio::time::timeout(Duration::from_secs(2), waiter)
+        .await
+        .expect("healthy-alternative request must not be blocked by another request's recovery lane")
+        .expect("queued Gemini recovery task panicked")
+        .expect("queued Gemini recovery action failed");
     assert!(
-        !waiter.is_finished(),
-        "active Broker recovery permit expired before validated terminal EOF"
+        !first_runtime.is_finished(),
+        "first request must remain held on Broker terminal validation while the healthy alternative completes"
+    );
+    assert_eq!(released.status, 200);
+    assert!(
+        released
+            .node_trace
+            .contains(&"V3TargetLocalReselected"),
+        "the independent Gemini request must reselect a healthy alternative without an action-gate wait"
     );
 
     drop(terminal_sender);
@@ -1424,8 +1438,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         .expect("first Gemini recovery task panicked")
         .expect("first Gemini recovery attempt failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the controlled committed SSE must be a recovery action"
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the controlled committed SSE must follow a target-local reselection"
     );
     let first_stream = match first.client_body {
         V3GeminiRelayClientBody::Sse(stream) => stream,
@@ -1438,19 +1452,6 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
     assert!(String::from_utf8(committed[0].clone())
         .unwrap()
         .contains("done"));
-
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("validated terminal did not release the queued Gemini recovery action")
-        .expect("queued Gemini recovery task panicked")
-        .expect("queued Gemini recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing Gemini request must also enter Error05 recovery"
-    );
 }
 
 #[tokio::test]
@@ -1788,27 +1789,43 @@ async fn collect_sse_failure(
     let transport = StaticSseTransport {
         chunks: Mutex::new(Some(chunks)),
     };
-    let manifest = manifest_for_action_gate_scope(server_id);
-    let output = execute_v3_gemini_relay_runtime(
-        &manifest,
-        V3GeminiRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-sse-negative".into(),
-            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-            payload: json!({
-                "contents":[{"role":"user","parts":[{"text":"invalid stream"}]}],
-                "stream":true
-            }),
-        },
-        &transport,
+    // The single-candidate negative cases legitimately stay pending until the
+    // declared request residence budget expires. Keep that budget short and
+    // the outer wait bounded so four serial cases cannot consume the runner.
+    let mut manifest = manifest_for_action_gate_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("gemini relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        execute_v3_gemini_relay_runtime(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-sse-negative".into(),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"invalid stream"}]}],
+                    "stream":true
+                }),
+            },
+            &transport,
+        ),
     )
     .await
+    .expect("malformed SSE attempt must settle within the short test residence budget")
     .unwrap();
     let status = output.status;
     let node_trace = output.node_trace;
