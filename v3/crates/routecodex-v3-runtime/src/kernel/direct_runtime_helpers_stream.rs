@@ -387,8 +387,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
                 // the final failed attempt until the declared residence
                 // deadline so the policy owner handles it exactly once, without
                 // retrying or probing the failed identity during the window.
-                let missing_terminal = source.source_kind
-                    == V3ErrorSourceKind::ProviderFailure
+                let missing_terminal = source.source_kind == V3ErrorSourceKind::ProviderFailure
                     && source
                         .external_error
                         .as_ref()
