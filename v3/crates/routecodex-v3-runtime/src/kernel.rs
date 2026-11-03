@@ -1777,11 +1777,59 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 }
                                 V3Error05ExecutionAction::ProjectTerminal => {
                                     if is_missing_terminal_provider_failure {
-                                        let deadline = tokio::time::Instant::from_std(
-                                            attempt_budget.residence_deadline(),
-                                        );
-                                        if tokio::time::Instant::now() < deadline {
-                                            tokio::time::sleep_until(deadline).await;
+                                        // The final failed candidate has no
+                                        // replacement now. Per the active
+                                        // last-provider policy the request
+                                        // stays pending until its residence
+                                        // deadline: consume recovery evidence
+                                        // for other identities in the existing
+                                        // target-recovery owner and reselect
+                                        // immediately when a healthy
+                                        // alternative is admitted. Only the
+                                        // residence deadline ends the request.
+                                        // Pinned targets have no alternative
+                                        // identity, so they stay pending until
+                                        // the deadline.
+                                        let recovered = match expanded.as_ref() {
+                                            Some(expanded_set) => {
+                                                let recovery_now_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                                                    .unwrap_or(now_epoch_ms);
+                                                match crate::operation_runner::plan_execution::wait_for_target_recovery(
+                                                    expanded_set,
+                                                    &provider_health,
+                                                    &direct_failure_session_scope,
+                                                    &mut failed_candidates,
+                                                    &mut request_local_busy_candidates,
+                                                    recovery_now_ms,
+                                                    &attempt_budget,
+                                                )
+                                                .await
+                                                {
+                                                    Ok(recovered) => recovered,
+                                                    Err(error) => {
+                                                        return direct_runtime_helpers_stream::source_failure_output(
+                                                            Ok(error),
+                                                            last_external_http.clone(),
+                                                            trace,
+                                                            &hook_registry,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                let deadline = tokio::time::Instant::from_std(
+                                                    attempt_budget.residence_deadline(),
+                                                );
+                                                if tokio::time::Instant::now() < deadline {
+                                                    tokio::time::sleep_until(deadline).await;
+                                                }
+                                                false
+                                            }
+                                        };
+                                        if recovered {
+                                            retry_selected = None;
+                                            pending_provider_action_recovery = None;
+                                            continue;
                                         }
                                     }
                                     let mut observability = build_v3_direct_runtime_observability(
