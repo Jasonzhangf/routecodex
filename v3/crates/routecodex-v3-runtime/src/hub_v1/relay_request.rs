@@ -855,7 +855,9 @@ mod tests {
     }
 
     #[test]
-    fn govern_chat_request_req04_preserves_history_image_bytes_and_tool_pairing() {
+    fn govern_chat_request_req04_preserves_history_images_before_target_selection() {
+        // Target-specific image projection belongs after candidate selection.
+        // Req04 must keep the canonical history lossless for every target.
         let payload = json!({
             "model": "gpt-5.5",
             "messages": [
@@ -879,7 +881,19 @@ mod tests {
                 "function": {"name": "read_image", "parameters": {"type": "object", "properties": {}}}
             }]
         });
-        let captured = normalized_chat(payload.clone());
+        let captured = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(
+            build_v3_hub_req_inbound_01_client_raw(
+                json!({
+                    "model": "claude-test",
+                    "max_tokens": 128,
+                    "messages": [{"role": "user", "content": "seed"}]
+                }),
+                V3HubEntryProtocol::Anthropic,
+                V3HubInvocationSource::Client,
+                V3HubTransportIntent::Json,
+            ),
+        )
+        .expect("Anthropic inbound normalization");
         let side_output = Arc::new(Mutex::new(None));
 
         let output = run_v3_single_node_operator(
@@ -898,7 +912,7 @@ mod tests {
         assert_eq!(
             output["messages"][0]["content"][1]["image_url"]["url"],
             "data:image/png;base64,HISTORY_USER",
-            "Relay Req04 must not replace history-turn user image bytes"
+            "Req04 must preserve historical user images until a target is selected"
         );
         assert_eq!(
             output["messages"][2]["tool_call_id"], "call_read",
@@ -907,7 +921,7 @@ mod tests {
         assert_eq!(
             output["messages"][2]["content"][0]["image_url"]["url"],
             "data:image/png;base64,HISTORY_TOOL",
-            "history tool image bytes must survive Relay Req04"
+            "Req04 must preserve historical tool images until a target is selected"
         );
         assert_eq!(output["messages"][4]["content"], "now explain it");
     }
