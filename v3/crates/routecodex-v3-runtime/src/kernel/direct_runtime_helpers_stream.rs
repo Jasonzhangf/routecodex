@@ -380,7 +380,25 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             // business attempt as success.
             Err(Err(fault)) => return Err(Err(fault)),
             Err(Ok(_)) if terminal_seen => break,
-            Err(Ok(source)) => return Err(Ok(source)),
+            Err(Ok(source)) => {
+                // A provider SSE stream that ends without its protocol terminal
+                // is an accepted request with a recoverable provider failure,
+                // not a reason for the proxy to close the request early. Hold
+                // the final failed attempt until the declared residence
+                // deadline so the policy owner handles it exactly once, without
+                // retrying or probing the failed identity during the window.
+                let missing_terminal = source.source_kind
+                    == V3ErrorSourceKind::ProviderFailure
+                    && source
+                        .external_error
+                        .as_ref()
+                        .and_then(|external| external.code.as_deref())
+                        == Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL");
+                if missing_terminal {
+                    tokio::time::sleep_until(deadline).await;
+                }
+                return Err(Ok(source));
+            }
         };
         let disposition = frame.disposition;
         if terminal_seen && disposition == V3SseFrameDisposition::Continue {
