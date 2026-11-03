@@ -663,6 +663,129 @@ async fn issue7517a07_client_cancel_not_provider_502() {
     drop(home_guard);
 }
 
+/// Public-entry invariant for the Direct SSE lane: a `/v1/responses`
+/// `stream=true` request that delivers committed business content and then
+/// loses its client must fold into exactly one typed terminal row. This walks
+/// the real listener, the real provider transport, and the persisted
+/// request-record ledger; it does not construct a `V3Server16HttpFrame` helper
+/// value. The test also pins the identity and terminal facts the row must keep.
+#[tokio::test]
+async fn issue7517a07_direct_sse_client_drop_has_one_typed_terminal() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+    let addr = entry.handle.listeners[0].addr;
+
+    let body = json!({
+        "model": CLIENT_MODEL,
+        "input": "deliver-then-hang public direct sse terminal regression",
+        "stream": true
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(addr).await.unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: issue7517a07-direct-sse-terminal\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut delivered = Vec::new();
+    let read = timeout(Duration::from_secs(6), async {
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = socket.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            delivered.extend_from_slice(&buf[..n]);
+            if delivered
+                .windows(b"committed-business".len())
+                .any(|window| window == b"committed-business")
+            {
+                break;
+            }
+        }
+    })
+    .await;
+    drop(socket);
+    eprintln!(
+        "[issue7517a07-direct-sse-terminal] delivered_bytes={} read_ok={:?}",
+        delivered.len(),
+        read.is_ok()
+    );
+    assert!(
+        read.is_ok(),
+        "the public SSE client must observe a stream before closing: {}",
+        String::from_utf8_lossy(&delivered)
+    );
+    assert!(
+        delivered
+            .windows(b"committed-business".len())
+            .any(|window| window == b"committed-business"),
+        "the public SSE client must receive committed business content before closing: {}",
+        String::from_utf8_lossy(&delivered)
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-direct-sse-terminal", &rows);
+    assert_eq!(
+        terminals.len(),
+        1,
+        "one public Direct SSE request must fold into exactly one terminal row: {terminals:#?}"
+    );
+    let terminal = &terminals[0];
+    assert_eq!(
+        terminal["event_type"],
+        json!("request.cancelled"),
+        "the terminal must be the typed client-disconnect event: {terminal}"
+    );
+    let request_id = terminal["meta"]["request_id"]
+        .as_str()
+        .expect("terminal row owns its request identity");
+    assert_eq!(
+        terminal["request_key"],
+        json!(format!("{server_port}:{request_id}")),
+        "the terminal row must stay keyed by port:request_id: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["endpoint"],
+        json!("/v1/responses"),
+        "the terminal must belong to the public Responses entry: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["entry_protocol"],
+        json!("responses"),
+        "the terminal must keep the entry protocol: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["execution_mode"],
+        json!("direct"),
+        "the terminal must stay on the Direct lane: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["transport"],
+        json!("sse"),
+        "the terminal must keep the SSE transport: {terminal}"
+    );
+    assert!(
+        terminal["meta"]["provider_status"].is_null(),
+        "a client disconnect has no provider HTTP status: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["observed_error"]["source"],
+        json!("error01_client_disconnect"),
+        "the terminal must name the typed Error01 client-disconnect source: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["observed_error"]["source"],
+        json!("error06_projection"),
+        "this path holds no V3Error06ClientProjected: {terminal}"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
 /// Sub-form 2: a provider response-body/transport timeout reaches `NoResponse`.
 /// The ledger must name that typed transport terminal instead of provider 502.
 #[tokio::test]
