@@ -445,10 +445,11 @@ resources:
       pool_selection: fixed_order_first_configured_non_empty_match
       classification_order: [web_search, multimodal, longcontext, coding, thinking, search, tools, default]
       longcontext_candidate: retained_current_turn_optional_pool
-      single_pool_plan: true
+      single_pool_plan: false
       optional_pools: absent_or_empty_skipped
       default_pool: required_non_empty
-      cross_pool_default_append: forbidden
+      cross_pool_default_append: explicitly_ordered_after_current_route
+      route_fallback: search_to_tools_to_default_other_routes_to_default
       implicit_capability_pool: forbidden
       priority_order: lower numeric priority tiers precede every higher numeric tier
       weighted_scope: SWRR applies only within one equal-priority tier

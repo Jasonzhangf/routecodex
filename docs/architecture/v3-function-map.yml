@@ -2248,11 +2248,11 @@ features:
     the only model-driven target handoff; every other model string, virtual catalog
     entry, and `auto` value uses current-turn classification and is not filtered or
     selected by `match.models`. Provider aliases are not runtime routing truth.
-  - Ordinary classification resolves one fixed-order first match among configured
-    non-empty pools and captures exactly that pool; it never builds implicit capability
-    pools and never appends default or another pool after the match.
+  - Ordinary classification builds one ordered plan tier per distinct matching
+    non-empty pool and always appends the required non-empty default pool last;
+    it never builds implicit capability pools and never drops a matching pool.
   - Optional pools may be absent or empty and are skipped; the default pool is required,
-    non-empty, and remains the only no-match endpoint for ordinary requests.
+    non-empty, and remains the ordered final floor for ordinary requests.
   - The longcontext capability is retained; an absent or empty longcontext pool is
     skipped and cannot preempt a configured lower-order pool.
   - '`provider.model` direct routing pins a provider only when the segment before the
