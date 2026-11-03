@@ -1978,13 +1978,11 @@ chains:
       - v3.route.request_facts
       side_channel_writes:
       - v3.route.selection_plan
-    invariant: one_fixed_order_classified_pool_only
-    invariant_detail: resolve_route_pool_plan selects the first configured non-empty pool
-      in the fixed order hosted web_search, multimodal, longcontext, coding, thinking, search, tools,
-      default; it builds no implicit capability pool and appends no default or other pool
-      after the matched pool. Optional pools absent or empty are skipped; default is the
-      required non-empty no-match endpoint. A longcontext candidate is skipped when
-      its pool is absent or empty.
+    invariant: explicit_ordered_route_fallback
+    invariant_detail: resolve_route_pool_plan selects the primary classified pool and appends
+      the declared fallback chain search to tools to default or other routes to default.
+      Each route retains its own tier order, optional absent or empty pools are skipped,
+      and an explicit provider.model pin stays pinned. Router does not read health.
   - step_id: v3-rd-05
     from_node: V3Router06RoutePoolResolved
     to_node: V3Router07OpaqueTargetHitOnce

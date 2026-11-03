@@ -1515,9 +1515,8 @@ features:
   - Current-turn image/media facts survive trailing tool/function outputs of the same
     turn and are carried to Target as multimodal/vision requirements; earlier-turn
     images never classify the current request
-  - The selected pool's candidates are expanded and reselected inside that single pool;
-    no default-tier media projection and no cross-pool default floor is appended after a
-    matched multimodal pool
+  - The classified pool is followed by the explicit route fallback chain while
+    preserving actual media and other protocol capability requirements.
   - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding
       never hard-reject a candidate
@@ -1527,19 +1526,15 @@ features:
   - A cooldown or request-local failure on one interface never excludes a sibling interface of the same provider; the fallback request remains able to select the sibling interface with its own endpoint and transport contract
   - A non-null previous_response_id is rejected before routing; it never selects an exact-pin target, local restore, or Target model capability
   - OpenAI Responses request.reasoning is aliased to the thinking route fact before pool matching
-  - Target dedupe retains provenance inside the single captured pool; no classified request
-    ever appends default or another pool after its matched pool, and in-pool tier order is
-    applied before candidate priority so no lower-tier or default candidate can overtake
-    the matched pool's remaining candidates
+  - Target dedupe retains earliest authorized route and tier provenance; route order
+    precedes each route's configured tier and candidate priority.
   - Ordinary classification evaluates configured non-empty pools in fixed order
     (hosted web_search, multimodal, longcontext, coding, thinking, search, tools, default), skips
     absent/empty optional pools, never builds implicit capability pools, and keeps
     default as the required non-empty no-match endpoint. A retained longcontext
     candidate is skipped when its pool is absent or empty.
-  - A matched pool that temporarily loses all candidates waits or probes through the
-    declared recovery path inside that same pool; only genuine declared exhaustion ends
-    the request transport without client error payload or fabricated success, and a
-    different classification pool is never consulted
+  - A temporarily unavailable pool yields to the next authorized route. Only when
+    all eligible pools are empty does the request wait with transport-only keepalive.
   - Server-scoped provider schedules default to Asia/Shanghai, accept a configured IANA timezone and cross-midnight daily windows, and use one-based tiers where one is highest priority
   - Schedule adjustments apply only within the selected route pool and never bypass provider health/cooldown or enter request, provider, client, metadata, or debug control payloads
   - A provider model may declare a timezone-aligned availability window with guarded edges; outside it the candidate is excluded from Target10 selection as a hard admission input with an availability_inactive diagnostic, never as a fallback tier, and the exclusion never mutates provider health
@@ -1581,8 +1576,8 @@ features:
   status: source_bound_cli_replay_verified
   change_risk: high
   owner_kind: rust_project_v3
-  owner_scope: Full V3 request-fact pool matching with one fixed-order classified pool,
-    one-shot opaque handoff, and Target-local plan exhaustion
+  owner_scope: Full V3 request-fact pool matching with an ordered classified fallback
+    chain, one-shot opaque handoff, and Target-local plan exhaustion
   owner_modules:
   - v3/crates/routecodex-v3-virtual-router
   - v3/crates/routecodex-v3-target
@@ -1605,9 +1600,9 @@ features:
   - priority, priority-tiered smooth-weighted-round-robin (SWRR), and listener/group/pool isolated round-robin ordering; weighted state is isolated by listener/group/pool/priority, selection state persists
     across requests via the process-shared router, and peek ordering never advances it
   - high-weight higher-priority-number targets cannot win while any lower-priority-number target remains session-available; when the full lower tier is unavailable only that session advances
-  - single-pool target deduplication without second Router hit
+  - ordered cross-route target deduplication without second Router hit
   - Target internal Forwarder expansion and availability reselection across the captured
-    single-pool plan
+    ordered route plan
   - non-built-in requested model ids never select or filter an ordinary pool through
     `match.models`; only a valid `provider.model` string creates a direct target pin,
     and every other model string uses current-turn classification without Target
@@ -1616,10 +1611,8 @@ features:
     to the canonical model id (an enabled provider that declares no such model also falls back to normal classification), unmet vision/multimodal requirements fail fast, health cooldowns are reported but never veto the pin while request-local
     exclusions still block, and /v1/models exposes every enabled provider model as a provider.model direct id'
   required_contract:
-  - Ordinary classification selects the first configured non-empty pool in the fixed
-    order hosted web_search, multimodal, longcontext, coding, thinking, search, tools, default; the
-    default pool is explicit, non-empty, and is the no-match endpoint rather than an
-    appended fallback after another matched pool
+  - Ordinary classification selects the primary pool and then search to tools to
+    default, or any other route to default, preserving each route's tier order.
   - Optional classification pools may be absent or empty and are skipped; no implicit
     capability pool is built from provider declarations; no longcontext pool is
     configured for ordinary requests, so a retained longcontext candidate is skipped
@@ -1633,11 +1626,10 @@ features:
   - routing facts carry no continuation owner; a non-null previous_response_id fails before ordinary priority/weight allocation
   required_integration:
   - Runtime request facts select a non-default pool
-  - A controlled upstream on the classified pool fails to a second same-pool candidate
-    and succeeds; no lower-priority pool and no default pool records an upstream attempt
-  - Cooldown and recovery stay in the same classified pool; total same-pool exhaustion
-    enters the global Error chain and terminates the request transport without client
-    error payload or fabricated success
+  - Controlled public-entry upstreams prove in-route tier order and thinking to default,
+    search to tools to default, and other routes to default without unnecessary waiting.
+  - Only complete temporary unavailability across the route chain enters keepalive
+    recovery; provider error payloads and fabricated success never reach the client.
   - A public-entry request with an earlier-turn image and current text-only user content
     is classified without multimodal and without historical-image cleanup; the same
     current-turn image on the same public entry still selects the multimodal pool

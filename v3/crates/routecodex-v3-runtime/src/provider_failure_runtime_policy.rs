@@ -1061,7 +1061,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         1,
                     )
                 };
-                let recovery = if is_request_local_compat_failure || status != 429 {
+                let recovery = if is_request_local_compat_failure {
                     None
                 } else {
                     let configured_backoff_ms =
@@ -1110,18 +1110,16 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                                 .recovery_witness()
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
-                    } else if !is_request_local_compat_failure && status != 429 {
-                        None
                     } else {
                         Some(
                             request_local_recovery()
                                 .map_err(v3_relay_provider_policy_ordinary_error)?,
                         )
                     },
-                    !is_request_local_compat_failure && status != 429,
+                    false,
                 )
                 .map_err(Err)?;
-                if is_request_local_compat_failure {
+                if status != 429 {
                     state.failed_candidates.insert(candidate_key);
                 }
                 state.trace.push("V3TargetLocalReselected");

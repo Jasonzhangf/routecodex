@@ -1,6 +1,164 @@
 use super::*;
 use axum::response::IntoResponse;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue08d36e9_busy_search_and_tools_use_default() {
+    assert_busy_search_fallback(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue08d36e9_relay_busy_search_and_tools_use_default() {
+    assert_busy_search_fallback(false).await;
+}
+
+async fn assert_busy_search_fallback(direct: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("08d36e9-search-fallback");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let (first_url, mut first_requests, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_requests, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    let (third_url, mut third_requests, third_shutdown) = start_controlled_upstream().await;
+    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
+    if direct {
+        use_native_direct_responses(&mut manifest);
+    }
+    let forwarder = manifest.forwarders.get("concurrency").unwrap();
+    let route_target = |target: &routecodex_v3_config::V3ForwarderTargetManifest| {
+        routecodex_v3_config::V3RoutePoolTargetManifest {
+            kind: target.kind.clone(),
+            id: target.id.clone(),
+            provider: target.provider.clone(),
+            model: target.model.clone(),
+            key: target.key.clone(),
+            interface: target.interface.clone(),
+            priority: target.priority,
+            weight: target.weight,
+        }
+    };
+    let first_target = route_target(&forwarder.targets[0]);
+    let second_target = route_target(&forwarder.targets[1]);
+    let second_id = second_target.provider.clone().unwrap();
+    let third_id = format!("{second_id}_fallback");
+    let mut third_provider = manifest.providers[&second_id].clone();
+    third_provider.id = third_id.clone();
+    third_provider.base_url = third_url.clone();
+    for interface in third_provider.interfaces.values_mut() {
+        interface.base_url = third_url.clone();
+    }
+    manifest.providers.insert(third_id.clone(), third_provider);
+    let mut third_target = second_target.clone();
+    third_target.provider = Some(third_id);
+    let group = manifest.route_groups.get_mut("default").unwrap();
+    let mut search = group.pools["client_test"].clone();
+    search.id = "search".into();
+    search.targets = vec![first_target];
+    let mut tools = search.clone();
+    tools.id = "tools".into();
+    tools.targets = vec![second_target];
+    group.pools.insert("search".into(), search);
+    group.pools.insert("tools".into(), tools);
+    group.pools.get_mut("default").unwrap().targets = vec![third_target];
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let search_request = json!({"model":"client-test","stream":true,"input":[
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"find the code"}]},
+        {"type":"function_call","name":"exec_command","call_id":"search-call","arguments":"{\"command\":\"rg -n needle src\"}"},
+        {"type":"function_call_output","call_id":"search-call","output":"found"}
+    ]});
+    let first = {
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        let request = search_request.clone();
+        tokio::spawn(async move {
+            client
+                .post(endpoint)
+                .json(&request)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap()
+        })
+    };
+    let search_capture = timeout(Duration::from_secs(2), first_requests.recv())
+        .await
+        .expect("first search request must use search pool")
+        .unwrap();
+    assert!(search_capture.body.to_string().contains("search-call"));
+    let second = {
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        let request = search_request.clone();
+        tokio::spawn(async move {
+            client
+                .post(endpoint)
+                .json(&request)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap()
+        })
+    };
+    let tools_capture = timeout(Duration::from_millis(500), second_requests.recv())
+        .await
+        .expect("busy search must use tools before default")
+        .unwrap();
+    assert!(tools_capture.body.to_string().contains("search-call"));
+    assert!(
+        third_requests.try_recv().is_err(),
+        "default cannot overtake tools"
+    );
+    let third = tokio::spawn(async move {
+        client
+            .post(endpoint)
+            .json(&search_request)
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+    });
+    let captured = timeout(Duration::from_millis(500), third_requests.recv())
+        .await
+        .expect("default must receive the request while both earlier pools are busy")
+        .unwrap();
+    let sent = captured.body.to_string();
+    assert!(
+        sent.contains("search-call") && sent.contains("found"),
+        "tool call and result stay paired"
+    );
+    let body = timeout(Duration::from_secs(3), third)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_responses_sse_delivered_business_text(&body, "controlled SSE response");
+    assert!(!first.is_finished() && !second.is_finished());
+    first_release.add_permits(1);
+    second_release.add_permits(1);
+    timeout(Duration::from_secs(3), first)
+        .await
+        .unwrap()
+        .unwrap();
+    timeout(Duration::from_secs(3), second)
+        .await
+        .unwrap()
+        .unwrap();
+    timeout(Duration::from_secs(2), handle.shutdown())
+        .await
+        .unwrap();
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    third_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
 #[derive(Clone)]
 struct FirstByteStallState {
     captures: tokio::sync::mpsc::UnboundedSender<ProviderCapture>,

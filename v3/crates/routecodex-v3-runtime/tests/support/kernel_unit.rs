@@ -2298,6 +2298,161 @@ targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
 }
 
 #[tokio::test]
+async fn direct_sse_missing_terminal_with_healthy_alternative_reselects_under_two_seconds() {
+    use futures_util::StreamExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    std::env::set_var("RTP_FIRST_KEY", "first-secret");
+    std::env::set_var("RTP_SECOND_KEY", "second-secret");
+    let first_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind first RTP provider");
+    let first_address = first_listener
+        .local_addr()
+        .expect("first RTP provider address");
+    let second_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind second RTP provider");
+    let second_address = second_listener
+        .local_addr()
+        .expect("second RTP provider address");
+
+    let first_server = tokio::spawn(async move {
+        let (mut socket, _) = first_listener
+            .accept()
+            .await
+            .expect("first RTP provider accept");
+        let mut request = [0_u8; 4096];
+        let _ = socket
+            .read(&mut request)
+            .await
+            .expect("first RTP provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("first RTP provider headers");
+        socket
+            .write_all(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-a-partial\"}\n\n")
+            .await
+            .expect("first RTP provider partial frame");
+        socket.shutdown().await.expect("first RTP provider disconnect");
+    });
+    let second_server = tokio::spawn(async move {
+        let (mut socket, _) = second_listener
+            .accept()
+            .await
+            .expect("second RTP provider accept");
+        let mut request = [0_u8; 4096];
+        let _ = socket
+            .read(&mut request)
+            .await
+            .expect("second RTP provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("second RTP provider headers");
+        socket
+            .write_all(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"rtp-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\n")
+            .await
+            .expect("second RTP provider first frames");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        socket
+            .write_all(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"rtp-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"provider-b-only\"}]}}\n\n")
+            .await
+            .expect("second RTP provider terminal frame");
+        socket.shutdown().await.expect("second RTP provider shutdown");
+    });
+
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "rtp_reselect"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
+
+[providers.rtp_first]
+type = "responses"
+base_url = "http://{first_address}/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "RTP_FIRST_KEY" }}] }}
+[providers.rtp_first.models.test]
+wire_name = "wire-first"
+[providers.rtp_first.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
+
+[providers.rtp_second]
+type = "responses"
+base_url = "http://{second_address}/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "RTP_SECOND_KEY" }}] }}
+[providers.rtp_second.models.test]
+wire_name = "wire-second"
+[providers.rtp_second.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
+
+[forwarders.rtp]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "rtp_first", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "rtp_second", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.rtp_reselect.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "rtp", priority = 1 }}]
+"#
+    ))
+    .expect("real RTP SSE authoring config");
+    let manifest = compile_v3_config_05_manifest(authoring).expect("real RTP SSE manifest");
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        "rtp_reselect",
+        "req-rtp-sse",
+        "exec-rtp-sse",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &ReqwestResponsesTransport::default(),
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
+        panic!("RTP replacement stream must be atomically committed")
+    };
+    let committed = stream.collect::<Vec<_>>().await;
+    let text = String::from_utf8(committed.into_iter().flatten().collect()).unwrap();
+    assert!(text.contains("provider-b-only"));
+    assert!(!text.contains("provider-a-partial"));
+    first_server.await.expect("first RTP provider task");
+    second_server.await.expect("second RTP provider task");
+}
+
+#[tokio::test]
 async fn direct_sse_full_attempt_commit_rejects_eof_without_terminal() {
     use futures_util::StreamExt;
 
