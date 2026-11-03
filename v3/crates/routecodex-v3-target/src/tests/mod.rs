@@ -1564,10 +1564,10 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
 }
 
 #[test]
-fn optional_exhaustion_continues_inside_selected_pool_tiers() {
-    // The request hits one pool. Inside that pool the provider tiers keep the
-    // user-confirmed order: an unavailable higher tier continues to the next
-    // tier, and the selected pool is never left for another pool.
+fn optional_exhaustion_continues_in_pool_tiers_then_hands_off_to_default() {
+    // The request hits the tools pool first. Inside that pool an unavailable
+    // higher tier continues to the next tier; once every tools-tier candidate
+    // is gone the request falls through to the default floor instead of ending.
     let mut manifest = manifest();
     let pool = manifest
         .route_groups
@@ -1632,21 +1632,21 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.hit_count, 1);
     assert_eq!(hit.pool_id, "tools");
-    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
+    assert_eq!(hit.target_plan.first().unwrap().pool_id, "tools");
+    assert_eq!(hit.target_plan.last().unwrap().pool_id, "default");
 
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    assert_eq!(expanded.candidates.len(), 2);
-    assert!(expanded
-        .candidates
-        .iter()
-        .all(|candidate| candidate.pool_ids == vec!["tools".to_string()]));
-    assert!(expanded
-        .candidates
-        .iter()
-        .all(|candidate| candidate.provider_id != "c"));
+    assert_eq!(expanded.candidates.len(), 3);
+    assert!(
+        expanded
+            .candidates
+            .iter()
+            .any(|candidate| candidate.provider_id == "c"),
+        "the default floor member c must be reachable after the tools pool is spent"
+    );
 
     let selected = target
         .select_available(
@@ -1664,7 +1664,7 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
     assert_eq!(selected.candidate.path[0], "pool:tools");
     assert_eq!(selected.attempts, 2, "the lower tier is the next attempt");
 
-    let exhausted = target
+    let fallen = target
         .select_available(
             expanded,
             &Availability {
@@ -1672,15 +1672,9 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
             },
             0,
         )
-        .expect_err("the selected pool must never fall through to another pool");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "b:default:kb:m:availability(b:default:kb:m)".to_string(),
-            "a:default:ka:m:availability(a:default:ka:m)".to_string(),
-        ],
-        "exhaustion reports only the candidates of the selected pool"
-    );
+        .expect("an exhausted tools pool must hand the request to the default floor");
+    assert_eq!(fallen.candidate.provider_id, "c");
+    assert_eq!(fallen.route.pool_id, "default");
 }
 
 #[test]
@@ -1840,26 +1834,34 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
 }
 
 #[test]
-fn optional_candidate_keeps_only_selected_pool_provenance() {
+fn optional_candidate_merges_selected_pool_and_default_floor_provenance() {
     let expanded = expanded_tools();
     let first = expanded
         .candidates
         .first()
         .expect("tools route must keep first candidate");
     assert_eq!(first.provider_id, "a");
-    // Provider `a` is also declared in the default pool, but the request hit the
-    // tools pool. Provenance must describe the selected pool only: no default
-    // floor membership may leak into the candidate.
-    assert_eq!(first.pool_ids, vec!["tools".to_string()]);
-    assert!(
-        !first.default_pool_member,
-        "a candidate reached through another pool must not carry default pool membership"
+    // Provider `a` is declared in the tools pool and is also reachable through
+    // the default floor. The pool fallback chain keeps one candidate entry and
+    // merges both provenances instead of duplicating `a`.
+    assert_eq!(
+        first.pool_ids,
+        vec!["tools".to_string(), "default".to_string()]
     );
-    assert!(expanded
-        .route
-        .target_plan
-        .iter()
-        .all(|entry| entry.pool_id == "tools"));
+    assert!(
+        first.default_pool_member,
+        "a candidate reachable through the default floor carries default pool membership"
+    );
+    assert_eq!(
+        expanded
+            .route
+            .target_plan
+            .iter()
+            .map(|entry| entry.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tools", "default"],
+        "the selected pool keeps its precedence and appends the default floor"
+    );
 }
 
 #[test]
@@ -1974,9 +1976,9 @@ targets = [
 }
 
 #[test]
-fn multimodal_pool_exhaustion_never_falls_back_to_default_pool() {
+fn multimodal_pool_exhaustion_falls_through_to_default_pool() {
     // A routed multimodal pool that only contains an incapable candidate must
-    // exhaust itself and never cross into another pool for service.
+    // exhaust itself in that pool and then cross into the default floor.
     let source = r#"
 version = 3
 [servers.s]
@@ -2032,23 +2034,24 @@ targets = [
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "multimodal");
-    assert!(hit
-        .target_plan
-        .iter()
-        .all(|entry| entry.pool_id == "multimodal"));
+    assert_eq!(hit.target_plan.first().unwrap().pool_id, "multimodal");
+    assert_eq!(hit.target_plan.last().unwrap().pool_id, "default");
 
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
+    // The multimodal pool's incapable text candidate is a capability_mismatch
+    // and gets filtered from selection, but the default pool's vision candidate
+    // is still reachable as the floor.
     assert!(
         expanded
             .candidates
             .iter()
-            .all(|candidate| candidate.provider_id != "vision"),
-        "the incapable-by-capability default pool must not be expanded at all"
+            .any(|candidate| candidate.provider_id == "vision"),
+        "the default pool vision candidate must be reachable as the floor"
     );
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -2056,12 +2059,11 @@ targets = [
             },
             0,
         )
-        .expect_err("a multimodal pool without a capable candidate exhausts itself");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec!["text:key:m:capability_mismatch".to_string()],
-        "exhaustion stays inside the selected multimodal pool"
-    );
+        .expect(
+            "the default pool vision candidate must serve after the multimodal pool is exhausted",
+        );
+    assert_eq!(selected.candidate.provider_id, "vision");
+    assert_eq!(selected.route.pool_id, "default");
 }
 
 #[test]
@@ -2151,7 +2153,7 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
 }
 
 #[test]
-fn cooled_hosted_search_tier_exhausts_without_crossing_to_default_pool() {
+fn cooled_hosted_search_tier_exhausts_then_crosses_to_default_pool() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2213,10 +2215,8 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "web_search");
-    assert!(hit
-        .target_plan
-        .iter()
-        .all(|entry| entry.pool_id == "web_search"));
+    assert_eq!(hit.target_plan.first().unwrap().pool_id, "web_search");
+    assert_eq!(hit.target_plan.last().unwrap().pool_id, "default");
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
@@ -2240,7 +2240,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         .iter()
         .any(|reason| reason == "search:default:key:m:availability(search:default:key:m)"));
 
-    let exhausted = target
+    let fallen = target
         .select_available(
             expanded,
             &Availability {
@@ -2251,20 +2251,15 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
             },
             0,
         )
-        .expect_err("a fully cooled web_search pool must not cross into the default pool");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "search2:default:key:m:availability(search2:default:key:m)".to_string(),
-            "search:default:key:m:availability(search:default:key:m)".to_string(),
-        ]
-    );
+        .expect("a fully cooled web_search pool must cross into the default pool");
+    assert_eq!(fallen.candidate.provider_id, "text");
+    assert_eq!(fallen.route.pool_id, "default");
 }
 
 #[test]
-fn cooled_single_search_candidate_keeps_its_pool_recovery_opportunity() {
-    // The pool has one provider and a recovery opportunity. Target must keep
-    // that provider selectable instead of terminating or crossing to default.
+fn cooled_single_search_candidate_falls_through_to_default_floor() {
+    // The pool has one provider and a recovery opportunity. Target must not
+    // terminate while the default floor still has an eligible candidate.
     let source = r#"
 version = 3
 [servers.s]
@@ -2330,25 +2325,29 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
             model_id: Option<&str>,
             _now_ms: u64,
         ) -> V3ProviderAvailabilityProjection {
+            // Only the hosted-search identity is cooled; the default floor's
+            // text identity stays available so the fallback can be exercised.
+            let available = provider_id != "search";
             V3ProviderAvailabilityProjection {
                 provider_id: provider_id.into(),
                 interface_id: "default".into(),
                 auth_alias: auth_alias.map(Into::into),
                 model_id: model_id.map(Into::into),
-                available: false,
-                blocked_scopes: vec!["provider_key_health_cooldown".into()],
+                available,
+                blocked_scopes: if available {
+                    Vec::new()
+                } else {
+                    vec!["provider_key_health_cooldown".into()]
+                },
             }
         }
     }
 
-    let selected = target
+    let fallen = target
         .select_available(expanded, &AutomaticCooldown, 0)
-        .expect("a pool with a recovery opportunity keeps its provider selectable");
-    assert_eq!(selected.candidate.provider_id, "search");
-    assert_eq!(
-        selected.route.pool_id, "web_search",
-        "the recovery opportunity stays inside the selected pool"
-    );
+        .expect("the cooled search pool must hand off to the default floor");
+    assert_eq!(fallen.candidate.provider_id, "text");
+    assert_eq!(fallen.route.pool_id, "default");
 }
 
 #[test]
