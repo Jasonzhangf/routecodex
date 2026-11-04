@@ -3872,7 +3872,7 @@ features:
   owner_kind: rust_v3_resident_request_execution_lifecycle
   owner_scope: Resident Direct and Relay transitions reuse one request control, target plan, Error05 recovery state, deadline, and attempt budget.
   required_positive:
-  - Generic Direct registers the selected plan candidate count before transport admission or protocol handoff; cumulative attempts and the configured hard ceiling remain unchanged.
+  - Generic Direct registers its captured plan before transport admission or protocol handoff without resetting cumulative real-send counts. Attempt counting cannot block an untried eligible tier/default identity; the original residence deadline and normal health, capacity, shape, and action-gate restrictions remain authoritative.
   - fa22072_direct_to_relay_business_continuation_public_entry requires JSON/SSE A1/B1; removing only Direct plan-budget registration reproduces A1/B0.
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
@@ -3886,6 +3886,10 @@ features:
   change_risk: critical
   owner_kind: rust_v3_bounded_attempt_payload_store
   owner_scope: Direct and Relay append only through byte, frame, request, process, and residence admission before copy.
+  required_positive:
+  - After a real failed attempt, an untried eligible later tier/default candidate is sent before the original residence deadline even when the declared attempt count is reached. Direct and Relay preserve real-send sequence numbers and unsent reservation rollback.
+  required_negative:
+  - Attempt counting cannot create a terminal response or an unconditional residence sleep that hides an untried eligible candidate. Recovery does not retry the last failed identity, release shape exclusions, renew the deadline, or bypass normal eligibility.
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server hard_attempt_cap_waits -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server all_tried_transport_failure -- --nocapture

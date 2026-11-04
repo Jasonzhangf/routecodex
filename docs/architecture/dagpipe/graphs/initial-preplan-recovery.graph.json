@@ -1,0 +1,117 @@
+{
+  "id": "v3.initial_preplan_recovery",
+  "version": "1",
+  "description": "Existing Runtime lifecycle design for an accepted request that must bind its original control, reach a ready plan or a typed terminal disposition while existing health probes recover, dispatch only a ready plan, and close out with one internal request disposition receipt. Probe start or completion is not health success and cannot substitute for normal candidate eligibility; this graph requires no probe handoff or immediate first-poll recheck. Request-local recovery waits do not acquire business capacity or renew the original residence deadline; attempt exhaustion must not block a normal, legal untried tier/default identity.",
+  "inputs": [
+    {
+      "id": "accepted-request-context",
+      "schema": "Object",
+      "schema_ref": "v3.initial_preplan_recovery.arc.accepted_request_context"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "bind_original_control",
+      "operator": "routecodex.v3.runtime.bind_original_request_control",
+      "operator_version": "1",
+      "inputs": ["accepted-request-context"],
+      "output": {
+        "id": "original-control-bound",
+        "schema": "Object",
+        "schema_ref": "v3.initial_preplan_recovery.arc.original_control_bound"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": ["v3.execution.request_lifecycle_control", "v3.execution.attempt_budget"]
+      }
+    },
+    {
+      "id": "resolve_and_recover_preplan",
+      "operator": "routecodex.v3.runtime.resolve_and_recover_preplan",
+      "operator_version": "1",
+      "inputs": ["original-control-bound"],
+      "output": {
+        "id": "preplan-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.initial_preplan_recovery.arc.preplan_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.execution.request_lifecycle_control",
+          "v3.execution.attempt_budget",
+          "v3.provider.availability_projection",
+          "v3.provider.cooldown_probe_state",
+          "v3.operation_runner.request_local_exclusions"
+        ],
+        "writes": []
+      }
+    },
+    {
+      "id": "dispatch_selected_plan",
+      "operator": "routecodex.v3.runtime.dispatch_selected_plan",
+      "operator_version": "1",
+      "inputs": ["preplan-disposition"],
+      "output": {
+        "id": "execution-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.initial_preplan_recovery.arc.execution_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.hub.resolved_target",
+          "v3.operation_runner.execution_mode",
+          "v3.provider.adaptive_concurrency_admission"
+        ],
+        "writes": [
+          "v3.target.concrete_provider",
+          "v3.provider.transport_request"
+        ]
+      }
+    },
+    {
+      "id": "close_request_scope",
+      "operator": "routecodex.v3.runtime.close_request_scope",
+      "operator_version": "1",
+      "inputs": ["execution-disposition"],
+      "output": {
+        "id": "request-disposition-receipt",
+        "schema": "Object",
+        "schema_ref": "v3.initial_preplan_recovery.arc.request_disposition_receipt"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.execution.attempt_budget", "v3.error.chain"],
+        "writes": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "bind_original_control",
+      "to": "resolve_and_recover_preplan",
+      "arc_id": "original-control-bound"
+    },
+    {
+      "from": "resolve_and_recover_preplan",
+      "to": "dispatch_selected_plan",
+      "arc_id": "preplan-disposition"
+    },
+    {
+      "from": "dispatch_selected_plan",
+      "to": "close_request_scope",
+      "arc_id": "execution-disposition"
+    }
+  ],
+  "outputs": ["request-disposition-receipt"]
+}

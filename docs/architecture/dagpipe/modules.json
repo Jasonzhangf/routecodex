@@ -42,6 +42,11 @@
       "id": "responses-namespace-shell-roundtrip",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/graphs/responses-namespace-shell-roundtrip.graph.json"
+    },
+    {
+      "id": "initial-preplan-recovery",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/initial-preplan-recovery.graph.json"
     }
   ]
 }

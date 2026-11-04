@@ -9417,7 +9417,7 @@ chains:
     caller_symbol: execute_v3_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
     callee_symbol: V3AttemptBudget::admit_transport_attempt
-    settlement_contract: Typed pre-wire ConcurrencyBusy releases the pending reservation through V3AttemptBudget::release_unsent_transport_attempt; actual wire attempts and HTTP429 retain their sequence.
+    settlement_contract: Typed pre-wire ConcurrencyBusy releases the pending reservation through V3AttemptBudget::release_unsent_transport_attempt; actual wire attempts and HTTP429 retain their sequence. Reaching the attempt count cannot block an untried eligible identity in the captured tier/default plan or cause an unconditional residence sleep; normal eligibility and the original deadline still apply.
     callee_file: v3/crates/routecodex-v3-runtime/src/execution_control.rs
     status: anchored
     edge_kind: reserve_before_append

@@ -3031,6 +3031,7 @@ resources:
     semantic_contract:
       dimensions: [attempt_count, request_resident_bytes, process_resident_bytes, deadline_or_residence]
       unsent_capacity: Runtime releases its pending transport-attempt reservation only on typed ConcurrencyBusy before wire transmission; real HTTP attempts and 429 sequence numbers remain counted.
+      untried_candidate: Reaching the declared attempt count cannot block an untried eligible identity in the captured tier/default plan. Real-send sequence numbers remain cumulative; this rule does not authorize last-failed retries or bypass health, capacity, shape, action-gate, or original deadline restrictions.
       recovery_wait: Repeated planning retains a request-local compiled 1s/3s/15s/35s/90s then steady 1s pool-recovery cursor and scheduled due time. Pool recovery is bounded by the immutable request residence deadline, distinct from individual candidate acquisition or probe budgets; health/capacity notifications recheck eligibility without advancing an unexpired interval. No wait holds business capacity or renews the original request deadline.
       admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
       request_scope: Provider transport admission and every Runtime-sealed client replay projection consume the same request-local budget instance; Server may only move the sealed replay and may not construct or reconstruct a budget.

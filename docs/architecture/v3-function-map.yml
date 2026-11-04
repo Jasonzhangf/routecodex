@@ -6119,7 +6119,7 @@ features:
   - real local TCP SSE replacement stream reaches protocol terminal on the resident Runtime
   - no SSE wrapper creates a Runtime or re-enters a full executor
   - one request-level attempt/deadline budget survives Direct, Relay, and typed handoff
-  - generic Direct registers the selected plan candidate count before admission without resetting cumulative attempts or changing the configured ceiling
+  - Generic Direct registers its captured plan before admission without resetting cumulative real-send counts. Attempt counting cannot block an untried eligible tier/default identity; the original residence deadline and normal health, capacity, shape, and action-gate restrictions remain authoritative.
   - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test fa22072_direct_relay_handoff -- --nocapture --test-threads=1
   - git diff --check
 
