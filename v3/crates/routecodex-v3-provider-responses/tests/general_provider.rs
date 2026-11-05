@@ -633,7 +633,7 @@ async fn rate_limited_upstream(State(state): State<Arc<RateLimitState>>) -> Resp
 }
 
 #[tokio::test]
-async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
+async fn upstream_429_steps_adaptive_budget_below_the_refused_watermark_without_collapse() {
     use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -729,8 +729,8 @@ async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
         "two 429s at an in-flight watermark of two must cap the budget one slot below it"
     );
     assert_eq!(
-        snapshot.budget, 1,
-        "the adaptive budget must drop to the refused watermark minus one, not step down by one"
+        snapshot.budget, 7,
+        "two concurrent 429s move the adaptive budget one small hourly-capped step, not directly to the measured ceiling"
     );
     assert!(snapshot.saturated);
     assert!(snapshot.in_flight == 0, "both leases must be released");

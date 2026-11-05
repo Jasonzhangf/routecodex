@@ -1527,7 +1527,10 @@ async fn websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner
     let saturated = controller
         .snapshot_for_scope(provider_key, Some(&scope))
         .unwrap();
-    assert_eq!(saturated.budget, 1);
+    assert_eq!(
+        saturated.budget, 2,
+        "a 429 moves the adaptive budget one small hourly-capped step, not directly to one"
+    );
     assert_eq!(saturated.in_flight, 2);
     assert!(saturated.saturated);
     let waiting_send = tokio::spawn({
