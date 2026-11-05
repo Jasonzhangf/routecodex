@@ -1149,7 +1149,8 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
                 || has_upstream_http_status
                 || provider_first_byte_hang
                 || is_transport_stage_failure))
-            || (remaining == 0
+            || (!rate_limited
+                && remaining == 0
                 && crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
                     expanded,
                     &failed_with_current,
@@ -1163,7 +1164,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         provider_key_model_scope,
         remaining,
         false,
-        rate_limited && remaining == 0,
+        // Direct recovery never retries the same candidate. A rate-limited
+        // identity with no remaining alternative terminates the request through
+        // the error chain; it does not re-send business traffic to a candidate
+        // that just answered 429.
+        false,
         recovery_witness,
         target_recovery_pending,
     )?;

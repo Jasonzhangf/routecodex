@@ -996,12 +996,24 @@ pub(crate) async fn wait_for_target_recovery(
     else {
         return Ok(false);
     };
+    // The request must not sit on the residence deadline. Bound recovery by the
+    // target's own acquisition budget, and end immediately once the pool holds
+    // no busy or cooling candidate left to recover.
+    let recovery_started = attempt_budget.target_recovery_started();
     let permanent: BTreeSet<String> = excluded.difference(busy).cloned().collect();
+    let cooldown_only = crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
+        expanded, &permanent, scope, health, now_ms,
+    );
+    if busy.is_empty() && !cooldown_only {
+        return Ok(false);
+    }
     let availability = health.session_bound_availability(scope);
     let concurrency = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared();
     loop {
         let now = std::time::Instant::now();
-        if now >= attempt_budget.residence_deadline() {
+        if now >= attempt_budget.residence_deadline()
+            || target_recovery_remaining(expanded, recovery_started).is_zero()
+        {
             return Ok(false);
         }
         if now >= due_at {
