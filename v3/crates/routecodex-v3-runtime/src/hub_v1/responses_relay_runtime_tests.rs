@@ -390,8 +390,8 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
     let rejection = request_execution_control
         .attempt_budget()
         .admit_transport_attempt();
-    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
-        "after pending reaches the original residence deadline it takes precedence over the exhausted attempt ceiling: {rejection:?}");
+    assert!(matches!(&rejection, Err(V3AttemptStoreError::TransportAttemptsExhausted(_))),
+        "the exhausted attempt ceiling terminates the request promptly instead of waiting out the residence deadline: {rejection:?}");
 }
 
 #[test]

@@ -2420,7 +2420,9 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
 
     let routing_group = "direct_sse_no_continuation_error";
     let mut manifest = scoped_test_manifest(test_manifest(), routing_group);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap().attempt_store.residence_timeout_ms = 300;
+    // A long residence proves the failure ends through the typed error chain
+    // instead of waiting out the residence deadline.
+    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap().attempt_store.residence_timeout_ms = 5000;
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let raw = test_responses_raw(
         routing_group,
@@ -2442,14 +2444,9 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
         crate::register_responses_direct_hooks(),
         &transport,
     );
-    tokio::pin!(execution);
-    tokio::select! {
-        _ = transport.sent.notified() => {},
-        _ = &mut execution => panic!("last attempt must stay pending after provider EOF"),
-    }
-    assert!(tokio::time::timeout(Duration::from_millis(50), &mut execution).await.is_err());
-    let output = tokio::time::timeout(Duration::from_secs(3), execution).await
-        .expect("the original test residence deadline must end this request");
+    let output = tokio::time::timeout(Duration::from_secs(2), execution)
+        .await
+        .expect("the final failed attempt must enter the typed error chain promptly");
     assert_eq!(transport.sends.load(std::sync::atomic::Ordering::SeqCst), 1,
         "the final failed identity is not automatically retried or probed");
     assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness)) if witness.status() == 200),

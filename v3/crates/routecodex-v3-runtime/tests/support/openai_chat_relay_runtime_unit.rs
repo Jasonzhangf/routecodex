@@ -453,7 +453,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         std::env::set_var("ROUTECODEX_V3_TEST_KEY", "test-secret");
         let mut manifest = test_relay_manifest();
         manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-            .attempt_store.residence_timeout_ms = 300;
+            .attempt_store.residence_timeout_ms = 5000;
         let request_execution_control =
             crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
                 .expect("request execution control");
@@ -522,15 +522,17 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             Some(handoff),
         );
         tokio::pin!(execution);
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(50), &mut execution).await.is_err(),
-            "exhausted shared budget must stay pending inside the original residence");
-        let error = tokio::time::timeout(std::time::Duration::from_secs(3), execution)
-        .await.expect("the original short test residence must end this request")
+        // The provider transport attempt ceiling must reject the next send on
+        // the typed error chain immediately instead of waiting out the
+        // residence deadline.
+        let error = tokio::time::timeout(std::time::Duration::from_secs(2), execution)
+        .await.expect("an exhausted shared budget must end immediately on the typed error chain")
         .expect_err("Relay must reject the next transport attempt from the shared budget");
 
         assert!(
             matches!(error, V3OpenAiChatRelayRuntimeError::Target(ref message)
-            if message.contains("request provider transport attempt limit 1 exhausted"))
+            if message.contains("request provider transport attempt limit 1 exhausted")
+                && !message.contains("residence"))
         );
         assert_eq!(
             transport.sends.load(std::sync::atomic::Ordering::Acquire),
@@ -538,6 +540,7 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         );
         assert_eq!(request_execution_control.transport_attempts(), 1);
         assert!(matches!(request_execution_control.attempt_budget().admit_transport_attempt(),
-            Err(crate::execution_control::V3AttemptStoreError::ResidenceDeadlineExceeded(_))));
+            Err(crate::execution_control::V3AttemptStoreError::TransportAttemptsExhausted(_))),
+            "the prompt error chain must not fall through to a residence-deadline error");
     }
 }
