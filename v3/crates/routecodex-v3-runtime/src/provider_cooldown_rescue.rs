@@ -17,11 +17,11 @@ pub(crate) async fn admit_v3_provider_transport_attempt(
             drop(admission.take());
             drop(rate_limit_permit.take());
             drop(action_permit.take());
-            tokio::time::sleep_until(tokio::time::Instant::from_std(budget.residence_deadline()))
-                .await;
-            Err(V3AttemptStoreError::ResidenceDeadlineExceeded(format!(
-                "request residence deadline expired while waiting after {error}"
-            )))
+            // Attempt exhaustion ends this request immediately. The previous
+            // implementation slept until the residence deadline (10/15 minutes),
+            // which made single-candidate pools appear stuck and never released
+            // the request.
+            Err(error)
         }
         result => result,
     }

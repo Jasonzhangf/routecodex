@@ -15,6 +15,14 @@ pub const V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS: u64 = 60 * 60_000;
 /// `provider.concurrency.maxInFlight`.
 pub const V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT: u32 = 40;
 
+/// Adaptive concurrency may move at most this percent of the startup budget per
+/// hour, in either direction. A transient 429 must never collapse the pool to a
+/// single slot; the budget only converges toward the measured ceiling in small,
+/// time-bounded steps.
+pub const V3_ADAPTIVE_CONCURRENCY_HOURLY_CHANGE_PERCENT: u32 = 20;
+
+pub const V3_ADAPTIVE_CONCURRENCY_HOUR_MS: u64 = 60 * 60_000;
+
 /// Dynamic capacity belongs to a declared interface/model, never a wire body.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct V3ConcurrencyIdentityScope {
@@ -185,10 +193,16 @@ struct V3AdaptiveConcurrencyRateLimitSample {
 struct V3AdaptiveConcurrencyState {
     budget: u32,
     hard_max_in_flight: u32,
+    /// The declared startup budget. It anchors the one-hour change bound but is
+    /// not a cage: the adaptive budget can move away from it in both directions.
+    initial_budget: u32,
     in_flight: u32,
     saturated: bool,
     probe_in_flight: bool,
     next_probe_at_ms: Option<u64>,
+    /// Wall clock of the last budget change, used to enforce the hourly step cap.
+    /// `None` means the budget has not yet moved, so the first step is due now.
+    last_adjust_ms: Option<u64>,
     notify: Arc<Notify>,
     /// Trailing-window HTTP 429 samples. The sample's in_flight value is the
     /// concurrency level the provider rate-limited at, captured before the
@@ -201,10 +215,12 @@ impl Default for V3AdaptiveConcurrencyState {
         Self {
             budget: 0,
             hard_max_in_flight: 0,
+            initial_budget: 0,
             in_flight: 0,
             saturated: false,
             probe_in_flight: false,
             next_probe_at_ms: None,
+            last_adjust_ms: None,
             notify: Arc::new(Notify::new()),
             rate_limit_samples: VecDeque::new(),
         }
@@ -252,15 +268,18 @@ impl V3AdaptiveConcurrencyController {
             .or_insert_with(|| V3AdaptiveConcurrencyState {
                 budget: self.inner.initial_budget,
                 hard_max_in_flight: self.inner.hard_max_in_flight,
+                initial_budget: self.inner.initial_budget,
                 ..V3AdaptiveConcurrencyState::default()
             });
         let hard_max = shared.hard_max_in_flight;
+        let initial_budget = shared.initial_budget;
         let notify = shared.notify.clone();
         states
             .entry(V3ConcurrencyBucketKey::new(provider_key, scope))
             .or_insert_with(|| V3AdaptiveConcurrencyState {
                 budget: hard_max,
                 hard_max_in_flight: hard_max,
+                initial_budget,
                 notify,
                 ..V3AdaptiveConcurrencyState::default()
             })
@@ -315,12 +334,14 @@ impl V3AdaptiveConcurrencyController {
             .or_insert_with(|| V3AdaptiveConcurrencyState {
                 budget: initial_budget,
                 hard_max_in_flight: initial_budget,
+                initial_budget,
                 ..V3AdaptiveConcurrencyState::default()
             });
         for (_, state) in states
             .iter_mut()
             .filter(|(key, _)| key.provider_key == provider_key)
         {
+            state.initial_budget = initial_budget;
             state.hard_max_in_flight = initial_budget;
             state.budget = state.budget.min(initial_budget);
         }
@@ -582,18 +603,19 @@ impl V3AdaptiveConcurrencyController {
         match result {
             V3AdaptiveConcurrencyProbeResult::Accepted => {
                 Self::prune_rate_limit_samples(state, now_ms);
-                state.budget = state
-                    .budget
-                    .saturating_add(1)
-                    .min(state.hard_max_in_flight)
-                    .max(1);
+                // A successful probe proves one more slot is safe. Raise the
+                // budget a single step toward the hard ceiling, rate-limited by
+                // the one-hour change bound so capacity discovery stays gradual.
+                Self::step_budget_toward(state, state.hard_max_in_flight, now_ms);
                 state.saturated = false;
                 state.next_probe_at_ms = None;
             }
             V3AdaptiveConcurrencyProbeResult::RateLimited => {
                 Self::record_rate_limit_sample(state, now_ms, probe_level);
                 let smoothed = Self::smoothed_budget(state);
-                state.budget = state.budget.min(smoothed).max(1);
+                // Converge toward the measured ceiling in one-slot steps. A
+                // rate-limited probe must not collapse the pool to one slot.
+                Self::step_budget_toward(state, smoothed, now_ms);
                 state.saturated = true;
                 state.next_probe_at_ms =
                     Some(now_ms.saturating_add(V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS));
@@ -625,7 +647,7 @@ impl V3AdaptiveConcurrencyController {
             .ok_or_else(|| "adaptive concurrency provider key is missing".to_string())?;
         Self::record_rate_limit_sample(state, now_ms, state.in_flight);
         let smoothed = Self::smoothed_budget(state);
-        state.budget = state.budget.min(smoothed).max(1);
+        Self::step_budget_toward(state, smoothed, now_ms);
         state.saturated = true;
         state.next_probe_at_ms =
             Some(now_ms.saturating_add(V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS));
@@ -660,6 +682,60 @@ impl V3AdaptiveConcurrencyController {
             .is_some_and(|sample| sample.epoch_ms < window_start)
         {
             state.rate_limit_samples.pop_front();
+        }
+    }
+
+    /// Maximum slots the adaptive budget may move in one hour, derived from the
+    /// declared startup budget. At least one slot is always allowed so a small
+    /// startup value can still adapt.
+    fn hourly_change_cap(initial_budget: u32) -> u32 {
+        let initial = initial_budget.max(1);
+        let cap = (initial * V3_ADAPTIVE_CONCURRENCY_HOURLY_CHANGE_PERCENT).div_ceil(100);
+        cap.max(1)
+    }
+
+    /// Minimum wall-clock spacing between two budget steps. This is the
+    /// one-hour change bound expressed as a per-step interval.
+    fn min_step_interval_ms(initial_budget: u32) -> u64 {
+        let cap = Self::hourly_change_cap(initial_budget);
+        (V3_ADAPTIVE_CONCURRENCY_HOUR_MS / u64::from(cap)).max(1)
+    }
+
+    fn budget_step_due(state: &V3AdaptiveConcurrencyState, now_ms: u64) -> bool {
+        match state.last_adjust_ms {
+            None => true,
+            Some(last_ms) => {
+                now_ms.saturating_sub(last_ms) >= Self::min_step_interval_ms(state.initial_budget)
+            }
+        }
+    }
+
+    /// Move the budget a single slot toward `target`. This is the small-step,
+    /// time-bounded adjustment that keeps a 429 from collapsing the pool: the
+    /// budget only approaches the measured ceiling gradually, and it never
+    /// changes while a probe is already in flight.
+    fn step_budget_toward(
+        state: &mut V3AdaptiveConcurrencyState,
+        target: u32,
+        now_ms: u64,
+    ) -> bool {
+        if !Self::budget_step_due(state, now_ms) {
+            return false;
+        }
+        let previous = state.budget;
+        if previous > target {
+            state.budget = previous.saturating_sub(1).max(target).max(1);
+        } else if previous < target {
+            state.budget = previous
+                .saturating_add(1)
+                .min(target)
+                .min(state.hard_max_in_flight);
+        }
+        if state.budget != previous {
+            state.last_adjust_ms = Some(now_ms);
+            true
+        } else {
+            false
         }
     }
 
@@ -714,11 +790,13 @@ impl V3AdaptiveConcurrencyController {
             return Ok(());
         };
         Self::prune_rate_limit_samples(state, now_ms);
-        state.budget = state
-            .budget
-            .saturating_add(1)
-            .min(state.hard_max_in_flight)
-            .max(1);
+        // A completed business success proves the provider still accepts the
+        // current level. Only raise the budget toward the hard ceiling once the
+        // trailing 429 window is clear, so recovery cannot immediately re-breach
+        // a recently measured ceiling. The raise is one slot and hourly-capped.
+        if Self::smoothed_budget(state) >= state.hard_max_in_flight {
+            Self::step_budget_toward(state, state.hard_max_in_flight, now_ms);
+        }
         state.saturated = false;
         state.next_probe_at_ms = None;
         let notify = state.notify.clone();
@@ -830,7 +908,10 @@ mod tests {
             refused.smoothed_budget, 1,
             "sample is A's two leases, not all six provider leases"
         );
-        assert_eq!(refused.budget, 1);
+        assert_eq!(
+            refused.budget, 7,
+            "a single 429 moves one hourly-capped step, never directly to the measured ceiling"
+        );
         for lease in a_leases {
             controller.release(lease.into_permit()).unwrap();
         }
@@ -886,14 +967,15 @@ mod tests {
             .unwrap();
         assert_eq!(
             controller.snapshot_for_scope(key, Some(&a)).unwrap().budget,
-            1
+            7
         );
         controller
             .observe_business_success_scoped(key, Some(&a), 1002)
             .unwrap();
         assert_eq!(
             controller.snapshot_for_scope(key, Some(&a)).unwrap().budget,
-            2
+            7,
+            "a success cannot raise the budget while a recent 429 still bounds the window"
         );
         assert!(
             !controller
@@ -910,7 +992,7 @@ mod tests {
         let legacy = controller.try_acquire_business(key).unwrap();
         controller.observe_rate_limit(key, 1000).unwrap();
         controller.release(legacy.into_permit()).unwrap();
-        assert_eq!(controller.snapshot(key).unwrap().budget, 1);
+        assert_eq!(controller.snapshot(key).unwrap().budget, 3);
         let scope = identity("responses", "a");
         let leases: Vec<_> = (0..4)
             .map(|_| {
@@ -1147,33 +1229,77 @@ mod tests {
     }
 
     #[test]
-    fn business_success_restores_budget_drained_by_rate_limits() {
+    fn business_success_restores_budget_after_rate_limit_window_clears() {
         let controller = V3AdaptiveConcurrencyController::new(8).unwrap();
         let key = "provider:key";
         controller.ensure_initial_budget(key, 8).unwrap();
         for _ in 0..7 {
             controller.observe_rate_limit(key, 0).unwrap();
         }
-        let drained = controller.snapshot(key).unwrap();
-        assert_eq!(drained.budget, 1);
-        assert!(drained.saturated);
-        // The drained budget plus one in-flight lease must report busy; a
-        // completed business success must restore the next admission.
-        let held = controller.try_acquire_business(key).unwrap();
-        assert!(
-            controller.try_acquire_business(key).is_none(),
-            "drained budget with an in-flight lease must report busy"
+        // Seven rapid 429s at one instant cannot collapse the pool: only the
+        // first is a due hourly step, so the budget drops by exactly one slot.
+        let throttled = controller.snapshot(key).unwrap();
+        assert_eq!(
+            throttled.budget, 7,
+            "repeated 429s inside one hourly step window must not collapse the budget to one"
         );
+        assert!(throttled.saturated);
+        let held = controller.try_acquire_business(key).unwrap();
+        let held_second = controller
+            .try_acquire_business(key)
+            .expect("the pool keeps serving requests while throttled");
+        // A success cannot bypass the recent 429 window, so the budget holds.
         controller.observe_business_success(key, 0).unwrap();
+        assert_eq!(controller.snapshot(key).unwrap().budget, 7);
+        // Once the trailing window clears and the hourly step is due, one success
+        // raises the budget a single slot and the pool is no longer saturated.
+        controller
+            .observe_business_success(key, V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS + 3_600_001)
+            .unwrap();
         let recovered = controller.snapshot(key).unwrap();
-        assert_eq!(recovered.budget, 2);
+        assert_eq!(recovered.budget, 8);
         assert!(!recovered.saturated);
         assert_eq!(recovered.next_probe_at_ms, None);
-        let admitted = controller
-            .try_acquire_business(key)
-            .expect("business success must admit the next request");
-        controller.release(admitted.into_permit()).unwrap();
         controller.release(held.into_permit()).unwrap();
+        controller.release(held_second.into_permit()).unwrap();
+    }
+
+    #[test]
+    fn long_clear_window_grows_budget_past_startup_at_the_hourly_cap() {
+        let controller = V3AdaptiveConcurrencyController::new_with_limits(20, 40).unwrap();
+        let key = "provider:key";
+        // 20% of the declared startup budget of 20 is four slots per hour.
+        let step_ms = V3_ADAPTIVE_CONCURRENCY_HOUR_MS / 4;
+        let lease = controller.try_acquire_business(key).unwrap();
+        controller.release(lease.into_permit()).unwrap();
+
+        // A clear window lets the first success grow the budget above the
+        // startup value, which is a starting estimate rather than a cage.
+        controller.observe_business_success(key, 1_000).unwrap();
+        assert_eq!(controller.snapshot(key).unwrap().budget, 21);
+
+        // Further successes inside the same step window cannot move it again.
+        for offset in 0..20 {
+            controller
+                .observe_business_success(key, 1_000 + offset)
+                .unwrap();
+        }
+        assert_eq!(
+            controller.snapshot(key).unwrap().budget,
+            21,
+            "repeated successes must not exceed the hourly change cap"
+        );
+
+        // One full step later exactly one more slot is due.
+        controller
+            .observe_business_success(key, 1_000 + step_ms)
+            .unwrap();
+        assert_eq!(controller.snapshot(key).unwrap().budget, 22);
+        assert!(
+            controller.snapshot(key).unwrap().budget
+                <= controller.snapshot(key).unwrap().hard_max_in_flight,
+            "adaptive growth never exceeds the configured hard maximum"
+        );
     }
 
     #[test]
@@ -1244,7 +1370,11 @@ mod tests {
                 600_100,
             )
             .unwrap();
-        assert_eq!(controller.snapshot(provider_key).unwrap().budget, 5);
+        assert_eq!(
+            controller.snapshot(provider_key).unwrap().budget,
+            4,
+            "a probe success inside the hourly step window must not jump the budget back to the hard maximum"
+        );
         assert_eq!(controller.snapshot(provider_key).unwrap().in_flight, 4);
         for lease in leases {
             controller.release(lease.into_permit()).unwrap();
@@ -1533,8 +1663,8 @@ mod tests {
         assert_eq!(snapshot.rate_limit_samples, 1);
         assert_eq!(snapshot.smoothed_budget, 11);
         assert_eq!(
-            snapshot.budget, 11,
-            "a 429 at 12 concurrent must set budget to the refused watermark minus one"
+            snapshot.budget, 19,
+            "a 429 moves the budget one small hourly-capped step toward the measured ceiling, not directly onto it"
         );
         for lease in leases {
             controller.release(lease.into_permit()).unwrap();
@@ -1550,7 +1680,7 @@ mod tests {
         controller
             .observe_rate_limit("opencode-go:key1", 1_000)
             .unwrap();
-        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 4);
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 39);
         for lease in first {
             controller.release(lease.into_permit()).unwrap();
         }
@@ -1570,7 +1700,7 @@ mod tests {
             "a sample older than one hour must be pruned from the window"
         );
         assert_eq!(snapshot.smoothed_budget, 2);
-        assert_eq!(snapshot.budget, 2);
+        assert_eq!(snapshot.budget, 38);
         for lease in second {
             controller.release(lease.into_permit()).unwrap();
         }
@@ -1586,7 +1716,7 @@ mod tests {
         controller
             .observe_rate_limit("opencode-go:key1", 1_000)
             .unwrap();
-        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 29);
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 39);
         for lease in first {
             controller.release(lease.into_permit()).unwrap();
         }
@@ -1613,7 +1743,7 @@ mod tests {
             snapshot.smoothed_budget, 7,
             "median of [30, 6, 8] is 8, minus one slot; the 30 outlier must not collapse the budget"
         );
-        assert_eq!(snapshot.budget, 7);
+        assert_eq!(snapshot.budget, 39);
         for lease in third {
             controller.release(lease.into_permit()).unwrap();
         }
@@ -1628,7 +1758,7 @@ mod tests {
         controller
             .observe_rate_limit("opencode-go:key1", 1_000)
             .unwrap();
-        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 4);
+        assert_eq!(controller.snapshot("opencode-go:key1").unwrap().budget, 39);
         for lease in leases {
             controller.release(lease.into_permit()).unwrap();
         }
@@ -1645,7 +1775,7 @@ mod tests {
             snapshot.smoothed_budget, 40,
             "an empty one-hour window must allow the configured hard maximum again"
         );
-        assert_eq!(snapshot.budget, 5);
+        assert_eq!(snapshot.budget, 40);
     }
 
     #[test]
@@ -1659,10 +1789,10 @@ mod tests {
         controller.release(held.into_permit()).unwrap();
 
         controller
-            .observe_business_success("opencode-go:key1", 2_000)
+            .observe_business_success("opencode-go:key1", 3_601_001)
             .unwrap();
         controller
-            .observe_business_success("opencode-go:key1", 2_000)
+            .observe_business_success("opencode-go:key1", 3_601_001)
             .unwrap();
         assert_eq!(
             controller.snapshot("opencode-go:key1").unwrap().budget,
@@ -1672,7 +1802,7 @@ mod tests {
 
         let held = controller.try_acquire_business("opencode-go:key1").unwrap();
         controller
-            .observe_rate_limit("opencode-go:key1", 3_000)
+            .observe_rate_limit("opencode-go:key1", 7_201_002)
             .unwrap();
         assert_eq!(
             controller.snapshot("opencode-go:key1").unwrap().budget,
@@ -1718,9 +1848,9 @@ mod tests {
         let b = controller.snapshot("opencode-go:key-b").unwrap();
         assert_eq!(a.rate_limit_samples, 1);
         assert_eq!(a.smoothed_budget, 19);
-        assert_eq!(a.budget, 19);
+        assert_eq!(a.budget, 39);
         assert_eq!(b.rate_limit_samples, 1);
         assert_eq!(b.smoothed_budget, 2);
-        assert_eq!(b.budget, 2);
+        assert_eq!(b.budget, 39);
     }
 }
