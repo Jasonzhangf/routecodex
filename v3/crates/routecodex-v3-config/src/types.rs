@@ -459,7 +459,6 @@ impl V3ProviderErrorActionClass {
 #[serde(rename_all = "snake_case")]
 pub enum V3ProviderErrorRetryMode {
     None,
-    RetrySame,
     ReselectBeforeClientProjection,
     ProjectTerminal,
 }

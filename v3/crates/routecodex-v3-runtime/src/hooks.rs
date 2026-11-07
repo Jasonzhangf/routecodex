@@ -100,7 +100,6 @@ type ErrorHook = fn(
     V3ErrorActionScope,
     usize,
     bool,
-    bool,
     Option<V3Error05RecoveryAdmissionWitness>,
 ) -> Result<
     (Value, V3Error05ExecutionDecision),
@@ -273,7 +272,6 @@ impl V3HookRegistry {
         scope: V3ErrorActionScope,
         candidates_remaining: usize,
         default_pool_available: bool,
-        same_provider_retry_available: bool,
         recovery: Option<V3Error05RecoveryAdmissionWitness>,
     ) -> Result<(Value, V3Error05ExecutionDecision), crate::operation_runner::OperationRunnerError>
     {
@@ -282,7 +280,6 @@ impl V3HookRegistry {
             scope,
             candidates_remaining,
             default_pool_available,
-            same_provider_retry_available,
             recovery,
         )
     }
@@ -1415,7 +1412,6 @@ pub(crate) fn responses_direct_error_hook(
     scope: V3ErrorActionScope,
     candidates_remaining: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> Result<(Value, V3Error05ExecutionDecision), crate::operation_runner::OperationRunnerError> {
     let source_projection = serde_json::to_value(&source).map_err(|error| {
@@ -1429,7 +1425,6 @@ pub(crate) fn responses_direct_error_hook(
         scope,
         candidates_remaining,
         default_pool_available,
-        same_provider_retry_available,
         recovery,
     )
 }

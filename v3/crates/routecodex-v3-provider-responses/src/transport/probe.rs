@@ -1,12 +1,5 @@
 use super::*;
 
-pub(super) fn is_rate_limited(error: &V3ProviderError) -> bool {
-    matches!(
-        error,
-        V3ProviderError::HttpStatus { response } if response.status == 429
-    )
-}
-
 impl ProviderResponsesTransport {
     /// A health probe succeeds at HTTP 2xx headers; business parsing stays in send_http.
     pub async fn send_probe(
@@ -96,8 +89,6 @@ impl ProviderResponsesTransport {
         .await;
         if was_probe && result.is_ok() {
             drop(guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted));
-        } else if was_probe && result.as_ref().err().is_some_and(is_rate_limited) {
-            drop(guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited));
         } else {
             drop(guard);
         }

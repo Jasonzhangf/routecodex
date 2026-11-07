@@ -182,7 +182,7 @@ fn responses_direct_error_hook_runs_sdk_02_through_05_and_returns_decision_proje
         "provider connection failed",
     );
     let (projection, decision) = registry
-        .run_error(source, V3ErrorActionScope::None, 0, false, false, None)
+        .run_error(source, V3ErrorActionScope::None, 0, false, None)
         .expect("registered Error hook must execute SDK Error02 through Error05");
 
     assert_eq!(

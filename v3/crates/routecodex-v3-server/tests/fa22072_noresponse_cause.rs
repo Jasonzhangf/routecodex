@@ -702,7 +702,6 @@ fn fa22072_error_terminal_preserves_original_typed_source() {
             source_status: None,
         },
         false,
-        false,
         None,
     );
     let terminal = decision.try_into_terminal().expect("terminal failure");

@@ -126,7 +126,6 @@ mod tests {
             action,
             candidates_remaining,
             default_pool_available,
-            false,
         )
     }
 

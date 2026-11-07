@@ -209,7 +209,6 @@ fn project_v3_relay_error_source_keeps_real_sdk_rejection_as_fault() {
         scope.clone(),
         0,
         false,
-        false,
         None,
     )
     .expect_err("the real Error02 SDK must reject a non-object source projection");
@@ -286,7 +285,6 @@ fn sdk_error_keeps_original_source_and_runner_message() {
         },
         0,
         false,
-        false,
         None,
     )
     .expect_err("the real Error02 SDK must reject a non-object projection");
@@ -358,7 +356,6 @@ fn policy_error02_to_05_sdk_rejection_preserves_original_source() {
         source.clone(),
         0,
         false,
-        false,
         None,
         false,
     )
@@ -395,7 +392,6 @@ fn terminal_error06_rejection_preserves_decision_source_and_nonterminal_stays_no
         source.clone(),
         1,
         true,
-        false,
         Some(recovery),
         false,
     )
@@ -412,7 +408,6 @@ fn terminal_error06_rejection_preserves_decision_source_and_nonterminal_stays_no
         source_projection,
         source.clone(),
         0,
-        false,
         false,
         None,
         false,

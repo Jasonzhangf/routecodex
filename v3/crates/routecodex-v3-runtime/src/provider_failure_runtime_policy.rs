@@ -14,12 +14,12 @@ use routecodex_v3_error::{
     V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
-    adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
-    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
-    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderFailureRecord, V3ProviderHealthListenerScope, V3ProviderHealthStore,
-    V3ProviderKeyHealthProjection, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
-    V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
+    adaptive_concurrency::V3AdaptiveConcurrencyController, V3ProviderAvailabilityProjection,
+    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureAction,
+    V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderFailureRecord,
+    V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderKeyHealthProjection,
+    V3ProviderRecoveryKind, V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3StickySelectionScope, V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected,
@@ -38,8 +38,8 @@ use crate::operation_runner::{
     run_v3_error_06_terminal_projection_operator, V3Err01SourceInput,
 };
 use crate::provider_action_gate::{
-    V3ProviderActionAdmission, V3ProviderActionFailureRecorded, V3ProviderActionGate,
-    V3ProviderActionGateKey, V3ProviderActionProviderScope, V3ProviderActionRecoveryTransition,
+    V3ProviderActionGate,
+    V3ProviderActionGateKey, V3ProviderActionProviderScope,
 };
 use crate::provider_error_policy_matching::provider_error_policy_matches_source_failure;
 pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
@@ -103,8 +103,9 @@ pub async fn probe_v3_provider_global_target(
 }
 
 /// Error owns typed thresholds for the exact provider+interface+auth_alias+model
-/// identity; typed classification wins. Early429 is capacity backpressure;
-/// sustained429 escalation belongs to the health Store episode owner.
+/// identity; typed classification wins. HTTP 429 uses the same typed control
+/// path as any other recoverable provider failure; only the raw upstream
+/// evidence differs.
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -112,10 +113,7 @@ pub(crate) fn apply_v3_internal_provider_failure_policy(
     code: &str,
 ) -> V3ProviderFailureAction {
     let _ = (source_stage, code);
-    if matches!(
-        action.recovery,
-        V3ProviderRecoveryKind::NotProviderHealth | V3ProviderRecoveryKind::HealthNeutralTransient
-    ) {
+    if matches!(action.recovery, V3ProviderRecoveryKind::NotProviderHealth) {
         return action;
     }
     // 状态码阈值只作用在可恢复类：已注册的不可恢复账户/计费代码即使上游返回
@@ -170,6 +168,10 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         // not provider health. Relay may surface them as a runtime 502 after
         // decoding an HTTP-200 SSE error event, so status alone is insufficient.
         || error_type == Some("invalid_request_error")
+        // Local connection-slot capacity busy describes the request's admission
+        // contention, not provider health. The failed identity is still excluded
+        // from this request, but it must not cool a healthy provider.
+        || error_type == Some("provider_concurrency_busy")
 }
 
 /// A Relay Error-operator contract failure. This is a typed control resource:
@@ -322,7 +324,6 @@ fn project_v3_relay_error_source_with_projection(
         scope,
         candidates_remaining,
         false,
-        false,
         None,
     )
     .map_err(|error| {
@@ -380,7 +381,6 @@ pub(crate) fn project_v3_client_disconnect(
         },
         0,
         false,
-        false,
         None,
     )
     .map_err(|error| {
@@ -394,31 +394,6 @@ pub(crate) fn project_v3_client_disconnect(
         original_source,
         run_v3_error_06_terminal_projection_operator(decision_projection, decision),
     )
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct V3RelayProviderFailureRetryPolicy {
-    pub(crate) same_candidate_retries: usize,
-}
-
-impl Default for V3RelayProviderFailureRetryPolicy {
-    fn default() -> Self {
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
-}
-
-impl V3RelayProviderFailureRetryPolicy {
-    pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
-        // Every provider failure changes the candidate. RetrySame is retained
-        // only as a config compatibility enum and never grants production
-        // same-candidate retries.
-        let _ = manifest;
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -457,13 +432,11 @@ pub(crate) struct V3RelayProviderFailurePolicyContext<'ctx> {
     pub(crate) captured_target_09: Option<&'ctx V3Target09CandidateSetExpanded>,
     pub(crate) failure_session_scope: V3ProviderFailureSessionScope,
     pub(crate) provider_health: &'ctx V3ProviderFailureRuntimeHealth,
-    pub(crate) retry_policy: V3RelayProviderFailureRetryPolicy,
     pub(crate) deterministic_sample: u64,
 }
 
 pub(crate) struct V3RelayProviderFailurePolicyState<'state> {
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
-    pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) trace: &'state mut Vec<&'static str>,
     pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
 }
@@ -542,6 +515,15 @@ struct V3SessionGlobalSchedulingReader<'health> {
     excluded: &'health BTreeSet<String>,
 }
 
+/// Global store state and the session projection can name the same automatic
+/// hold (for example the pre-cool observation marker). The reason string must
+/// describe each block once, so duplicate markers collapse while their original
+/// order is preserved.
+fn collapse_duplicate_blocked_scopes(scopes: &mut Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    scopes.retain(|scope| seen.insert(scope.clone()));
+}
+
 impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
     fn scheduling_projection_for_interface(
         &self,
@@ -583,6 +565,7 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
+        collapse_duplicate_blocked_scopes(&mut projection.blocked_scopes);
         projection.available = projection.available && session.available && !excluded_candidate;
         projection
     }
@@ -625,6 +608,7 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
+        collapse_duplicate_blocked_scopes(&mut projection.blocked_scopes);
         projection.available = projection.available && session.available && !excluded_candidate;
         projection
     }
@@ -634,7 +618,6 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
 pub struct V3ProviderFailureRuntimeHealth {
     store: V3ProviderHealthStore,
     action_gate: V3ProviderActionGate,
-    default_same_provider_retries: usize,
     probe_owner: std::sync::Arc<std::sync::Mutex<Option<V3ManagedProbeSender>>>,
     precool: std::sync::Arc<std::sync::Mutex<BTreeMap<V3PrecoolIdentity, V3DeferredHealthAction>>>,
     observation_clock: Option<Arc<dyn V3ProviderHealthObservationClock>>,
@@ -789,7 +772,6 @@ impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
             precool: Default::default(),
             observation_clock: None,
             action_gate: V3ProviderActionGate::process_shared(),
-            default_same_provider_retries: 0,
         }
     }
 }
@@ -888,6 +870,23 @@ fn v3_relay_provider_policy_ordinary_error(
     Ok(error.into())
 }
 
+/// 本请求失败但不进行 Provider health 副作用的记录。该值不写 store、
+/// 不设置 cooldown、不创建观察或探测，也不能成为后续选路真源。
+pub(crate) fn v3_provider_failure_record_without_health(
+    provider_key: String,
+    state: &'static str,
+    reason: Option<&str>,
+) -> V3ProviderFailureRecord {
+    V3ProviderFailureRecord {
+        scope_label: provider_key.clone(),
+        provider_key,
+        state: state.to_string(),
+        failure_count: 0,
+        cooldown_until_ms: None,
+        reason: reason.map(str::to_string),
+    }
+}
+
 pub(crate) async fn run_v3_relay_provider_failure_policy(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: V3Target10ConcreteProviderSelected,
@@ -982,8 +981,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
     let is_request_local_compat_failure = is_response_processing_failure
         || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
-    let mut excluded_with_failed = state.failed_candidates.clone();
-    excluded_with_failed.insert(candidate_key.clone());
+    // Capture the real failed identity before any reselection or local
+    // expansion failure. Provider lifecycle recovery cannot erase this fact.
+    state.failed_candidates.insert(candidate_key.clone());
+    let excluded_with_failed = state.failed_candidates.clone();
     let resolution = reselect_from_captured_target_plan(
         context,
         &selected,
@@ -991,30 +992,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?,
     )
     .await;
-    let has_alternative = matches!(&resolution, V3RelayProviderTargetResolution::Selected(_));
-    // Resolve another eligible identity before any health mutation. A terminal
-    // attempt publishes diagnostics only; it does not update health or actions.
-    // The last or only eligible candidate stays health-neutral for every
-    // provider failure class.
-    let health_record = if is_request_local_compat_failure || (!has_alternative && status != 429) {
-        V3ProviderFailureRecord {
-            scope_label: candidate_key.clone(),
-            provider_key: candidate_key.clone(),
-            state: if status == 429 {
-                "rate_limit_capacity_wait"
-            } else if is_response_processing_failure {
-                "request_local_response_processing"
-            } else if is_request_local_compat_failure {
-                "request_local_provider_compat"
-            } else {
-                "last_candidate_terminal"
-            }
-            .to_string(),
-            failure_count: 0,
-            cooldown_until_ms: None,
-            reason: reason.map(str::to_string),
-        }
+    let request_local_state = if is_response_processing_failure {
+        "request_local_response_processing"
     } else {
+        "request_local_provider_compat"
+    };
+    let record_ordinary_failure = |selected: &V3Target10ConcreteProviderSelected| {
         context
             .provider_health
             .record_provider_failure_record_with_policy_for_interface(
@@ -1033,14 +1016,56 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 &message,
                 v3_relay_provider_policy_now_epoch_ms()
                     .map_err(v3_relay_provider_policy_ordinary_error)?,
-            )?
+            )
     };
-    let retries_done = state
-        .same_candidate_retries
-        .get(&candidate_key)
-        .copied()
-        .unwrap_or(0);
-    let route_resolution_proved_no_alternative = match resolution {
+    let health_record = match &resolution {
+        V3RelayProviderTargetResolution::Selected(alternative) => {
+            let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
+            if alternative_key == candidate_key
+                || state.failed_candidates.contains(&alternative_key)
+            {
+                return Err(v3_relay_provider_policy_ordinary_error(format!(
+                    "provider failure reselection returned an already failed candidate: {alternative_key}"
+                )));
+            }
+            if is_request_local_compat_failure {
+                v3_provider_failure_record_without_health(
+                    candidate_key.clone(),
+                    request_local_state,
+                    reason.as_deref(),
+                )
+            } else {
+                record_ordinary_failure(&selected)?
+            }
+        }
+        V3RelayProviderTargetResolution::Exhausted { .. } if is_request_local_compat_failure => {
+            v3_provider_failure_record_without_health(
+                candidate_key.clone(),
+                request_local_state,
+                reason.as_deref(),
+            )
+        }
+        V3RelayProviderTargetResolution::Exhausted { .. } => {
+            v3_provider_failure_record_without_health(
+                candidate_key.clone(),
+                "last_candidate_terminal",
+                reason.as_deref(),
+            )
+        }
+        // Target expansion/resolution failure leaves the alternative fact
+        // unknown. It is not a proven last candidate, so the real provider
+        // failure keeps its ordinary typed health path.
+        V3RelayProviderTargetResolution::Failed(_) if is_request_local_compat_failure => {
+            v3_provider_failure_record_without_health(
+                candidate_key.clone(),
+                request_local_state,
+                reason.as_deref(),
+            )
+        }
+        V3RelayProviderTargetResolution::Failed(_) => record_ordinary_failure(&selected)?,
+        V3RelayProviderTargetResolution::OperatorFault(fault) => return Err(Err(fault.clone())),
+    };
+    match resolution {
         V3RelayProviderTargetResolution::Selected(alternative) => {
             let alternative_key = v3_relay_provider_candidate_key(&alternative.candidate);
             if alternative_key == candidate_key
@@ -1051,79 +1076,16 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 )));
             }
             {
-                let request_local_recovery = || {
-                    V3Error05RecoveryAdmissionWitness::new(
-                        context.failure_session_scope.clone(),
-                        candidate_key.clone(),
-                        error_type
-                            .as_deref()
-                            .unwrap_or("provider_request_compat_error"),
-                        1,
-                    )
-                };
-                let recovery = if is_request_local_compat_failure || status != 429 {
-                    None
-                } else {
-                    let configured_backoff_ms =
-                        configured_retry_backoff_ms(matched_policy, retries_done);
-                    Some(if configured_backoff_ms == 0 {
-                        context
-                            .provider_health
-                            .record_provider_action_failure_in_scope_for_interface(
-                                &context.failure_session_scope,
-                                &selected.candidate.provider_id,
-                                &selected.candidate.interface_id,
-                                Some(&selected.candidate.auth_alias),
-                                Some(&selected.candidate.model_id),
-                                if status == 429 {
-                                    "provider_http_429"
-                                } else {
-                                    error_type.as_deref().unwrap_or("provider_failure")
-                                },
-                            )
-                            .map_err(v3_relay_provider_policy_ordinary_error)?
-                    } else {
-                        context
-                            .provider_health
-                            .record_provider_action_failure_in_scope_with_minimum_delay_for_interface(
-                                &context.failure_session_scope,
-                                &selected.candidate.provider_id,
-                                &selected.candidate.interface_id,
-                                Some(&selected.candidate.auth_alias),
-                                Some(&selected.candidate.model_id),
-                                if status == 429 { "provider_http_429" } else { error_type.as_deref().unwrap_or("provider_failure") },
-                                configured_backoff_ms,
-                            )
-                            .map_err(v3_relay_provider_policy_ordinary_error)?
-                    })
-                };
                 let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
                     &selected,
                     attempt_source_projection.clone(),
                     attempt_source.clone(),
                     usize::from(!alternative.candidate.default_pool_member),
                     alternative.candidate.default_pool_member,
-                    false,
-                    if let Some(record) = recovery.as_ref() {
-                        Some(
-                            record
-                                .recovery_witness()
-                                .map_err(v3_relay_provider_policy_ordinary_error)?,
-                        )
-                    } else if !is_request_local_compat_failure && status != 429 {
-                        None
-                    } else {
-                        Some(
-                            request_local_recovery()
-                                .map_err(v3_relay_provider_policy_ordinary_error)?,
-                        )
-                    },
-                    !is_request_local_compat_failure && status != 429,
+                    None,
+                    true,
                 )
                 .map_err(Err)?;
-                if is_request_local_compat_failure {
-                    state.failed_candidates.insert(candidate_key);
-                }
                 state.trace.push("V3TargetLocalReselected");
                 return Ok(V3RelayProviderFailurePolicyResult {
                     terminal_projection: terminal_projection_for(
@@ -1132,7 +1094,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         matched_policy,
                     )
                     .map_err(Err)?,
-                    terminal_disposition: terminal_disposition_for(&decision, state),
+                    terminal_disposition: terminal_disposition_for(&decision, state, false),
                     decision,
                     retry_selected: Some(Box::new(alternative)),
                     event: build_v3_relay_provider_failure_policy_event(
@@ -1144,7 +1106,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                             health_record,
                             action: "switch_provider",
                             next_provider_key: Some(alternative_key),
-                            wait_ms: recovery.as_ref().map(|record| record.minimum_delay_ms),
+                            wait_ms: None,
                             diagnostic_source: attempt_source.clone(),
                         },
                     ),
@@ -1153,7 +1115,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         }
         V3RelayProviderTargetResolution::Exhausted {
             attempted_candidates: _,
-        } => true,
+        } => {}
         V3RelayProviderTargetResolution::Failed(source) => {
             let resolution_message = source.message.clone();
             let original_source = source.clone();
@@ -1172,7 +1134,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 source,
                 V3ErrorActionScope::None,
                 0,
-                false,
                 false,
                 None,
             )
@@ -1210,115 +1171,12 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             return Err(Err(fault));
         }
     };
-    if status == 429 && !is_request_local_compat_failure {
-        let recovery = context
-            .provider_health
-            .record_provider_action_failure_in_scope_for_interface(
-                &context.failure_session_scope,
-                &selected.candidate.provider_id,
-                &selected.candidate.interface_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-                "provider_http_429",
-            )
-            .map_err(v3_relay_provider_policy_ordinary_error)?;
-        let witness = recovery
-            .recovery_witness()
-            .map_err(v3_relay_provider_policy_ordinary_error)?;
-        let (_, decision) = build_v3_relay_provider_error_05_decision(
-            &selected,
-            attempt_source_projection,
-            attempt_source.clone(),
-            0,
-            false,
-            true,
-            Some(witness),
-            false,
-        )
-        .map_err(Err)?;
-        let event =
-            build_v3_relay_provider_failure_policy_event(V3RelayProviderFailurePolicyEventInput {
-                candidate: selected.candidate.clone(),
-                status,
-                error_type,
-                message,
-                health_record,
-                action: "wait_rate_limit_capacity",
-                next_provider_key: Some(candidate_key),
-                wait_ms: Some(recovery.minimum_delay_ms),
-                diagnostic_source: attempt_source,
-            });
-        return Ok(V3RelayProviderFailurePolicyResult {
-            decision,
-            retry_selected: Some(Box::new(selected)),
-            terminal_projection: None,
-            terminal_disposition: None,
-            event,
-        });
-    }
-    let recovery_now_ms =
-        v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?;
-    if context.captured_target_09.is_some_and(|expanded| {
-        (!is_request_local_compat_failure && status != 429)
-            || v3_exhaustion_is_cooldown_only(
-                expanded,
-                &excluded_with_failed,
-                &context.failure_session_scope,
-                context.provider_health,
-                recovery_now_ms,
-            )
-    }) {
-        state.failed_candidates.insert(candidate_key.clone());
-        let (_, decision) =
-            crate::operation_runner::run_v3_error_02_to_05_decision_operators_with_target_recovery(
-                attempt_source_projection.clone(),
-                attempt_source.clone(),
-                V3ErrorActionScope::ProviderKeyModel {
-                    provider_id: selected.candidate.provider_id.clone(),
-                    auth_alias: selected.candidate.auth_alias.clone(),
-                    model_id: selected.candidate.model_id.clone(),
-                },
-                0,
-                false,
-                false,
-                None,
-                true,
-            )
-            .map_err(|error| {
-                Err(relay_error_operator_fault(
-                    "relay_error_operator_sdk_failure",
-                    error.message,
-                    Some(attempt_source.clone()),
-                ))
-            })?;
-        return Ok(V3RelayProviderFailurePolicyResult {
-            decision,
-            retry_selected: None,
-            terminal_projection: None,
-            terminal_disposition: None,
-            event: build_v3_relay_provider_failure_policy_event(
-                V3RelayProviderFailurePolicyEventInput {
-                    candidate: selected.candidate,
-                    status,
-                    error_type,
-                    message,
-                    health_record,
-                    action: "wait_target_recovery",
-                    next_provider_key: None,
-                    wait_ms: None,
-                    diagnostic_source: attempt_source,
-                },
-            ),
-        });
-    }
     if is_request_local_compat_failure {
-        state.failed_candidates.insert(candidate_key);
         let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
             &selected,
             attempt_source_projection.clone(),
             attempt_source.clone(),
             0,
-            false,
             false,
             None,
             false,
@@ -1331,7 +1189,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 matched_policy,
             )
             .map_err(Err)?,
-            terminal_disposition: terminal_disposition_for(&decision, state),
+            terminal_disposition: terminal_disposition_for(&decision, state, false),
             decision,
             retry_selected: None,
             event: build_v3_relay_provider_failure_policy_event(
@@ -1349,19 +1207,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             ),
         });
     }
-    if !route_resolution_proved_no_alternative {
-        return Err(v3_relay_provider_policy_ordinary_error(
-            "target resolution did not prove route/default exhaustion before terminal Error05"
-                .to_string(),
-        ));
-    }
-    state.failed_candidates.insert(candidate_key);
     let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
         &selected,
         attempt_source_projection,
         attempt_source.clone(),
         0,
-        false,
         false,
         None,
         false,
@@ -1369,7 +1219,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     .map_err(Err)?;
     let terminal_projection =
         terminal_projection_for(decision_projection, &decision, matched_policy).map_err(Err)?;
-    let terminal_disposition = terminal_disposition_for(&decision, state);
+    // This is the only call reached after a normal captured-target Exhausted
+    // with no remaining untried eligible alternative. The failed candidate was
+    // already recorded and no health, probe, wait or resend was added here.
+    let terminal_disposition = terminal_disposition_for(&decision, state, true);
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection,
         terminal_disposition,
@@ -1394,6 +1247,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
 fn terminal_disposition_for(
     decision: &V3Error05ExecutionDecision,
     state: &V3RelayProviderFailurePolicyState<'_>,
+    normal_last_candidate: bool,
 ) -> Option<routecodex_v3_error::V3ProviderTerminalDisposition> {
     decision.clone().try_into_terminal().ok().map(|terminal| {
         if terminal
@@ -1407,10 +1261,19 @@ fn terminal_disposition_for(
         {
             return routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse;
         }
-        V3ErrorHandlingCenter::provider_terminal_disposition(
-            terminal,
-            state.last_external_http.clone(),
-        )
+        if normal_last_candidate {
+            // The current attempt witness is already bound to this attempt. A
+            // complete real upstream HTTP error becomes the constrained
+            // client-visible variant; anything else keeps private evidence.
+            V3ErrorHandlingCenter::last_candidate_terminal_disposition(
+                state.last_external_http.clone(),
+            )
+        } else {
+            V3ErrorHandlingCenter::provider_terminal_disposition(
+                terminal,
+                state.last_external_http.clone(),
+            )
+        }
     })
 }
 
@@ -1572,7 +1435,6 @@ fn build_v3_relay_provider_error_05_decision(
     source: V3Error01SourceRaised,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
     target_recovery_pending: bool,
 ) -> Result<(Value, V3Error05ExecutionDecision), V3RelayErrorOperatorFault> {
@@ -1587,7 +1449,6 @@ fn build_v3_relay_provider_error_05_decision(
         },
         route_pool_remaining_after_exclusion,
         default_pool_available,
-        same_provider_retry_available,
         recovery,
         target_recovery_pending,
     )

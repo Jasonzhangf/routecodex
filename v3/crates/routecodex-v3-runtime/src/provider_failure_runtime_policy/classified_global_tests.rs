@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
+fn classified_global_health_keeps_429_ordinary_and_auth_terminal() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -27,91 +27,61 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
     let recoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified =
         classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
-    // An early 429 is capacity backpressure, not a health exclusion.
-    recoverable_health
-        .record_provider_global_health_for_classified_error(
-            &scope,
-            "first",
-            "default",
-            Some("key1"),
-            Some("gpt-test"),
-            &classified,
-            10_000,
-        )
-        .expect("classified 429 failure should record");
-    assert!(
+    // A classified 429 is an ordinary recoverable failure: the global health
+    // path counts the shared consecutive streak exactly like a 503 and cools
+    // only on the third consecutive failure. Only the retained raw upstream
+    // evidence differs.
+    for attempt in 0..3u64 {
         recoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
-            .available,
-        "early 429 must leave health routable"
-    );
-    // Business success resets this unresolved episode.
-    recoverable_health
-        .store()
-        .record_provider_key_success("first", "key1", "gpt-test", 10_001)
-        .expect("business success resets the early episode");
-    assert!(
-        recoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_001)
-            .available,
-        "business success preserves health availability"
-    );
-    // A new episode requires another actual 429 across the full window.
-    recoverable_health
-        .record_provider_global_health_for_classified_error(
-            &scope,
-            "first",
-            "default",
-            Some("key1"),
-            Some("gpt-test"),
-            &classified,
-            20_000,
-        )
-        .expect("second classified 429 failure should record");
-    assert!(
-        recoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
-            .available,
-        "a fresh early episode must remain health-neutral"
-    );
-    assert!(
-        recoverable_health
-            .store()
-            .availability_for_session(
+            .record_provider_global_health_for_classified_error(
                 &scope,
                 "first",
+                "default",
                 Some("key1"),
                 Some("gpt-test"),
-                20_000 + 60_001,
+                &classified,
+                10_000 + attempt,
             )
-            .available,
-        "time alone cannot upgrade the episode"
-    );
-    recoverable_health
-        .record_provider_global_health_for_classified_error(
-            &scope,
-            "first",
-            "default",
-            Some("key1"),
-            Some("gpt-test"),
-            &classified,
-            140_000,
-        )
-        .expect("new actual 429 across two minutes");
+            .expect("classified 429 failure should record");
+        if attempt < 2 {
+            assert!(
+                recoverable_health
+                    .store()
+                    .availability_for_session(
+                        &scope,
+                        "first",
+                        Some("key1"),
+                        Some("gpt-test"),
+                        10_000 + attempt,
+                    )
+                    .available,
+                "below the shared consecutive threshold a classified 429 must not cool"
+            );
+        }
+    }
     assert!(
         !recoverable_health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 140_000,)
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000,)
             .available
     );
     assert!(
         recoverable_health
             .store()
-            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 140_000,)
+            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 10_000,)
             .available
+    );
+    // Business success releases the ordinary cooldown on the exact identity.
+    recoverable_health
+        .store()
+        .record_provider_key_success("first", "key1", "gpt-test", 10_010)
+        .expect("business success releases the ordinary cooldown");
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_011)
+            .available,
+        "business success restores the cooled identity"
     );
 
     let unrecoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
@@ -217,7 +187,7 @@ fn classified_provider_error(
 }
 
 #[test]
-fn early_http_429_does_not_enter_global_cooldown() {
+fn http_429_counts_and_commits_the_ordinary_global_ladder() {
     let mut manifest = global_pool_alive_manifest("recoverable_http_429_global_threshold");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -238,7 +208,10 @@ fn early_http_429_does_not_enter_global_cooldown() {
         .scheduling_projection("first", "key1", "gpt-test", 100, 1, 0)
         .expect("initial health projection");
 
-    // Repeated actual429 responses inside the window stay health-neutral.
+    // v31: a recorded 429 is an ordinary recoverable failure. Each consecutive
+    // same-fingerprint record counts immediately and only the ladder crossing
+    // changes visibility: attempts 1-2 stay visible, the third commits the
+    // shared 10s floor for exactly this identity.
     for attempt in 0..6 {
         let now_ms = 10_000 + attempt as u64;
         health
@@ -262,27 +235,52 @@ fn early_http_429_does_not_enter_global_cooldown() {
             .store()
             .scheduling_projection("first", "key1", "gpt-test", 100, 1, now_ms)
             .expect("health projection");
-        let available = projection.available;
-        assert!(
-            available,
-            "429 must not cool provider health; attempt={attempt}"
-        );
+        if attempt < 2 {
+            assert!(
+                projection.available,
+                "429 stays visible below the ladder threshold; attempt={attempt}"
+            );
+        } else {
+            assert!(
+                !projection.available,
+                "the third consecutive 429 commits the shared ladder; attempt={attempt}"
+            );
+        }
     }
     assert!(
-        health
+        !health
             .store()
             .provider_cooldown_probe_keys_due(u64::MAX)
             .expect("probe keys")
             .is_empty(),
-        "an early429 must not create a health recovery probe"
+        "a committed 429 cooldown owns its scheduled recovery probe"
     );
-    // The passage of time without a new provider response cannot cool health.
-    let projection = health
-        .store()
-        .scheduling_projection("first", "key1", "gpt-test", 100, 1, 10_000 + 5 + 60_001)
-        .expect("post-window projection");
     assert!(
-        projection.available,
-        "an unchanged early episode remains routable"
+        health
+            .availability("first", Some("key2"), Some("gpt-test"), 10_005)
+            .available,
+        "the committed cooldown stays exact to the failed identity"
+    );
+    // The committed step is a cooldown substate: once its `until_ms` elapses it
+    // remains a due recovery probe in the pool, and only a matching probe
+    // success restores routing. No request ever waits on it.
+    let entries = health.store().cooldown_entries(10_005 + 30_000 + 1);
+    assert!(
+        entries.iter().any(|entry| entry.provider_id == "first"
+            && entry.interface_id == "default"
+            && entry.auth_alias.as_deref() == Some("key1")
+            && entry.model_id.as_deref() == Some("gpt-test")
+            && entry.until_ms.is_none()),
+        "the elapsed ladder step keeps a due probe substate instead of a request wait: {entries:?}"
+    );
+    assert!(
+        health
+            .store()
+            .scheduling_projection("first", "key1", "gpt-test", 100, 1, 10_005 + 30_000 + 1)
+            .expect("post-cooldown projection")
+            .blocked_scopes
+            .iter()
+            .all(|scope| scope != "provider_pre_cool_observation"),
+        "the committed identity is owned by the store's cooldown, not a pre-cool hold"
     );
 }

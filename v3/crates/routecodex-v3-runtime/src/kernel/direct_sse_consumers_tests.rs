@@ -818,7 +818,7 @@ fn transport_error_export_enters_the_canonical_error_chain() {
     );
     let exhaustion =
             routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-                local, 0, false, false,
+                local, 0, false,
             );
     let execution = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
         exhaustion, None,
