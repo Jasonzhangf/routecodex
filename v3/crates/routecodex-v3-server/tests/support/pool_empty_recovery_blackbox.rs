@@ -3208,6 +3208,10 @@ async fn assert_rate_limit_wait(
     let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let late_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // Business attempts only, excluding the provider-lifecycle probe lane. The 429
+    // budget below decides whether the request's truthful terminal is a real provider
+    // 429, so a probe must never consume it (see the ladder comment at the handler).
+    let business_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let call_trace = Arc::new(std::sync::Mutex::new(Vec::new()));
     let fixture_started = std::time::Instant::now();
     let healthy_started = Arc::new(tokio::sync::Notify::new());
@@ -3217,6 +3221,7 @@ async fn assert_rate_limit_wait(
         let ready = ready.clone();
         let calls = calls.clone();
         let late_calls = late_calls.clone();
+        let business_calls = business_calls.clone();
         let call_trace = call_trace.clone();
         let healthy_started = healthy_started.clone();
         let release_healthy = release_healthy.clone();
@@ -3224,6 +3229,7 @@ async fn assert_rate_limit_wait(
             let ready = ready.clone();
             let calls = calls.clone();
             let late_calls = late_calls.clone();
+            let business_calls = business_calls.clone();
             let call_trace = call_trace.clone();
             let hit_tx = hit_tx.clone();
             let healthy_started = healthy_started.clone();
@@ -3239,9 +3245,29 @@ async fn assert_rate_limit_wait(
                     return Response::builder().status(200).header("content-type", "text/event-stream")
                         .body(Body::from("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"parallel-success\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"healthy session completed\"}],\"output_text\":\"healthy session completed\"}}\n\ndata: [DONE]\n\n")).unwrap();
                 }
-                let attempt = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                // The 429 ladder shapes the request's truthful terminal, so it is
+                // counted over business attempts only. It used to share one global
+                // counter with the provider-lifecycle probe lane: when two probes
+                // occupied the window the two promoted business sends became upstream
+                // attempts 3 and 4, and attempt 4 also landed after the 250 ms `ready`
+                // snapshot, so the fake upstream answered it 200 with its real
+                // "recovered after wait" body. The runtime then correctly projected that
+                // real business answer and the request completed legitimately — the flake
+                // was this fixture manufacturing a scenario the test itself forbids
+                // (a cooled-pool terminal must carry no fabricated or real completion).
+                // `calls` stays the global attempt counter because the assertions below
+                // subtract `probe_calls` from it.
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let probe = body.to_string().contains("ping; reply pong");
+                let business_attempt = if probe {
+                    0
+                } else {
+                    business_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+                };
                 let _ = hit_tx.send(());
-                if attempt <= if parallel_success { 1 } else { 3 } || !ready.load(std::sync::atomic::Ordering::SeqCst) {
+                if business_attempt <= if parallel_success { 1 } else { 3 }
+                    || !ready.load(std::sync::atomic::Ordering::SeqCst)
+                {
                     return Response::builder().status(429)
                         .header("content-type", "application/json")
                         .body(Body::from(r#"{"error":{"type":"rate_limit_error","message":"capacity busy"}}"#)).unwrap();
@@ -3420,8 +3446,18 @@ async fn assert_rate_limit_wait(
     } else {
         waiter_count.max(2)
     };
-    assert!(early_calls <= max_early_calls,
-        "rate-limit wait must not hammer upstream: {early_calls}, fixture trace (elapsed, probe)={early_trace:?}");
+    // The anti-hammer bound is the request's own upstream traffic. The lifecycle
+    // recovery probes are owned by the provider lifecycle lane and arrive
+    // asynchronously with the promoted sends inside the same 250 ms window, so
+    // counting them here read 2 probes + 2 business sends = 4 against the cooled
+    // budget 3 — the same shared-counter instability as the 429 ladder above. The
+    // probe lane keeps its own bound (`probe_calls <= 2 * waiter_count`) below.
+    // Both counts come from the single `early_trace` snapshot so the split cannot
+    // straddle two reads; the trace is pushed before either counter advances.
+    let early_probe_calls = early_trace.iter().filter(|(_, probe)| *probe).count();
+    let early_business_calls = early_trace.iter().filter(|(_, probe)| !*probe).count();
+    assert!(early_business_calls <= max_early_calls,
+        "rate-limit wait must not hammer upstream: business={early_business_calls} probes={early_probe_calls} global_calls={early_calls}, fixture trace (elapsed, probe)={early_trace:?}");
     if cooled {
         // v31 cooldown-fallback contract. This branch used to assert the retired
         // wait-for-probe-recovery lane ("recovered after wait" + a completed
