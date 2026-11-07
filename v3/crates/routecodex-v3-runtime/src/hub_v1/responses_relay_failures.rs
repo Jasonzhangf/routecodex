@@ -393,17 +393,31 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     if failure.error_operator_fault.is_some() {
         return failure;
     }
+    // A real upstream HTTP status owns the external classification. The typed
+    // policy error type stays body-derived so policy matching and provider
+    // health keep the same cooldown classification.
+    let is_real_http_failure = failure.provider_status == Some(failure.status);
+    let external_code = if is_real_http_failure {
+        format!("provider_http_{}", failure.status)
+    } else {
+        failure.policy_error_type.clone()
+    };
+    let external_link_code = if is_real_http_failure {
+        format!("HTTP_{}", failure.status)
+    } else {
+        failure.policy_error_type.clone()
+    };
     let source = crate::shared::direct_source_error(
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
-        &failure.policy_error_type,
+        external_code,
         &failure.policy_error_message,
         match failure.provider_status {
             Some(status) => crate::operation_runner::V3Err01SourceInput::External(
                 routecodex_v3_error::V3ExternalErrorLink {
                     kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
                     status: Some(status),
-                    code: Some(failure.policy_error_type.clone()),
+                    code: Some(external_link_code),
                     provider_id: None,
                     upstream_request_id: None,
                     message: Some(failure.policy_error_message.clone()),
@@ -1055,8 +1069,50 @@ mod tests {
             routecodex_v3_error::V3ExternalErrorKind::Provider
         );
         assert_eq!(external.status, Some(429));
-        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(
+            external.code.as_deref(),
+            Some("HTTP_429"),
+            "the real upstream HTTP status owns the external link code; the body is evidence only",
+        );
         assert_eq!(external.message.as_deref(), Some("slow down"));
+    }
+
+    /// 35aa0d1：responses relay 收到真实上游 HTTP 400 时，外部分类必须来自该
+    /// HTTP status（provider_http_400），不能改用响应体里的 error.type；body 保留在
+    /// typed terminal witness，不进入客户端线。
+    #[test]
+    fn responses_relay_provider_http_400_derives_external_code_from_status() {
+        let body = br#"{"error":{"type":"invalid_request_error","message":"bad input"}}"#;
+        let failure = provider_http_failure(400, body, "provider-a", None);
+
+        assert_eq!(failure.provider_status, Some(400));
+        assert_eq!(
+            failure.policy_error_type, "invalid_request_error",
+            "the body-derived type stays the policy/health input",
+        );
+        let witness =
+            routecodex_v3_error::V3ExternalHttpWitness::new(400, vec![], body.to_vec());
+        let terminalized =
+            terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));
+        assert_eq!(
+            terminalized.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+            "upstream body must stay in the typed terminal witness, not the client wire",
+        );
+        let projection = terminalized
+            .terminal_projection
+            .expect("terminalized provider failure must carry Error06 projection");
+        assert_eq!(projection.diagnostic_source.code, "provider_http_400");
+        let external = projection
+            .diagnostic_source
+            .external_error
+            .expect("a real upstream HTTP status must stay linked in Error01");
+        assert_eq!(
+            external.kind,
+            routecodex_v3_error::V3ExternalErrorKind::Provider
+        );
+        assert_eq!(external.status, Some(400));
+        assert_eq!(external.code.as_deref(), Some("HTTP_400"));
     }
 
     #[test]
