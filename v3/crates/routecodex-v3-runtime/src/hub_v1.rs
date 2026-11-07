@@ -89,7 +89,7 @@ pub use req_inbound_02_normalized::*;
 mod history_image_cleanup;
 pub(crate) use history_image_cleanup::{
     count_v3_payload_image_refs, normalize_v3_history_image_placeholders,
-    V3_HISTORY_IMAGE_PLACEHOLDER,
+    v3_capabilities_represent_image_content, V3_HISTORY_IMAGE_PLACEHOLDER,
 };
 mod req_chat_process_04_governed;
 pub use req_chat_process_04_governed::build_v3_hub_req_chat_process_04_from_v3_hub_req_inbound_02;

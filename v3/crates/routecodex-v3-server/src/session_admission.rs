@@ -173,8 +173,13 @@ pub(crate) fn hold_response_body_request_activity_permit(
     front: Option<crate::restart_handoff::V3StableFrontSocket>,
 ) -> Response<Body> {
     let (parts, body) = response.into_parts();
+    // The activity permit keeps body and front-flush custody: the data stream is
+    // taken from the body first, wrapped as the held stream next, and the permit
+    // is handed to the Front flush boundary by the wrapper's single terminal
+    // hand-off (`hold_activity_until_flush(permit)`).
+    let stream = Box::pin(body.into_data_stream());
     let body = Body::from_stream(V3HeldResponseBodyStream {
-        stream: Box::pin(body.into_data_stream()),
+        stream,
         permit: Some(permit),
         front,
     });

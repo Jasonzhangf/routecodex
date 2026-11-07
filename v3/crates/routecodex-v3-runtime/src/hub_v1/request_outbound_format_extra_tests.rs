@@ -1648,6 +1648,19 @@ fn d701cc8_anthropic_canonical() -> Value {
 }
 
 fn d701cc8_target(provider_type: &str) -> routecodex_v3_target::V3TargetCandidate {
+    // P1-5: the `[Image]` placeholder rewrite belongs to targets that genuinely
+    // cannot represent an image, so this helper declares text-only capabilities.
+    d701cc8_target_with_capabilities(provider_type, &["text", "tools"])
+}
+
+fn d701cc8_vision_target(provider_type: &str) -> routecodex_v3_target::V3TargetCandidate {
+    d701cc8_target_with_capabilities(provider_type, &["text", "tools", "multimodal"])
+}
+
+fn d701cc8_target_with_capabilities(
+    provider_type: &str,
+    capabilities: &[&str],
+) -> routecodex_v3_target::V3TargetCandidate {
     routecodex_v3_target::V3TargetCandidate {
         provider_id: format!("d701cc8-{provider_type}"),
         provider_type: provider_type.into(),
@@ -1656,7 +1669,10 @@ fn d701cc8_target(provider_type: &str) -> routecodex_v3_target::V3TargetCandidat
         model_id: "model".into(),
         wire_model: "wire-model".into(),
         visible_model_ids: vec!["model".into()],
-        model_capabilities: vec!["text".into(), "tools".into(), "multimodal".into()],
+        model_capabilities: capabilities
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
         web_search_execution_mode: V3WebSearchExecutionMode::None,
         model_availability: None,
         max_context_tokens: None,
@@ -1692,7 +1708,9 @@ fn d701cc8_target(provider_type: &str) -> routecodex_v3_target::V3TargetCandidat
 #[test]
 fn d701cc8_anthropic_older_turn_tool_image_projects_only_to_openai_chat() {
     // Anthropic -> OpenAI-Chat is the configured compatibility projection that
-    // needs historical placeholders. The latest tool_result image remains.
+    // needs historical placeholders, and `d701cc8_target` declares text-only
+    // capabilities, so the selected target genuinely cannot represent the
+    // image. The latest tool_result image remains.
     let canonical = d701cc8_anthropic_canonical();
     let wire = super::super::project_v3_operation_runner_standard_provider_request(
         &canonical,
@@ -1747,7 +1765,7 @@ fn d701cc8_anthropic_to_anthropic_preserves_original_image_carrier() {
         super::super::V3HubEntryProtocol::Anthropic,
         super::super::V3HubTransportIntent::Json,
         super::super::V3HubProviderWireProtocol::Anthropic,
-        &d701cc8_target("anthropic"),
+        &d701cc8_vision_target("anthropic"),
     )
     .expect("Anthropic -> Anthropic projection")
     .payload;
@@ -1761,4 +1779,138 @@ fn d701cc8_anthropic_to_anthropic_preserves_original_image_carrier() {
         json!({"type": "url", "url": "https://example.test/image.png"}),
         "Anthropic target must preserve the original image source: {wire:#?}"
     );
+}
+
+const D701CC8_HISTORY_URL: &str = "https://example.test/image.png";
+const D701CC8_TOOL_DATA_URL: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+/// Ordered OpenAI Chat wire image sources (`image_url` part URLs, data URLs
+/// included). Proves the projection keeps the same image count and order.
+fn d701cc8_chat_wire_image_urls(value: &Value, output: &mut Vec<String>) {
+    match value {
+        Value::Object(row) => {
+            if row.get("type").and_then(Value::as_str) == Some("image_url") {
+                if let Some(url) = row
+                    .get("image_url")
+                    .and_then(|image| image.get("url").or(Some(image)))
+                    .and_then(Value::as_str)
+                {
+                    output.push(url.to_string());
+                }
+            }
+            for child in row.values() {
+                d701cc8_chat_wire_image_urls(child, output);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                d701cc8_chat_wire_image_urls(item, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn p1_5_anthropic_history_images_project_faithfully_to_vision_openai_chat_target() {
+    // P1-5 contract: once a target that can represent images is selected, the
+    // history projection is faithful — same number of images, same order, same
+    // data, no `[Image]` replacement. Both declared capability spellings that
+    // mean "accepts image content parts" must select the faithful projection.
+    for capabilities in [
+        &["text", "tools", "multimodal"][..],
+        &["text", "tools", "vision"][..],
+    ] {
+        let canonical = d701cc8_anthropic_canonical();
+        let wire = super::super::project_v3_operation_runner_standard_provider_request(
+            &canonical,
+            super::super::V3HubEntryProtocol::Anthropic,
+            super::super::V3HubTransportIntent::Json,
+            super::super::V3HubProviderWireProtocol::OpenAiChat,
+            &d701cc8_target_with_capabilities("openai_chat", capabilities),
+        )
+        .expect("Anthropic -> OpenAI-Chat projection")
+        .payload;
+        let wire_text = wire.to_string();
+        assert!(
+            !wire_text.contains("[Image]"),
+            "a vision-capable selected target must receive real images, not placeholders: {capabilities:?} {wire:#?}"
+        );
+        let mut images = Vec::new();
+        d701cc8_chat_wire_image_urls(&wire, &mut images);
+        assert_eq!(
+            images,
+            vec![
+                D701CC8_HISTORY_URL.to_string(),
+                D701CC8_HISTORY_URL.to_string(),
+                D701CC8_TOOL_DATA_URL.to_string()
+            ],
+            "history images must keep their count, order and data for a vision-capable target: {capabilities:?} {wire:#?}"
+        );
+        let first_parts = wire["messages"][0]["content"]
+            .as_array()
+            .expect("first user message parts");
+        assert_eq!(
+            first_parts[1]["future_sibling"],
+            json!({"occurrence":1}),
+            "the preserved history image part keeps its opaque sibling: {wire:#?}"
+        );
+        assert_eq!(
+            first_parts[2]["future_sibling"],
+            json!({"occurrence":2}),
+            "the second preserved history image part keeps its opaque sibling: {wire:#?}"
+        );
+    }
+}
+
+#[test]
+fn p1_5_text_only_openai_chat_target_keeps_history_image_placeholder() {
+    // Regression guard for the other direction: a selected target that declares
+    // no image-capable capability keeps the deterministic `[Image]` placeholder
+    // for history images, exactly as before.
+    let canonical = d701cc8_anthropic_canonical();
+    let wire = super::super::project_v3_operation_runner_standard_provider_request(
+        &canonical,
+        super::super::V3HubEntryProtocol::Anthropic,
+        super::super::V3HubTransportIntent::Json,
+        super::super::V3HubProviderWireProtocol::OpenAiChat,
+        &d701cc8_target_with_capabilities("openai_chat", &["text", "tools"]),
+    )
+    .expect("Anthropic -> OpenAI-Chat projection")
+    .payload;
+    let messages = wire["messages"].as_array().expect("wire messages");
+    assert_eq!(
+        messages[0]["content"][1],
+        json!({"type":"text","text":"[Image]","future_sibling":{"occurrence":1}}),
+        "text-only target must still receive the deterministic placeholder: {messages:#?}"
+    );
+    assert_eq!(
+        messages[0]["content"][2],
+        json!({"type":"text","text":"[Image]","future_sibling":{"occurrence":2}}),
+        "text-only target must still receive the deterministic placeholder: {messages:#?}"
+    );
+    let mut images = Vec::new();
+    d701cc8_chat_wire_image_urls(&wire, &mut images);
+    assert_eq!(
+        images,
+        vec![D701CC8_TOOL_DATA_URL.to_string()],
+        "only the latest tool image survives a text-only history cleanup: {messages:#?}"
+    );
+}
+
+#[test]
+fn p1_5_capability_signal_matches_declared_image_capabilities() {
+    assert!(super::super::v3_capabilities_represent_image_content(&[
+        "text".into(),
+        "multimodal".into()
+    ]));
+    assert!(super::super::v3_capabilities_represent_image_content(&[
+        "vision".into()
+    ]));
+    assert!(!super::super::v3_capabilities_represent_image_content(&[
+        "text".into(),
+        "tools".into(),
+        "longcontext".into()
+    ]));
+    assert!(!super::super::v3_capabilities_represent_image_content(&[]));
 }
