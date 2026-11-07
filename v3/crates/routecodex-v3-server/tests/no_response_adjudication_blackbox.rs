@@ -509,11 +509,9 @@ async fn refill_default_exactly_two_public() {
     std::env::remove_var(KEY_ENV);
 }
 
-/// Stable public ID: limit 3 allows exactly three new executions beyond the
-/// original. The plain fallback answers the fourth attempt; a fifth attempt
-/// means the budget was not honored.
+/// A configured value above one cannot allow consecutive extra refills.
 #[tokio::test]
-async fn refill_limit_three_public() {
+async fn refill_config_above_one_still_refills_once_public() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let (consumed, attempts) = refill_public_chain(
@@ -530,8 +528,8 @@ async fn refill_limit_three_public() {
     )
     .await;
     assert_eq!(
-        attempts, 4,
-        "limit 3 must allow original plus three refills: {consumed:?}"
+        attempts, 2,
+        "limit 3 must still allow only one refill: {consumed:?}"
     );
     assert!(
         consumed.transport_error.is_none(),
@@ -540,7 +538,8 @@ async fn refill_limit_three_public() {
     assert!(
         consumed.body.contains("R1")
             && consumed.body.contains("R2")
-            && consumed.body.contains("R3"),
+            && !consumed.body.contains("R3")
+            && !consumed.body.contains("R4_FALLBACK"),
         "each refill round must be preserved: {consumed:?}"
     );
     assert_no_error_payload(&consumed.body);
@@ -631,9 +630,9 @@ async fn refill_error_chain_public() {
         None,
     )
     .await;
-    assert!(
-        attempts >= 3,
-        "empty recovery, governed success and refill must all execute: {consumed:?}"
+    assert_eq!(
+        attempts, 3,
+        "one failed attempt, one recovered business execution and exactly one refill must execute: {consumed:?}"
     );
     assert!(
         consumed.transport_error.is_none(),

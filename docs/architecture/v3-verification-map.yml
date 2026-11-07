@@ -70,9 +70,9 @@ features:
   - repeated success caps score at 150 and the next -5 deduction yields 145 without hidden credit
   - a globally scored identity reaching score 0 enters the exact-identity cooldown and a valid HTTP 2xx probe restores score 100
   - after prolonged backup success traffic, a semantic probe recovery returns the primary to Target selection immediately
-  - A non-429 provider failure with a healthy alternative first holds only the exact providerId+interfaceId+authAlias+model identity for observation. Only a still-current failed observation may commit its declared health action; matching business success cancels it. Early HTTP429 is health-neutral capacity backpressure. Sustained real429 follows the two-minute minimum and one-hour required-probe episode policy; advisory probes cannot bypass its mandatory restrictions.
-  - Managed listener regressions cover health-neutral 429 fresh fallback, in-flight success waking exact-identity waiters before backoff, manual 2xx probe recovery, unfinished non-2xx probe isolation, and real non-429 exact-identity cooldown with healthy fallback. The independent score-zero branch remains covered by the public typed health consumer hs03_zero_score_cools_exact_key_and_valid_probe_restores_100.
-  - no_first_failure_cooldown_public_http proves a real HTTP 429 leaves the cooldown pool empty and fresh requests skip the constrained identity before backoff expiry; healthy sibling identities remain usable while real HTTP 500 and 401 cool only their complete identities and recover through healthy fallback.
+  - 'Every recoverable provider failure — HTTP 429, 500, 502 and every other HTTP/error-channel failure — shares one policy and counts immediately as one consecutive failure for the exact providerId+interfaceId+authAlias+model identity inside its own listener: 3 consecutive failures commit the 10s cooldown, 5 commit 30s, 10 commit 1h, and a declared success on that identity resets the count. Below the threshold the identity stays routable and the pre-cool observation row is an observability substate only; a failed recovery probe advances only its own probe cadence and never the business ladder. The cooldown changes pool visibility only: it never blocks, waits for, or resends a request, and every other visible eligible candidate is switched to immediately. There is no dedicated 429 episode, minimum, health-neutral bypass, wait, or retry-same policy. When the captured target holds a single usable candidate, or the current candidate is the last eligible one, no cooldown, admission, wait, probe, or recovery blocking applies to that identity: the original typed Error and the real provider status, body and headers pass through to the client without a proxy-generated replacement error and without a fabricated success; the cooldown and admission policy above applies only while more than one usable candidate exists.'
+  - 'Managed listener regressions cover exact-identity 429 fresh fallback that switches inside the same request to the healthy candidate without waiting and without resending the failed identity, manual 2xx probe recovery, unfinished non-2xx probe isolation, and real exact-identity cooldown with healthy fallback while sibling identities stay usable. The independent score-zero branch remains covered by the public typed health consumer hs03_zero_score_cools_exact_key_and_valid_probe_restores_100.'
+  - 'no_first_failure_cooldown_public_http proves a real HTTP 429 counts one consecutive failure for only the exact failed identity, leaves that identity routable below the threshold, and serves every request by switching to the healthy fallback inside the same request with no wait and no same-identity retry; three consecutive business 429s then commit exactly one visibility-only 10s row for that identity while a different model on the same key, a sibling key, and an independent provider remain usable. Later real HTTP 500 and 401 failures cool only their complete identities under the same consecutive ladder (3 -> 10s, 5 -> 30s, 10 -> 1h; a declared success on the exact identity resets the count; the cooldown changes only pool visibility).'
   - non429_hold_preserves_healthy_fallback_and_matching_success_cancels_cooling proves valid concurrent failures hold only the failed exact identity before cooling, healthy fallback remains immediately usable, and matching in-flight success cancels the pending cooling decision before the original observation floor.
   - non429_business_success_supersedes_in_flight_observation_failure proves an admitted observation cannot resurrect cooling after matching business success; healthy sibling traffic continues while the old probe is pending.
   - matching_business_success_recovers_only_its_non429_cooldown proves the public typed health consumer clears a probe-managed cooldown on matching real business success and preserves other interface, key and model cooldowns; explicit auth holds remain operator/probe owned.
@@ -1178,9 +1178,15 @@ features:
   - pending business endpoints route their typed failure through Debug/Error and break the model client transport instead of returning a structured not_implemented payload
   required_blackbox:
   - fa22072_error_decoupling exercises request-stage, response decode, Provider recovery/exhaustion and Responses WS close with no client error or fabricated business completion.
+  - 'v27_last_http_error_passthrough_original_status_body_headers binds the v27 last-candidate exception: a single-candidate Direct and Responses Relay request whose only upstream returns a real HTTP 429/503/401 must reach the client as that original status with the complete original body bytes and the legal duplicate headers once no client HTTP head is committed, and the upstream must receive exactly one business send per trial. It is never satisfied by a transport break, a synthesized 502, or a fabricated success.'
   - Failed requests release activity and session admission; a concurrent sibling and the same provider/model/key/session follow-up complete through the real listener.
   required_gates:
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling -- --test-threads=1 --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling v27_last_http_error_passthrough_original_status_body_headers -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling v29_arbitration_last_eligible_429_passes_original_typed_error_to_client -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_first_failure_cooldown_blackbox v29_arbitration_multi_candidate_sustained_429_cooldown_is_visibility_only -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test provider_multi_interface_controlled provider_action_gate_03_public_entry_types_failure_and_isolates_sibling_identity -- --exact --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --test-threads=1 --nocapture
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-module-boundaries
   - npm run test:v3-source-gate-red-fixtures
@@ -1361,18 +1367,18 @@ features:
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
   - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
-  - 'Business HTTP429 samples and adjusts only the typed provider/interface/model/key dynamic bucket before releasing its lease; the providerId:authAlias shared hard ceiling remains unchanged and the Error/action gate owns retry timing. issue44cc3af_429_healthy_alternatives_keep_parallelism and issue44cc3af_direct_429_healthy_alternatives_keep_parallelism hold eight sibling-model requests before any success and require all eight configured slots; dynamic sampling must not be disabled to satisfy isolation'
+  - 'Business HTTP429 no longer adjusts any concurrency bucket: the transport 429 observation hook is removed, HTTP 429 is an ordinary typed recoverable failure on the unified consecutive ladder, and only the declared static provider.concurrency.maxInFlight ceiling governs admission; issue44cc3af_429_healthy_alternatives_keep_parallelism and issue44cc3af_direct_429_healthy_alternatives_keep_parallelism still hold eight sibling-model requests before any success and require all eight configured slots'
   - 'Configured maxInFlight bounds business admission; Direct and Relay try the next eligible candidate, then wait within the acquisition budget when remaining candidates are temporarily full'
-  - 'provider.concurrency.maxInFlight is only a static hard ceiling defaulting to 40; an HTTP 429 records the in-flight watermark at that moment, prunes samples older than one hour, and computes a measured ceiling from the median refused watermark minus one'
-  - 'The adaptive budget moves toward that measured ceiling one slot per step, spaced so the total movement is at most 20% of the declared startup budget per hour, and a transient 429 never collapses the pool to one slot'
-  - 'A business 2xx or an accepted probe restores one budget unit up to the hard maximum once the trailing window is clear and clears saturation; an empty one-hour window implies the hard maximum as the smoothed ceiling'
-  - 'Temporary HTTP429 masks remain recoverable across pre-exhaustion and exhaustion probe continuations; a cooled peer must not turn the rate-limited healthy candidate into a permanent request-local failure'
+  - 'provider.concurrency.maxInFlight is the declared static hard ceiling defaulting to 40; no production path records 429 watermarks, no measured ceiling is computed, and no 429-driven contraction exists'
+  - 'The admission budget stays at its declared static ceiling; recoverable provider errors, including HTTP 429, never shrink it, and a transient 429 never collapses the pool'
+  - 'A business 2xx or an accepted probe releases the identity''s concurrency lease and clears saturation up to the declared hard maximum; no rate-limit trailing window or smoothed ceiling exists'
+  - 'HTTP429 creates no concurrency mask: a 429-cooled identity follows the unified consecutive ladder and restores through exact-identity probe success or business success, so a cooled peer never turns the rate-limited candidate into a permanent request-local failure'
   - 'Pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy only when every captured Target09 candidate key was proven capacity-busy; mixed exhaustion remains selected_target_exhausted'
   - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
   - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect; the exact candidate busy provenance survives subsequent request-local exhaustion'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
   - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
-  - A successful ten-minute probe increases the budget a single hourly-capped step, a rate-limited probe records the refused in-flight watermark and steps the budget toward the smoothed ceiling, and SSE leases release only when the raw stream is dropped or exhausted
+  - A successful probe restores the exact identity''s eligibility without stepping any adaptive budget, rate-limited probes record no in-flight watermark, and SSE leases release only when the raw stream is dropped or exhausted
   - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
   - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
@@ -1827,8 +1833,8 @@ features:
   - the Relay collector handoff after a partial provider frame and typed ClientDisconnect retains its typed Error01 ClientDisconnect source, proves the partial frame was observed, keeps the primary health-neutral, and starts no additional provider attempt while a second eligible candidate exists; the untyped-transport counterexample after the same partial frame cools the primary, reselects the eligible secondary, and delivers the secondary payload
   - the public Server socket-drop path separately aborts the runtime outcome task, releases the request-local attempt, and starts no additional provider attempt; it does not claim to exercise the typed codec-to-collector handoff
   - rejected metadata_center request produces zero upstream captures
-  - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
-  - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body
+  - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload; the sole exception is a normal last-candidate exhaustion whose current attempt carried a complete real HTTP error, which the uncommitted client boundary returns with its original status, body, and legal headers
+  - a real external upstream status (429/503) from a mid-chain candidate never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body; the sole exception is the normal last-candidate exhaustion with a complete real HTTP error returned once no client HTTP head is committed
   - Standard Chat Direct JSON and SSE recover from an owned pre-head A failure through the already-selected Responses B; A1/B1, held-client pending, genuine B model/content/stop/usage/DONE, privacy and owned cleanup are required.
   - Direct-to-Relay continuation consumes the captured target plan and request-local exclusions without Router re-entry or a new request execution control.
   - fa22072_direct_relay_captured_plan_and_exclusions_public_consumer requires captured A/B/C execution and D0 after the receiving manifest routes to D; captured-plan and exclusion reverses must each fail.
@@ -3043,33 +3049,10 @@ features:
   mainline_bindings:
   - v3-provider-action-gate-01
   - v3-provider-action-gate-02
-  - v3-provider-action-gate-03
-  - v3-provider-action-gate-04
   - v3-provider-action-gate-05
-  - v3-provider-action-gate-06
-  - v3-provider-action-gate-07
-  - v3-provider-action-gate-08
-  - v3-provider-action-gate-10
-  - v3-provider-action-gate-11
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
   - v3-provider-action-gate-14
   - v3-provider-action-gate-15
   - v3-provider-action-gate-16
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-21
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-23
-  - v3-provider-action-gate-24
-  - v3-provider-action-gate-25
-  - v3-provider-action-gate-26
-  - v3-provider-action-gate-27
-  - v3-provider-action-gate-28
-  - v3-provider-action-gate-29
-  - v3-provider-action-gate-30
-  - v3-provider-action-gate-31
-  - v3-provider-action-gate-32
   - v3-provider-action-gate-33
   - v3-provider-action-gate-34
   - v3-provider-action-gate-35
@@ -3089,11 +3072,6 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
-  - v3-provider-action-gate-52
-  - v3-provider-action-gate-53
-  - v3-provider-action-gate-54
-  - v3-provider-action-gate-55
-  - v3-provider-action-gate-56
   required_positive:
   - Responses Relay provider-bound request compatibility and wire encoding failures enter the shared provider failure policy and typed Error05 action lane before retry or reselect.
   - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
@@ -3401,10 +3379,14 @@ features:
   - step_v3_target_planning_with_admission_sync
   - try_admit_v3_selected_target
   required_positive:
-  - sustained_429_window_direct_public_http and sustained_429_window_relay_public_http prove real429 observations cross the two-minute window on the same injected health clock used by Runtime, commit a30-minute minimum, keep healthy alternatives and other listeners usable, and recover only through a real qualified probe after the minimum.
-  - sustained_429_hour_direct_public_http and sustained_429_hour_relay_public_http prove a real429 recovery probe extends the unresolved episode past one hour without sending more business traffic; a subsequent real503 probe remains excluded and a qualified202 probe restores the exact identity while healthy alternatives continue to serve.
+  - ordinary_429_exact_identity_direct_public_http and ordinary_429_exact_identity_relay_public_http prove a real429 uses the healthy fallback immediately, exposes only the exact failed identity after its failed probe, and keeps other listeners and healthy identities usable without resending the failed identity.
+  - ordinary_429_probe_failure_visibility_direct_public_http and ordinary_429_probe_failure_visibility_relay_public_http prove a real429 remains excluded after a real503 probe while healthy business and the other listener continue; a qualified HTTP202 probe restores only the exact identity.
+  - 'v29_arbitration_multi_candidate_sustained_429_cooldown_is_visibility_only proves the multi-candidate arbitration: sustained real 429 on the primary switches every request to the healthy candidate immediately with exactly one send per failed identity and no request wait, the cooldown pool stays empty below 3 consecutive failures, and the third consecutive failure cools the exact identity as visibility-only state while sibling models, keys, and the fallback stay usable.'
+  - 'v29_arbitration_last_eligible_429_passes_original_typed_error_to_client proves the last-eligible arbitration: after the earlier candidate fails, the last eligible candidate''s real HTTP 429 crosses to the client as the original typed error with the original status, body, and headers, each candidate receives exactly one send, and no fabricated success or proxy replacement error is produced; this exhausted path deliberately carries no no-client-error assertion.'
+  - 'provider_action_gate_03_public_entry_types_failure_and_isolates_sibling_identity proves the Provider-lifecycle observation substate contract on the public entry: one real business failure on the exact identity is listed by GET /_routecodex/health/cooldown-pool as state=pre_cool_observation (a cooldown substate, not a committed cooldown), the sibling identity of the same provider stays routable, a follow-up request is served by the sibling only, the failed identity receives no second send, and the typed failed attempt is persisted in the provider-attempts sample with its real status and stage.'
+  - 'partial_content_with_untyped_disconnect_cools_and_reselects_counterexample proves one untyped partial-output disconnect stays below the consecutive ladder threshold: the store keeps the identity available with no probe key due, a fresh request sends only to the eligible sibling, and the failure leaves selection as a pre-cool observation hold rather than a cooldown.'
+  - 'provider_http_failure_reselects_next_candidate_before_client_projection and active_recovery_sse_never_blocks_a_second_request prove request independence: a first provider failure reselects the next candidate immediately with no recovery wait, and a second request completes through its own reselection while another attempt still streams, with no provider-action admission node in the trace.'
   - late_inflight_failure_cannot_shadow_existing_cooldown_recovery_public_http proves a held real business failure arriving after qualified cooldown switches to a healthy spare and cannot create a second precool owner that shadows the subsequent real successful probe and restored business dispatch.
-  - sustained_429_hour_requires_probe_and_ignores_late_business_success proves a one-hour unresolved episode cannot be cleared by business success or time alone; typed probe matrix preserves non429 failures and the persistence consumer retains the lock across Store reconstruction.
   - issue231_responses_relay_stale_probe_public_blackbox proves current Responses Relay delivers the real healthy later-tier payload while a preferred probe is held, then both stale completion branches preserve newer failure state and release their owner; exhausted requests close transport without an empty success while a healthy sibling continues
   - issue245_permission_11128_search_continuation_public_blackbox proves genuine HTTP400 permission_error cools the exact identity, preserves paired function-search and executed nonce history through Relay, remains excluded beyond the original deadline after a failed probe, restores only after a matching successful probe, and closes exhausted transport while explicit current-turn native hosted search continues; it does not replay or resolve the historical upstream/channel cause
   - one opaque typed acquisition identity owns each scheduled or rescue probe; matching current-health-generation success atomically resets score, streak, delta window, cooldown, and probe backoff state
@@ -3415,16 +3397,16 @@ features:
   - rejected, cancelled or dropped reversible exec preparation restores the sole aggregate probe owner before business admission resumes; restored scheduling preserves future due deadlines and an authenticated due probe restores only its exact cooled identity before subsequent successful business
   - fair scheduling reaches an independently available fifth due identity while four earlier identities retain real business transport leases; capacity rejection remains health-neutral and the four manager slots stay bounded
   - each health-excluded provider+auth_alias+model identity stays visible in the cooldown pool; due waiting and in-flight probes are cooldown substates until exact HTTP 2xx probe recovery
-  - 429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch
+  - '429 cooldown and HTTP 2xx recovery cases exercise the public managed listener, exact-key business failures, stalled probe visibility, spare-key routing, and automatically recovered same-key business dispatch under the unified consecutive-failure visibility ladder: 3 consecutive failures of a complete provider/interface/model/key identity within its listener enter the cooldown pool for 10s, 5 consecutive for 30s, 10 consecutive for 1h; a declared success event on the exact identity resets the streak; below the threshold only precool observation exists'
   - Responses, OpenAI Chat, Anthropic, and Gemini probes send a simple ping and accept every HTTP 2xx response without reading the success body or validating content type, JSON, embedded errors, terminal status, or pong text
   - the first transient recovery probe is independently due after the provider-owned probe interval even when the business cooldown deadline is longer
   - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
   - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
-  - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
+  - 'cc-sol and kdns providers configured with probe_interval_ms=120000 clamp their declared interval: failure-driven cooldown entries schedule the first probe at the cooldown floor (10s/30s/1h per the consecutive ladder) and each failed probe advances only next_probe_at by the +10s/+30s/+60s/+120s/+900s/+1800s cadence without extending the cooldown itself; manual cooldowns, trigger_probe_now, and restart re-arm keep their declared timings'
   - matched HTTP 401 and HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
   - 401 exact-identity failures first enter observation; qualified negative observation commits their declared cooldown, while matching real business success cancels the hold and independent current probes follow the shared5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s ladder
-  - Early HTTP429 is exact-identity capacity backpressure; cross-session admission coordinates only that identity. A real two-minute unresolved episode commits30minute minimum and a real one-hour unresolved episode requires a current non429 probe. Matching business success clears only an unlocked observation and cannot shorten the minimum or replace a required probe.
+  - 'HTTP429 is an ordinary typed recoverable provider failure scoped to the exact identity. Current and fresh requests immediately use healthy alternatives; probe and cooldown lifecycle affects only that identity''s visibility and never retries or waits on the same identity. No 429-only episode, minimum, required-probe, or health-neutral bypass exists; on the last eligible candidate the original typed Error passes through to the client per the v27 rule. The consecutive-failure visibility ladder is explicit: 3 consecutive failures -> cooldown pool 10s, 5 -> 30s, 10 -> 1h per complete provider/interface/model/key identity within its listener; declared success resets the streak; precool observation exists below the threshold; cooldown changes visibility only (no request wait, no same-identity retry) and does not apply when the captured target has a single or last eligible candidate.'
   - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - A completely received upstream HTTP502 or truncated2xx body at the last candidate through Direct or Relay does not create cooldown, retry or a recovery probe for that identity. The request waits its original captured-pool recovery budget without business capacity; only final cancellation/deadline/eligibility exhaustion ends its own transport detectably.
@@ -3893,13 +3875,19 @@ features:
 - feature_id: v3.execution_attempt_budget_store
   status: active
   change_risk: critical
-  owner_kind: rust_v3_bounded_attempt_payload_store
-  owner_scope: Direct and Relay append only through byte, frame, request, process, and residence admission before copy.
+  owner_kind: rust_v3_attempt_payload_store
+  owner_scope: Direct and Relay preserve complete attempt frames and original residence without transport count, byte, frame or process admission limits. The shared Chat Process business policy allows at most one additional consecutive refill.
+  required_positive:
+  - After a real failed attempt, an untried eligible later tier/default candidate is sent before the original residence deadline without an attempt-count gate. Direct and Relay preserve real-send sequence numbers and unsent reservation rollback.
+  - issue44cc3af_untried_tier_attempt_direct_refill_uses_visible_provider proves a new refill execution selects from current visibility inside the captured route rather than replaying the original failed Provider selection; A receives one failed business request and B completes the request plus its single refill.
+  - Attempt replay and concurrent requests retain complete frames beyond former byte/frame/process limits, without imposing shared business capacity.
+  required_negative:
+  - Attempt counting cannot create a terminal response or an unconditional residence sleep that hides an untried eligible candidate. Recovery does not retry the last failed identity, release shape exclusions, renew the deadline, or bypass normal eligibility.
   required_gates:
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server hard_attempt_cap_waits -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server all_tried_transport_failure -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib target_recovery_ -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_wait_outlives_single_candidate -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue44cc3af_untried_tier_attempt_ -- --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib unsent_capacity_rejection_releases_only_pending_attempt -- --nocapture
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
@@ -4251,7 +4239,7 @@ features:
     public_tests:
     - refill_limit_zero_public
     - refill_default_exactly_two_public
-    - refill_limit_three_public
+    - refill_config_above_one_still_refills_once_public
     - refill_synthesized_summary_does_not_stop_public
     - refill_error_chain_public
     - refill_direct_relay_content_parity_public

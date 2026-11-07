@@ -17,7 +17,6 @@ struct V3Error04TargetExhaustionOperator {
     local_action: V3Error03TargetLocalAction,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     target_recovery_pending: bool,
     side_output: Arc<Mutex<Option<V3Error04TargetExhaustionDecision>>>,
 }
@@ -27,7 +26,6 @@ impl V3Error04TargetExhaustionOperator {
         local_action: V3Error03TargetLocalAction,
         route_pool_remaining_after_exclusion: usize,
         default_pool_available: bool,
-        same_provider_retry_available: bool,
         target_recovery_pending: bool,
         side_output: Arc<Mutex<Option<V3Error04TargetExhaustionDecision>>>,
     ) -> Self {
@@ -35,7 +33,6 @@ impl V3Error04TargetExhaustionOperator {
             local_action,
             route_pool_remaining_after_exclusion,
             default_pool_available,
-            same_provider_retry_available,
             target_recovery_pending,
             side_output,
         }
@@ -64,7 +61,6 @@ impl Operator for V3Error04TargetExhaustionOperator {
             self.local_action.clone(),
             self.route_pool_remaining_after_exclusion,
             self.default_pool_available,
-            self.same_provider_retry_available,
             self.target_recovery_pending,
         );
         let projection = serde_json::to_value(&result).map_err(|error| error.to_string())?;
@@ -82,14 +78,12 @@ pub(crate) fn run_v3_error_04_target_exhaustion_operator(
     local_action: V3Error03TargetLocalAction,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
 ) -> Result<(Value, V3Error04TargetExhaustionDecision), OperationRunnerError> {
     run_v3_error_04_target_exhaustion_operator_with_target_recovery(
         input,
         local_action,
         route_pool_remaining_after_exclusion,
         default_pool_available,
-        same_provider_retry_available,
         false,
     )
 }
@@ -99,7 +93,6 @@ pub(crate) fn run_v3_error_04_target_exhaustion_operator_with_target_recovery(
     local_action: V3Error03TargetLocalAction,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     target_recovery_pending: bool,
 ) -> Result<(Value, V3Error04TargetExhaustionDecision), OperationRunnerError> {
     let side_output = Arc::new(Mutex::new(None));
@@ -111,7 +104,6 @@ pub(crate) fn run_v3_error_04_target_exhaustion_operator_with_target_recovery(
             local_action,
             route_pool_remaining_after_exclusion,
             default_pool_available,
-            same_provider_retry_available,
             target_recovery_pending,
             Arc::clone(&side_output),
         ),
@@ -177,20 +169,17 @@ mod tests {
             action.clone(),
             1,
             false,
-            false,
         )
         .unwrap();
         assert!(!typed.target_exhausted);
         assert_eq!(projection["target_exhausted"], false);
         assert_eq!(projection["route_pool_remaining_after_exclusion"], 1);
         assert_eq!(projection["default_pool_available"], false);
-        assert_eq!(projection["same_provider_retry_available"], false);
 
         let (exhausted_projection, exhausted) = run_v3_error_04_target_exhaustion_operator(
             action_input.clone(),
             action.clone(),
             0,
-            false,
             false,
         )
         .unwrap();
@@ -198,17 +187,11 @@ mod tests {
         assert_eq!(exhausted_projection["target_exhausted"], true);
 
         let (default_pool_projection, default_pool) =
-            run_v3_error_04_target_exhaustion_operator(action_input, action, 0, true, true)
-                .unwrap();
+            run_v3_error_04_target_exhaustion_operator(action_input, action, 0, true).unwrap();
         assert!(!default_pool.target_exhausted);
         assert!(default_pool.default_pool_available);
-        assert!(default_pool.same_provider_retry_available);
         assert_eq!(default_pool_projection["target_exhausted"], false);
         assert_eq!(default_pool_projection["default_pool_available"], true);
-        assert_eq!(
-            default_pool_projection["same_provider_retry_available"],
-            true
-        );
     }
 
     #[test]
@@ -216,8 +199,7 @@ mod tests {
         let action = client_disconnect_action();
         let action_input = serde_json::to_value(&action).unwrap();
         let (projection, typed) =
-            run_v3_error_04_target_exhaustion_operator(action_input, action, 3, true, false)
-                .unwrap();
+            run_v3_error_04_target_exhaustion_operator(action_input, action, 3, true).unwrap();
 
         assert!(typed.target_exhausted);
         assert_eq!(

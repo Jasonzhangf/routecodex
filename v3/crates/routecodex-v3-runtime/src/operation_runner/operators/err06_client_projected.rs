@@ -118,7 +118,6 @@ mod tests {
             action,
             candidates_remaining,
             false,
-            false,
         );
         let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
         let terminal = decision

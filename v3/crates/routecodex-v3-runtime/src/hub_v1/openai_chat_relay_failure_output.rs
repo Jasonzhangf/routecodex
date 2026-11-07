@@ -125,7 +125,6 @@ mod tests {
             routecodex_v3_error::V3ErrorActionScope::None,
             0,
             false,
-            false,
             None,
         )
         .expect_err("a non-object source projection must expose the real SDK fault");

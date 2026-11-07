@@ -504,10 +504,328 @@ async fn responses_entry_reselects_sibling_interface_and_preserves_sibling_healt
         .expect("the healthy sibling must serve the second request")
         .unwrap();
     assert_eq!(second_success.path, "/v1/responses");
+    // v31 (supersedes the retired hold basis): below the consecutive threshold the
+    // failed interface stays VISIBLE, so the next public request legitimately
+    // selects it again (higher priority) and switches to the sibling inside the
+    // same request. What v31 forbids is a same-identity retry inside one request
+    // and any exclusion of the sibling; both are asserted here.
+    let retried = tokio::time::timeout(Duration::from_secs(2), failure_rx.recv())
+        .await
+        .expect("a still-visible failed interface is selected again below the threshold")
+        .expect("the failed interface capture channel must stay open");
+    assert_eq!(retried.path, "/v1/responses");
     assert!(
         failure_rx.try_recv().is_err(),
-        "the cooled sibling interface must not be retried on the next request"
+        "the visible identity is attempted exactly once per request: no same-identity retry"
     );
+    let committed_rows: Vec<Value> = pool["entries"]
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|entry| entry["state"] != "pre_cool_observation")
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        committed_rows.is_empty(),
+        "two recorded failures must not commit a cooldown: {committed_rows:?}"
+    );
+
+    handle.shutdown().await;
+    failure_shutdown_tx.send(()).unwrap();
+    success_shutdown_tx.send(()).unwrap();
+    std::env::remove_var("V3_MULTI_INTERFACE_FAILURE_KEY");
+}
+
+/// Handoff gate provider-action-gate-1050e4f-20261107: one public request
+/// whose higher-priority interface fails with a real provider 500 isolates
+/// only the exact failed identity. The sibling interface serves the same
+/// request and later requests immediately; the failed identity appears in
+/// the cooldown pool as a pre-cool observation substate (visibility only,
+/// never a request wait or same-identity resend) and the typed failure
+/// sample persists for the failed public request.
+#[tokio::test]
+async fn provider_action_gate_03_public_entry_types_failure_and_isolates_sibling_identity() {
+    let _guard = TEST_LOCK.lock().await;
+    std::env::set_var(
+        "V3_MULTI_INTERFACE_FAILURE_KEY",
+        "controlled-multi-failure-secret",
+    );
+
+    let failure_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let failure_addr = failure_listener.local_addr().unwrap();
+    let success_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let success_addr = success_listener.local_addr().unwrap();
+    let (failure_tx, mut failure_rx) = mpsc::unbounded_channel();
+    let (success_tx, mut success_rx) = mpsc::unbounded_channel();
+    let failure_state = Arc::new(ProviderState {
+        captures: failure_tx,
+    });
+    let success_state = Arc::new(ProviderState {
+        captures: success_tx,
+    });
+    let (failure_shutdown_tx, failure_shutdown_rx) = oneshot::channel();
+    let (success_shutdown_tx, success_shutdown_rx) = oneshot::channel();
+
+    let failure_app = Router::new()
+        .route("/v1/responses", post(controlled_responses_failure_upstream))
+        .with_state(failure_state);
+    tokio::spawn(async move {
+        axum::serve(failure_listener, failure_app)
+            .with_graceful_shutdown(async move {
+                let _ = failure_shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let success_app = Router::new()
+        .route("/v1/responses", post(controlled_responses_upstream))
+        .with_state(success_state);
+    tokio::spawn(async move {
+        axum::serve(success_listener, success_app)
+            .with_graceful_shutdown(async move {
+                let _ = success_shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let server_port = free_port();
+    let handle = spawn_v3_server_aggregate(multi_interface_failure_manifest(
+        server_port,
+        failure_addr.port(),
+        success_addr.port(),
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+
+    // One public request: the first (higher-priority) interface fails with a
+    // provider 500, the runtime records the typed Error and excludes the exact
+    // identity, then reselects the sibling which returns business output.
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "direct-client",
+            "input": "provider-action-gate-03"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["output_text"], "direct-interface");
+    assert!(
+        !body.to_string().contains("controlled sibling failure"),
+        "provider failure must stay out of the client body: {body}"
+    );
+
+    let failure_capture = tokio::time::timeout(Duration::from_secs(2), failure_rx.recv())
+        .await
+        .expect("the failed interface must be attempted")
+        .unwrap();
+    assert_eq!(failure_capture.path, "/v1/responses");
+    let success_capture = tokio::time::timeout(Duration::from_secs(2), success_rx.recv())
+        .await
+        .expect("the sibling interface must receive the reselected request")
+        .unwrap();
+    assert_eq!(success_capture.path, "/v1/responses");
+
+    let pool: Value = client
+        .get(format!(
+            "http://{}/_routecodex/health/cooldown-pool",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = pool["entries"].as_array().expect("cooldown entries");
+    let failed_identity = entries
+        .iter()
+        .find(|entry| {
+            entry["provider_id"] == "multi"
+                && entry["interface_id"] == "failure"
+                && entry["auth_alias"].as_str() == Some("key")
+                && entry["model_id"].as_str() == Some("wire-model")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the exact failed identity must stay visible in the cooldown pool as an observation substate: {entries:?}"
+            )
+        });
+    assert_eq!(
+        failed_identity["state"], "pre_cool_observation",
+        "below the consecutive threshold the pool lists an observation substate, not a committed cooldown: {entries:?}"
+    );
+    assert!(
+        entries.iter().all(|entry| {
+            !(entry["provider_id"] == "multi" && entry["interface_id"] == "success")
+        }),
+        "the successful sibling interface must not inherit the failure hold: {entries:?}"
+    );
+
+    // v31 (supersedes the retired action-gate hold): a single recorded failure
+    // does not exclude the identity - "冷却只改变该身份在候选池中的可见性" and the
+    // streak only changes visibility at 3/5/10 - so the next public request may
+    // legitimately select the same identity again, exactly once per request and
+    // without a same-identity retry inside the request. Reverting to the hold
+    // basis would require reverting arbitration (A) and would re-break the
+    // mandatory public gate (three business failures -> 10 s visibility-only
+    // cooldown), which entry-tests and provider-health both proved unsatisfiable.
+    let second = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "direct-client",
+            "input": "provider-action-gate-03-after-cooldown"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_body: Value = second.json().await.unwrap();
+    assert_eq!(second_body["output_text"], "direct-interface");
+    assert!(
+        !second_body.to_string().contains("controlled sibling failure"),
+        "provider failure must stay out of the client body: {second_body}"
+    );
+    let second_failure = tokio::time::timeout(Duration::from_secs(2), failure_rx.recv())
+        .await
+        .expect("below the threshold the failed identity stays visible and is selected again")
+        .unwrap();
+    assert_eq!(second_failure.path, "/v1/responses");
+    let sibling_capture = tokio::time::timeout(Duration::from_secs(2), success_rx.recv())
+        .await
+        .expect("the still-visible failed identity must not block the visible sibling")
+        .unwrap();
+    assert_eq!(sibling_capture.path, "/v1/responses");
+    assert!(
+        failure_rx.try_recv().is_err(),
+        "a visible identity is attempted exactly once per request: no same-identity retry"
+    );
+
+    // Third consecutive recorded failure: the exact identity reaches the ladder
+    // threshold and enters the pool as a visibility-only 10 s cooldown row while
+    // the sibling interface stays untouched.
+    let third = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "direct-client",
+            "input": "provider-action-gate-03-threshold"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(third.status(), StatusCode::OK);
+    let third_body: Value = third.json().await.unwrap();
+    assert_eq!(third_body["output_text"], "direct-interface");
+    let third_failure = tokio::time::timeout(Duration::from_secs(2), failure_rx.recv())
+        .await
+        .expect("the third consecutive failure must be attempted")
+        .unwrap();
+    assert_eq!(third_failure.path, "/v1/responses");
+    let committed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let pool: Value = client
+                .get(format!(
+                    "http://{}/_routecodex/health/cooldown-pool",
+                    handle.listeners[0].addr
+                ))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let Some(entries) = pool["entries"].as_array() else {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                continue;
+            };
+            if let Some(entry) = entries.iter().find(|entry| {
+                entry["provider_id"] == "multi"
+                    && entry["interface_id"] == "failure"
+                    && entry["auth_alias"].as_str() == Some("key")
+                    && entry["model_id"].as_str() == Some("wire-model")
+                    && entry["state"] != "pre_cool_observation"
+                    && entry["until_ms"].is_number()
+            }) {
+                return entry.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the third consecutive failure must commit the exact identity cooldown");
+    let remaining = committed["remaining_ms"].as_i64().unwrap_or(-1);
+    assert!(
+        remaining > 0 && remaining <= 10_000,
+        "the v31 ladder floor for three consecutive failures is 10s: {committed:?}"
+    );
+
+    // With the cooldown committed the identity is no longer selected, and the
+    // sibling serves the next public request without waiting.
+    let began = tokio::time::Instant::now();
+    let after = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "direct-client",
+            "input": "provider-action-gate-03-after-threshold"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(after.status(), StatusCode::OK);
+    assert!(
+        began.elapsed() < Duration::from_secs(2),
+        "a committed cooldown must never delay the public request"
+    );
+    let after_body: Value = after.json().await.unwrap();
+    assert_eq!(after_body["output_text"], "direct-interface");
+    let sibling_capture = tokio::time::timeout(Duration::from_secs(2), success_rx.recv())
+        .await
+        .expect("the sibling must serve the request while the exact identity is cooled")
+        .unwrap();
+    assert_eq!(sibling_capture.path, "/v1/responses");
+    assert!(
+        failure_rx.try_recv().is_err(),
+        "a committed-cooldown identity must not be selected by a new public request"
+    );
+
+    handle.wait_for_codex_sample_persistence().await.unwrap();
+    let samples = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(format!(
+        ".rcc/codex-samples/openai-responses/ports/{server_port}"
+    ));
+    let typed_attempts = std::fs::read_dir(&samples)
+        .unwrap()
+        .flatten()
+        .filter_map(|entry| std::fs::read(entry.path().join("provider-failed-attempts.json")).ok())
+        .map(|bytes| serde_json::from_slice::<Value>(&bytes).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        typed_attempts.len(),
+        3,
+        "each of the three failing public requests must persist exactly one typed attempt witness"
+    );
+    for artifact in typed_attempts {
+        let attempt = &artifact["attempts"].as_array().unwrap()[0];
+        assert_eq!(attempt["provider_key"], "multi:failure:key:wire-model");
+        assert_eq!(attempt["provider_id"], "multi");
+        assert_eq!(attempt["auth_alias"], "key");
+        assert_eq!(attempt["model_id"], "wire-model");
+        assert_eq!(attempt["status"], 500);
+        assert_eq!(attempt["diagnostic_source"]["source_kind"], "provider_failure");
+        assert_eq!(
+            attempt["diagnostic_source"]["source_stage"],
+            "V3ProviderReqOutbound09TransportRequest"
+        );
+        assert_eq!(attempt["failed_attempt_evidence"]["provider_response"]["status"], 500);
+    }
 
     handle.shutdown().await;
     failure_shutdown_tx.send(()).unwrap();

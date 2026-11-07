@@ -729,9 +729,45 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
         probe_now_ms(),
     );
     assert!(
-        !primary_availability.available,
-        "an untyped disconnect after partial content must cool the failed primary"
+        primary_availability.available,
+        "one transport failure is below the consecutive ladder threshold and must not commit a cooldown"
     );
+    // The failed identity still leaves selection immediately as a pre-cool
+    // observation hold: a fresh request sends only to the eligible secondary.
+    {
+        let fresh_transport = PartialClientDisconnectSseTransport {
+            provider_ids: Mutex::new(Vec::new()),
+            typed_disconnect: false,
+        };
+        let fresh = execute_v3_openai_chat_relay_runtime_with_provider_health(
+            &manifest,
+            V3OpenAiChatRelayRuntimeInput {
+                server_id: scope.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    "partial-client-disconnect-counterexample-fresh",
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-partial-untyped-disconnect-fresh".into(),
+                payload: json!({
+                    "model":"chat-client-alias",
+                    "messages":[{"role":"user","content":"untyped disconnect after partial output"}],
+                    "stream":true
+                }),
+            },
+            &fresh_transport,
+            provider_health.runtime_health(),
+        )
+        .await
+        .expect("the fresh request must complete without the failed identity");
+        assert_eq!(fresh.status, 200);
+        assert_eq!(
+            fresh_transport.provider_ids.lock().unwrap().as_slice(),
+            [secondary.as_str()],
+            "the held primary must not receive a second business send; the sibling serves immediately"
+        );
+    }
     let secondary_availability = provider_health.store().availability(
         secondary.as_str(),
         Some(secondary.as_str()),
@@ -1619,8 +1655,8 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
         [primary.as_str(), secondary.as_str()]
     );
     assert!(
-        started.elapsed() >= Duration::from_millis(1_000),
-        "the first provider failure must block the reselected provider action for at least one second"
+        started.elapsed() < Duration::from_millis(1_000),
+        "the first provider failure must not delay the reselected provider action: reselection is immediate with no recovery wait"
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
@@ -3041,7 +3077,7 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
+async fn active_recovery_sse_never_blocks_a_second_request() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_active_recovery";
     const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
@@ -3128,10 +3164,21 @@ data: [DONE]
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    // v29/v31: a second request never waits on another request's active
+    // recovery action. It completes through its own immediate reselection
+    // while the first attempt is still streaming.
+    let released = tokio::time::timeout(Duration::from_secs(2), waiter)
+        .await
+        .expect("the second request must not wait on the first request's recovery action")
+        .expect("second recovery task panicked")
+        .expect("second request must complete on its own reselection");
+    assert_eq!(released.status, 200);
     assert!(
-        !waiter.is_finished(),
-        "active recovery permit expired by wall clock before terminal success"
+        !released
+            .node_trace
+            .contains(&"V3ProviderActionGateAdmission"),
+        "requests never acquire provider-action admission: {:?}",
+        released.node_trace
     );
 
     drop(terminal_sender);
@@ -3141,8 +3188,9 @@ data: [DONE]
         .expect("first recovery task panicked")
         .expect("first recovery action failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the first request must enter Error05 recovery"
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the first request must reselect after its failed primary attempt: {:?}",
+        first.node_trace
     );
     let first_stream = match first.client_body {
         V3OpenAiChatRelayClientBody::Sse(stream) => stream,
@@ -3155,18 +3203,6 @@ data: [DONE]
         .map(|frame| String::from_utf8(frame).unwrap())
         .collect::<String>();
     assert!(first_text.contains("done"), "{first_text}");
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("clean EOF did not release the queued recovery action")
-        .expect("queued recovery task panicked")
-        .expect("queued recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing request must also enter Error05 recovery"
-    );
 }
 
 #[tokio::test]

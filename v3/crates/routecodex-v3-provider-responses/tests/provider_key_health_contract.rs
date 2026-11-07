@@ -1,13 +1,12 @@
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_provider_global_error_fingerprint, build_v3_provider_global_failure_policy,
-    V3ProviderErrorFingerprint, V3ProviderFailureSessionScope,
+    build_v3_provider_global_error_fingerprint, V3ProviderErrorFingerprint,
+    V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderAvailabilityReader, V3ProviderCooldownCoordinator, V3ProviderFailureAction,
-    V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderHealthStore,
-    V3ProviderKeyHealthStore, V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
-    V3ProviderRateLimitProbeDisposition, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
+    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderPrecoolObservationOutcome,
+    V3ProviderProbePurpose, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
 };
 
 fn real_http_provider_action(status: u16, code: &str) -> V3ProviderFailureAction {
@@ -36,398 +35,48 @@ fn real_http_429_action() -> V3ProviderFailureAction {
 }
 
 #[test]
-fn early_429_is_health_neutral_for_exact_identity() {
+fn early_429_uses_the_ordinary_recoverable_health_path() {
     let store = V3ProviderKeyHealthStore::default();
-    assert!(build_v3_provider_global_failure_policy(429).is_none());
     let action = real_http_429_action();
     assert_eq!(
         action.recovery,
-        V3ProviderRecoveryKind::HealthNeutralTransient
+        V3ProviderRecoveryKind::RecoverableCounted
     );
-    for time in 100..125 {
-        let state = store
-            .record_provider_failure_action("p", "a", "m", &action, time)
-            .unwrap();
-        assert!(state.available);
-        assert!(!state.cooldown);
-        assert_eq!(state.failure_streak, 0);
-        assert_eq!(
-            store
-                .scheduling_projection("p", "a", "m", 1, 1, time)
-                .unwrap()
-                .score_milli,
-            100
-        );
-    }
-    // A repeated 429 on the same identity never blocks a sibling identity.
+    assert_eq!(
+        action.failure_threshold,
+        routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
+        "HTTP 429 shares the ordinary recoverable consecutive threshold"
+    );
+    // Below the consecutive threshold the identity keeps its store-level
+    // visibility; the precool observation owner (runtime) defers it.
+    let first = store
+        .record_provider_failure_action("p", "a", "m", &action, 100)
+        .unwrap();
+    assert_eq!(first.failure_streak, 1);
+    assert!(!first.cooldown);
+    assert!(first.available);
+    let second = store
+        .record_provider_failure_action("p", "a", "m", &action, 101)
+        .unwrap();
+    assert_eq!(second.failure_streak, 2);
+    assert!(!second.cooldown);
+    assert!(second.available);
+    // The third consecutive 429 commits the ordinary v29 cooldown minimum.
+    let third = store
+        .record_provider_failure_action("p", "a", "m", &action, 102)
+        .unwrap();
+    assert_eq!(third.failure_streak, 3);
+    assert!(third.cooldown);
+    assert!(!third.available);
+    assert_eq!(third.cooldown_until_ms, Some(10_102));
+
+    // Ordinary failure isolation still protects sibling identities.
     for (provider, key, model) in [("p", "b", "m"), ("p", "a", "n"), ("q", "a", "m")] {
         let state = store
             .scheduling_projection(provider, key, model, 1, 1, 110)
             .unwrap();
         assert!(state.available, "sibling {provider}.{model}.{key}");
     }
-    store
-        .record_provider_key_success("p", "a", "m", 125)
-        .unwrap();
-    store
-        .record_provider_failure_action("p", "a", "m", &action, 126)
-        .unwrap();
-    assert_eq!(
-        store
-            .scheduling_projection("p", "a", "m", 1, 1, 126)
-            .unwrap()
-            .score_milli,
-        101
-    );
-}
-
-#[test]
-fn sustained_429_window_cools_only_after_observed_two_minutes() {
-    let store = V3ProviderHealthStore::default();
-    let action = real_http_429_action();
-    for now in [1000, 2000, 3000, 4000, 5000, 120999] {
-        assert!(
-            store
-                .record_provider_failure_action_for_interface(
-                    "p",
-                    "responses",
-                    "k",
-                    "m",
-                    &action,
-                    now
-                )
-                .unwrap()
-                .available,
-            "count alone or an incomplete window cannot cool"
-        );
-    }
-    let cooled = store
-        .record_provider_failure_action_for_interface("p", "responses", "k", "m", &action, 121000)
-        .unwrap();
-    assert!(
-        !cooled.available && cooled.cooldown,
-        "a new429 spanning two minutes without success must cool: {cooled:?}"
-    );
-    assert_eq!(cooled.cooldown_until_ms, Some(1921000));
-    assert!(
-        store
-            .scheduling_projection_for_key_with_interface(
-                "p",
-                "responses",
-                "sibling",
-                "m",
-                1,
-                1,
-                121000
-            )
-            .unwrap()
-            .available
-    );
-}
-
-#[test]
-fn sustained_429_hour_requires_probe_and_ignores_late_business_success() {
-    let store = V3ProviderHealthStore::default();
-    let action = real_http_429_action();
-    for now in [1000, 121000, 3601000] {
-        store
-            .record_provider_failure_action_for_interface("p", "responses", "k", "m", &action, now)
-            .unwrap();
-    }
-    store
-        .record_provider_key_success_for_interface("p", "responses", "k", "m", 3601001)
-        .unwrap();
-    assert!(
-        !store
-            .scheduling_projection_for_key_with_interface("p", "responses", "k", "m", 1, 1, 7201000)
-            .unwrap()
-            .available,
-        "timer expiry and a late business success cannot replace required non429 probe"
-    );
-    let probe = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("the hour lock still exposes its current physical probe");
-    store
-        .complete_provider_cooldown_probe_success_with_permit(&probe, 7201001)
-        .unwrap();
-    assert!(
-        store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 7201001)
-            .available,
-        "only a current qualified probe clears the hour lock"
-    );
-}
-
-#[test]
-fn early_qualified_success_cannot_shorten_429_minimum() {
-    let store = V3ProviderHealthStore::default();
-    let action = real_http_429_action();
-    store
-        .record_provider_failure_action_for_interface("p", "responses", "k", "m", &action, 1_000)
-        .unwrap();
-    let cooled = store
-        .record_provider_failure_action_for_interface("p", "responses", "k", "m", &action, 121_000)
-        .unwrap();
-    assert_eq!(cooled.cooldown_until_ms, Some(1_921_000));
-
-    // A matching business success resets only an unlocked observation; it
-    // cannot shorten the committed 30-minute minimum.
-    store
-        .record_provider_key_success_for_interface("p", "responses", "k", "m", 130_000)
-        .unwrap();
-    let probe = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("cooldown owns the physical probe slot");
-    store
-        .complete_provider_cooldown_probe_success_with_permit(&probe, 200_000)
-        .unwrap();
-    assert!(
-        !store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 200_001)
-            .available,
-        "an early qualified probe success cannot shorten the 429 minimum"
-    );
-    assert!(
-        !store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 1_920_999)
-            .available,
-        "the minimum must remain exclusive until its boundary"
-    );
-
-    let probe = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("minimum expiry leaves the current physical probe available");
-    store
-        .complete_provider_cooldown_probe_success_with_permit(&probe, 1_921_000)
-        .unwrap();
-    assert!(
-        store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 1_921_000)
-            .available,
-        "a current qualified probe restores at the minimum boundary"
-    );
-}
-
-#[test]
-fn probe_http_503_clears_only_429_lock_and_still_excludes_provider() {
-    let store = V3ProviderHealthStore::default();
-    let action_429 = real_http_429_action();
-    for now in [1_000, 121_000, 3_601_000] {
-        store
-            .record_provider_failure_action_for_interface(
-                "p",
-                "responses",
-                "k",
-                "m",
-                &action_429,
-                now,
-            )
-            .unwrap();
-    }
-    let permit = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("hour lock owns the physical probe slot");
-    let action_503 = real_http_provider_action(503, "service_unavailable");
-    assert_eq!(
-        store
-            .record_provider_rate_limit_probe_status_with_permit(
-                &permit,
-                503,
-                &action_503,
-                3_601_001,
-            )
-            .unwrap(),
-        V3ProviderRateLimitProbeDisposition::Reclassified,
-        "a non-429 probe failure reclassifies the 429 episode instead of retaining it"
-    );
-    assert!(
-        !store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 3_601_002)
-            .available,
-        "a 503 probe result must not publish a healthy interval"
-    );
-    assert!(
-        store
-            .has_provider_cooldown_probe_pending_for_interface(
-                "p",
-                "responses",
-                Some("k"),
-                Some("m"),
-            )
-            .unwrap(),
-        "the provider remains excluded while its typed failure path owns recovery"
-    );
-    assert!(
-        store
-            .availability_for_interface("p", "responses", Some("sibling"), Some("m"), 3_601_002)
-            .available,
-        "a sibling identity is not affected"
-    );
-    // The 429-specific lock is gone, so the ordinary matching-success policy
-    // resumes; the 503 itself never published an available interval.
-    store
-        .record_provider_key_success_for_interface("p", "responses", "k", "m", 3_601_002)
-        .unwrap();
-    assert!(
-        store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 3_601_003)
-            .available,
-        "a 503 probe result clears only the 429 lock, and normal success recovery resumes"
-    );
-}
-
-#[test]
-fn stale_probe_permit_cannot_clear_429_lock() {
-    let store = V3ProviderHealthStore::default();
-    let action_429 = real_http_429_action();
-    for now in [1_000, 121_000, 3_601_000] {
-        store
-            .record_provider_failure_action_for_interface(
-                "p",
-                "responses",
-                "k",
-                "m",
-                &action_429,
-                now,
-            )
-            .unwrap();
-    }
-    let stale = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("hour lock owns the physical probe slot");
-    store
-        .record_provider_failure_action_for_interface(
-            "p",
-            "responses",
-            "k",
-            "m",
-            &action_429,
-            3_602_000,
-        )
-        .unwrap();
-    let action_503 = real_http_provider_action(503, "service_unavailable");
-    assert_eq!(
-        store
-            .record_provider_rate_limit_probe_status_with_permit(
-                &stale,
-                503,
-                &action_503,
-                3_602_001,
-            )
-            .unwrap(),
-        V3ProviderRateLimitProbeDisposition::Superseded,
-        "a stale acquisition cannot reclassify or clear the current 429 state"
-    );
-    store
-        .record_provider_key_success_for_interface("p", "responses", "k", "m", 3_602_002)
-        .unwrap();
-    assert!(
-        !store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 3_602_003)
-            .available,
-        "the current hour lock survives a stale permit and business success"
-    );
-    let current = store
-        .acquire_provider_cooldown_probe_for_interface("p", "responses", Some("k"), Some("m"))
-        .unwrap()
-        .expect("stale completion releases the physical probe slot");
-    store
-        .complete_provider_cooldown_probe_success_with_permit(&current, 3_602_004)
-        .unwrap();
-    assert!(
-        store
-            .availability_for_interface("p", "responses", Some("k"), Some("m"), 3_602_004)
-            .available,
-        "only the current qualified probe clears the remaining lock"
-    );
-}
-
-#[test]
-fn sustained_429_lock_and_minimum_round_trip_scoped_persistence() {
-    let manifest = compile_v3_config_05_manifest(
-        parse_v3_config_02_authoring(
-            r#"
-version = 3
-[servers.s]
-bind = "127.0.0.1"
-port = 1
-routing_group = "g"
-[providers.p]
-type = "responses"
-base_url = "http://provider.invalid/v1"
-default_model = "m"
-auth = { type = "api_key", entries = [{ alias = "k", env = "KEY" }] }
-[providers.p.models.m]
-[route_groups.g.pools.default]
-targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", priority = 1 }]
-"#,
-        )
-        .expect("parse manifest authoring"),
-    )
-    .expect("compile manifest");
-    let path = std::env::temp_dir().join(format!(
-        "routecodex-429-window-scoped-persistence-{}.json",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_file(&path);
-    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
-    let action = real_http_429_action();
-    for now in [1_000, 121_000, 3_601_000] {
-        store
-            .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, now)
-            .unwrap();
-    }
-    store.flush_persistence().expect("flush scoped persistence");
-    let episodes = V3ProviderCooldownCoordinator::load(path.clone())
-        .unwrap()
-        .persisted_rate_limit_episodes();
-    assert_eq!(episodes.len(), 1);
-    let (key, episode) = &episodes[0];
-    assert_eq!(key.provider_id, "p");
-    assert_eq!(key.interface_id, "default");
-    assert_eq!(key.auth_alias.as_deref(), Some("k"));
-    assert_eq!(key.model_id.as_deref(), Some("m"));
-    assert_eq!(episode.first_429_at_ms, Some(1_000));
-    assert_eq!(episode.last_429_at_ms, Some(3_601_000));
-    assert_eq!(episode.not_before_ms, Some(1_921_000));
-    assert!(episode.probe_required);
-
-    let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
-    assert!(
-        restored
-            .has_provider_cooldown_probe_pending_for_interface(
-                "p", "default", Some("k"), Some("m"),
-            )
-            .unwrap(),
-        "the restored exclusion keeps a probe schedule without restoring an active permit"
-    );
-    restored
-        .record_provider_key_success_for_interface("p", "default", "k", "m", 3_601_002)
-        .unwrap();
-    assert!(
-        !restored
-            .availability_for_interface("p", "default", Some("k"), Some("m"), 3_601_003)
-            .available,
-        "the persisted hour lock survives a business success"
-    );
-    let probe = restored
-        .acquire_provider_cooldown_probe_for_interface("p", "default", Some("k"), Some("m"))
-        .unwrap()
-        .expect("the restored lock exposes a fresh current probe");
-    restored
-        .complete_provider_cooldown_probe_success_with_permit(&probe, 3_601_004)
-        .unwrap();
-    assert!(
-        restored
-            .availability_for_interface("p", "default", Some("k"), Some("m"), 3_601_004)
-            .available,
-        "only the restored current qualified probe clears the persisted lock"
-    );
 }
 
 #[test]
@@ -450,17 +99,21 @@ fn matching_business_success_recovers_only_its_non429_cooldown() {
         ("default", "a", "other"),
         ("chat", "a", "m"),
     ] {
-        assert!(
-            store
+        for now_ms in 100..=102 {
+            let projection = store
                 .record_provider_failure_action_for_interface(
-                    "p", interface, key, model, &action, 100
+                    "p", interface, key, model, &action, now_ms,
                 )
-                .unwrap()
-                .cooldown
-        );
+                .unwrap();
+            assert_eq!(
+                projection.cooldown,
+                now_ms == 102,
+                "the third consecutive failure commits the v29 cooldown for {interface}/{key}/{model}"
+            );
+        }
     }
     let recovered = store
-        .record_provider_key_success_for_interface("p", "default", "a", "m", 101)
+        .record_provider_key_success_for_interface("p", "default", "a", "m", 103)
         .unwrap();
     assert!(
         recovered.available && !recovered.cooldown,
@@ -474,7 +127,7 @@ fn matching_business_success_recovers_only_its_non429_cooldown() {
     ] {
         assert!(
             !store
-                .availability_for_interface("p", interface, Some(key), Some(model), 101)
+                .availability_for_interface("p", interface, Some(key), Some(model), 103)
                 .available,
             "different identity must stay cooled: {interface}/{key}/{model}"
         );
@@ -704,16 +357,25 @@ fn recoverable_failure_cools_after_repeat_without_changing_score_contract() {
         .expect("first failure");
     assert_eq!(first.score_milli, 95);
     assert_eq!(first.success_streak, 0);
-    assert!(!first.available);
-    assert!(first.cooldown);
-    assert_eq!(first.cooldown_until_ms, Some(5_100));
+    assert!(first.available, "a fresh streak stays below the threshold");
+    assert!(!first.cooldown);
+    store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
+        .expect("second failure");
+    let third = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 102)
+        .expect("third failure");
+    assert_eq!(third.score_milli, 85);
+    assert!(!third.available);
+    assert!(third.cooldown, "the third consecutive failure must cool the key down");
+    assert_eq!(third.cooldown_until_ms, Some(10_102));
     let first_probe = store
-        .provider_cooldown_probe_keys_due(5_099)
+        .provider_cooldown_probe_keys_due(10_101)
         .expect("probe due query");
-    assert!(first_probe.is_empty(), "first probe must wait 5s");
+    assert!(first_probe.is_empty(), "the probe respects the 10s cooldown minimum");
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(5_100)
+            .provider_cooldown_probe_keys_due(10_102)
             .expect("probe due query"),
         vec![(
             "provider-a".into(),
@@ -722,19 +384,18 @@ fn recoverable_failure_cools_after_repeat_without_changing_score_contract() {
         )]
     );
     store
-        .complete_probe_success("provider-a", "key-a", "model-a", 5_101)
+        .complete_probe_success("provider-a", "key-a", "model-a", 10_103)
         .expect("probe success must restore exact identity");
-    let second = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 101)
-        .expect("repeated failure");
-    assert_eq!(second.score_milli, 95);
-    assert!(!second.available);
-    assert!(second.cooldown);
-    assert_eq!(second.cooldown_until_ms, Some(5_101));
+    let fourth = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 104)
+        .expect("failure after probe success");
+    assert_eq!(fourth.score_milli, 95);
+    assert!(fourth.available, "the streak restarts below the threshold");
+    assert!(!fourth.cooldown);
 }
 
 #[test]
-fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
+fn dynamic_probe_ladder_first_probe_waits_for_the_cooldown_minimum() {
     let store = V3ProviderHealthStore::default();
     let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
         .expect("session scope");
@@ -763,13 +424,15 @@ fn dynamic_probe_ladder_starts_at_5s_after_the_first_cooldown() {
             .expect("same-key failure");
     }
 
+    // v31 fixes the ladder duration: a declared 60s does not extend the
+    // 10s floor for three consecutive failures.
     assert!(store
-        .provider_cooldown_probe_keys_due(5_099)
+        .provider_cooldown_probe_keys_due(10_099)
         .expect("probe due query")
         .is_empty());
     assert_eq!(
         store
-            .provider_cooldown_probe_keys_due(5_100)
+            .provider_cooldown_probe_keys_due(10_100)
             .expect("probe due query"),
         vec![(
             "provider-a".into(),
@@ -1024,7 +687,7 @@ fn health_score_ignores_configured_priority_as_its_baseline() {
 }
 
 #[test]
-fn two_502_failures_enter_cooldown() {
+fn three_502_failures_enter_cooldown() {
     let store = V3ProviderHealthStore::default();
     store
         .scheduling_projection("p", "k", "m", 100, 1, 100)
@@ -1035,8 +698,8 @@ fn two_502_failures_enter_cooldown() {
         .record_provider_failure_action("p", "k", "m", &action, 101)
         .expect("first 502 failure");
     assert!(
-        first.cooldown,
-        "a single recoverable 502 must cool the provider immediately"
+        !first.cooldown,
+        "a single recoverable 502 stays in precool observation below the threshold"
     );
     assert_eq!(
         store
@@ -1049,8 +712,12 @@ fn two_502_failures_enter_cooldown() {
     let second = store
         .record_provider_failure_action("p", "k", "m", &action, 102)
         .expect("second 502 failure");
-    assert!(second.cooldown);
-    assert_eq!(second.cooldown_until_ms, Some(5_102));
+    assert!(!second.cooldown, "two consecutive failures stay below the threshold");
+    let third = store
+        .record_provider_failure_action("p", "k", "m", &action, 103)
+        .expect("third 502 failure");
+    assert!(third.cooldown);
+    assert_eq!(third.cooldown_until_ms, Some(10_103));
 }
 
 #[test]
@@ -1261,22 +928,6 @@ fn transient_failure_preserves_configured_priority_recovery_path() {
 }
 
 #[test]
-fn health_neutral_action_does_not_change_score_or_cooldown() {
-    let store = V3ProviderKeyHealthStore::default();
-    let action = V3ProviderFailureAction {
-        recovery: V3ProviderRecoveryKind::HealthNeutralTransient,
-        ..V3ProviderFailureAction::recoverable("sse_stall")
-    };
-    let result = store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 100)
-        .expect("health neutral");
-    assert_eq!(result.score_milli, 100);
-    assert_eq!(result.score_generation, 0);
-    assert!(!result.cooldown);
-    assert!(result.available);
-}
-
-#[test]
 fn cooldown_expiry_only_opens_probe_and_probe_failure_reschedules() {
     let store = V3ProviderKeyHealthStore::default();
     let action = V3ProviderFailureAction::recoverable("transport");
@@ -1481,9 +1132,9 @@ fn different_recoverable_fingerprints_do_not_add_up_to_one_cooldown() {
     let mut action = V3ProviderFailureAction::recoverable("provider_http_error");
     action.failure_threshold = 3;
 
-    // HTTP 429 is an independent rate-limit observation, not a counted
-    // recoverable failure; the 5xx fingerprints still keep separate streaks.
-    for (offset, status, expected_streak) in [(0, 429_u16, 0), (1, 500, 1), (2, 502, 1)] {
+    // HTTP 429 and every other recoverable status use the same counted path;
+    // different typed fingerprints still each start their own streak.
+    for (offset, status, expected_streak) in [(0, 429_u16, 1), (1, 500, 1), (2, 502, 1)] {
         action.failure_fingerprint = Some(typed_failure_fingerprint(status));
         let projection = store
             .record_provider_failure_action(
@@ -1870,9 +1521,10 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     assert!(!failed.available, "the bounded hold window still excludes");
 
     // The hold window expires without a probe, so the identity comes back on its
-    // own; an advisory probe is never the availability owner.
+    // own; an advisory probe is never the availability owner. The v29 cooldown
+    // floor is the first ladder step for a threshold-1 hold.
     let after_window = store
-        .scheduling_projection("p", "k", "m", 1, 1, 101 + 5_000)
+        .scheduling_projection("p", "k", "m", 1, 1, 101 + 10_000)
         .expect("post-window projection");
     assert!(
         after_window.available,
@@ -1911,199 +1563,411 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         still_available.available,
         "advisory probe failures must never lock the provider out"
     );
-    let rate_limit = real_http_429_action();
-    store
-        .record_provider_failure_action("p", "k", "m", &rate_limit, 40_000)
-        .unwrap();
-    let minimum = store
-        .record_provider_failure_action("p", "k", "m", &rate_limit, 160_000)
-        .unwrap();
-    assert!(
-        !minimum.available,
-        "advisory cannot bypass a mandatory429 minimum"
-    );
-    assert_eq!(minimum.cooldown_until_ms, Some(1_960_000));
-    store
-        .record_provider_failure_action("p", "k", "m", &rate_limit, 3_640_000)
-        .unwrap();
-    assert!(
-        !store
-            .record_provider_key_success("p", "k", "m", 3_640_001)
-            .unwrap()
-            .available,
-        "advisory cannot replace the mandatory current non429 probe"
-    );
-    assert!(
-        !store
-            .scheduling_projection("p", "k", "m", 1, 1, 9_000_000)
-            .unwrap()
-            .available
-    );
 }
 
 #[test]
-fn a_429_hold_does_not_relabel_a_later_non_rate_limit_cooldown() {
-    // A committed429 minimum and a later503 retain their independent limits.
-    let store = V3ProviderKeyHealthStore::default();
-    let rate_limit = real_http_429_action();
-    store
-        .record_provider_failure_action("p", "a", "m", &rate_limit, 1_000)
-        .unwrap();
-    let held = store
-        .record_provider_failure_action("p", "a", "m", &rate_limit, 121_000)
-        .unwrap();
-    assert!(!held.available, "the 429 must hold the identity");
-
-    // A later 5xx on the same identity keeps the probe-owned cooldown.
-    let mut upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
-    upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
-    upstream.failure_threshold = 1;
-    upstream.cooldown_ms = 5_000;
-    upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
-    store
-        .record_provider_failure_action("p", "a", "m", &upstream, 122_000)
-        .unwrap();
-
-    // The 5xx cooldown must not expire by window: only a probe success restores
-    // the identity. Well past both windows it must still be unavailable.
-    let far_future = 122_000 + 3_600_000;
-    let still_cooled = store
-        .scheduling_projection("p", "a", "m", 1, 1, far_future)
-        .unwrap();
-    assert!(
-        !still_cooled.available,
-        "a probe-owned 5xx cooldown must not auto-expire one hour later"
-    );
-    // A successful probe is the path that restores it.
-    let permit = store
-        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
-        .unwrap()
-        .unwrap();
-    assert!(store
-        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, far_future + 1)
-        .unwrap());
-    assert!(
+fn stream_failure_commits_visibility_only_from_the_consecutive_ladder() {
+    use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
+    let store = V3ProviderHealthStore::default();
+    let record = |provider: &str, key: &str, model: &str, now_ms: u64| {
         store
-            .scheduling_projection("p", "a", "m", 1, 1, far_future + 1)
-            .unwrap()
-            .available,
-        "a probe success restores the identity after the 5xx cooldown"
-    );
-}
-
-#[test]
-fn mandatory_429_episode_agrees_in_every_projection() {
-    let store = V3ProviderKeyHealthStore::default();
-    let rate_limit = real_http_429_action();
-    assert!(
-        store
-            .record_provider_failure_action("p", "a", "m", &rate_limit, 1_000)
-            .unwrap()
-            .available
-    );
-    let held = store
-        .record_provider_failure_action("p", "a", "m", &rate_limit, 121_000)
-        .unwrap();
-    assert!(!held.available, "the hold must exclude the identity");
-    assert_eq!(
-        held.cooldown_until_ms,
-        Some(1_921_000),
-        "the reported deadline must be the real hold window, not the probe cadence"
-    );
-
-    store
-        .record_provider_failure_action("p", "a", "m", &rate_limit, 3_601_000)
-        .unwrap();
-    let scope = V3ProviderFailureSessionScope::new("s", "g", "session").unwrap();
-    for time in [3_601_001, 9_000_000] {
+            .record_provider_stream_failure_in_provider_scope_for_interface(
+                provider,
+                "default",
+                Some(key),
+                Some(model),
+                "post_commit_stream_break",
+                now_ms,
+            )
+            .expect("post-commit stream failure");
+    };
+    // A post-commit stream break is an ordinary recoverable failure: below the
+    // consecutive ladder it records only the streak and never changes pool
+    // visibility.
+    for now_ms in [100_u64, 101] {
+        record("p", "k", "m", now_ms);
         assert!(
-            !store
-                .scheduling_projection("p", "a", "m", 1, 1, time)
-                .unwrap()
-                .available
+            store
+                .availability_for_interface("p", "default", Some("k"), Some("m"), now_ms)
+                .available,
+            "a stream failure below the consecutive ladder must not cool the identity"
         );
         assert!(
-            !store
-                .availability_for_interface("p", "default", Some("a"), Some("m"), time)
-                .available
+            store.cooldown_entries(now_ms).is_empty(),
+            "a stream failure below the consecutive ladder must not create a cooldown-pool entry"
         );
         assert!(
-            !store
-                .availability_for_session(&scope, "p", Some("a"), Some("m"), time)
-                .available
-        );
-        assert!(
-            !store
-                .record_provider_key_success("p", "a", "m", time)
-                .unwrap()
-                .available
+            store
+                .provider_cooldown_probe_keys_due(9_999)
+                .expect("probe due query")
+                .is_empty(),
+            "no recovery probe may be due before the ten-second floor"
         );
     }
-    let permit = store
-        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
-        .unwrap()
-        .unwrap();
-    assert!(store
-        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, 9_000_001)
-        .unwrap());
+    // The exact identity's siblings are untouched.
+    for (key, model) in [("sibling-key", "m"), ("k", "sibling-model")] {
+        assert!(
+            store
+                .availability_for_interface("p", "default", Some(key), Some(model), 101)
+                .available,
+            "unrelated {key}/{model} identity must stay visible"
+        );
+    }
+    // The third consecutive failure commits the v31 ten-second floor.
+    record("p", "k", "m", 102);
     assert!(
-        store
-            .scheduling_projection("p", "a", "m", 1, 1, 9_000_001)
-            .unwrap()
+        !store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 102)
             .available
     );
+    let entries = store.cooldown_entries(102);
+    let probe = entries
+        .iter()
+        .find(|entry| entry.kind == "probe")
+        .expect("the third consecutive failure must create a cooldown-pool entry");
+    assert_eq!(probe.until_ms, Some(10_102));
     assert!(
         store
-            .availability_for_session(&scope, "p", Some("a"), Some("m"), 9_000_001)
+            .provider_cooldown_probe_keys_due(10_101)
+            .expect("probe due query")
+            .is_empty(),
+        "the recovery probe waits for the committed ten-second floor"
+    );
+    assert_eq!(
+        store
+            .provider_cooldown_probe_keys_due(10_102)
+            .expect("probe due query"),
+        vec![("p".into(), Some("k".into()), Some("m".into()))]
+    );
+    // A declared success resets the consecutive count ...
+    store
+        .record_provider_key_success_for_interface("p", "default", "k", "m", 10_103)
+        .expect("business success");
+    assert!(
+        store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 10_103)
             .available
     );
+    // ... so the next stream break starts a fresh streak below the threshold.
+    record("p", "k", "m", 10_104);
+    assert!(
+        store
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 10_104)
+            .available,
+        "a declared success must restart the consecutive count below the threshold"
+    );
+    assert!(store.cooldown_entries(10_104).is_empty());
 }
 
 #[test]
-fn a_429_during_an_outstanding_cooldown_preserves_the_non429_restriction() {
-    let store = V3ProviderKeyHealthStore::default();
-    let mut upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
-    upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
-    upstream.failure_threshold = 1;
-    upstream.cooldown_ms = 5_000;
-    upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
-    store
-        .record_provider_failure_action("p", "a", "m", &upstream, 1_000)
-        .expect("5xx cooldown");
+fn stream_failure_consecutive_ladder_steps_are_ten_thirty_and_one_hour() {
+    let store = V3ProviderHealthStore::default();
+    let steps = [
+        (100_u64, None),
+        (101, None),
+        (102, Some(10_102)),
+        (103, Some(10_103)),
+        (104, Some(30_104)),
+        (105, Some(30_105)),
+        (106, Some(30_106)),
+        (107, Some(30_107)),
+        (108, Some(30_108)),
+        (109, Some(3_600_109)),
+    ];
+    for (now_ms, expected_until) in steps {
+        store
+            .record_provider_stream_failure_in_provider_scope_for_interface(
+                "p",
+                "default",
+                Some("k"),
+                Some("m"),
+                "post_commit_stream_break",
+                now_ms,
+            )
+            .expect("post-commit stream failure");
+        let until_ms = store
+            .cooldown_entries(now_ms)
+            .iter()
+            .find(|entry| entry.kind == "probe")
+            .and_then(|entry| entry.until_ms);
+        assert_eq!(
+            until_ms, expected_until,
+            "the committed cooldown must follow the consecutive ladder at {now_ms}"
+        );
+    }
+    // Streak 3 -> 10s, 5 -> 30s, 10 -> 1h: the one-hour step is the floor for
+    // the recovery probe.
+    assert!(
+        store
+            .provider_cooldown_probe_keys_due(3_600_108)
+            .expect("probe due query")
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .provider_cooldown_probe_keys_due(3_600_109)
+            .expect("probe due query"),
+        vec![("p".into(), Some("k".into()), Some("m".into()))]
+    );
+}
 
-    let rate_limit = real_http_429_action();
-    store
-        .record_provider_failure_action("p", "a", "m", &rate_limit, 2_000)
-        .expect("429 during the 5xx cooldown");
+/// v31 request-failure counting contract. `record_provider_failure_action_for_interface`
+/// is the counted path a recorded recoverable REQUEST failure must use: every
+/// record bumps the exact identity's consecutive streak, the identity stays
+/// VISIBLE below the threshold (only the ladder may change visibility), and the
+/// ladder commits exactly one cooldown row at 3 -> 10s, 5 -> 30s, 10 -> 1h. A
+/// declared success resets the counter, and sibling key/model identities are
+/// never touched.
+#[test]
+fn request_failure_action_path_counts_only_from_the_consecutive_ladder() {
+    use routecodex_v3_provider_responses::V3ProviderAvailabilityReader;
+    let store = V3ProviderHealthStore::default();
+    let action = V3ProviderFailureAction::recoverable("provider_transport_error");
+    for (expected_streak, now_ms) in [(1_u32, 100_u64), (2, 101)] {
+        let projection = store
+            .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, now_ms)
+            .expect("recorded recoverable request failure");
+        assert_eq!(
+            projection.failure_streak, expected_streak,
+            "each recorded request failure advances the exact identity streak"
+        );
+        assert!(
+            !projection.cooldown,
+            "below the ladder a recorded request failure must not commit a cooldown"
+        );
+        assert_eq!(projection.cooldown_until_ms, None);
+        assert!(projection.available);
+        assert!(
+            store.cooldown_entries(now_ms).is_empty(),
+            "no cooldown-pool row exists below the ladder"
+        );
+        for (sibling_key, sibling_model) in [("other-key", "m"), ("k", "other-model")] {
+            assert!(
+                store
+                    .availability_for_interface(
+                        "p",
+                        "default",
+                        Some(sibling_key),
+                        Some(sibling_model),
+                        now_ms,
+                    )
+                    .available,
+                "below the ladder the failure must not touch {sibling_key}/{sibling_model}"
+            );
+        }
+    }
 
-    // Early429 cannot remove a preceding503 exclusion.
+    // The third consecutive recorded request failure commits exactly one
+    // 10s-floor row, and that row is the probe's own deadline.
+    let third = store
+        .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, 102)
+        .expect("third recorded recoverable request failure");
+    assert_eq!(third.failure_streak, 3);
+    assert!(third.cooldown);
+    assert_eq!(third.cooldown_until_ms, Some(10_102));
+    let committed = store.cooldown_entries(102);
+    assert_eq!(
+        committed.len(),
+        1,
+        "exactly one committed row at the third record: {committed:?}"
+    );
+    assert_eq!(committed[0].kind, "probe");
+    assert_eq!(committed[0].interface_id, "default");
+    assert_eq!(committed[0].auth_alias.as_deref(), Some("k"));
+    assert_eq!(committed[0].model_id.as_deref(), Some("m"));
+    assert_eq!(committed[0].until_ms, Some(10_102));
     assert!(
         !store
-            .scheduling_projection("p", "a", "m", 1, 1, 2_000 + 59_999)
-            .expect("projection inside the rate-limit window")
-            .available,
-        "the existing non429 restriction still owns availability"
+            .availability_for_interface("p", "default", Some("k"), Some("m"), 102)
+            .available
     );
-    // Elapsed429 observation time cannot silently clear that restriction.
-    let after_window = 2_000 + 60_001;
-    assert!(
-        !store
-            .scheduling_projection("p", "a", "m", 1, 1, after_window)
-            .expect("projection after the rate-limit window")
-            .available,
-        "early429 must not replace a probe-owned503 restriction"
+    for (sibling_key, sibling_model) in [("other-key", "m"), ("k", "other-model")] {
+        assert!(
+            store
+                .availability_for_interface(
+                    "p",
+                    "default",
+                    Some(sibling_key),
+                    Some(sibling_model),
+                    102,
+                )
+                .available,
+            "a committed cooldown must not exclude {sibling_key}/{sibling_model}"
+        );
+    }
+    assert!(store
+        .provider_cooldown_probe_keys_due(10_101)
+        .expect("probe due query")
+        .is_empty());
+    assert_eq!(
+        store
+            .provider_cooldown_probe_keys_due(10_102)
+            .expect("probe due query"),
+        vec![("p".into(), Some("k".into()), Some("m".into()))]
     );
-    // And the older 5xx evidence is not lost: the next 5xx re-arms the ladder.
-    let mut next_upstream = V3ProviderFailureAction::recoverable("recoverable_upstream");
-    next_upstream.recovery = V3ProviderRecoveryKind::RecoverableCounted;
-    next_upstream.failure_threshold = 1;
-    next_upstream.cooldown_ms = 5_000;
-    next_upstream.failure_fingerprint = build_v3_provider_global_error_fingerprint(500).unwrap();
-    let rearmed = store
-        .record_provider_failure_action("p", "a", "m", &next_upstream, after_window)
-        .expect("a repeated 5xx after the rate-limit window");
-    assert!(
-        rearmed.cooldown,
-        "a repeated 5xx must cool the identity again"
+
+    // Ladder crossings on the same recorded-request-failure path: 4 stays on
+    // the 10s step, 5 -> 30s, and 10 -> 1h.
+    for (now_ms, expected_until) in [
+        (103_u64, 10_103_u64),
+        (104, 30_104),
+        (105, 30_105),
+        (106, 30_106),
+        (107, 30_107),
+        (108, 30_108),
+        (109, 3_600_109),
+    ] {
+        store
+            .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, now_ms)
+            .expect("recorded recoverable request failure");
+        let until_ms = store
+            .cooldown_entries(now_ms)
+            .iter()
+            .find(|entry| entry.kind == "probe")
+            .and_then(|entry| entry.until_ms);
+        assert_eq!(
+            until_ms,
+            Some(expected_until),
+            "the consecutive ladder must decide the committed cooldown at {now_ms}"
+        );
+    }
+
+    // A declared success resets the counter and clears the committed row.
+    let recovered = store
+        .record_provider_key_success_for_interface("p", "default", "k", "m", 3_600_110)
+        .expect("declared provider success");
+    assert!(recovered.available);
+    assert_eq!(recovered.failure_streak, 0);
+    assert!(store.cooldown_entries(3_600_110).is_empty());
+    // The next recorded request failure starts the ladder over at one.
+    let after_reset = store
+        .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, 3_600_111)
+        .expect("recorded recoverable request failure after success");
+    assert_eq!(after_reset.failure_streak, 1);
+    assert!(!after_reset.cooldown);
+    assert!(store.cooldown_entries(3_600_111).is_empty());
+}
+
+/// v31 fixes the consecutive ladder durations (3 -> 10s, 5 -> 30s, 10 -> 1h):
+/// a declared policy duration can neither undercut NOR extend them. Only the
+/// MANUAL/admin entry keeps its exact declared duration.
+#[test]
+fn declared_policy_duration_neither_undercuts_nor_extends_the_fixed_ladder() {
+    let store = V3ProviderHealthStore::default();
+    let session = V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
+        .expect("session scope");
+    let policy = |cooldown_ms: u64| V3ProviderFailurePolicy {
+        failure_threshold: 3,
+        cooldown_ms,
+        probe_interval_ms: 5_000,
+        max_probe_interval_ms: None,
+        long_probe_backoff: false,
+        until_restart: false,
+        advisory_probe: false,
+        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
+    };
+    let fingerprint = build_v3_provider_global_error_fingerprint(429).expect("classification");
+    let record = |model_id: &'static str, declared_ms: u64, now_ms: u64| {
+        store
+            .record_provider_failure_in_session_with_policy(
+                &session,
+                "provider-a",
+                Some("key-a"),
+                Some(model_id),
+                Some("transport"),
+                fingerprint.clone(),
+                now_ms,
+                Some(policy(declared_ms)),
+            )
+            .expect("recoverable failure")
+    };
+    let committed_span = |model_id: &'static str, now_ms: u64| {
+        let until = store
+            .cooldown_entries(now_ms)
+            .into_iter()
+            .find(|entry| entry.model_id.as_deref() == Some(model_id))
+            .and_then(|entry| entry.until_ms)
+            .unwrap_or_else(|| panic!("{model_id} must have a committed cooldown row"));
+        until - now_ms
+    };
+
+    // 1) A declared 5000 SHORTER than the ladder may not undercut the 10s
+    //    commit at three consecutive failures.
+    for now_ms in [100_u64, 101] {
+        let below = record("declared-short", 5_000, now_ms);
+        assert!(
+            below.cooldown_until_ms.is_none(),
+            "below-threshold failures stay visible and commit nothing"
+        );
+    }
+    record("declared-short", 5_000, 102);
+    assert_eq!(
+        committed_span("declared-short", 102),
+        10_000,
+        "a declared 5000 must not undercut the fixed v31 10s step"
     );
+
+    // 2) The same declared 5000 at the five-failure step commits the 30s step.
+    for now_ms in [200_u64, 201, 202, 203] {
+        record("declared-short-five", 5_000, now_ms);
+    }
+    record("declared-short-five", 5_000, 204);
+    assert_eq!(
+        committed_span("declared-short-five", 204),
+        30_000,
+        "a declared 5000 must not undercut the fixed v31 30s step"
+    );
+
+    // 3) A declared duration LONGER than the ladder does not extend it: the
+    //    v31 ladder duration is fixed, not a configurable minimum.
+    for now_ms in [300_u64, 301] {
+        let below = record("declared-long", 60_000, now_ms);
+        assert!(below.cooldown_until_ms.is_none());
+    }
+    record("declared-long", 60_000, 302);
+    assert_eq!(
+        committed_span("declared-long", 302),
+        10_000,
+        "the v31 10s ladder step is fixed; a declared 60s does not extend it"
+    );
+
+    // 4) MANUAL/admin cooldowns keep their exact declared duration; the fixed
+    //    ladder is an automatic-path rule and does not rewrite operator intent.
+    let manual_until = store
+        .add_cooldown_entry_for_interface(
+            "provider-a",
+            "default",
+            Some("manual-key"),
+            Some("manual-model"),
+            "probe",
+            5_000,
+            400,
+        )
+        .expect("manual cooldown");
+    assert_eq!(
+        manual_until - 400,
+        5_000,
+        "a manual/admin cooldown must keep its exact declared duration"
+    );
+    let manual = store
+        .cooldown_entries(400)
+        .into_iter()
+        .find(|entry| entry.model_id.as_deref() == Some("manual-model"))
+        .expect("manual cooldown must be projected");
+    assert_eq!(manual.until_ms, Some(5_400));
+    assert_eq!(manual.remaining_ms, Some(5_000));
+
+    // Each identity above owns its own row: the ladder never leaks across
+    // sibling models.
+    let models: Vec<_> = store
+        .cooldown_entries(400)
+        .into_iter()
+        .filter_map(|entry| entry.model_id)
+        .collect();
+    for expected in ["declared-short", "declared-short-five", "declared-long"] {
+        assert!(
+            models.iter().any(|model| model == expected),
+            "{expected} must own a committed row: {models:?}"
+        );
+    }
 }

@@ -24,7 +24,7 @@ use crate::provider_failure_runtime_policy::{
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
+    V3Error05ExecutionAction, V3Error06ClientProjected,
     V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
     V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
@@ -343,14 +343,13 @@ pub(crate) fn bind_v3_selected_business_auth_kind(
 /// provider 失败策略执行（共享版；替代各协议 `handle_provider_failure` 副本）。
 ///
 /// 返回 `Ok(Some(failure))` 表示 terminal（需投影输出）；`Ok(None)` 表示已重排
-/// （retry_selected / pending_recovery 已更新，主循环 continue）。
+/// （下一次发送回到路由 owner；请求不持有 Provider 恢复控制）。
 pub async fn handle_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     mut failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
     handle_provider_failure_with_response_code(
@@ -359,7 +358,6 @@ pub async fn handle_provider_failure(
         failure,
         state,
         retry_selected,
-        pending_recovery,
         provider_failure_events,
         None,
     )
@@ -372,7 +370,6 @@ pub(crate) async fn handle_provider_failure_with_response_code(
     mut failure: V3RelayProviderFailure,
     state: &mut V3RelayProviderFailurePolicyState<'_>,
     retry_selected: &mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pending_recovery: &mut Option<V3Error05RecoveryAdmissionWitness>,
     provider_failure_events: &mut Vec<V3RuntimeProviderFailureObservation>,
     response_processing_code: Option<routecodex_v3_error::V3InternalErrorCode>,
 ) -> Result<Option<V3RelayProviderFailure>, String> {
@@ -409,27 +406,10 @@ pub(crate) async fn handle_provider_failure_with_response_code(
     match result.decision.action {
         V3Error05ExecutionAction::ReevaluateTarget => {
             *retry_selected = None;
-            *pending_recovery = None;
             Ok(None)
         }
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::WaitThenReselect { .. } => {
             *retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录/lane 可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *pending_recovery = Some(recovery);
-            } else {
-                *pending_recovery = None;
-            }
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {
@@ -1308,19 +1288,16 @@ pub(crate) fn relay_handoff_entry_state(
 ) -> (
     crate::runtime_timing::V3RuntimeTimingState,
     std::collections::BTreeSet<String>,
-    std::collections::BTreeSet<String>,
     Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
 ) {
     match handoff {
         Some(handoff) => (
             handoff.observability_accumulator.timing(),
             handoff.request_local_excluded_candidates.clone(),
-            handoff.request_local_busy_candidates.clone(),
             Some(handoff.target.clone()),
         ),
         None => (
             crate::runtime_timing::V3RuntimeTimingState::start(),
-            std::collections::BTreeSet::new(),
             std::collections::BTreeSet::new(),
             None,
         ),

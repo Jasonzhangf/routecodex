@@ -54,76 +54,81 @@ public_code = "E_MATCHED_CLASS"
         .find(|policy| policy.policy_id == "no_status_match")
         .expect("matched-policy fixture must expose its directive");
     // 400 无全局分类指纹：两类不同的 provider 本地错误都只能靠 source.code
-    // 区分。若桥接只传状态码指纹，两者会塌进同一个桶并累加到三次冷却。
+    // 区分。若桥接只传状态码指纹，两者会塌进同一个桶并累加到共享的
+    // 连续失败阈值。先各记一次并完成观察：分开计数时 A 类 streak 只有 1，
+    // 决不能提前冷却；若合并则两条记录加观察会直接凑满阈值。
     let classes = ["invalid_request_a", "invalid_request_b"];
-    for (index, class) in classes.iter().enumerate() {
-        let record = health
-            .record_provider_failure_record_with_policy(
-                Some(policy),
-                &manifest,
-                &scope_handle,
-                "first",
-                Some("responses"),
-                Some("key1"),
-                Some("gpt-test"),
-                Some("matched policy failure"),
-                "V3ProviderRespInbound01Raw",
-                400,
-                Some(*class),
-                "matched class failure",
-                100 + index as u64,
-            )
-            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
-        assert_eq!(record.state, "pre_cool_observation");
-        assert_eq!(
-            record.failure_count, 0,
-            "class {class} health counters wait for the qualified observation"
-        );
-        assert_eq!(record.cooldown_until_ms, None);
-    }
-    complete_due_precool_failures(&health, 101).await;
-    let cooldown_until_ms = health
-        .store()
-        .cooldown_entries(5_100)
-        .into_iter()
-        .find(|entry| {
-            entry.provider_id == "first"
-                && entry.interface_id == "default"
-                && entry.auth_alias.as_deref() == Some("key1")
-                && entry.model_id.as_deref() == Some("gpt-test")
-        })
-        .and_then(|entry| entry.until_ms);
-    assert_eq!(
-        cooldown_until_ms,
-        Some(5_101),
-        "both no-status classes must keep the threshold-one cooldown step"
-    );
-    for class in classes {
-        let available = health
+    let find_cooldown_until = |health: &V3ProviderFailureRuntimeHealth, now_ms: u64| {
+        health
             .store()
-            .availability_for_session(&scope_handle, "first", Some("key1"), Some("gpt-test"), 101)
-            .available;
-        assert!(
-            !available,
-            "threshold one blocks only this complete identity"
-        );
-        assert_eq!(
-            health
-                .store()
-                .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"),)
-                .expect("matched-policy probe deadline"),
-            Some(5_101),
-            "class {class} must start its own threshold-one streak"
-        );
-        assert!(
-            health
-                .availability("first", Some("key1"), Some("other-model"), 101)
-                .available
-        );
-        assert!(
-            health
-                .availability("first", Some("key2"), Some("gpt-test"), 101)
-                .available
-        );
+            .cooldown_entries(now_ms)
+            .into_iter()
+            .find(|entry| {
+                entry.provider_id == "first"
+                    && entry.interface_id == "default"
+                    && entry.auth_alias.as_deref() == Some("key1")
+                    && entry.model_id.as_deref() == Some("gpt-test")
+            })
+            .and_then(|entry| entry.until_ms)
+    };
+    // Each class fails twice with its qualified observation completing in
+    // between. Counted separately, neither fingerprint reaches the shared
+    // consecutive threshold (3); a bridge that collapsed both classes into one
+    // status-only fingerprint would hold a streak of four and must commit the
+    // cooldown.
+    let mut step = 0u64;
+    for round in 0..2u64 {
+        for class in classes {
+            let record = health
+                .record_provider_failure_record_with_policy(
+                    Some(policy),
+                    &manifest,
+                    &scope_handle,
+                    "first",
+                    Some("responses"),
+                    Some("key1"),
+                    Some("gpt-test"),
+                    Some("matched policy failure"),
+                    "V3ProviderRespInbound01Raw",
+                    400,
+                    Some(class),
+                    "matched class failure",
+                    100 + step,
+                )
+                .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+            // v31: the record is counted immediately, but each distinct
+            // no-status class is its own fingerprint, so alternating classes
+            // always restart the consecutive series at one.
+            assert_eq!(record.state, "pre_cool_observation");
+            assert_eq!(
+                record.failure_count, 1,
+                "class {class} starts its own consecutive-failure series"
+            );
+            assert_eq!(record.cooldown_until_ms, None);
+            complete_due_precool_failures(&health, 101 + step).await;
+            step += 1;
+        }
     }
+    assert_eq!(
+        find_cooldown_until(&health, 20_000),
+        None,
+        "distinct no-status classes must not merge into one consecutive streak"
+    );
+    assert!(
+        health
+            .store()
+            .availability_for_session(&scope_handle, "first", Some("key1"), Some("gpt-test"), 20_000)
+            .available,
+        "below the shared threshold the identity must stay routable"
+    );
+    assert!(
+        health
+            .availability("first", Some("key1"), Some("other-model"), 101)
+            .available
+    );
+    assert!(
+        health
+            .availability("first", Some("key2"), Some("gpt-test"), 101)
+            .available
+    );
 }

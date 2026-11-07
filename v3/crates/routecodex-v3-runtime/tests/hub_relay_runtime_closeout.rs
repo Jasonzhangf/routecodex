@@ -11,9 +11,8 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime,
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
     execute_v3_responses_relay_runtime,
-    execute_v3_responses_relay_runtime_with_health_and_retry_policy,
-    execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayRuntimeInput,
-    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    execute_v3_responses_relay_runtime_with_transport_health, V3AnthropicRelayRuntimeInput,
+    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
@@ -1603,7 +1602,7 @@ path = [
             // The explicit auth-key policy cools the attempted identity. The
             // healthy alternative prevents last-candidate neutrality hiding it.
             {
-                let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+                let output = execute_v3_responses_relay_runtime_with_transport_health(
                     &manifest,
                     V3ResponsesRelayRuntimeInput {
                         server_id: group.into(),
@@ -1619,9 +1618,6 @@ path = [
                     },
                     &transport,
                     &health,
-                    V3ResponsesRelayRetryPolicy {
-                        same_candidate_retries: 0,
-                    },
                 )
                 .await
                 .unwrap();
@@ -1633,10 +1629,16 @@ path = [
                 assert_eq!(events.len(), 1);
                 let event = &events[0];
                 assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
-                assert_eq!(event.wait_ms, Some(if scoped && group == "group_a" { 7000 } else { 11000 }),
-                    "wrong policy consumed: scoped={scoped}, group={group}, response={response_failure}");
-                assert_eq!(event.failure_count, 1);
-                assert_eq!(event.health_state, "cooldown");
+                // v31 retires the request-side wait_retry step: neither the
+                // scoped 7000 ms policy nor the 11000 ms group policy may delay
+                // the request, and the failed identity lands in pre-cool
+                // observation instead of a committed cooldown.
+                assert_eq!(
+                    event.wait_ms, None,
+                    "no provider policy may impose a request wait: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert_eq!(event.failure_count, 0);
+                assert_ne!(event.health_state, "cooldown");
                 assert_eq!(output.status, 200);
                 let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
                     panic!("expected business JSON")
@@ -1646,11 +1648,17 @@ path = [
                 assert!(body.get("error").is_none());
             }
             assert_eq!(*transport.providers.lock().unwrap(), ["limited", "minimax"]);
+            // v31: the failed identity is excluded through the pre-cool
+            // observation hold; the store record itself is not committed to a
+            // cooldown by a single failure.
             assert!(
-                !health
-                    .store()
-                    .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
-                    .available
+                health
+                    .pending_precool_observations()
+                    .iter()
+                    .any(|observation| observation.provider_id == "limited"
+                        && observation.auth_alias.as_deref() == Some("key1")
+                        && observation.model_id.as_deref() == Some("gpt-5.5")),
+                "the failed identity must be held in pre-cool observation"
             );
             for (provider, key, model) in [
                 ("limited", "key2", "gpt-5.5"),
@@ -1832,12 +1840,16 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         Some(timing.runtime_total)
     );
     // The first provider returns a request-local 400. Target excludes only that
-    // exact candidate and reselects MiniMax before response projection.
+    // exact candidate and reselects MiniMax before response projection. v31
+    // also annotates the identity's pending pre-cool observation in the
+    // availability reason list; a single failed send still records the
+    // request-local provider failure exactly once.
     assert_eq!(
         observability.unavailable_candidates,
-        vec![
-            "limited:default:key1:gpt-5.5:availability(request_local_provider_failure)".to_string()
-        ]
+        vec!["limited:default:key1:gpt-5.5:availability(\
+provider_pre_cool_observation|request_local_provider_failure\
+)"
+            .to_string()]
     );
     assert_eq!(
         observability
@@ -1920,10 +1932,14 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         provider_event.next_provider_key.as_deref(),
         Some("minimax:default:key1:MiniMax-M3")
     );
-    assert_eq!(provider_event.failure_count, 1);
-    // A typed provider decode failure immediately cools the exact identity.
-    assert_eq!(provider_event.health_state, "cooldown");
-    assert!(provider_event.cooldown_until_ms.is_some());
+    assert_eq!(
+        provider_event.failure_count, 0,
+        "a first deferred decode failure must not advance the store streak"
+    );
+    // v31: a typed provider decode failure is a deferred pre-cool observation
+    // below the consecutive ladder threshold, not a committed cooldown.
+    assert_ne!(provider_event.health_state, "cooldown");
+    assert!(provider_event.cooldown_until_ms.is_none());
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
@@ -2264,7 +2280,7 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
             stream_response: false,
             custom_tool,
         };
-        let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        let output = execute_v3_responses_relay_runtime(
             &responses_single_limited_manifest_for_scope(&server_id),
             V3ResponsesRelayRuntimeInput {
                 server_id,
@@ -2282,9 +2298,6 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
                 }),
             },
             &transport,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         )
         .await
         .expect("one candidate is enough to return representable duplicate tool identities");
@@ -2329,7 +2342,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
     )
     .expect("test provider failure session scope");
 
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -2343,9 +2356,6 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         },
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 3,
-        },
     )
     .await
     .unwrap();
@@ -2360,23 +2370,33 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(observability.provider_failure_events.len(), 1);
-    assert_eq!(observability.provider_failure_events[0].failure_count, 1);
+    // v31: the failed identity is held as a pending pre-cool observation
+    // below the ladder threshold; no committed cooldown exists after one send.
     assert_eq!(
+        observability.provider_failure_events[0].failure_count, 0,
+        "one failed send must not advance the committed streak"
+    );
+    assert_ne!(
         observability.provider_failure_events[0].health_state,
         "cooldown"
     );
     assert!(observability.provider_failure_events[0]
         .cooldown_until_ms
-        .is_some());
+        .is_none());
+    // The observation hold is what keeps the identity out of selection: the
+    // store record itself is not committed to a cooldown below the ladder.
     assert!(
-        !provider_health
-            .store()
-            .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
-            .available
+        provider_health
+            .pending_precool_observations()
+            .iter()
+            .any(|observation| observation.provider_id == "limited"
+                && observation.auth_alias.as_deref() == Some("key1")
+                && observation.model_id.as_deref() == Some("gpt-5.5")),
+        "the failed identity must be held in pre-cool observation"
     );
 
     for turn in 1..=3 {
-        let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        let output = execute_v3_responses_relay_runtime_with_transport_health(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -2390,9 +2410,6 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
             },
             &transport,
             &provider_health,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 3,
-            },
         )
         .await
         .unwrap();
@@ -2438,7 +2455,7 @@ async fn responses_relay_default_floor_projects_error_after_single_failure() {
         captures: Mutex::new(Vec::new()),
         fail_count: usize::MAX,
     };
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -2456,9 +2473,6 @@ async fn responses_relay_default_floor_projects_error_after_single_failure() {
             }),
         },
         &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2492,7 +2506,7 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
     };
     let output = tokio::time::timeout(
         Duration::from_secs(14),
-        execute_v3_responses_relay_runtime_with_retry_policy(
+        execute_v3_responses_relay_runtime(
             &responses_single_limited_manifest_for_scope(server_id),
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -2510,9 +2524,6 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
                 }),
             },
             &transport,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         ),
     )
     .await
@@ -2548,7 +2559,7 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_sendi
         captures: Mutex::new(Vec::new()),
     };
     let started = Instant::now();
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_request_compat_reselect_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "compat_reselect".into(),
@@ -2567,9 +2578,6 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_sendi
             }),
         },
         &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("request projection failure must use the error chain");
@@ -2616,7 +2624,7 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
         sends: Mutex::new(Vec::new()),
     };
     let run = |request_id: &'static str| {
-        execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        execute_v3_responses_relay_runtime_with_transport_health(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "compat_storm".into(),
@@ -2636,9 +2644,6 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
             },
             &transport,
             &provider_health,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         )
     };
 
@@ -2685,7 +2690,7 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
 
 #[tokio::test]
 async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malformed_sse() {
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2703,9 +2708,6 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
             }),
         },
         &ResponsesSseBodyReadErrorTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2730,7 +2732,7 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
 async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery() {
     let server_id = "responses_terminal_missing_fresh_isolation";
     let manifest = responses_single_limited_manifest_for_scope(server_id);
-    let failed = execute_v3_responses_relay_runtime_with_retry_policy(
+    let failed = execute_v3_responses_relay_runtime(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -2748,9 +2750,6 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
             }),
         },
         &ResponsesSseTerminalMissingTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2774,7 +2773,7 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
     };
     let fresh = tokio::time::timeout(
         Duration::from_millis(500),
-        execute_v3_responses_relay_runtime_with_retry_policy(
+        execute_v3_responses_relay_runtime(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -2792,9 +2791,6 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
                 }),
             },
             &success_transport,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         ),
     )
     .await
@@ -2806,7 +2802,7 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
 
 #[tokio::test]
 async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2824,9 +2820,6 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
             }),
         },
         &ResponsesSseUnterminatedFramingTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2859,7 +2852,7 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
 
 #[tokio::test]
 async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse() {
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2877,9 +2870,6 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
             }),
         },
         &ResponsesSseMalformedEventJsonTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2911,7 +2901,7 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
 }
 
 #[test]
-fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
+fn provider_key_failure_uses_the_consecutive_ladder_and_recovers() {
     let store = V3ProviderHealthStore::from_manifest_without_persistence(
         &responses_single_limited_manifest(),
     );
@@ -2921,16 +2911,44 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
         "provider-key-cooldown",
     )
     .expect("test provider failure session scope");
-
-    store
-        .record_provider_stream_failure_in_provider_scope(
-            "limited",
-            Some("key1"),
-            Some("gpt-5.5"),
-            "controlled failure",
-            1_000,
-        )
-        .unwrap();
+    let exact_key = (
+        "limited".to_string(),
+        Some("key1".to_string()),
+        Some("gpt-5.5".to_string()),
+    );
+    // v31: consecutive failures count per complete provider/interface/model/key
+    // identity: three land the identity in the cooldown pool with a ten-second
+    // floor, five use thirty seconds and ten use one hour. Below three nothing
+    // is committed, and there is no separate aggressive recovery ladder.
+    for attempt in 0..3 {
+        store
+            .record_provider_stream_failure_in_provider_scope(
+                "limited",
+                Some("key1"),
+                Some("gpt-5.5"),
+                "controlled failure",
+                0,
+            )
+            .unwrap();
+        if attempt < 2 {
+            assert!(
+                store
+                    .availability_for_session(
+                        &failure_session_scope,
+                        "limited",
+                        Some("key1"),
+                        Some("gpt-5.5"),
+                        0,
+                    )
+                    .available,
+                "consecutive failure {attempt} is below the ladder and must not cool"
+            );
+            assert!(
+                store.provider_cooldown_probe_keys_due(9_999).unwrap().is_empty(),
+                "no probe may be due before the ten-second floor"
+            );
+        }
+    }
     assert!(
         !store
             .availability_for_session(
@@ -2938,38 +2956,23 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
                 "limited",
                 Some("key1"),
                 Some("gpt-5.5"),
-                5_999,
+                0,
             )
-            .available
+            .available,
+        "the third consecutive failure must land the exact identity in cooldown"
     );
     assert!(
         store
-            .availability("limited", Some("key1"), Some("other-model"), 5_999)
-            .available
+            .availability("limited", Some("key1"), Some("other-model"), 0)
+            .available,
+        "the ladder must not cool a sibling model of the same key"
     );
-
-    let exact_key = (
-        "limited".to_string(),
-        Some("key1".to_string()),
-        Some("gpt-5.5".to_string()),
+    assert!(
+        store.provider_cooldown_probe_keys_due(9_999).unwrap().is_empty(),
+        "the v31 cooldown floor is ten seconds"
     );
     assert!(store
-        .provider_cooldown_probe_keys_due(6_000)
-        .unwrap()
-        .contains(&exact_key));
-    let permit = store
-        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
-        .unwrap()
-        .unwrap();
-    store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 6_000)
-        .unwrap();
-    assert!(store
-        .provider_cooldown_probe_keys_due(15_999)
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .provider_cooldown_probe_keys_due(16_000)
+        .provider_cooldown_probe_keys_due(10_000)
         .unwrap()
         .contains(&exact_key));
 
@@ -2978,23 +2981,7 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
         .unwrap()
         .unwrap();
     store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 16_000)
-        .unwrap();
-    assert!(store
-        .provider_cooldown_probe_keys_due(45_999)
-        .unwrap()
-        .is_empty());
-    assert!(store
-        .provider_cooldown_probe_keys_due(46_000)
-        .unwrap()
-        .contains(&exact_key));
-
-    let permit = store
-        .acquire_provider_cooldown_probe("limited", Some("key1"), Some("gpt-5.5"))
-        .unwrap()
-        .unwrap();
-    store
-        .complete_provider_cooldown_probe_success_with_permit(&permit, 46_000)
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 10_001)
         .unwrap();
     assert!(
         store
@@ -3003,24 +2990,11 @@ fn provider_key_failure_uses_aggressive_probe_ladder_and_recovers() {
                 "limited",
                 Some("key1"),
                 Some("gpt-5.5"),
-                46_001,
+                10_002,
             )
-            .available
+            .available,
+        "a matching successful probe must restore the exact identity"
     );
-
-    store
-        .record_provider_stream_failure_in_provider_scope(
-            "limited",
-            Some("key1"),
-            Some("gpt-5.5"),
-            "fast recovery failed again",
-            50_000,
-        )
-        .unwrap();
-    assert!(store
-        .provider_cooldown_probe_keys_due(55_000)
-        .unwrap()
-        .contains(&exact_key));
 }
 
 #[tokio::test]

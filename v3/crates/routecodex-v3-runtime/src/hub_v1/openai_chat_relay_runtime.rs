@@ -1,10 +1,7 @@
 use super::*;
 use crate::hub_v1::relay_sse_hooks::V3RelaySseHookCatalog;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
-use crate::provider_action_gate::V3ProviderActionPermit;
-use crate::provider_failure_runtime_policy::{
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
-};
+use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
 use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
@@ -176,7 +173,6 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_default_transport_provide
         input,
         crate::default_responses_transport(),
         provider_health,
-        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         V3HubExecutionMode::Relay,
         Some(handoff),
     )
@@ -227,7 +223,6 @@ pub async fn execute_v3_openai_chat_relay_runtime_with_provider_health_and_execu
         input,
         transport,
         provider_health,
-        V3RelayProviderFailureRetryPolicy::from_manifest(manifest),
         execution_mode,
         None,
     )
@@ -239,7 +234,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
     input: V3OpenAiChatRelayRuntimeInput,
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
-    retry_policy: V3RelayProviderFailureRetryPolicy,
     execution_mode: V3HubExecutionMode,
     initial_handoff: Option<crate::V3ResponsesProtocolRelayHandoff>,
 ) -> Result<V3OpenAiChatRelayRuntimeOutput, V3OpenAiChatRelayRuntimeError> {
@@ -263,7 +257,6 @@ async fn execute_v3_openai_chat_relay_runtime_inner<T: ResponsesTransport>(
             input.payload,
             transport,
             provider_health,
-            retry_policy,
             initial_handoff,
         )
         .await
@@ -562,7 +555,6 @@ pub(crate) struct V3OpenAiChatSseProviderOutcome {
     auth_alias: String,
     model_id: String,
     recorded: bool,
-    _provider_action_permit: Option<V3ProviderActionPermit>,
 }
 
 impl V3OpenAiChatSseProviderOutcome {
@@ -570,7 +562,6 @@ impl V3OpenAiChatSseProviderOutcome {
         if self.recorded || self.response_control.has_response_governance_failure()? {
             return Ok(());
         }
-        drop(self._provider_action_permit.take());
         let source = build_v3_error_01_source_raised(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",
@@ -1348,7 +1339,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
         auth_alias: String,
         model_id: String,
         recorded: bool,
-        permit: Option<V3ProviderActionPermit>,
     ) -> V3OpenAiChatSseProviderOutcome {
         V3OpenAiChatSseProviderOutcome {
             response_control: V3RuntimeStreamObservation::default(),
@@ -1359,7 +1349,6 @@ impl V3RelayProtocolCodec for V3OpenAiChatRelayCodec {
             auth_alias,
             model_id,
             recorded,
-            _provider_action_permit: permit,
         }
     }
 

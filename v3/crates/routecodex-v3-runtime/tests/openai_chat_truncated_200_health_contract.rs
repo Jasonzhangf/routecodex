@@ -249,12 +249,17 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
     );
 
     let now = u64::MAX;
+    // v31: one failure is a deferred pre-cool observation, not a committed
+    // cooldown, so the exact identity is listed as pending observation while
+    // the store record itself stays available below the ladder threshold.
     assert!(
-        !provider_health
-            .store()
-            .availability(scope, Some("key1"), Some("chat-wire-model"), now)
-            .available,
-        "the exact failed identity must be cooled"
+        provider_health
+            .pending_precool_observations()
+            .iter()
+            .any(|observation| observation.provider_id == scope
+                && observation.auth_alias.as_deref() == Some("key1")
+                && observation.model_id.as_deref() == Some("chat-wire-model")),
+        "the exact failed identity must be held in pre-cool observation"
     );
     assert!(
         provider_health

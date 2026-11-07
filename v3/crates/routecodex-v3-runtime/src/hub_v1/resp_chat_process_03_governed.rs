@@ -890,9 +890,8 @@ fn has_openai_chat_source_explicit_summary(payload: &Value) -> bool {
 
 /// The single shared refill policy for Direct-registered hooks and Relay.
 /// Contract: no governed tool call AND no source-explicit non-empty summary AND
-/// a remaining consecutive-refill budget ask for one more execution. A real
+/// a completed business response may ask for one additional execution. A real
 /// error never reaches this decision (it is handled by the Error chain first).
-/// 0 disables refill; N allows at most N new executions beyond the original.
 pub(crate) fn decide_v3_chat_process_refill(
     tool_calls: &[V3HubResponseToolCall],
     has_source_summary: bool,
@@ -901,9 +900,9 @@ pub(crate) fn decide_v3_chat_process_refill(
     max_consecutive_refills: u32,
 ) -> V3ChatProcessRefillDisposition {
     if !response_completed
+        || refill_used >= max_consecutive_refills.min(1)
         || !tool_calls.is_empty()
         || has_source_summary
-        || refill_used >= max_consecutive_refills
     {
         V3ChatProcessRefillDisposition::Deliver
     } else {
