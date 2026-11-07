@@ -57,6 +57,19 @@ impl Default for RouteClassification {
 
 pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
     let thinking_from_user = input.latest_message_from_user;
+    // Image routing has one condition only: the current turn carries an image
+    // attachment. No other route signal (compaction, web_search, longcontext,
+    // coding, thinking, search, tools) may shadow or downgrade it. `has_image_attachment`
+    // is already scoped to the current turn by the typed active-turn builder, so this
+    // is the plain "current turn + image attachment" rule.
+    if input.has_image_attachment {
+        return RouteClassification {
+            route_name: "multimodal".to_string(),
+            reasoning: "multimodal:metadata-attachment".to_string(),
+            candidates: vec!["multimodal".to_string(), DEFAULT_ROUTE.to_string()],
+            required_capabilities: Vec::new(),
+        };
+    }
     let continuation = !input.latest_message_from_user && input.has_current_turn_tool_output;
     let categories: Vec<&str> = if input.current_turn_tool_categories.is_empty() {
         input
