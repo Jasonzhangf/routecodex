@@ -2390,13 +2390,26 @@ async fn assert_rate_limit_residence_deadline(direct: bool) {
     let _home_guard = TestHomeGuard::new("44cc3af-rate-deadline");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    // Terminal discriminant: the client terminal must follow the measured upstream
+    // attempt. Provider lifecycle probes carry their own body and are not request
+    // business attempts, so they are counted separately.
+    let business_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let app = Router::new().route(
         "/v1/responses",
-        post(|| async {
-            (
-                StatusCode::TOO_MANY_REQUESTS,
-                axum::Json(json!({"error":{"type":"rate_limit_error","message":"capacity busy"}})),
-            )
+        post({
+            let business_attempts = business_attempts.clone();
+            move |axum::Json(body): axum::Json<Value>| {
+                let business_attempts = business_attempts.clone();
+                async move {
+                    if !body.to_string().contains("ping; reply pong") {
+                        business_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        axum::Json(json!({"error":{"type":"rate_limit_error","message":"capacity busy"}})),
+                    )
+                }
+            }
         }),
     );
     let upstream = tokio::spawn(async move {
@@ -2427,7 +2440,7 @@ async fn assert_rate_limit_residence_deadline(direct: bool) {
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let mut bytes = Vec::new();
     let broken = timeout(Duration::from_secs(3), async {
         loop {
@@ -2443,16 +2456,73 @@ async fn assert_rate_limit_residence_deadline(direct: bool) {
     handle.shutdown().await;
     upstream.abort();
     std::env::remove_var("V3_P6_TEST_KEY");
-    assert!(broken.expect("bounded rate-limit wait must terminate"));
+    let broken = broken.expect("bounded rate-limit wait must terminate");
+    let business_attempts = business_attempts.load(std::sync::atomic::Ordering::SeqCst);
+    let body = String::from_utf8(bytes).unwrap();
+    // Removed premise (Lead ruling, 2026-11-07): this fixture used to require
+    // `status == OK` on every run, i.e. it assumed a request is never preempted by
+    // its own residence budget. Under v31 the request residence budget IS the
+    // request budget and its expiry is a truthful typed terminal, and with one
+    // pinned candidate the failing identity is the only/last eligible one whose
+    // real provider response is passed through. The terminal must therefore follow
+    // the measured upstream attempt instead of the retired "always wait" premise:
+    // an admitted attempt ends in that provider's verbatim 429, and a request whose
+    // budget was already spent before admission ends in a detectable transport
+    // break with no error bytes. Both are law-conformant; neither may become a
+    // proxy-generated error, a fabricated completion, or a same-identity retry.
     assert!(
-        elapsed >= Duration::from_millis(120) && elapsed < Duration::from_millis(500),
+        !body.contains("network_error") && !body.contains("response.failed"),
+        "a provider HTTP failure must never become a proxy-generated projection: {body}"
+    );
+    assert!(
+        !body.contains("response.completed"),
+        "a failing upstream must never be fabricated into a completion: {body}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(500),
         "request residence deadline must include gate queueing: {elapsed:?}"
     );
-    let body = String::from_utf8(bytes).unwrap();
-    assert!(
-        !body.contains("error") && !body.contains("response.completed"),
-        "{body}"
-    );
+    if business_attempts > 0 {
+        // Warm start (measured: 148 ms of the 150 ms residence budget were still
+        // left at the first admission): the request reached transport, so the
+        // client receives that attempt's own provider 429 verbatim. The front had
+        // not committed a stream yet, so the verbatim JSON answer is complete.
+        assert_eq!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS,
+            "the real provider 429 must reach the client verbatim: {body}"
+        );
+        assert!(
+            body.contains("capacity busy"),
+            "the provider's own error body must be preserved: {body}"
+        );
+        assert_eq!(
+            business_attempts, 1,
+            "the only pinned candidate must receive exactly one business attempt"
+        );
+        assert!(
+            !broken,
+            "a verbatim 429 body is complete, not a transport break: {body}"
+        );
+    } else {
+        // Cold start (measured: the 150 ms budget was already spent before the
+        // first admission): no provider attempt exists, so the request ends in the
+        // detectable transport break the front produces instead of an error frame.
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "the committed SSE channel must open before the truthful terminal: {body}"
+        );
+        assert!(
+            broken,
+            "the expired residence budget must break the transport detectably: {body}"
+        );
+        assert!(!body.contains("error"), "{body}");
+        assert!(
+            elapsed >= Duration::from_millis(120),
+            "request residence deadline must include gate queueing: {elapsed:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -3168,14 +3238,66 @@ async fn assert_rate_limit_wait(
     assert!(early_calls <= max_early_calls,
         "rate-limit wait must not hammer upstream: {early_calls}, fixture trace (elapsed, probe)={early_trace:?}");
     if cooled {
+        // v31 cooldown-fallback contract. This branch used to assert the retired
+        // wait-for-probe-recovery lane ("recovered after wait" + a completed
+        // protocol terminal) that `issue44cc3af_initial_all_cooled_waits_for_active_probe`
+        // already contradicts: a request never waits for an active probe owner.
+        // An all-cooled pool is promoted through the cooldown fallback
+        // immediately, so both cooled identities receive exactly one business
+        // attempt at once, the request never re-sends an identity, and the probe
+        // stays owned by the provider lifecycle lane. The terminal is the last
+        // eligible candidate's real provider 429: a committed client SSE channel
+        // cannot carry a provider HTTP error, so the front closes the transport
+        // without an error frame — no response.failed, no network_error, no
+        // fabricated completion. The front does emit transport keepalives before
+        // that close, so the keepalive frame remains part of the terminal shape.
+        // The 250 ms snapshot above precedes the promoted sends in this fixture,
+        // so the terminal accounting reads the counters after every result has
+        // been collected. Probe hits are identified by their own body, which keeps
+        // the lifecycle lane's probes out of the request's business count.
+        let final_trace = call_trace.lock().unwrap().clone();
+        let probe_calls = final_trace.iter().filter(|(_, probe)| *probe).count();
+        let business_calls = calls
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .saturating_sub(probe_calls);
+        assert_eq!(
+            business_calls,
+            2 * waiter_count,
+            "the two promoted cooled identities must each receive exactly one business send per request: {business_calls}, fixture trace (elapsed, probe)={final_trace:?}"
+        );
+        assert!(
+            probe_calls <= 2 * waiter_count,
+            "a request must not duplicate the recovery probes owned by the provider lifecycle lane: {probe_calls}, fixture trace (elapsed, probe)={final_trace:?}"
+        );
+        assert_eq!(
+            results.len(),
+            waiter_count,
+            "every request must finish inside the test window"
+        );
         for result in results {
-            let (_, body, _broken) = result
-                .expect("rate-limit recovery deadline")
+            let (status, body, broken) = result
+                .expect("the promoted cooled pool must finish without waiting for recovery")
                 .expect("intact client transport");
-            assert_responses_sse_delivered_business_text(&body, "recovered after wait");
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "the committed client SSE channel must open before the truthful terminal: {body}"
+            );
+            assert!(
+                broken,
+                "the real provider 429 must close the committed SSE transport without an error frame: {body}"
+            );
+            assert!(
+                !body.contains("response.failed")
+                    && !body.contains("network_error")
+                    && !body.contains("\"error\"")
+                    && !body.contains("response.completed")
+                    && !body.contains("recovered after wait"),
+                "a cooled-pool terminal must carry no error payload and no fabricated completion: {body}"
+            );
             assert!(
                 body.contains(": keepalive"),
-                "cooled protocol planning must retain transport keepalives: {body}"
+                "the front must keep transport keepalives before the truthful close: {body}"
             );
         }
     } else {
