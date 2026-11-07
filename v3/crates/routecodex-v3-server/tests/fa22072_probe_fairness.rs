@@ -36,9 +36,15 @@ async fn fail(port: u16, id: &str) {
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .json(&json!({"model":format!("{id}-failure"),"messages":[{"role":"user","content":"genuine failure"}],"stream":false}))
         .send().await.unwrap();
-    assert_eq!(response.status(), 200);
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
     assert_eq!(
-        response.json::<Value>().await.unwrap(),
+        status,
+        200,
+        "a genuine first-candidate failure must recover through its declared spare: {body}"
+    );
+    assert_eq!(
+        body,
         fixture::business("recovery"),
         "a genuine first-candidate failure must recover through its declared spare"
     );

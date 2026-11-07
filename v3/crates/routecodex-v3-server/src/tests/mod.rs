@@ -5355,11 +5355,32 @@ async fn provider_terminal_last_candidate_http_projects_complete_response_withou
         "keep-alive",
         "x-listed-hop",
         "proxy-authenticate",
-        "content-length",
     ] {
         assert!(!response.headers().contains_key(name), "{name} crossed");
     }
+    let framed_length = response
+        .headers()
+        .get("content-length")
+        .map(|value| {
+            value
+                .to_str()
+                .expect("content-length is ASCII")
+                .parse::<usize>()
+                .expect("content-length is numeric")
+        });
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    // v27 framing (supersedes the blanket "content-length must never cross" ban):
+    // the provider's own content-length VALUE never crosses, because it can be stale
+    // or describe a different body. The framed length must describe exactly the bytes
+    // that pass through, so the client never sees a truncated or mis-framed body.
+    if let Some(length) = framed_length {
+        assert_eq!(
+            length,
+            body.len(),
+            "framed content-length must describe the forwarded body"
+        );
+        assert_ne!(length, 17, "the provider's own content-length value must not cross");
+    }
     assert_eq!(body.as_ref(), raw_body.as_slice());
 
     let evidence: Value = serde_json::from_str(

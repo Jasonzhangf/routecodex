@@ -35,7 +35,7 @@ fn v3_direct_selected_available_for_send(
     );
     let selected_available_in_session = selected_projection.available
         || (!failed_candidates.contains(&selected_key)
-            && routecodex_v3_target::V3TargetInterpreter::ignores_single_candidate_automatic_cooldown(
+            && routecodex_v3_target::V3TargetInterpreter::ignores_single_candidate_health_blocking(
                 admitted_candidate_count,
                 &selected_projection.blocked_scopes,
             ));
