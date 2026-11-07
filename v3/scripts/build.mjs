@@ -47,28 +47,26 @@ async function reserveWithWait(options) {
   }
 }
 
-export async function commitBuild(reservation, options = {}) {
+// Any build-stage or commit failure releases this build's reservation. The
+// original failure is thrown unchanged; release diagnostics are attached so a
+// failed cleanup never hides the real cause.
+function releaseReservationOnFailure(reservation, options, failure) {
   try {
+    const releaseOutcome = releaseVersion(reservation, options);
+    failure.released = releaseOutcome.released === true;
+  } catch (releaseError) {
+    failure.released = false;
+    failure.releaseError = releaseError;
+  }
+  return failure;
+}
+
+export async function commitBuild(reservation, options = {}, build = null) {
+  try {
+    if (build) await build();
     return await commitVersion(reservation, options);
-  } catch (commitError) {
-    // A failed logical build must release its own reservation only while it still
-    // owns it. releaseVersion is a no-op for a reservation held by another build,
-    // so a partially committed or stolen ledger is never overwritten here.
-    let released = false;
-    let releaseError;
-    try {
-      const releaseOutcome = releaseVersion(reservation, options);
-      released = releaseOutcome.released === true;
-    } catch (error) {
-      releaseError = error;
-    }
-    const combined = new Error(
-      `${commitError.message}\n[v3 build] additionally failed to release reservation ${reservation.version}: ${releaseError?.message ?? 'release not attempted'}`,
-    );
-    combined.commitError = commitError;
-    combined.released = released;
-    combined.releaseError = releaseError;
-    throw combined;
+  } catch (error) {
+    throw releaseReservationOnFailure(reservation, options, error);
   }
 }
 
@@ -112,28 +110,27 @@ export async function runBuild(options = {}) {
   };
 
   try {
-    await run('node', ['scripts/verify-isolation.mjs'], { env });
-    if (cliOnly) {
-      // CLI-only debug build: identical to the historical build:v3-cli compile
-      // step, but with the reserved version embedded.
-      await run('cargo', ['build', '--locked', '-p', 'routecodex-v3-cli'], { env });
-    } else {
-      await run('cargo', ['build', '--locked', '--workspace'], { env });
-      await run('node', ['scripts/copy-cli-bin.mjs'], { env });
-    }
+    await commitBuild(reservation, { worktree: process.cwd() }, async () => {
+      await run('node', ['scripts/verify-isolation.mjs'], { env });
+      if (cliOnly) {
+        // CLI-only debug build: identical to the historical build:v3-cli compile
+        // step, but with the reserved version embedded.
+        await run('cargo', ['build', '--locked', '-p', 'routecodex-v3-cli'], { env });
+      } else {
+        await run('cargo', ['build', '--locked', '--workspace'], { env });
+        await run('node', ['scripts/copy-cli-bin.mjs'], { env });
+      }
+    });
   } catch (error) {
-    try {
-      releaseVersion(reservation, { worktree: process.cwd() });
-    } catch (releaseError) {
-      error.message = `${error.message}\n[v3 build] additionally failed to release reservation ${buildVersion}: ${releaseError.message}`;
-    }
+    const releaseDetail = error.releaseError
+      ? `, release failed: ${error.releaseError.message}`
+      : '';
     process.stderr.write(
-      `[v3 build] FAILED build_id=${buildId} reserved=${buildVersion} (released; retry reuses it): ${error.message}\n`,
+      `[v3 build] FAILED build_id=${buildId} reserved=${buildVersion}${releaseDetail} (released; retry reuses it): ${error.message}\n`,
     );
     process.exit(1);
   }
 
-  await commitBuild(reservation, { worktree: process.cwd() });
   process.stdout.write(
     `[v3 build] PASS mode=${cliOnly ? 'cli' : 'workspace'} version=${buildVersion} (declared was ${packageVersion})\n`,
   );

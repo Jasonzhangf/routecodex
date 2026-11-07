@@ -200,7 +200,7 @@ test('a commit failure releases this build reservation so retry reuses the versi
     fs.chmodSync(dir, 0o755);
   }
   assert.ok(commitError, 'commit failure must be reported to the caller');
-  assert.ok(commitError.commitError, 'the original commit error must be preserved');
+  assert.match(commitError.message, /EACCES|EPERM|permission denied/, 'the original commit error must be preserved');
   assert.equal(commitError.released, false, 'release failed while the directory was read-only');
   assert.ok(commitError.releaseError, 'the separate release failure must be recorded');
 
@@ -241,4 +241,46 @@ test('a commit failure never releases a different build live reservation', async
   const { ledger } = describeLedger(baseOptions);
   assert.equal(ledger.reserved?.build_id, 'intruder');
   assert.equal(ledger.reserved?.version, '0.90.5001');
+});
+
+test('a build-stage failure releases its reservation before commit so retry reuses the version', async (t) => {
+  const ledgerPath = tempLedger(t);
+  const options = { ledgerPath, declaredVersion: '0.90.5000', buildId: 'build-stage-fail' };
+  const reservation = reserveVersion(options);
+  assert.equal(reservation.version, '0.90.5001');
+
+  let failure;
+  try {
+    await commitBuild(reservation, options, () => {
+      throw new Error('controlled build stage failure');
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  assert.ok(failure, 'the original build failure must be reported');
+  assert.match(failure.message, /controlled build stage failure/);
+  assert.equal(failure.released, true, 'the reservation must be released');
+  assert.equal(failure.releaseError, undefined, 'release must not fail');
+
+  const retry = reserveVersion({ ...options, buildId: 'build-stage-retry' });
+  assert.equal(retry.version, '0.90.5001');
+  assert.equal(commitVersion(retry, { ...options, buildId: 'build-stage-retry' }).committed, '0.90.5001');
+});
+
+test('an unreleased reservation makes the next build hit VERSION_ALLOCATION_BUSY', (t) => {
+  const ledgerPath = tempLedger(t);
+  const options = { ledgerPath, declaredVersion: '0.90.5000' };
+  const leaked = reserveVersion({ ...options, buildId: 'leaked-build' });
+  assert.equal(leaked.version, '0.90.5001');
+
+  assert.throws(
+    () => reserveVersion({ ...options, buildId: 'next-build' }),
+    (error) => error.code === 'VERSION_ALLOCATION_BUSY' && /leaked-build/.test(error.message),
+    'an unreleased reservation must block the next build',
+  );
+
+  assert.equal(releaseVersion(leaked, options).released, true);
+  const retry = reserveVersion({ ...options, buildId: 'retry-build' });
+  assert.equal(retry.version, '0.90.5001');
 });

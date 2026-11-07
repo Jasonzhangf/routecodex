@@ -284,7 +284,17 @@ export function releaseVersion(reservation, options = {}) {
   return withLedgerLock(lockPath, () => {
     const ledger = loadLedger(ledgerPath, declaredVersion);
     const reserved = ledger.reserved;
-    if (!reserved || reserved.build_id !== buildId) {
+    const ownsReservation =
+      reserved &&
+      reserved.build_id === buildId &&
+      reserved.version === reservation.version;
+    const hasOwnedReservedAllocation = ledger.allocations.some(
+      (allocation) =>
+        allocation.build_id === buildId &&
+        allocation.version === reservation.version &&
+        allocation.state === 'reserved',
+    );
+    if (!ownsReservation || !hasOwnedReservedAllocation) {
       return { released: false };
     }
     ledger.reserved = null;
