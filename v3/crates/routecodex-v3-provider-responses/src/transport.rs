@@ -134,6 +134,10 @@ pub struct V3Transport13ResponsesRequest {
     pre_acquired_admission: V3PreAcquiredProviderAdmission,
     auth_carrier: V3ProviderHttpAuthCarrier,
     identity_scope: Option<V3ConcurrencyIdentityScope>,
+    /// 2026-11-07 ruling ①: this send is exempt from adaptive capacity
+    /// admission because it is the single/last eligible candidate. It rides on
+    /// the transport request so no provider-target initializer changes.
+    pub(crate) capacity_admission_bypass: bool,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
@@ -173,6 +177,21 @@ impl V3Transport13ResponsesRequest {
     pub fn with_identity_scope(mut self, scope: V3ConcurrencyIdentityScope) -> Self {
         self.identity_scope = Some(scope);
         self
+    }
+
+    /// 2026-11-07 ruling ①: the single/last eligible candidate is exempt from
+    /// capacity admission as well as from health blocks, so the request reaches
+    /// the provider over the adaptive budget and its real answer is passed
+    /// through instead of a proxy admission decision.
+    pub fn with_capacity_admission_bypass(mut self) -> Self {
+        self.capacity_admission_bypass = true;
+        self
+    }
+
+    /// Read-only view of the ruling ① capacity bypass stamp. A request may only
+    /// re-send an identity that is capacity-busy when it carries this stamp.
+    pub fn capacity_admission_bypass(&self) -> bool {
+        self.capacity_admission_bypass
     }
 
     pub fn release_pre_acquired_admission(&mut self) {
@@ -408,6 +427,7 @@ pub(crate) fn v3_transport_13_request(
         pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
         auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
         identity_scope: None,
+        capacity_admission_bypass: false,
     }
 }
 

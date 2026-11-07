@@ -725,7 +725,7 @@ impl ResponsesTransport for ProviderConcurrencyRecordingTransport {
 struct PostTransportConcurrencyTransport {
     busy_providers: BTreeSet<String>,
     sends: Mutex<Vec<String>>,
-    last_send_at: Mutex<BTreeMap<String, std::time::Instant>>,
+    busy_resends: Mutex<BTreeSet<String>>,
 }
 
 impl PostTransportConcurrencyTransport {
@@ -733,7 +733,7 @@ impl PostTransportConcurrencyTransport {
         Self {
             busy_providers: busy_providers.iter().map(|id| (*id).to_string()).collect(),
             sends: Mutex::new(Vec::new()),
-            last_send_at: Mutex::new(BTreeMap::new()),
+            busy_resends: Mutex::new(BTreeSet::new()),
         }
     }
 }
@@ -746,11 +746,16 @@ impl ResponsesTransport for PostTransportConcurrencyTransport {
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let provider_id = request.provider_id().to_string();
         if self.busy_providers.contains(&provider_id) {
-            let now = std::time::Instant::now();
-            if let Some(previous) = self.last_send_at.lock().unwrap().insert(provider_id.clone(), now) {
-                assert!(now.duration_since(previous) >= Duration::from_millis(900),
-                    "transport-busy identity must retain its original one-second recovery due");
-            }
+            // 2026-11-07 ruling ①: the retired lane waited about one second for
+            // capacity and then retried the same identity. v31 never waits for
+            // capacity, so a capacity-busy identity may be re-sent only when the
+            // request carries the single/last-eligible-candidate capacity bypass.
+            let mut busy_resends = self.busy_resends.lock().unwrap();
+            let already_sent = !busy_resends.insert(provider_id.clone());
+            assert!(
+                !already_sent || request.capacity_admission_bypass(),
+                "a capacity-busy identity may be re-sent only on the request's capacity bypass"
+            );
         }
         {
             let mut calls = self.sends.lock().unwrap();
@@ -2956,13 +2961,16 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
 
     assert_eq!(output.status, 502, "{output:?}");
     let calls = transport.sends.lock().unwrap();
-    // v31: the cooled candidate is promoted by the target's cooldown fallback
-    // once the visible pool is empty and becomes the last eligible candidate, so
-    // it is attempted exactly once; neither identity is retried.
+    // 2026-11-07 ruling ①: the capacity-busy identity is skipped (not failed),
+    // the cooled candidate is promoted by the target's cooldown fallback and
+    // answers its real typed failure, and only then is the still-busy identity
+    // restored once as the request's last eligible candidate and re-sent over
+    // the occupied budget with the capacity bypass. No other resend happens,
+    // and the fixture send guard proves that resend carries the bypass.
     assert_eq!(
         calls.as_slice(),
-        &[first.to_string(), second.to_string()],
-        "the capacity-busy identity is attempted exactly once, then the promoted cooled candidate exactly once: {calls:?}"
+        &[first.to_string(), second.to_string(), first.to_string()],
+        "busy identity skipped, promoted cooled candidate attempted, then the busy identity re-sent once on the capacity bypass: {calls:?}"
     );
     drop(calls);
     assert!(
@@ -2984,12 +2992,20 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
         source.source_kind,
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
     );
+    assert_eq!(
+        source.code, "provider_concurrency_busy",
+        "the terminal is the exempted last-eligible attempt's real capacity category"
+    );
     let events = &output
         .observability
         .as_ref()
         .expect("relay mixed exhaustion must keep provider failure observations")
         .provider_failure_events;
-    assert_eq!(events.len(), 2, "one observation per attempted identity");
+    assert_eq!(
+        events.len(),
+        3,
+        "one observation per attempt: capacity skip, real failure, exempted last-candidate attempt"
+    );
     assert_eq!(
         events[0].external_error_code.as_deref(),
         Some("provider_concurrency_busy"),
@@ -3002,7 +3018,16 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
     assert_eq!(
         events[1].external_error_code.as_deref(),
         Some("invalid_request_error"),
-        "the last attempt keeps its own real provider error category"
+        "the promoted cooled candidate keeps its own real provider error category"
+    );
+    assert_eq!(
+        events[2].provider_id, first,
+        "the exempted send is the busy identity again, as the last eligible candidate"
+    );
+    assert_eq!(
+        events[2].external_error_code.as_deref(),
+        Some("provider_concurrency_busy"),
+        "the exempted last-candidate attempt keeps its real capacity category"
     );
 }
 

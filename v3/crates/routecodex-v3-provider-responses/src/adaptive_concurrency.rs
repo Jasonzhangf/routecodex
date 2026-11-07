@@ -76,6 +76,12 @@ pub struct V3AdaptiveConcurrencySnapshot {
 pub enum V3AdaptiveConcurrencyAdmission {
     Lease,
     Probe,
+    /// The single/last eligible candidate is exempt from capacity admission
+    /// (2026-11-07 ruling ①). The request is sent over the adaptive budget
+    /// because there is no alternative candidate to switch to, and the
+    /// provider's real answer is what the client must see. The lease holds no
+    /// counter, so releasing it is a no-op and `in_flight` stays truthful.
+    CapacityBypass,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -88,6 +94,15 @@ pub struct V3AdaptiveConcurrencyLease {
 impl V3AdaptiveConcurrencyLease {
     pub fn is_probe(&self) -> bool {
         matches!(self.admission, V3AdaptiveConcurrencyAdmission::Probe)
+    }
+
+    /// Whether this lease bypasses the adaptive budget for a single/last
+    /// eligible candidate (2026-11-07 ruling ①).
+    pub fn is_capacity_bypass(&self) -> bool {
+        matches!(
+            self.admission,
+            V3AdaptiveConcurrencyAdmission::CapacityBypass
+        )
     }
 
     pub fn provider_key(&self) -> &str {
@@ -125,6 +140,9 @@ pub struct V3AdaptiveConcurrencyPermit {
     /// A provider lifecycle health/recovery probe. It is admitted by its own
     /// lane, so it neither consumes nor releases business capacity.
     health_probe: bool,
+    /// An over-budget send for the single/last eligible candidate. The permit
+    /// owns no counter, so `release` must not touch `in_flight`.
+    bypass: bool,
 }
 
 pub(crate) struct V3AdaptiveConcurrencyPermitGuard {
@@ -531,6 +549,7 @@ impl V3AdaptiveConcurrencyController {
                 identity_scope: scope.cloned(),
                 probe: true,
                 health_probe: true,
+                bypass: false,
             },
             controller: self.clone(),
         })
@@ -567,11 +586,38 @@ impl V3AdaptiveConcurrencyController {
                     identity_scope: scope.cloned(),
                     probe: false,
                     health_probe: false,
+                bypass: false,
                 },
                 controller: self.clone(),
             });
         }
         None
+    }
+
+    /// Over-budget admission for the single/last eligible candidate.
+    ///
+    /// 2026-11-07 ruling ①: when the captured target holds only one admissible
+    /// candidate, or the current attempt is the last eligible one, capacity
+    /// admission may not block that identity. The request is sent with this
+    /// lease, which owns no counter: `in_flight`, `business_in_flight` and the
+    /// 429 watermark stay truthful, and `release` is a no-op. The provider's
+    /// real response (or original typed failure) is passed through.
+    pub fn capacity_bypass_lease(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+    ) -> V3AdaptiveConcurrencyLease {
+        V3AdaptiveConcurrencyLease {
+            admission: V3AdaptiveConcurrencyAdmission::CapacityBypass,
+            permit: V3AdaptiveConcurrencyPermit {
+                provider_key: provider_key.to_string(),
+                identity_scope: scope.cloned(),
+                probe: false,
+                health_probe: false,
+                bypass: true,
+            },
+            controller: self.clone(),
+        }
     }
 
     pub fn try_acquire_probe(
@@ -611,6 +657,7 @@ impl V3AdaptiveConcurrencyController {
                     identity_scope: scope.cloned(),
                     probe: true,
                     health_probe: false,
+                bypass: false,
                 },
                 controller: self.clone(),
             });
@@ -630,6 +677,7 @@ impl V3AdaptiveConcurrencyController {
                     identity_scope: scope.cloned(),
                     probe: true,
                     health_probe: false,
+                bypass: false,
                 },
                 controller: self.clone(),
             });
@@ -884,6 +932,12 @@ impl V3AdaptiveConcurrencyController {
     }
 
     pub fn release(&self, permit: V3AdaptiveConcurrencyPermit) -> Result<(), String> {
+        // A capacity bypass owns no counter, so there is nothing to release.
+        // Early-returning is what keeps `in_flight` truthful for a
+        // single/last eligible candidate that was sent over the budget.
+        if permit.bypass {
+            return Ok(());
+        }
         let mut states = self
             .inner
             .states
@@ -1715,6 +1769,7 @@ mod tests {
                     identity_scope: None,
                     probe: false,
                     health_probe: false,
+                bypass: false,
                 },
                 V3AdaptiveConcurrencyProbeResult::Accepted,
                 0,
@@ -1727,6 +1782,7 @@ mod tests {
                 identity_scope: None,
                 probe: false,
                 health_probe: false,
+                bypass: false,
             })
             .is_err());
     }

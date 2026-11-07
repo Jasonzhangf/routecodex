@@ -35,7 +35,7 @@ fn v3_direct_selected_available_for_send(
     );
     let selected_available_in_session = selected_projection.available
         || (!failed_candidates.contains(&selected_key)
-            && routecodex_v3_target::V3TargetInterpreter::ignores_single_candidate_health_blocking(
+            && routecodex_v3_target::V3TargetInterpreter::ignores_single_candidate_scheduling_blocking(
                 admitted_candidate_count,
                 &selected_projection.blocked_scopes,
             ));
@@ -154,6 +154,11 @@ pub(crate) struct DirectPolicyFailure {
 
 pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
     failed_candidates: &'state mut BTreeSet<String>,
+    /// 2026-11-07 ruling ①: complete identities this request refused at capacity
+    /// admission. They were never contacted, so the failure policy must not
+    /// treat them as tried when it decides whether the current attempt is the
+    /// last eligible candidate.
+    capacity_skipped: &'state BTreeSet<String>,
     trace: &'state mut Vec<&'static str>,
 }
 
@@ -851,6 +856,18 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         );
     let failed_key = candidate_key(&selected.candidate);
     state.failed_candidates.insert(failed_key.clone());
+    // 2026-11-07 ruling ①: a capacity-skipped identity never received a request,
+    // so it must not count as "tried" while this attempt decides whether it is
+    // the last eligible candidate. Hold it out of the selection basis for that
+    // decision only; the runtime's own set keeps it so a later plan still moves
+    // on to another visible candidate.
+    let capacity_skipped = state.capacity_skipped.clone();
+    let mut held_back_capacity_keys: Vec<String> = Vec::new();
+    for key in capacity_skipped.iter() {
+        if state.failed_candidates.remove(key) {
+            held_back_capacity_keys.push(key.clone());
+        }
+    }
     let next_selected = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => match select_v3_target_with_session_then_global(
             &V3TargetInterpreter::default(),
@@ -874,6 +891,9 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ))
         }
     };
+    for key in held_back_capacity_keys {
+        state.failed_candidates.insert(key);
+    }
     let health_record = match &next_selected {
         Some(_) if is_health_neutral_failure => {
             crate::provider_failure_runtime_policy::v3_provider_failure_record_without_health(
