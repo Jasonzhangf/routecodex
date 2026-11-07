@@ -188,10 +188,12 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     concurrency
         .ensure_initial_budget(&provider_key, initial_concurrency_budget)
         .map_err(V3ProviderHealthProbeFailure::Internal)?;
-    let now_ms =
-        v3_relay_provider_policy_now_epoch_ms().map_err(V3ProviderHealthProbeFailure::Internal)?;
+    // v31: this probe is provider lifecycle state. It uses the health-probe
+    // lane, which never consumes a business budget slot, so a request is never
+    // refused (ConcurrencyBusy) only because this probe is in flight, and this
+    // probe never waits for business capacity to become free.
     let admission = concurrency
-        .try_acquire_scoped(&provider_key, Some(&identity_scope), now_ms)
+        .try_acquire_health_probe_scoped(&provider_key, Some(&identity_scope))
         .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
     ReqwestResponsesTransport::default()
         .send_probe(request.with_pre_acquired_admission(admission))
