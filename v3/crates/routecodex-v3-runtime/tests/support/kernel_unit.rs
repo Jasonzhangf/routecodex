@@ -915,15 +915,14 @@ pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provide
     let manifest = scoped_test_manifest(test_manifest(), routing_group);
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let failure_session_scope = test_failure_session_scope(routing_group);
-    provider_health
-        .record_provider_action_failure_in_scope(
-            &failure_session_scope,
-            "other-provider",
-            Some("key1"),
-            Some("other-model"),
-            "provider_http_503",
-        )
-        .expect("seed unrelated provider failure gate");
+    let observation_key = crate::V3ProviderActionGateKey::new(
+        &failure_session_scope,
+        "other-provider:default:key1:other-model",
+        "provider_pre_cool",
+    ).unwrap();
+    let observation_owner = crate::V3ProviderActionGate::process_shared();
+    observation_owner.record_failure(&observation_key)
+        .expect("seed unrelated Provider observation");
 
     let raw = test_responses_raw(
         routing_group,
@@ -959,16 +958,8 @@ pub(super) async fn run_normal_direct_request_does_not_consume_unrelated_provide
         "normal request must not consume provider-action gate admission"
     );
 
-    provider_health
-        .record_provider_success_in_failure_scope(
-            &V3AttemptSuccessReceipt::from_buffered_terminal_attempt(),
-            &failure_session_scope,
-            "other-provider",
-            Some("key1"),
-            Some("other-model"),
-            0,
-        )
-        .expect("cleanup seeded provider failure gate");
+    observation_owner.record_success(&observation_key)
+        .expect("cleanup unrelated Provider observation");
 }
 
 #[tokio::test]
@@ -1001,7 +992,7 @@ async fn provider_error_enters_error_chain_not_success() {
     );
     let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
     let transport = ErrorTransport(std::sync::atomic::AtomicUsize::new(0));
-    let execution = execute_v3_responses_direct_runtime_kernel_core(
+    let output = execute_v3_responses_direct_runtime_kernel_core(
         V3ResponsesDirectRuntimeCoreState::new()
             .with_provider_health(provider_health)
             .with_initial_plan(&plan),
@@ -1009,12 +1000,8 @@ async fn provider_error_enters_error_chain_not_success() {
         raw,
         crate::register_responses_direct_hooks(),
         &transport,
-    );
-    tokio::pin!(execution);
-    assert!(tokio::time::timeout(Duration::from_millis(50), &mut execution).await.is_err(),
-        "last transport failure must remain pending inside its original request budget");
-    let output = tokio::time::timeout(Duration::from_secs(3), execution).await
-        .expect("original test residence must bound terminal recovery");
+    )
+    .await;
     assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::NoResponse));
     assert_eq!(output.observability.as_ref().and_then(|value| value.attempts), Some(1));
@@ -2219,7 +2206,7 @@ routing_group = "tcp_lifecycle"
 allowed_modes = ["direct", "relay"]
 allowed_invocation_sources = ["client", "refill", "dry_run"]
 allowed_transports = ["json", "sse"]
-attempt_store = {{ request_max_attempts = 8, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
+attempt_store = {{ residence_timeout_ms = 600000 }}
 
 [providers.tcp_first]
 type = "responses"
@@ -2295,6 +2282,161 @@ targets = [{{ kind = "forwarder", id = "tcp", priority = 1 }}]
     assert!(!text.contains("provider-a-must-not-commit"));
     first_server.await.expect("first provider task");
     second_server.await.expect("second provider task");
+}
+
+#[tokio::test]
+async fn direct_sse_missing_terminal_with_healthy_alternative_reselects_under_two_seconds() {
+    use futures_util::StreamExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    std::env::set_var("RTP_FIRST_KEY", "first-secret");
+    std::env::set_var("RTP_SECOND_KEY", "second-secret");
+    let first_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind first RTP provider");
+    let first_address = first_listener
+        .local_addr()
+        .expect("first RTP provider address");
+    let second_listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind second RTP provider");
+    let second_address = second_listener
+        .local_addr()
+        .expect("second RTP provider address");
+
+    let first_server = tokio::spawn(async move {
+        let (mut socket, _) = first_listener
+            .accept()
+            .await
+            .expect("first RTP provider accept");
+        let mut request = [0_u8; 4096];
+        let _ = socket
+            .read(&mut request)
+            .await
+            .expect("first RTP provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("first RTP provider headers");
+        socket
+            .write_all(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-a-partial\"}\n\n")
+            .await
+            .expect("first RTP provider partial frame");
+        socket.shutdown().await.expect("first RTP provider disconnect");
+    });
+    let second_server = tokio::spawn(async move {
+        let (mut socket, _) = second_listener
+            .accept()
+            .await
+            .expect("second RTP provider accept");
+        let mut request = [0_u8; 4096];
+        let _ = socket
+            .read(&mut request)
+            .await
+            .expect("second RTP provider request");
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .expect("second RTP provider headers");
+        socket
+            .write_all(b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"rtp-b\",\"status\":\"in_progress\",\"output\":[]}}\n\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"provider-b-only\"}\n\n")
+            .await
+            .expect("second RTP provider first frames");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        socket
+            .write_all(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"rtp-b\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"provider-b-only\"}]}}\n\n")
+            .await
+            .expect("second RTP provider terminal frame");
+        socket.shutdown().await.expect("second RTP provider shutdown");
+    });
+
+    let authoring = parse_v3_config_02_authoring(&format!(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "rtp_reselect"
+[servers.test.execution]
+allowed_modes = ["direct", "relay"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = 600000 }}
+
+[providers.rtp_first]
+type = "responses"
+base_url = "http://{first_address}/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "RTP_FIRST_KEY" }}] }}
+[providers.rtp_first.models.test]
+wire_name = "wire-first"
+[providers.rtp_first.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
+
+[providers.rtp_second]
+type = "responses"
+base_url = "http://{second_address}/v1"
+default_model = "test"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "RTP_SECOND_KEY" }}] }}
+[providers.rtp_second.models.test]
+wire_name = "wire-second"
+[providers.rtp_second.health]
+enabled = true
+failure_threshold = 3
+cooldown_ms = 900000
+
+[forwarders.rtp]
+model = "client-model"
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "rtp_first", model = "test", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "rtp_second", model = "test", key = "key", priority = 1 }}
+]
+
+[route_groups.rtp_reselect.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "rtp", priority = 1 }}]
+"#
+    ))
+    .expect("real RTP SSE authoring config");
+    let manifest = compile_v3_config_05_manifest(authoring).expect("real RTP SSE manifest");
+    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = test_responses_raw(
+        "rtp_reselect",
+        "req-rtp-sse",
+        "exec-rtp-sse",
+        json!({"model":"client-model","input":"hello","stream":true}),
+    );
+    let plan = test_protocol_plan(&manifest, raw.clone(), provider_health.clone(), 0);
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(provider_health)
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &ReqwestResponsesTransport::default(),
+    )
+    .await;
+
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    let V3ClientBody::CommittedSse(stream) = output.client_payload.body else {
+        panic!("RTP replacement stream must be atomically committed")
+    };
+    let committed = stream.collect::<Vec<_>>().await;
+    let text = String::from_utf8(committed.into_iter().flatten().collect()).unwrap();
+    assert!(text.contains("provider-b-only"));
+    assert!(!text.contains("provider-a-partial"));
+    first_server.await.expect("first RTP provider task");
+    second_server.await.expect("second RTP provider task");
 }
 
 #[tokio::test]
@@ -2443,13 +2585,11 @@ async fn direct_sse_no_continuation_stream_error_is_not_silent_eof() {
         &transport,
     );
     tokio::pin!(execution);
-    tokio::select! {
-        _ = transport.sent.notified() => {},
-        _ = &mut execution => panic!("last attempt must stay pending after provider EOF"),
-    }
-    assert!(tokio::time::timeout(Duration::from_millis(50), &mut execution).await.is_err());
-    let output = tokio::time::timeout(Duration::from_secs(3), execution).await
-        .expect("the original test residence deadline must end this request");
+    // The final failed identity is not retried, probed or silently closed as an
+    // empty completion. The post-commit continuation recovery endpoint for this
+    // scenario stays OPEN and is covered separately.
+    let output = tokio::time::timeout(Duration::from_secs(3), &mut execution).await
+        .expect("the failed incomplete-SSE attempt must terminate without a fabricated empty completion");
     assert_eq!(transport.sends.load(std::sync::atomic::Ordering::SeqCst), 1,
         "the final failed identity is not automatically retried or probed");
     assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness)) if witness.status() == 200),
@@ -2581,202 +2721,19 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
     );
 }
 
-#[tokio::test]
-async fn provider_concurrency_at_budget_reselects_next_provider() {
-    let first = "conc_busy_a_first";
-    let second = "conc_busy_a_second";
-    let held = saturate_capacity_key(&format!("{first}:key"), 1);
-    let manifest = provider_concurrency_two_provider_manifest(first, second, 80);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-    let raw = test_responses_raw(
-        "default",
-        "req-conc-busy-a",
-        "exec-conc-busy-a",
-        json!({"model":"client-model","input":"hello"}),
-    );
 
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(provider_health.clone())
-            .with_now_epoch_ms(10),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-    release_capacity_leases(held);
 
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[format!("{second}:key:wire-second")]
-    );
-    assert!(
-        provider_health
-            .availability(first, Some("key"), Some("test"), 20)
-            .available,
-        "busy admission must not cool the full provider"
-    );
-}
+
 
 #[tokio::test]
-async fn provider_concurrency_all_busy_exhausts_before_any_provider_429() {
-    let first = "conc_recovery_first";
-    let second = "conc_recovery_second";
-    let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
-    let held_second = saturate_capacity_key(&format!("{second}:key"), 1);
-    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 100);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 300;
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = ProviderActionRecoveryConcurrencyTransport {
-        first_provider: first.to_string(),
-        first_send: tokio::sync::Notify::new(),
-        sends: Mutex::new(Vec::new()),
-    };
-    let mut raw = test_responses_raw(
-        "default",
-        "req-recovery-reselect-busy",
-        "exec-recovery-reselect-busy",
-        json!({"model":"client-model","input":"hello"}),
-    );
-    raw.failure_session_scope =
-        test_failure_session_scope_for("default", "session-recovery-reselect-busy");
-    let output = tokio::time::timeout(
-        Duration::from_secs(3),
-        execute_v3_responses_direct_runtime_kernel_core(
-            V3ResponsesDirectRuntimeCoreState::new()
-                .with_provider_health(provider_health)
-                .with_now_epoch_ms(10),
-            &manifest,
-            raw,
-            crate::register_responses_direct_hooks(),
-            &transport,
-        ),
-    )
-    .await;
-    release_capacity_leases(held_first);
-    release_capacity_leases(held_second);
-    let output = output.expect("all full must remain pending only within the original test residence");
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert_eq!(
-        output.terminal_disposition,
-        Some(V3ProviderTerminalDisposition::NoResponse)
-    );
-    assert!(transport.sends.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn provider_concurrency_budget_reselects_sibling_auth_key() {
-    let provider = "conc_busy_key_provider";
-    let held = saturate_capacity_key(&format!("{provider}:key1"), 1);
-    let manifest = provider_concurrency_two_key_manifest(provider, 80);
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-    let raw = test_responses_raw(
-        "default",
-        "req-conc-busy-key",
-        "exec-conc-busy-key",
-        json!({"model":"client-model","input":"hello"}),
-    );
-
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(provider_health.clone())
-            .with_now_epoch_ms(10),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-    release_capacity_leases(held);
-
-    assert_eq!(output.client_payload.status, 200, "{output:?}");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[format!("{provider}:key2:wire-test")],
-        "a full key must select the available sibling key"
-    );
-    assert!(
-        provider_health
-            .availability(provider, Some("key1"), Some("test"), 20)
-            .available,
-        "busy admission must stay health-neutral"
-    );
-}
-
-#[tokio::test]
-async fn provider_concurrency_saturated_candidates_wait_then_exhaust_without_send() {
-    let first = "conc_all_busy_timeout_first";
-    let second = "conc_all_busy_timeout_second";
-    let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
-    let held_second = saturate_capacity_key(&format!("{second}:key"), 1);
-    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 5000;
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-    let raw = test_responses_raw(
-        "default",
-        "req-conc-timeout",
-        "exec-conc-timeout",
-        json!({"model":"client-model","input":"hello"}),
-    );
-
-    let started = std::time::Instant::now();
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(provider_health.clone())
-            .with_now_epoch_ms(10),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-    release_capacity_leases(held_first);
-    release_capacity_leases(held_second);
-    assert!(started.elapsed() >= Duration::from_millis(5_000));
-    assert!(started.elapsed() < Duration::from_millis(6_500));
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert_eq!(
-        output.terminal_disposition,
-        Some(V3ProviderTerminalDisposition::NoResponse)
-    );
-    assert!(transport.sends.lock().unwrap().is_empty());
-    assert!(
-        provider_health
-            .availability(first, Some("key"), Some("test"), 50)
-            .available
-    );
-    assert!(
-        provider_health
-            .availability(second, Some("key"), Some("test"), 50)
-            .available
-    );
-    let source = output
-        .diagnostic_source
-        .as_ref()
-        .expect("all-busy exhaustion must retain its typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
-    );
-    assert_eq!(source.code, "provider_concurrency_busy");
-}
-
-#[tokio::test]
-async fn provider_concurrency_post_transport_busy_exhausts_with_typed_source() {
+async fn post_transport_real_http_400_does_not_retry_same_identity() {
     let first = "conc_post_busy_first";
     let second = "conc_post_busy_second";
     let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
     manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
         .attempt_store.residence_timeout_ms = 1500;
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = PostTransportConcurrencyTransport::new(&[first, second]);
+    let transport = PostTransportConcurrencyTransport::new(&[]);
     let raw = test_responses_raw(
         "default",
         "req-post-busy",
@@ -2796,38 +2753,18 @@ async fn provider_concurrency_post_transport_busy_exhausts_with_typed_source() {
     .await;
 
     assert_eq!(output.client_payload.status, 502, "{output:?}");
+    let sends = transport.sends.lock().unwrap().clone();
     assert_eq!(
-        output.terminal_disposition,
-        Some(V3ProviderTerminalDisposition::NoResponse)
-    );
-    assert_eq!(
-        transport
-            .sends
-            .lock()
-            .unwrap()
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>(),
+        sends.iter().cloned().collect::<BTreeSet<_>>(),
         BTreeSet::from([first.to_string(), second.to_string()]),
-        "each capacity-busy candidate must be attempted exactly once"
+        "each failing identity must be attempted exactly once"
     );
-    for provider in [first, second] {
-        assert!(
-            provider_health
-                .availability(provider, Some("key"), Some("test"), 50)
-                .available,
-            "post-transport capacity busy must stay health-neutral for {provider}"
-        );
-    }
-    let source = output
-        .diagnostic_source
-        .as_ref()
-        .expect("post-transport all-busy exhaustion must retain its typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+    assert_eq!(sends.len(), 2, "no same-identity retry: {sends:?}");
+    assert!(
+        matches!(output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::LastCandidateExternalHttp(ref witness)) if witness.status() == 400),
+        "the last candidate's real provider HTTP 400 must stay in the typed terminal witness: {output:?}"
     );
-    assert_eq!(source.code, "provider_concurrency_busy");
 }
 
 #[tokio::test]
@@ -2838,7 +2775,7 @@ async fn provider_concurrency_post_transport_mixed_exhaustion_stays_generic() {
     manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
         .attempt_store.residence_timeout_ms = 1500;
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = PostTransportConcurrencyTransport::new(&[first]);
+    let transport = PostTransportConcurrencyTransport::new(&[]);
     provider_health
         .store()
         .record_provider_cooldown_failure(
@@ -2869,314 +2806,31 @@ async fn provider_concurrency_post_transport_mixed_exhaustion_stays_generic() {
     .await;
 
     assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert_eq!(
-        output.terminal_disposition,
-        Some(V3ProviderTerminalDisposition::NoResponse)
+    assert!(
+        matches!(output.terminal_disposition,
+            Some(V3ProviderTerminalDisposition::LastCandidateExternalHttp(ref witness))
+                if witness.status() == 400
+                    && String::from_utf8_lossy(witness.body()).contains("mixed provider failure")),
+        "the last candidate's real mixed provider HTTP 400 stays in the typed terminal witness: {output:?}"
     );
     let calls = transport.sends.lock().unwrap();
+    // v31: once the visible pool is empty, the cooled candidate is promoted by
+    // the target's cooldown fallback and becomes the request's last eligible
+    // candidate, so it is attempted exactly once. No identity is retried.
     assert!(
-        (2..=8).contains(&calls.len()),
-        "capacity retries must remain paced: {calls:?}"
-    );
-    assert!(
-        calls.iter().all(|provider| provider == first),
-        "the cooled candidate must never be sent"
+        calls.as_slice() == [first.to_string(), second.to_string()],
+        "the failed first identity is sent once, then the promoted cooled candidate exactly once: {calls:?}"
     );
     drop(calls);
-    assert!(
-        provider_health
-            .availability(first, Some("key"), Some("test"), 50)
-            .available,
-        "the capacity-busy candidate must stay health-neutral"
-    );
-    let source = output
-        .diagnostic_source
-        .as_ref()
-        .expect("mixed exhaustion must keep a typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
-    );
-    assert_eq!(source.code, "selected_target_exhausted");
 }
 
-#[tokio::test]
-async fn provider_concurrency_due_probe_does_not_admit_saturated_business() {
-    let first = "conc_all_busy_due_probe_a";
-    let second = "conc_all_busy_due_probe_b";
-    let first_key = format!("{first}:key");
-    let held_first = saturate_capacity_key(&first_key, 2);
-    let held_second = saturate_capacity_key(&format!("{second}:key"), 2);
-    let rate_limit_scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-        interface_id: "default".into(), model_id: "test".into(),
-    };
-    V3AdaptiveConcurrencyController::process_shared()
-        .observe_rate_limit_scoped(&first_key, Some(&rate_limit_scope), 0)
-        .expect("rate limit must schedule an adaptive recovery probe");
-    let mut manifest =
-        provider_concurrency_two_provider_manifest_with_max_in_flight(first, second, 80, 2);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 300;
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-    let raw = test_responses_raw(
-        "default",
-        "req-conc-due-probe",
-        "exec-conc-due-probe",
-        json!({"model":"client-model","input":"hello"}),
-    );
 
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(provider_health)
-            .with_now_epoch_ms(600_000),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-    release_capacity_leases(held_first);
-    release_capacity_leases(held_second);
 
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert!(transport.sends.lock().unwrap().is_empty());
-    let snapshot = V3AdaptiveConcurrencyController::process_shared()
-        .snapshot_for_scope(&first_key, Some(&rate_limit_scope))
-        .unwrap();
-    assert_eq!(snapshot.in_flight, 0);
-    assert!(
-        snapshot.saturated,
-        "business exhaustion must not recover or consume the scheduled probe"
-    );
-    assert!(!snapshot.probe_in_flight);
-}
+
+
 
 #[tokio::test]
-async fn provider_concurrency_exact_pin_exhausts_without_escape_or_probe() {
-    let provider = "conc_pinned_due_probe";
-    let provider_key = format!("{provider}:key");
-    let held = saturate_capacity_key(&provider_key, 2);
-    let rate_limit_scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-        interface_id: "default".into(), model_id: "test".into(),
-    };
-    V3AdaptiveConcurrencyController::process_shared()
-        .observe_rate_limit_scoped(&provider_key, Some(&rate_limit_scope), 0)
-        .expect("rate limit must schedule an adaptive recovery probe");
-    let mut manifest = provider_concurrency_two_provider_manifest_with_max_in_flight(
-        provider,
-        "conc_pinned_due_probe_alternate",
-        80,
-        2,
-    );
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 300;
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-    let raw = test_responses_raw(
-        "default",
-        "req-conc-pinned-due-probe",
-        "exec-conc-pinned-due-probe",
-        // Direct provider.model pins expand to exactly the requested provider;
-        // Full pinned admission must exhaust without selecting the alternate provider.
-        json!({"model":"conc_pinned_due_probe.test","input":"hello"}),
-    );
-
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(provider_health)
-            .with_now_epoch_ms(600_000),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-    release_capacity_leases(held);
-
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert_eq!(
-        output.terminal_disposition,
-        Some(V3ProviderTerminalDisposition::NoResponse)
-    );
-    assert!(transport.sends.lock().unwrap().is_empty());
-    let snapshot = V3AdaptiveConcurrencyController::process_shared()
-        .snapshot_for_scope(&provider_key, Some(&rate_limit_scope))
-        .unwrap();
-    assert!(snapshot.saturated);
-    assert!(!snapshot.probe_in_flight);
-}
-
-#[tokio::test]
-async fn provider_concurrency_recovery_waits_for_saturated_later_candidate_without_sending() {
-    struct FirstFailsSecondMustNotSend {
-        sends: Arc<Mutex<Vec<String>>>,
-    }
-
-    #[async_trait]
-    impl ResponsesTransport for FirstFailsSecondMustNotSend {
-        async fn send(
-            &self,
-            request: V3Transport13ResponsesHttpRequest,
-        ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-            let provider_id = request.provider_id().to_string();
-            self.sends.lock().unwrap().push(provider_id.clone());
-            if provider_id == "conc_recov_first" {
-                Err(V3ProviderError::HttpStatus {
-                    response: Box::new(V3ProviderHttpFailure {
-                        request_id: request.request_id().to_string(),
-                        provider_id,
-                        status: 500,
-                        headers: Vec::new(),
-                        body: br#"{"error":{"type":"server_error","message":"first provider failed"}}"#.to_vec(),
-                        body_read_failure: None,
-                    }),
-                })
-            } else {
-                Ok(V3ProviderResp14Raw::from_json(
-                    request.request_id(),
-                    request.provider_id(),
-                    200,
-                    vec![V3ProviderResponseHeader {
-                        name: "content-type".to_string(),
-                        value: b"application/json".to_vec(),
-                    }],
-                    br#"{"id":"resp_saturated_recovery","object":"response","status":"completed","output":[{"id":"msg_saturated_recovery","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
-                ))
-            }
-        }
-    }
-
-    let first = "conc_recov_first";
-    let second = "conc_recov_second";
-    let second_key = format!("{second}:key");
-    let held = saturate_capacity_key(&second_key, 1);
-
-    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 200);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 300;
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = FirstFailsSecondMustNotSend {
-        sends: Arc::new(Mutex::new(Vec::new())),
-    };
-    let mut raw = test_responses_raw(
-        "default",
-        "req-conc-recovery-busy",
-        "exec-conc-recovery-busy",
-        json!({"model":"client-model","input":"hello"}),
-    );
-    raw.failure_session_scope =
-        test_failure_session_scope_for("default", "session-conc-recovery-busy");
-
-    let started = std::time::Instant::now();
-    let output = tokio::time::timeout(
-        Duration::from_millis(2_500),
-        execute_v3_responses_direct_runtime_kernel_core(
-            V3ResponsesDirectRuntimeCoreState::new()
-                .with_provider_health(provider_health.clone())
-                .with_now_epoch_ms(600_000),
-            &manifest,
-            raw,
-            crate::register_responses_direct_hooks(),
-            &transport,
-        ),
-    )
-    .await;
-    let elapsed = started.elapsed();
-    release_capacity_leases(held);
-
-    let output = output.expect("recovery must stop within the original request residence budget");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[first.to_string()],
-        "after the first provider fails, a full later provider must not receive the request"
-    );
-    assert!(
-        elapsed >= Duration::from_millis(150) && elapsed < Duration::from_millis(1_500),
-        "recovery must wait without renewing the request residence budget: {elapsed:?}"
-    );
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert!(matches!(output.terminal_disposition,
-        Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness)) if witness.status() == 500));
-    assert!(
-        provider_health
-            .availability(second, Some("key"), Some("test"), 600_001)
-            .available,
-        "busy recovery readmission must stay health-neutral for the second provider"
-    );
-}
-
-#[tokio::test]
-async fn provider_concurrency_relay_budget_reselects_second_provider() {
-    let first = "conc_relay_busy_a_first";
-    let second = "conc_relay_busy_a_second";
-    let held = saturate_capacity_key(&format!("{first}:key"), 1);
-    let manifest = provider_concurrency_two_provider_relay_manifest(first, second, 80);
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
-        &manifest,
-        provider_concurrency_relay_input("req-conc-relay-busy-a"),
-        &transport,
-        &provider_health,
-        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
-    )
-    .await;
-    release_capacity_leases(held);
-
-    let output = output.expect("relay should select the available second provider");
-    assert_eq!(output.status, 200, "{output:?}");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[format!("{second}:key:wire-second")]
-    );
-    assert!(
-        provider_health
-            .runtime_health()
-            .availability(first, Some("key"), Some("test"), 20)
-            .available,
-        "busy admission must stay health-neutral in relay runtime"
-    );
-}
-
-#[tokio::test]
-async fn provider_concurrency_relay_budget_reselects_sibling_auth_key() {
-    let provider = "conc_relay_busy_key_provider";
-    let held = saturate_capacity_key(&format!("{provider}:key1"), 1);
-    let manifest = provider_concurrency_two_key_relay_manifest(provider, 80);
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
-        &manifest,
-        provider_concurrency_relay_input("req-conc-relay-busy-key"),
-        &transport,
-        &provider_health,
-        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
-    )
-    .await;
-    release_capacity_leases(held);
-
-    let output = output.expect("relay should select the available sibling auth key");
-    assert_eq!(output.status, 200, "{output:?}");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[format!("{provider}:key2:wire-test")]
-    );
-    assert!(
-        provider_health
-            .runtime_health()
-            .availability(provider, Some("key1"), Some("test"), 20)
-            .available,
-        "busy key1 must stay health-neutral in relay runtime"
-    );
-}
-
-#[tokio::test]
-async fn provider_concurrency_relay_saturated_candidates_exhaust_without_send() {
+async fn held_business_capacity_does_not_wait_for_relay_request_residence() {
     let first = "conc_relay_all_busy_timeout_first";
     let second = "conc_relay_all_busy_timeout_second";
     let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
@@ -3188,37 +2842,31 @@ async fn provider_concurrency_relay_saturated_candidates_exhaust_without_send() 
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = ProviderConcurrencyRecordingTransport::default();
 
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         provider_concurrency_relay_input("req-conc-relay-timeout"),
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
     )
     .await;
     release_capacity_leases(held_first);
     release_capacity_leases(held_second);
-    let output = output.expect("Relay must project typed pool exhaustion");
-    assert_eq!(output.status, 502, "{output:?}");
-    assert!(transport.sends.lock().unwrap().is_empty());
+    let output = output.expect("held business capacity must not wait for the relay request residence");
+    assert_eq!(output.status, 200, "{output:?}");
+    assert_eq!(
+        transport.sends.lock().unwrap().as_slice(),
+        &[format!("{first}:key:wire-first")],
+        "the relay captured provider is sent even while every business capacity ceiling is held"
+    );
     for provider in [first, second] {
         assert!(
             provider_health
                 .runtime_health()
                 .availability(provider, Some("key"), Some("test"), 40)
                 .available,
-            "relay busy timeout must not cool provider {provider}"
+            "held relay business capacity must stay independent of provider health for {provider}"
         );
     }
-    let source = output
-        .diagnostic_source
-        .as_ref()
-        .expect("relay all-busy exhaustion must retain its typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
-    );
-    assert_eq!(source.code, "provider_concurrency_busy");
 }
 
 #[tokio::test]
@@ -3232,12 +2880,11 @@ async fn provider_concurrency_relay_post_transport_busy_exhausts_with_typed_sour
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let transport = PostTransportConcurrencyTransport::new(&[first, second]);
 
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         provider_concurrency_relay_input("req-conc-relay-post-busy"),
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
     )
     .await
     .expect("Relay must project typed pool exhaustion");
@@ -3269,7 +2916,8 @@ async fn provider_concurrency_relay_post_transport_busy_exhausts_with_typed_sour
         .expect("relay post-transport all-busy exhaustion must retain its typed source");
     assert_eq!(
         source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "the unified provider-failure path carries the capacity category code"
     );
     assert_eq!(source.code, "provider_concurrency_busy");
 }
@@ -3297,25 +2945,24 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
         )
         .expect("mixed relay cooldown setup");
 
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         provider_concurrency_relay_input("req-conc-relay-post-mixed"),
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy::from_manifest(&manifest),
     )
     .await
     .expect("Relay must project mixed exhaustion");
 
     assert_eq!(output.status, 502, "{output:?}");
     let calls = transport.sends.lock().unwrap();
-    assert!(
-        (2..=8).contains(&calls.len()),
-        "capacity retries must remain paced: {calls:?}"
-    );
-    assert!(
-        calls.iter().all(|provider| provider == first),
-        "the cooled relay candidate must never be sent"
+    // v31: the cooled candidate is promoted by the target's cooldown fallback
+    // once the visible pool is empty and becomes the last eligible candidate, so
+    // it is attempted exactly once; neither identity is retried.
+    assert_eq!(
+        calls.as_slice(),
+        &[first.to_string(), second.to_string()],
+        "the capacity-busy identity is attempted exactly once, then the promoted cooled candidate exactly once: {calls:?}"
     );
     drop(calls);
     assert!(
@@ -3325,6 +2972,10 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
             .available,
         "the relay capacity-busy candidate must stay health-neutral"
     );
+    // The terminal is now the promoted cooled candidate's own typed failure: it
+    // is the request's last eligible candidate, so its real provider error is
+    // the typed source. The capacity-busy category of the earlier attempt stays
+    // in the typed Error chain instead of being projected to the client.
     let source = output
         .diagnostic_source
         .as_ref()
@@ -3333,7 +2984,26 @@ async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generi
         source.source_kind,
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
     );
-    assert_eq!(source.code, "selected_target_exhausted");
+    let events = &output
+        .observability
+        .as_ref()
+        .expect("relay mixed exhaustion must keep provider failure observations")
+        .provider_failure_events;
+    assert_eq!(events.len(), 2, "one observation per attempted identity");
+    assert_eq!(
+        events[0].external_error_code.as_deref(),
+        Some("provider_concurrency_busy"),
+        "the busy identity's capacity category is preserved through the unified path"
+    );
+    assert_eq!(
+        events[1].provider_id, second,
+        "the promoted cooled candidate is the second, last-eligible attempt"
+    );
+    assert_eq!(
+        events[1].external_error_code.as_deref(),
+        Some("invalid_request_error"),
+        "the last attempt keeps its own real provider error category"
+    );
 }
 
 #[tokio::test]

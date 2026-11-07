@@ -471,7 +471,6 @@ async fn fa22072_direct_relay_captured_plan_and_exclusions_public_consumer() {
             &manifest,
         ),
         now,
-        true,
         None,
         None,
     )
@@ -873,7 +872,6 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
             &manifest,
         ),
         now,
-        true,
         Some(&failure_sink),
         Some(&route_sink),
     )

@@ -530,33 +530,18 @@ fn resp03_govern_runtime_path_strips_all_non_tool_cipher_without_typed_anthropic
 }
 
 #[test]
-fn refill_decision_respects_zero_default_and_three() {
-    // 0 disables
-    assert_eq!(
-        decide_v3_chat_process_refill(&[], false, true, 0, 0),
-        V3ChatProcessRefillDisposition::Deliver
-    );
-    // default 1: original + at most one new execution
+fn refill_decision_allows_only_one_consecutive_refill() {
     assert_eq!(
         decide_v3_chat_process_refill(&[], false, true, 0, 1),
         V3ChatProcessRefillDisposition::RequestRefill
     );
-    assert_eq!(
-        decide_v3_chat_process_refill(&[], false, true, 1, 1),
-        V3ChatProcessRefillDisposition::Deliver
-    );
-    // 3: original + up to three
-    for used in 0..3 {
+    for (used, configured_limit) in [(0, 0), (1, 1), (2, 1), (1, 3), (9, 3)] {
         assert_eq!(
-            decide_v3_chat_process_refill(&[], false, true, used, 3),
-            V3ChatProcessRefillDisposition::RequestRefill,
+            decide_v3_chat_process_refill(&[], false, true, used, configured_limit),
+            V3ChatProcessRefillDisposition::Deliver,
             "used={used}"
         );
     }
-    assert_eq!(
-        decide_v3_chat_process_refill(&[], false, true, 3, 3),
-        V3ChatProcessRefillDisposition::Deliver
-    );
 }
 
 #[test]

@@ -330,8 +330,7 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         "fresh must skip gated identity"
     );
     assert!(
-        pool_entries(&client, managed.pool_url())
-            .await
+        committed_entries(pool_entries(&client, managed.pool_url()).await)
             .iter()
             .all(|e| e["provider_id"] != provider_id || e["auth_alias"] != "key"),
         "neither 429 nor an unobserved non429 failure may create a health cooldown"
@@ -494,26 +493,22 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         return;
     }
     if refusal_status != 429 {
-        // A real failed observation, rather than a manual seed, must admit
-        // ordinary503 cooldown before its independent recovery probe.
+        // 2026-11-07 law: a failed recovery observation advances only its own
+        // probe cadence and never commits a business cooldown, so the exact
+        // identity must stay out of the committed cooldown pool.
         wait_receipt(&mut rx, ("Bearer controlled-secret", true)).await;
         release.add_permits(1);
-        timeout(Duration::from_secs(4), async {
-            loop {
-                if pool_entries(&client, managed.pool_url())
-                    .await
-                    .iter()
-                    .any(|entry| {
-                        entry["provider_id"] == provider_id && entry["auth_alias"] == "key"
-                    })
-                {
-                    break;
-                }
-                sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("failed physical observation commits exact503 cooldown");
+        sleep(Duration::from_millis(300)).await;
+        let committed: Vec<Value> = pool_entries(&client, managed.pool_url())
+            .await
+            .into_iter()
+            .filter(|entry| entry["state"] != "pre_cool_observation")
+            .collect();
+        assert!(
+            committed.iter().all(|entry| entry["provider_id"] != provider_id
+                || entry["auth_alias"] != "key"),
+            "a failed observation must not commit a business cooldown: {committed:?}"
+        );
         probe_failure.store(false, std::sync::atomic::Ordering::SeqCst);
     } else {
         let (status, body) = post_json(
@@ -533,8 +528,9 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         entries.iter().any(|entry| entry["auth_alias"] == "key"
             && entry["model_id"] == "test"
             && (entry["state"] == "probing"
+                || entry["state"] == "pre_cool_observation"
                 || (fail_streaming_probe && entry["state"] == "waiting"))),
-        "overdue in-flight identity must stay in pool: {entries:?}"
+        "overdue in-flight identity must stay listed in the pool: {entries:?}"
     );
     assert!(business(&client, &managed).await.contains("spare-secret"));
     wait_receipt(&mut rx, ("Bearer spare-secret", false)).await;

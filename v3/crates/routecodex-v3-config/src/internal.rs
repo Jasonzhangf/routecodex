@@ -33,7 +33,6 @@ struct InternalConfig {
     #[serde(default)]
     error_handling: ErrorHandling,
     target_recovery: V3InternalTargetRecoveryPolicy,
-    rate_limit_recovery: V3InternalRateLimitRecoveryPolicy,
     #[serde(default)]
     observability: Observability,
     #[serde(default)]
@@ -79,10 +78,6 @@ struct ErrorHandling {
     #[serde(default)]
     recoverable_http_statuses: Vec<u16>,
     #[serde(default)]
-    recoverable_cooldown_ms: u64,
-    #[serde(default)]
-    recoverable_probe_interval_ms: u64,
-    #[serde(default)]
     unrecoverable_http_statuses: Vec<u16>,
     #[serde(default)]
     unrecoverable_failure_threshold: u32,
@@ -97,8 +92,6 @@ pub struct V3InternalErrorHandlingPolicy {
     pub transient_stages: Vec<String>,
     pub transient_wait_ms: Vec<u64>,
     pub recoverable_http_statuses: Vec<u16>,
-    pub recoverable_cooldown_ms: u64,
-    pub recoverable_probe_interval_ms: u64,
     pub unrecoverable_http_statuses: Vec<u16>,
     pub unrecoverable_failure_threshold: u32,
     pub unrecoverable_cooldown_ms: u64,
@@ -110,18 +103,6 @@ pub struct V3InternalErrorHandlingPolicy {
 pub struct V3InternalTargetRecoveryPolicy {
     pub backoff_wait_ms: Vec<u64>,
     pub steady_wait_ms: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct V3InternalRateLimitRecoveryPolicy {
-    pub observation_window_ms: u64,
-    pub cooldown_ms: u64,
-    pub probe_required_after_ms: u64,
-}
-
-pub fn v3_internal_rate_limit_recovery() -> &'static V3InternalRateLimitRecoveryPolicy {
-    &INTERNAL_CONFIG.rate_limit_recovery
 }
 
 impl V3InternalTargetRecoveryPolicy {
@@ -238,8 +219,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
             .transient_wait_ms
             .windows(2)
             .all(|pair| pair[0] < pair[1]));
-        assert!(config.recoverable_cooldown_ms > 0);
-        assert_eq!(config.recoverable_probe_interval_ms, 15 * 60_000);
         assert!(config.unrecoverable_failure_threshold > 0);
         assert!(config.unrecoverable_cooldown_ms > 0);
         assert_eq!(config.unrecoverable_probe_interval_ms, 30 * 60_000);
@@ -247,8 +226,6 @@ pub fn v3_internal_error_handling() -> &'static V3InternalErrorHandlingPolicy {
             transient_stages: config.transient_stages.clone(),
             transient_wait_ms: config.transient_wait_ms.clone(),
             recoverable_http_statuses: config.recoverable_http_statuses.clone(),
-            recoverable_cooldown_ms: config.recoverable_cooldown_ms,
-            recoverable_probe_interval_ms: config.recoverable_probe_interval_ms,
             unrecoverable_http_statuses: config.unrecoverable_http_statuses.clone(),
             unrecoverable_failure_threshold: config.unrecoverable_failure_threshold,
             unrecoverable_cooldown_ms: config.unrecoverable_cooldown_ms,
@@ -589,7 +566,7 @@ mod tests {
     #[test]
     fn invalid_internal_assets_fail_fast() {
         fn parse(raw: &str) -> InternalConfig {
-            let required_control_tables = "\n[target_recovery]\nbackoff_wait_ms = [1000, 3000, 15000, 35000, 90000]\nsteady_wait_ms = 1000\n[rate_limit_recovery]\nobservation_window_ms = 120000\ncooldown_ms = 1800000\nprobe_required_after_ms = 3600000\n";
+            let required_control_tables = "\n[target_recovery]\nbackoff_wait_ms = [1000, 3000, 15000, 35000, 90000]\nsteady_wait_ms = 1000\n";
             toml::from_str(&format!("{raw}{required_control_tables}")).expect("syntactically valid")
         }
         let missing_family = parse("[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");

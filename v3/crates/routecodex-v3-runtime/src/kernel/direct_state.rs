@@ -128,7 +128,6 @@ struct V3ResponsesDirectRuntimeCoreState {
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
-    allow_exhaustion_rescue_probe: bool,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_protocol_decision: Option<V3Execution11ProtocolDecision>,
     // Candidate set from the Server-side protocol plan; always set together
@@ -136,7 +135,6 @@ struct V3ResponsesDirectRuntimeCoreState {
     // when routing was preplanned.
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
     initial_request_local_excluded_candidates: BTreeSet<String>,
-    initial_request_local_busy_candidates: BTreeSet<String>,
     initial_route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     initial_route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
@@ -155,12 +153,10 @@ impl V3ResponsesDirectRuntimeCoreState {
             now_epoch_ms: 0,
             provider_health: None,
             provider_health_neutral: false,
-            allow_exhaustion_rescue_probe: true,
             initial_selected_target: None,
             initial_protocol_decision: None,
             initial_expanded: None,
             initial_request_local_excluded_candidates: BTreeSet::new(),
-            initial_request_local_busy_candidates: BTreeSet::new(),
             initial_route_policy_scope: None,
             initial_route_policy_pending: None,
             observability_accumulator: None,
@@ -179,11 +175,6 @@ impl V3ResponsesDirectRuntimeCoreState {
 
     fn with_provider_health_neutral(mut self) -> Self {
         self.provider_health_neutral = true;
-        self
-    }
-
-    fn with_exhaustion_rescue_probe_disabled(mut self) -> Self {
-        self.allow_exhaustion_rescue_probe = false;
         self
     }
 
@@ -214,7 +205,6 @@ impl V3ResponsesDirectRuntimeCoreState {
         self.initial_expanded = Some(plan.expanded.clone());
         self.initial_request_local_excluded_candidates =
             plan.request_local_excluded_candidates.clone();
-        self.initial_request_local_busy_candidates = plan.request_local_busy_candidates.clone();
         self.initial_route_policy_scope = plan._route_policy_scope.clone();
         self.initial_route_policy_pending = plan._route_policy_pending.clone();
         self.initial_plan_trace = Some(plan.routing_trace_segment());
@@ -266,7 +256,6 @@ pub struct V3ResponsesProtocolRelayHandoff {
     pub target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     pub expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     pub request_local_excluded_candidates: BTreeSet<String>,
-    pub request_local_busy_candidates: BTreeSet<String>,
     pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub node_trace: Vec<&'static str>,
@@ -282,7 +271,6 @@ impl V3ResponsesProtocolRelayHandoff {
             route_policy_scope: self.route_policy_scope.clone(),
             observability_accumulator: Some(self.observability_accumulator.clone()),
             request_execution_control: Some(self.request_execution_control.clone()),
-            request_local_busy_candidates: self.request_local_busy_candidates.clone(),
             ..Default::default()
         }
     }
@@ -304,7 +292,6 @@ pub struct V3ResponsesProtocolExecutionPlan {
     // consumed. This keeps Direct/Relay handoffs on one Error01-06 attempt set
     // without storing control state in the normal request payload.
     pub request_local_excluded_candidates: BTreeSet<String>,
-    pub request_local_busy_candidates: BTreeSet<String>,
     pub _route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     pub _route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
 }
@@ -327,7 +314,6 @@ impl V3ResponsesProtocolExecutionPlan {
         crate::V3ResponsesRelayRuntimeSeeds {
             route_policy_pending: self._route_policy_pending.clone(),
             route_policy_scope: self._route_policy_scope.clone(),
-            request_local_busy_candidates: self.request_local_busy_candidates.clone(),
             ..Default::default()
         }
     }
