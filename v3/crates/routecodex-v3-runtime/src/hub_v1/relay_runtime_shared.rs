@@ -986,6 +986,22 @@ pub fn failure_error_type(failure: &V3RelayProviderFailure) -> Option<String> {
     (failure.error_type_fn)(&failure.client_response)
 }
 
+/// 外部分类只由「真实上游 HTTP status」派生：source code 用
+/// `provider_http_{status}`，external link code 用 `HTTP_{status}`。响应体
+/// 类型继续只作为 policy/health 与 typed diagnostics 证据。
+fn failure_external_classification(
+    failure: &V3RelayProviderFailure,
+) -> (Option<String>, Option<String>) {
+    if failure.provider_status == Some(failure.status) {
+        return (
+            Some(format!("provider_http_{}", failure.status)),
+            Some(format!("HTTP_{}", failure.status)),
+        );
+    }
+    let code = failure_error_type(failure);
+    (code.clone(), code)
+}
+
 /// 从 failure 提取错误消息（共享版；走协议提取函数字段）。
 pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
     (failure.error_message_fn)(&failure.client_response)
@@ -1051,19 +1067,18 @@ pub fn terminalize_provider_failure(
     if failure.error_operator_fault.is_some() {
         return failure;
     }
+    let (external_code, external_link_code) = failure_external_classification(&failure);
     let source = crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
-        failure_error_type(&failure)
-            .as_deref()
-            .unwrap_or("provider_error"),
+        external_code.as_deref().unwrap_or("provider_error"),
         provider_failure_message(&failure),
         match failure.provider_status {
             Some(status) => {
                 crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
                     status: Some(status),
-                    code: failure_error_type(&failure),
+                    code: external_link_code,
                     provider_id: None,
                     upstream_request_id: None,
                     message: Some(provider_failure_message(&failure)),
@@ -1612,7 +1627,11 @@ mod tests {
             routecodex_v3_error::V3ExternalErrorKind::Provider
         );
         assert_eq!(external.status, Some(429));
-        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(
+            external.code.as_deref(),
+            Some("HTTP_429"),
+            "the real upstream HTTP status owns the external link code; the body is evidence only",
+        );
         assert_eq!(external.message.as_deref(), Some("slow down"));
     }
 

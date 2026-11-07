@@ -113,6 +113,53 @@ fn shared_relay_header_wait_timeout_keeps_health_neutral_hang_code() {
     );
 }
 
+/// 35aa0d1：openai_chat relay 收到真实上游 HTTP 400 时，外部分类必须来自该
+/// HTTP status（provider_http_400），不能改用响应体里的 error.type；body 原样保留。
+#[test]
+fn openai_chat_relay_provider_http_400_derives_external_code_from_status() {
+    let body = br#"{"error":{"type":"invalid_request_error","message":"bad input","upstream_extra":"kept"}}"#;
+    let failure = <V3OpenAiChatRelayCodec as V3RelayProtocolCodec>::provider_http_failure(
+        400,
+        body,
+        "provider-a",
+    );
+
+    assert_eq!(failure.provider_status, Some(400));
+    assert_eq!(
+        crate::hub_v1::relay_runtime_shared::failure_error_type(&failure).as_deref(),
+        Some("invalid_request_error"),
+        "the body-derived type stays the policy/health input",
+    );
+    assert_eq!(
+        failure.client_response["error"]["upstream_extra"],
+        "kept",
+        "upstream body must stay lossless in the typed failure",
+    );
+    let witness =
+        routecodex_v3_error::V3ExternalHttpWitness::new(400, vec![], body.to_vec());
+    let terminal =
+        crate::hub_v1::relay_runtime_shared::terminalize_provider_failure(failure, Some(witness.clone()));
+    assert_eq!(
+        terminal.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+        "the upstream body must stay in the typed terminal witness, not the client wire",
+    );
+    let projection = terminal
+        .terminal_projection
+        .expect("terminalized provider failure must carry Error06 projection");
+    assert_eq!(projection.diagnostic_source.code, "provider_http_400");
+    let external = projection
+        .diagnostic_source
+        .external_error
+        .expect("a real upstream HTTP status must stay linked in Error01");
+    assert_eq!(
+        external.kind,
+        routecodex_v3_error::V3ExternalErrorKind::Provider
+    );
+    assert_eq!(external.status, Some(400));
+    assert_eq!(external.code.as_deref(), Some("HTTP_400"));
+}
+
 #[tokio::test]
 async fn guard_keeps_client_disconnect_out_of_provider_failure_policy() {
     let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
