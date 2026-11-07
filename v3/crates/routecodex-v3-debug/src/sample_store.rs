@@ -5,7 +5,9 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
-use crate::sample_retention::enforce_v3_codex_sample_global_retention;
+use crate::sample_retention::{
+    enforce_v3_codex_sample_global_retention, V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS,
+};
 
 /// Error snapshots are retained by request-id directory.  A request may have
 /// client request/response plus provider request/response files, but those four
@@ -74,6 +76,7 @@ struct V3CodexSamplePersistFailureLedger {
 pub struct V3CodexSampleStore {
     enabled: bool,
     retention: usize,
+    failure_retention_floor_ms: u64,
     /// 只落错误样本（force=true 的 error evidence）；由 server 从 internal 默认值
     /// 与 `--snap` 运行时授权（full_codex_sampling）组合传入。
     error_samples_only: bool,
@@ -237,9 +240,24 @@ impl V3CodexSamplePersistHandle {
 
 impl V3CodexSampleStore {
     pub fn new(enabled: bool, retention: usize, error_samples_only: bool) -> Self {
+        Self::with_failure_retention_floor(
+            enabled,
+            retention,
+            error_samples_only,
+            V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS,
+        )
+    }
+
+    pub fn with_failure_retention_floor(
+        enabled: bool,
+        retention: usize,
+        error_samples_only: bool,
+        failure_retention_floor_ms: u64,
+    ) -> Self {
         Self {
             enabled,
             retention,
+            failure_retention_floor_ms,
             error_samples_only,
             enqueue: RwLock::new(V3CodexSamplePersistAdmission::default()),
             queued_payload_bytes: Arc::new(tokio::sync::Semaphore::new(
@@ -301,7 +319,12 @@ impl V3CodexSampleStore {
         // for every file of a request multiplied the Debug worker cost by the
         // per-request file count.
         if is_new_request_dir {
-            enforce_v3_codex_sample_global_retention(&samples_root, Some(&dir), self.retention)?;
+            enforce_v3_codex_sample_global_retention(
+                &samples_root,
+                Some(&dir),
+                self.retention,
+                self.failure_retention_floor_ms,
+            )?;
         }
         Ok(())
     }
@@ -312,7 +335,12 @@ impl V3CodexSampleStore {
             return Ok(());
         }
         let _filesystem_guard = lock_v3_codex_sample_filesystem(&samples_root)?;
-        enforce_v3_codex_sample_global_retention(&samples_root, None, self.retention)
+        enforce_v3_codex_sample_global_retention(
+            &samples_root,
+            None,
+            self.retention,
+            self.failure_retention_floor_ms,
+        )
     }
 
     pub fn enforce_listener_retention(&self, _port: u16) -> Result<(), String> {

@@ -370,11 +370,7 @@ fn retention_caps_samples_across_endpoints_and_ports() {
 #[test]
 fn failure_sample_survives_success_samples_written_after_it() {
     with_test_home(|home_base| {
-        let previous_floor = std::env::var_os("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS");
-        std::env::set_var(
-            "V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS",
-            crate::sample_retention::V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS.to_string(),
-        );
+        // The declared default floor is per-store; no process-global state is touched.
         let store = V3CodexSampleStore::new(true, 3, false);
         store
             .persist(
@@ -403,11 +399,6 @@ fn failure_sample_survives_success_samples_written_after_it() {
                 .unwrap();
         }
         let failure_dir = sample_dir(home_base).join("failure-req");
-        if let Some(previous) = previous_floor {
-            std::env::set_var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS", previous);
-        } else {
-            std::env::remove_var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS");
-        }
         assert!(
             failure_dir.join("error.json").is_file(),
             "failure sample must survive success samples written after it"
@@ -423,9 +414,8 @@ fn failure_sample_survives_success_samples_written_after_it() {
 #[test]
 fn failure_sample_can_be_evicted_after_retention_floor_elapses() {
     with_test_home(|home_base| {
-        let previous_floor = std::env::var_os("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS");
-        std::env::set_var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS", "0");
-        let store = V3CodexSampleStore::new(true, 3, false);
+        // A zero floor makes the failure sample evictable without any process-global state.
+        let store = V3CodexSampleStore::with_failure_retention_floor(true, 3, false, 0);
         store
             .persist(
                 10000,
@@ -453,17 +443,69 @@ fn failure_sample_can_be_evicted_after_retention_floor_elapses() {
                 .unwrap();
         }
         let failure_dir = sample_dir(home_base).join("failure-req");
-        if let Some(previous) = previous_floor {
-            std::env::set_var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS", previous);
-        } else {
-            std::env::remove_var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS");
-        }
         assert!(
             !failure_dir.exists(),
             "failure sample past the retention floor may be evicted"
         );
         let total_dirs = fs::read_dir(sample_dir(home_base)).unwrap().count();
         assert_eq!(total_dirs, 3);
+    });
+}
+
+#[test]
+fn failure_samples_within_floor_may_exceed_count_cap_without_failing() {
+    with_test_home(|home_base| {
+        let store = V3CodexSampleStore::new(true, 1, false);
+        for index in 0..3 {
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    &format!("failure-{index}"),
+                    "error.json",
+                    &json!({"status": 502, "n": index}),
+                    true,
+                    Some(502),
+                )
+                .unwrap();
+        }
+        for index in 0..3 {
+            store
+                .persist(
+                    10000,
+                    "responses",
+                    "/v1/responses",
+                    &format!("success-{index}"),
+                    "request.json",
+                    &json!({"n": index}),
+                    true,
+                    None,
+                )
+                .unwrap();
+        }
+        assert!(
+            store.persist_failures().is_empty(),
+            "protected failure samples must not report a retention error"
+        );
+        for index in 0..3 {
+            assert!(
+                sample_dir(home_base)
+                    .join(format!("failure-{index}"))
+                    .join("error.json")
+                    .is_file(),
+                "failure sample {index} must survive the count cap"
+            );
+        }
+        let success_dirs = fs::read_dir(sample_dir(home_base))
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().join("request.json").is_file())
+            .count();
+        assert!(
+            success_dirs <= 1,
+            "non-failure samples must still be evicted; got {success_dirs}"
+        );
     });
 }
 

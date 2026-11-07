@@ -10,7 +10,10 @@
 //!
 //! A request directory containing `error.json` is a failure sample. Failure
 //! samples are protected by a time floor and must not be evicted by the
-//! success-sample count budget before the declared floor elapses.
+//! success-sample count budget before the declared floor elapses. When
+//! protected failure samples alone exceed the count budget, retention removes
+//! only the evictable entries and leaves the rest in place; it never fails the
+//! caller for that shortfall.
 
 use std::fs;
 use std::path::Path;
@@ -60,6 +63,7 @@ pub(crate) fn enforce_v3_codex_sample_global_retention(
     samples_root: &Path,
     protected_request_dir: Option<&Path>,
     retention: usize,
+    failure_retention_floor_ms: u64,
 ) -> Result<(), String> {
     let mut endpoint_dirs = match fs::read_dir(samples_root) {
         Ok(endpoint_dirs) => endpoint_dirs,
@@ -121,11 +125,7 @@ pub(crate) fn enforce_v3_codex_sample_global_retention(
         return Ok(());
     }
 
-    let failure_floor_ms = std::env::var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS);
-    let floor = Duration::from_millis(failure_floor_ms);
+    let floor = Duration::from_millis(failure_retention_floor_ms);
     let now = SystemTime::now();
 
     // A failure sample younger than the floor must not be evicted by count-based retention.
@@ -157,11 +157,6 @@ pub(crate) fn enforce_v3_codex_sample_global_retention(
         .filter(|(entry, _)| !is_protected_failure(entry))
         .take(excess)
         .collect::<Vec<_>>();
-    if removable.len() != excess {
-        return Err(format!(
-            "codex sample retention cannot remove {excess} directories because failure samples inside the retention floor must not be evicted"
-        ));
-    }
     for (entry, _) in removable {
         if let Err(error) = fs::remove_dir_all(entry.path()) {
             record_v3_codex_sample_retention_skip(&entry.path(), &error);
