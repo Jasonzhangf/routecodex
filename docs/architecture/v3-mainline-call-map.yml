@@ -7061,7 +7061,7 @@ chains:
 - chain_id: v3.provider_admission_rescue_entrypoints
   owner_feature_id: v3.provider_global_subscription_probe
   summary: Direct and Relay use one pre-transport selection boundary that applies typed health, exact-identity 429, cancellation, deadline and request-shape eligibility; request execution acquires no provider capacity lease.
-  exhaustion_contract: a cooldown-only request receives one rescue pass and captured-target reselection, then internal exhaustion when no candidate is eligible; mixed exclusions remain selected_target_exhausted, and independent scheduled health recovery does not retain the exhausted request
+  exhaustion_contract: captured-target reselection selects only from the current visible pool and never waits for lifecycle probe completion; when no captured candidate is eligible the request reaches the typed exhaustion owned by the Error chain, mixed exclusions remain selected_target_exhausted, and independent scheduled health recovery does not retain the exhausted request
   edges:
   - step_id: v3-rd-target-select-direct-admission-rescue
     from_node: V3Target09CandidateSetExpanded
@@ -7076,7 +7076,7 @@ chains:
       - Direct runtime selects from the captured Target09 candidate set through the health-aware rescue wrapper before provider transport.
       - Provider health, cooldown, exact-identity 429 admission, cancellation, deadline and request-shape exclusions decide eligibility; request execution acquires no capacity lease and does not wait for provider capacity.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection immediately continues to the eligible later tier.
-      - When no captured candidate is eligible, the runtime performs the existing rescue pass and captured-target reselection within the original request budget; health recovery remains independent and does not retain the request.
+      - When no captured candidate is eligible, the runtime performs one captured-target reselection pass against current visibility within the original request budget; it never waits for lifecycle probe completion, and health recovery remains independent and does not retain the request.
       - Earlier non-429 transport failures with eligible successors remain governed by combined health recovery, while final-failed-identity and request-shape exclusions remain protected.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
@@ -7095,7 +7095,7 @@ chains:
     semantic_contract:
       - Responses Direct runtime uses the same health-aware selection wrapper for initial selection and request-local reselection.
       - The wrapper applies only typed health, exact-identity 429, cancellation, deadline and request-shape eligibility; no request capacity lease or capacity wait exists.
-      - Shared captured-target recovery re-reads typed health and reselects inside the captured Target09 set without releasing independent failure/shape exclusions or renewing the original deadline.
+      - Shared captured-target recovery re-reads typed health once and reselects inside the captured Target09 set without waiting for lifecycle probes, releasing independent failure/shape exclusions, or renewing the original deadline.
       - Earlier non-429 transport failures with eligible successors remain governed by combined health recovery, while final-failed-identity and request-shape exclusions remain protected.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
@@ -7115,7 +7115,7 @@ chains:
       - Generic Relay runtime resolves Target09 through the health-aware rescue wrapper before provider transport.
       - Relay applies no capacity admission or capacity wait; typed health, exact-identity 429, cancellation, deadline and request-shape exclusions decide eligibility.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection continues to the eligible later tier.
-      - When no captured candidate is eligible, the runtime performs the existing rescue pass and captured-target reselection; mixed exclusions remain selected_target_exhausted.
+      - When no captured candidate is eligible, the runtime performs one captured-target reselection pass against current visibility and never waits for lifecycle probe completion; mixed exclusions remain selected_target_exhausted.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]
@@ -7133,7 +7133,7 @@ chains:
     semantic_contract:
       - Responses Relay runtime uses the health-aware rescue wrapper for selected Target10 resolution after its route facts are captured.
       - No provider capacity lease is acquired or handed to Relay transport; selection remains inside the captured target and preserves typed health, exact-identity 429 and request-shape exclusions.
-      - Cancellation, original deadline and final-failed-identity remain authoritative, and independent health recovery does not retain the exhausted request.
+      - Cancellation, the original deadline and final-failed-identity remain authoritative; request selection never waits for lifecycle probe completion, and independent health recovery does not retain the exhausted request.
       - Mixed exhaustion retains selected_target_exhausted; no capacity-busy source is synthesized.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
@@ -7153,7 +7153,7 @@ chains:
       - Anthropic Relay resolves Target09 through health-aware selection before Provider transport.
       - Anthropic Relay applies no capacity admission or capacity wait; typed health, exact-identity 429, cancellation, deadline and request-shape exclusions decide eligibility.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection continues to the eligible later tier.
-      - Mixed exhaustion remains selected_target_exhausted, and independent health recovery does not retain the exhausted request.
+      - Request selection never waits for lifecycle probe completion; mixed exhaustion remains selected_target_exhausted, and independent health recovery does not retain the exhausted request.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan]
       produces: [v3.target.concrete_provider]
@@ -7414,24 +7414,6 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
 
-  - step_id: v3-provider-global-probe-429-status
-    from_node: V3ProviderGlobalProbeExecution
-    to_node: V3ProviderHealthStore
-    caller_symbol: complete_v3_provider_health_probe
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.error.source, v3.provider.global_subscription_health]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health]
-      side_channel_writes: [v3.provider.global_subscription_health]
-    semantic_contract:
-      - Real probe HTTP failures pass Error01 and Error02 before the exact current acquisition updates the existing429 episode; transport without an HTTP head cannot qualify as non429.
-      - Non429 HTTP failure atomically releases only429 restriction while retaining failure exclusion; no intermediate healthy projection is published.
-
   - step_id: v3-provider-precool-join-existing-cooldown
     from_node: V3ProviderGlobalProbeExecution
     to_node: V3ProviderHealthStore
@@ -7448,23 +7430,6 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
     semantic_contract:
       - A late in-flight business failure retains its independent typed Error event and is counted once under the existing exact cooldown owner in the same Store lock; it never creates a second unacquirable precool lane or races a completed recovery into a new cooldown.
-
-  - step_id: v3-provider-precool-probe-429-status
-    from_node: V3ProviderGlobalProbeExecution
-    to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::complete_precool_observation
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.error.source, v3.provider.global_subscription_health]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health]
-      side_channel_writes: [v3.provider.global_subscription_health]
-    semantic_contract:
-      - A real429 observation does not commit the pending non429 business failures; when its quota window cools the identity, the existing cooldown owner takes over the same physical identity.
 
   - step_id: v3-provider-global-probe-02-failure
     from_node: V3ProviderGlobalProbeExecution
@@ -7497,36 +7462,6 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
     semantic_contract:
       - Release only the permit's active acquisition; health generation does not gate cancellation and cancellation preserves health and stored schedule.
-
-  - step_id: v3-provider-global-probe-inline-rescue-success
-    from_node: V3ProviderGlobalProbeExecution
-    to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.global_subscription_health]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health]
-      side_channel_writes: [v3.provider.global_subscription_health]
-
-  - step_id: v3-provider-global-probe-inline-rescue-failure
-    from_node: V3ProviderGlobalProbeExecution
-    to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-    callee_symbol: V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.global_subscription_health]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health]
-      side_channel_writes: [v3.provider.global_subscription_health]
 
   - step_id: v3-provider-global-probe-02-persistent
     from_node: V3ServerAggregateLifecycle

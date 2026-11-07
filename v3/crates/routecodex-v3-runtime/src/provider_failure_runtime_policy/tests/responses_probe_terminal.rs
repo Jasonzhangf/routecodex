@@ -93,19 +93,23 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
         !expanded.candidates.is_empty(),
         "the responses probe terminal case must resolve a candidate"
     );
-    for candidate in &expanded.candidates {
-        health
-            .store
-            .record_provider_cooldown_failure(
-                &candidate.provider_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-                "controlled responses probe terminal cooldown",
-                10_000,
-                10_000,
-            )
-            .expect("provider cooldown setup");
-    }
+    let probed = expanded
+        .candidates
+        .iter()
+        .find(|candidate| candidate.provider_id == "first")
+        .expect("the controlled loopback provider must stay in the expanded candidate set");
+    health
+        .store
+        .record_provider_cooldown_failure_for_interface(
+            &probed.provider_id,
+            &probed.interface_id,
+            Some(&probed.auth_alias),
+            Some(&probed.model_id),
+            "controlled responses probe terminal cooldown",
+            10_000,
+            10_000,
+        )
+        .expect("provider cooldown setup");
     let served = Arc::new(AtomicUsize::new(0));
     let probe_server = tokio::spawn(serve_responses_probes_until_idle(
         listener,
@@ -113,9 +117,26 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
         Arc::clone(&served),
     ));
     health
-        .run_exhaustion_rescue_probes(&manifest, &expanded, 20_001)
+        .run_due_provider_health_probes(
+            20_001,
+            false,
+            move |provider_id, interface_id, auth_alias, model_id| {
+                let manifest = manifest.clone();
+                async move {
+                    let target = build_v3_provider_global_probe_target(
+                        &manifest,
+                        &provider_id,
+                        &interface_id,
+                        auth_alias.as_deref(),
+                        model_id.as_deref(),
+                    )
+                    .map_err(V3ProviderHealthProbeFailure::Internal)?;
+                    probe_v3_provider_global_target(target).await
+                }
+            },
+        )
         .await
-        .expect("exhaustion rescue probes must not fail");
+        .expect("due provider health probes must not fail");
     tokio::time::timeout(Duration::from_secs(2), probe_server)
         .await
         .expect("responses probe terminal case must finish its probe server")
@@ -124,11 +145,6 @@ async fn responses_probe_terminal_clears_cooldown(scope: &str, body: &'static st
         served.load(Ordering::SeqCst) > 0,
         "the responses probe terminal case must exercise the real probe transport"
     );
-    let probed = expanded
-        .candidates
-        .iter()
-        .find(|candidate| candidate.provider_id == "first")
-        .expect("the mock provider must stay in the expanded candidate set");
     routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
         &health,
         &probed.provider_id,

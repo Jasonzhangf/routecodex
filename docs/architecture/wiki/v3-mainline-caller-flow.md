@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 93 functional paths, 535 caller edges.
+Generated view: 93 functional paths, 531 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -71,7 +71,7 @@ flowchart TD
   module_v3_runtime -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_runtime -->|5 edges / 1 paths| module_v3_debug
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
-  module_v3_runtime -->|25 edges / 8 paths| module_v3_provider_responses
+  module_v3_runtime -->|21 edges / 8 paths| module_v3_provider_responses
   module_v3_runtime -->|58 edges / 21 paths| module_v3_runtime
   module_v3_runtime -->|43 edges / 12 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
@@ -128,7 +128,7 @@ flowchart TD
 | v3-runtime | routecodex-v3-sse | 1 | `v3.sse_error_and_direct_consumer_pre_wiring` |
 | v3-runtime | v3-debug | 5 | `v3.debug_error_foundation.mainline` |
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
-| v3-runtime | v3-provider-responses | 25 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
+| v3-runtime | v3-provider-responses | 21 | `v3-provider-admission-lease-lifecycle`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 58 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_admission_rescue_entrypoints`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-runtime::hub_v1 | 43 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
@@ -2875,18 +2875,16 @@ Manifest: `docs/architecture/manifests/v3.provider_global_subscription_probe.mai
 ```mermaid
 flowchart TD
   subgraph c_71_v3_provider_global_subscription_probe_m_v3_error["v3-error"]
-    c_71_v3_provider_global_subscription_probe_28["v3-error<br/>build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy<br/><small>routecodex-v3-error/src/lib.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_24["v3-error<br/>build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy<br/><small>routecodex-v3-error/src/lib.rs</small>"]
   end
   subgraph c_71_v3_provider_global_subscription_probe_m_v3_provider_responses["v3-provider-responses"]
     c_71_v3_provider_global_subscription_probe_1["v3-provider-responses<br/>V3ProviderHealthStore::acquire_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
     c_71_v3_provider_global_subscription_probe_10["v3-provider-responses<br/>V3ProviderHealthStore::provider_cooldown_probe_keys_with_interface<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
     c_71_v3_provider_global_subscription_probe_13["v3-provider-responses<br/>ProviderResponsesTransport::send_probe<br/><small>routecodex-v3-provider-responses/src/transport/probe.rs</small>"]
     c_71_v3_provider_global_subscription_probe_15["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_16["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit<br/><small>routecodex-v3-provider-responses/src/health/rate_limit.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_18["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_20["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_22["v3-provider-responses<br/>V3ProviderHealthStore::cancel_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_24["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_17["v3-provider-responses<br/>V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_18["v3-provider-responses<br/>V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_20["v3-provider-responses<br/>V3ProviderHealthStore::cancel_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small>"]
   end
   subgraph c_71_v3_provider_global_subscription_probe_m_v3_runtime["v3-runtime"]
     c_71_v3_provider_global_subscription_probe_0["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
@@ -2896,14 +2894,12 @@ flowchart TD
     c_71_v3_provider_global_subscription_probe_11["v3-runtime<br/>probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
     c_71_v3_provider_global_subscription_probe_12["v3-runtime<br/>probe_v3_provider_global_target_impl<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
     c_71_v3_provider_global_subscription_probe_14["v3-runtime<br/>complete_v3_provider_health_probe<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_17["v3-runtime<br/>V3ProviderFailureRuntimeHealth::defer_provider_health_action<br/><small>routecodex-v3-runtime/src/provider_precool_hold.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_19["v3-runtime<br/>V3ProviderFailureRuntimeHealth::complete_precool_observation<br/><small>routecodex-v3-runtime/src/provider_precool_hold.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_21["v3-runtime<br/>V3ProviderProbeCancellationGuard::drop<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_23["v3-runtime<br/>V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_27["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_16["v3-runtime<br/>V3ProviderFailureRuntimeHealth::defer_provider_health_action<br/><small>routecodex-v3-runtime/src/provider_precool_hold.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_19["v3-runtime<br/>V3ProviderProbeCancellationGuard::drop<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_23["v3-runtime<br/>V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small>"]
   end
   subgraph c_71_v3_provider_global_subscription_probe_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
-    c_71_v3_provider_global_subscription_probe_26["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_22["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
   end
   subgraph c_71_v3_provider_global_subscription_probe_m_v3_server["v3-server"]
     c_71_v3_provider_global_subscription_probe_2["v3-server<br/>spawn_v3_server_aggregate_with_admin_and_hooks_sidecar_socket<br/><small>routecodex-v3-server/src/lib.rs</small>"]
@@ -2911,7 +2907,7 @@ flowchart TD
     c_71_v3_provider_global_subscription_probe_5["v3-server<br/>AggregateProbeLifecycle::supervise<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
     c_71_v3_provider_global_subscription_probe_7["v3-server<br/>V3ServerAggregateHandle::prepare_exec_attempt<br/><small>routecodex-v3-server/src/lib.rs</small>"]
     c_71_v3_provider_global_subscription_probe_8["v3-server<br/>AggregateProbeLifecycle::quiesce<br/><small>routecodex-v3-server/src/aggregate_probe_lifecycle.rs</small>"]
-    c_71_v3_provider_global_subscription_probe_25["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_71_v3_provider_global_subscription_probe_21["v3-server<br/>spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small>"]
   end
   c_71_v3_provider_global_subscription_probe_0 -->|v3-provider-global-probe-01<br/>V3ProviderHealthStore → V3ProviderHealthProbePermit| c_71_v3_provider_global_subscription_probe_1
   c_71_v3_provider_global_subscription_probe_2 -->|v3-provider-global-probe-02-owner<br/>V3ServerAggregateLifecycle → V3ServerProbeOwner| c_71_v3_provider_global_subscription_probe_3
@@ -2922,16 +2918,12 @@ flowchart TD
   c_71_v3_provider_global_subscription_probe_0 -->|v3-provider-global-probe-02-target<br/>V3ProviderHealthProbePermit → V3ProviderGlobalProbeExecution| c_71_v3_provider_global_subscription_probe_11
   c_71_v3_provider_global_subscription_probe_12 -->|v3-provider-global-probe-http-status<br/>V3ProviderGlobalProbeExecution → V3ProviderProbeHttpStatus| c_71_v3_provider_global_subscription_probe_13
   c_71_v3_provider_global_subscription_probe_14 -->|v3-provider-global-probe-02-success<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_15
-  c_71_v3_provider_global_subscription_probe_14 -->|v3-provider-global-probe-429-status<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_16
-  c_71_v3_provider_global_subscription_probe_17 -->|v3-provider-precool-join-existing-cooldown<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_18
-  c_71_v3_provider_global_subscription_probe_19 -->|v3-provider-precool-probe-429-status<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_16
-  c_71_v3_provider_global_subscription_probe_14 -->|v3-provider-global-probe-02-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_20
-  c_71_v3_provider_global_subscription_probe_21 -->|v3-provider-global-probe-owner-cancel<br/>V3ProviderProbeCancellationGuard → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_22
-  c_71_v3_provider_global_subscription_probe_23 -->|v3-provider-global-probe-inline-rescue-success<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_24
-  c_71_v3_provider_global_subscription_probe_23 -->|v3-provider-global-probe-inline-rescue-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_20
-  c_71_v3_provider_global_subscription_probe_25 -->|v3-provider-global-probe-02-persistent<br/>V3ServerAggregateLifecycle → V3ProviderGlobalProbeExecution| c_71_v3_provider_global_subscription_probe_0
-  c_71_v3_provider_global_subscription_probe_26 -->|v3-provider-global-probe-03<br/>V3Error02Classified → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_27
-  c_71_v3_provider_global_subscription_probe_26 -->|v3-provider-global-probe-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_71_v3_provider_global_subscription_probe_28
+  c_71_v3_provider_global_subscription_probe_16 -->|v3-provider-precool-join-existing-cooldown<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_17
+  c_71_v3_provider_global_subscription_probe_14 -->|v3-provider-global-probe-02-failure<br/>V3ProviderGlobalProbeExecution → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_18
+  c_71_v3_provider_global_subscription_probe_19 -->|v3-provider-global-probe-owner-cancel<br/>V3ProviderProbeCancellationGuard → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_20
+  c_71_v3_provider_global_subscription_probe_21 -->|v3-provider-global-probe-02-persistent<br/>V3ServerAggregateLifecycle → V3ProviderGlobalProbeExecution| c_71_v3_provider_global_subscription_probe_0
+  c_71_v3_provider_global_subscription_probe_22 -->|v3-provider-global-probe-03<br/>V3Error02Classified → V3ProviderHealthStore| c_71_v3_provider_global_subscription_probe_23
+  c_71_v3_provider_global_subscription_probe_22 -->|v3-provider-global-probe-error-classification<br/>V3Error01SourceRaised → V3Error02Classified| c_71_v3_provider_global_subscription_probe_24
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2945,13 +2937,9 @@ flowchart TD
 | `v3-provider-global-probe-02-target` | `V3ProviderHealthProbePermit` → `V3ProviderGlobalProbeExecution` | anchored | V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | probe_v3_provider_global_target<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-http-status` | `V3ProviderGlobalProbeExecution` → `V3ProviderProbeHttpStatus` | anchored | probe_v3_provider_global_target_impl<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small> | ProviderResponsesTransport::send_probe<br/><small>routecodex-v3-provider-responses/src/transport/probe.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-success` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | complete_v3_provider_health_probe<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-global-probe-429-status` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | complete_v3_provider_health_probe<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit<br/><small>routecodex-v3-provider-responses/src/health/rate_limit.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-precool-join-existing-cooldown` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::defer_provider_health_action<br/><small>routecodex-v3-runtime/src/provider_precool_hold.rs</small> | V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-precool-probe-429-status` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::complete_precool_observation<br/><small>routecodex-v3-runtime/src/provider_precool_hold.rs</small> | V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit<br/><small>routecodex-v3-provider-responses/src/health/rate_limit.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-failure` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | complete_v3_provider_health_probe<br/><small>routecodex-v3-runtime/src/provider_probe_lifecycle.rs</small> | V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-owner-cancel` | `V3ProviderProbeCancellationGuard` → `V3ProviderHealthStore` | anchored | V3ProviderProbeCancellationGuard::drop<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | V3ProviderHealthStore::cancel_provider_cooldown_probe<br/><small>routecodex-v3-provider-responses/src/health/probe_schedule.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-global-probe-inline-rescue-success` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
-| `v3-provider-global-probe-inline-rescue-failure` | `V3ProviderGlobalProbeExecution` → `V3ProviderHealthStore` | anchored | V3ProviderFailureRuntimeHealth::run_cooldown_rescue_probes_for_candidates<br/><small>routecodex-v3-runtime/src/provider_cooldown_rescue.rs</small> | V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit<br/><small>routecodex-v3-provider-responses/src/health.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-02-persistent` | `V3ServerAggregateLifecycle` → `V3ProviderGlobalProbeExecution` | anchored | spawn_v3_server_aggregate<br/><small>routecodex-v3-server/src/lib.rs</small> | V3ProviderFailureRuntimeHealth::run_due_provider_health_probes<br/><small>routecodex-v3-runtime/src/provider_failure_runtime_policy.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-03` | `V3Error02Classified` → `V3ProviderHealthStore` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error<br/><small>routecodex-v3-runtime/src/provider_failure_global_probe.rs</small> | `v3.provider_global_subscription_probe` |
 | `v3-provider-global-probe-error-classification` | `V3Error01SourceRaised` → `V3Error02Classified` | anchored | execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small> | build_v3_error_02_classified_from_v3_error_01_with_provider_global_policy<br/><small>routecodex-v3-error/src/lib.rs</small> | `v3.provider_global_subscription_probe` |

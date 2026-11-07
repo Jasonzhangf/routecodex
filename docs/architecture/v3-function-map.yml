@@ -4757,10 +4757,10 @@ features:
   cross_feature_extensions:
   - path: v3/crates/routecodex-v3-config/src/internal.rs
     owner_feature_id: v3.simplified_user_config
-    reason: Declares the internal typed429 observation, minimumcooldown and probe-required windows consumed by the provider health owner, without adding user configuration or runtime state.
+    reason: Parses the existing internal typed Provider health and probe policy without adding user configuration or request admission.
   - path: v3/crates/routecodex-v3-config/src/internal.toml
     owner_feature_id: v3.simplified_user_config
-    reason: Single source for the user-authorized120000,1800000,3600000 millisecond policy declarations; data-plane payloads and public config remain unchanged.
+    reason: Single source for existing internal Provider health and probe declarations; the v29 unified recoverable-error cooldown ladder remains a separate implementation acceptance obligation.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -4778,7 +4778,6 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
-  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
@@ -4845,8 +4844,6 @@ features:
   - v3-provider-global-probe-02-resume
   - v3-provider-global-probe-02-quiesce
   - v3-provider-global-probe-02-schedule
-  - v3-provider-global-probe-429-status
-  - v3-provider-precool-probe-429-status
   - v3-provider-precool-join-existing-cooldown
   entry_symbols:
   - build_v3_provider_global_error_fingerprint
@@ -4878,10 +4875,8 @@ features:
   - V3ProviderFailureRuntimeHealth::managed_probe
   - complete_v3_provider_health_probe
   - classify_provider_probe_failure
-  - V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
   - V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit
-  - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
   - run_v3_plan_execution
   - await_v3_plan_execution_with_deadline
@@ -4889,15 +4884,10 @@ features:
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
   - V3AdaptiveConcurrencyController::try_acquire_scoped
-  - V3AdaptiveConcurrencyController::observe_rate_limit
-  - V3AdaptiveConcurrencyController::observe_business_success
-  - V3AdaptiveConcurrencyController::observe_rate_limit_scoped
-  - V3AdaptiveConcurrencyController::observe_business_success_scoped
   - V3ConcurrencyIdentityScope
   - V3AdaptiveConcurrencyController::complete_probe
   - V3AdaptiveConcurrencyController::process_shared
   - V3AdaptiveConcurrencyController::snapshot
-  - V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS
   - V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT
   - V3AdaptiveConcurrencyRateLimitSample
   - V3ProviderResponsesTransport::send
@@ -4914,7 +4904,6 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
-  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs

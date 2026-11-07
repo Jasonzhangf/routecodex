@@ -624,7 +624,7 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
     let _guard = TEST_LOCK.lock().await;
     let ControlledEntry {
         endpoint,
-        handle: _handle,
+        handle,
         mut captures,
         release,
         upstream_shutdown,
@@ -706,6 +706,11 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
         "the expired attempt must not fabricate business success: {received}"
     );
     let _ = release.send(true);
+    let persistence_failures = handle.shutdown().await;
+    assert!(
+        persistence_failures.is_empty(),
+        "aggregate shutdown reported sample persistence failures: {persistence_failures:?}"
+    );
     let _ = upstream_shutdown.send(());
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
