@@ -345,6 +345,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
+    // 2026-11-07 ruling ①: complete identities refused at capacity admission.
+    // They were never contacted, they are not provider failures, and they stay
+    // eligible for the single/last-candidate exemption.
+    let mut capacity_skipped: BTreeSet<String> = BTreeSet::new();
+    // Set once, after every real candidate failed and only a capacity-skipped
+    // identity remains: the next send goes out over the adaptive budget with the
+    // transport bypass flag.
+    let mut capacity_bypass_granted = false;
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
     let mut initial_selected_target = initial_selected_target;
     let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -408,6 +416,39 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         );
                     }
                     Err(crate::operation_runner::plan_execution::V3PlanExecutionStop::Exhausted { expanded: exhausted_expanded, exhaustion: error, source, .. }) => {
+                        // 2026-11-07 ruling ①: exhaustion is not terminal while a
+                        // capacity-skipped identity can still be tried, provided a
+                        // real provider failure is what emptied the pool. A pool
+                        // that is only *busy* has no provider answer to pass
+                        // through and keeps its truthful exhaustion. The skipped
+                        // identity was never sent, so it is restored once and
+                        // reselected: the plan then holds that single remaining
+                        // candidate and the send is stamped with the capacity
+                        // bypass instead of being refused at admission again.
+                        let real_failure_recorded = failed_candidates
+                            .iter()
+                            .any(|key| !capacity_skipped.contains(key));
+                        if !capacity_bypass_granted
+                            && !capacity_skipped.is_empty()
+                            && real_failure_recorded
+                        {
+                            for key in capacity_skipped.iter() {
+                                failed_candidates.remove(key);
+                            }
+                            capacity_bypass_granted = true;
+                            trace.push("V3CapacityAdmissionBypassGranted");
+                            continue;
+                        }
+                        // 2026-11-07 ruling ① diagnostic convention: capacity refusals never run
+                        // the failure policy, so the request-local terminal action is stamped on
+                        // the last capacity-skipped attempt instead of a policy event.
+                        if !real_failure_recorded {
+                            if let Some(last) = provider_failure_events.last_mut() {
+                                if last.action == "CapacitySkipped" {
+                                    last.action = "terminal_request_local_provider_compat_exhausted".to_string();
+                                }
+                            }
+                        }
                         let detail = if error.attempted_candidates.is_empty() {
                             "no candidates".to_string()
                         } else {
@@ -646,6 +687,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 )
             }
         };
+        // 2026-11-07 ruling ①: the last eligible candidate is exempt from
+        // capacity admission. After the capacity-skipped identity was restored,
+        // the plan holds exactly one candidate; this send is stamped so the
+        // transport admits it over the adaptive budget and the provider's real
+        // answer (or original typed error) passes through to the client.
+        let transport_request = if capacity_bypass_granted && policy.target.candidate_count == 1 {
+            transport_request.with_capacity_admission_bypass()
+        } else {
+            transport_request
+        };
         trace.push("V3Transport13ResponsesHttpRequest");
         provider_request_snapshot = Some(transport_request.provider_request_projection());
 
@@ -739,6 +790,37 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &hook_registry,
                     );
                 }
+                // 2026-11-07 ruling ①: capacity admission is local provider
+                // capacity, not a provider failure. The identity was never
+                // contacted, so it is recorded as capacity-skipped and the
+                // request continues with the next visible candidate instead of
+                // cooling a healthy provider or turning the refusal into a
+                // terminal.
+                if !capacity_bypass_granted
+                    && matches!(&error, V3ProviderError::ConcurrencyBusy { .. })
+                {
+                    let busy_key = v3_relay_provider_candidate_key(&policy.target.candidate);
+                    capacity_skipped.insert(busy_key.clone());
+                    failed_candidates.insert(busy_key);
+                    trace.push("V3ProviderCapacitySkipped");
+                    provider_failure_events.push(
+                        crate::hub_v1::build_v3_runtime_capacity_skipped_failure_observation(
+                            &policy.target.candidate,
+                        ),
+                    );
+                    // The send opened this attempt's external timing; a capacity
+                    // refusal still has to close it, or the next attempt cannot
+                    // start its own.
+                    if let Err(timing_error) = runtime_timing.finish_external() {
+                        return direct_runtime_helpers_stream::source_failure_output(
+                            runtime_source("V3RuntimeTimingExternal", timing_error),
+                            last_external_http.clone(),
+                            trace,
+                            &hook_registry,
+                        );
+                    }
+                    continue;
+                }
                 let failed_attempt_evidence =
                     crate::hub_v1::build_v3_runtime_provider_failed_attempt_evidence_from_error(
                         total_attempts(&accumulator, send_attempts),
@@ -829,6 +911,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     502,
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
+                        capacity_skipped: &capacity_skipped,
                         trace: &mut trace,
                     },
                     last_external_http.as_ref(),
@@ -1042,6 +1125,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     provider_status,
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
+                        capacity_skipped: &capacity_skipped,
                         trace: &mut trace,
                     },
                     last_external_http.as_ref(),
@@ -1195,6 +1279,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     provider_status,
                     &mut V3DirectProviderFailurePolicyState {
                         failed_candidates: &mut failed_candidates,
+                        capacity_skipped: &capacity_skipped,
                         trace: &mut trace,
                     },
                     last_external_http.as_ref(),
@@ -1455,6 +1540,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 provider_status,
                                 &mut V3DirectProviderFailurePolicyState {
                                     failed_candidates: &mut failed_candidates,
+                                    capacity_skipped: &capacity_skipped,
                                     trace: &mut trace,
                                 },
                                 last_external_http.as_ref(),
