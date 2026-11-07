@@ -28,6 +28,18 @@ fn is_v3_text_content_part(row: &Map<String, Value>) -> bool {
     )
 }
 
+/// 目标模型能否承载图片内容 part：唯一能力信号是选中候选声明的
+/// `model_capabilities`（provider 模型 manifest 的 `capabilities`）。
+///
+/// config 校验只允许 `multimodal` / `vision` 表达"能接收图片内容 part"；
+/// 其他能力（text/tools/reasoning/...）都不构成图片投影承诺。能力集合为空
+/// 同样按"不能承载"处理——占位符是历史默认，不会被静默升级为图片透传。
+pub(crate) fn v3_capabilities_represent_image_content(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
+}
+
 /// 统计 payload 中图片引用数（临时诊断辅助：image_url / data / file_id /
 /// file_url 键的 part）。
 pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
@@ -95,6 +107,12 @@ fn count_v3_image_refs(value: &Value) -> usize {
 
 /// 历史图片统一占位清理（唯一清洗真源）。调用仅限 Anthropic 入口在已选择
 /// OpenAI-Chat 目标后的出站投影；其他目标保留原始图片载体。
+///
+/// ## 调用前提（保真契约，2026-11-07 P1-5）
+/// 占位改写只允许发生在**选中目标确实不能承载该历史图片**时：调用方必须先用
+/// [`v3_capabilities_represent_image_content`] 判断选中候选的能力声明。
+/// 能承载图片的目标（vision/multimodal）必须原样投影同一数量、同一顺序、同一
+/// 数据（URL 或 base64）的图片，禁止替换、丢弃或重排。占位符只为纯文本目标保留。
 ///
 /// ## 边界（历史轮定义，统一）
 /// - 当前轮起点（最后一个 user run 的起点，及其后的工具段）之前的图片属于历史，

@@ -7,9 +7,10 @@ use super::{
     build_v3_openai_chat_standard_request_for_selected_web_search_mode_recording,
     build_v3_openai_responses_standard_request_for_selected_target_with_drops_and_options,
     classify_v3_provider_compat_error, encode_v3_responses_semantic_as_anthropic_request,
-    normalize_v3_history_image_placeholders, provider_protocol_compat_id, V3HubEntryProtocol,
-    V3HubProviderWireProtocol, V3HubReqTarget06Resolved, V3HubTransportIntent,
-    V3ProviderCompatError, V3ProviderCompatProfileId,
+    normalize_v3_history_image_placeholders, provider_protocol_compat_id,
+    v3_capabilities_represent_image_content, V3HubEntryProtocol, V3HubProviderWireProtocol,
+    V3HubReqTarget06Resolved, V3HubTransportIntent, V3ProviderCompatError,
+    V3ProviderCompatProfileId,
 };
 use crate::projection_drop_log::{V3ProjectionDropContext, V3ProjectionDropRecord};
 use crate::selected_provider_model_binding::{
@@ -118,12 +119,21 @@ pub(crate) fn project_v3_operation_runner_standard_provider_request(
     )?;
     let mut provider_protocol_payload = match provider_protocol {
         V3HubProviderWireProtocol::OpenAiChat => {
-            let anthropic_target_payload =
-                (entry_protocol == V3HubEntryProtocol::Anthropic).then(|| {
-                    let mut payload = governed_payload.clone();
-                    normalize_v3_history_image_placeholders(&mut payload);
-                    payload
-                });
+            // Fidelity contract (P1-5): the history `[Image]` placeholder is a
+            // lossy rewrite, so it is allowed only when the *selected* target
+            // genuinely cannot represent the image. The capability signal is the
+            // selected candidate's declared `model_capabilities` (provider model
+            // manifest `capabilities`): `multimodal`/`vision` means the target
+            // accepts image content parts, so every history image keeps its
+            // original OpenAI Chat `image_url` part (same count, order and data).
+            // A text-only target keeps the pre-existing placeholder path.
+            let history_images_unrepresentable = entry_protocol == V3HubEntryProtocol::Anthropic
+                && !v3_capabilities_represent_image_content(&selected.model_capabilities);
+            let anthropic_target_payload = history_images_unrepresentable.then(|| {
+                let mut payload = governed_payload.clone();
+                normalize_v3_history_image_placeholders(&mut payload);
+                payload
+            });
             let target_payload = anthropic_target_payload
                 .as_ref()
                 .unwrap_or(governed_payload);

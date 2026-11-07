@@ -3308,17 +3308,21 @@ features:
     opaque data. Current-turn image detection is owned by the route-classifier
     current-turn fact builder.
   owner_modules:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib p1_5_anthropic_history_images_project_faithfully_to_vision_openai_chat_target
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib p1_5_text_only_openai_chat_target_keeps_history_image_placeholder
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_preserves_representable_latest_image
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-error --lib transient_stage_code_classifier
   completion_rule:
-    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; complete original history images and paired tool receipts survive standardization and reach the selected provider without placeholder rewriting, while current-turn image detection stays independent in the typed route facts. ProviderReqCompat preserves representable images and paired tool receipts independently of target capability metadata.
+    source: Runtime tests and public HTTP image_input_blackbox cases pass for Chat, Responses and Anthropic; complete original history images and paired tool receipts survive standardization and reach the selected provider without placeholder rewriting whenever that provider declares the image capability (`multimodal` or `vision`); the placeholder projection is permitted only for a selected provider that cannot represent the image and keeps its exact bytes, while current-turn image detection stays independent in the typed route facts. ProviderReqCompat preserves representable images and paired tool receipts independently of target capability metadata.
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
   change_risk: critical
