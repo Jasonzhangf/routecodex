@@ -25,9 +25,9 @@ pub type RouteClassifierInput = V3CurrentTurnRouteFacts;
 pub const DEFAULT_ROUTE: &str = "default";
 
 pub const ROUTE_PRIORITY: [&str; 9] = [
+    "multimodal",
     "compact",
     "web_search",
-    "multimodal",
     "longcontext",
     "coding",
     "thinking",
@@ -106,11 +106,6 @@ pub fn classify_route(input: &V3CurrentTurnRouteFacts) -> RouteClassification {
             } else {
                 "web_search:explicit-or-intent"
             },
-        ),
-        (
-            "multimodal",
-            input.has_image_attachment,
-            "multimodal:metadata-attachment",
         ),
         (
             "longcontext",
@@ -201,9 +196,9 @@ mod tests {
         assert_eq!(
             ROUTE_PRIORITY,
             [
+                "multimodal",
                 "compact",
                 "web_search",
-                "multimodal",
                 "longcontext",
                 "coding",
                 "thinking",

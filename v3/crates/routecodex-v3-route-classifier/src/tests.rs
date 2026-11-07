@@ -455,10 +455,7 @@ fn multi_tool_categories_keep_every_match_below_media_and_longcontext() {
         ..base.clone()
     });
     assert_eq!(multimodal.route_name, "multimodal");
-    assert_eq!(
-        multimodal.candidates,
-        vec!["multimodal", "default"]
-    );
+    assert_eq!(multimodal.candidates, vec!["multimodal", "default"]);
 
     let longcontext = classify_route(&RouteClassifierInput {
         reached_long_context: true,
@@ -1035,10 +1032,7 @@ fn longcontext_wins_when_longcontext_thinking_and_coding_conditions_hit() {
         ..Default::default()
     });
     assert_eq!(modality.route_name, "multimodal");
-    assert_eq!(
-        modality.candidates,
-        vec!["multimodal", "default"]
-    );
+    assert_eq!(modality.candidates, vec!["multimodal", "default"]);
 
     // compact 在没有图片时仍是最高优先级信号。
     let compact = classify_route(&RouteClassifierInput {
@@ -1377,8 +1371,64 @@ fn current_user_and_tool_images_activate_only_their_own_turn() {
             }
         ]
     }));
-    assert!(current_tool.has_current_turn_image);
+    assert!(
+        !current_tool.has_current_turn_image,
+        "tool-output image must not be a current-turn user image attachment"
+    );
     assert!(current_tool.has_current_turn_tool_output);
+    assert_eq!(
+        classify_route(&RouteClassifierInput {
+            has_image_attachment: current_tool.has_current_turn_image,
+            has_current_turn_tool_output: current_tool.has_current_turn_tool_output,
+            ..Default::default()
+        })
+        .route_name,
+        "tools",
+        "tool-output image must not drive multimodal route"
+    );
+}
+
+#[test]
+fn current_user_image_survives_followup_tool_image() {
+    let signals = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "input": [
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"show the chart"},
+                {"type":"input_image","file_url":"data:image/png;base64,current"}
+            ]},
+            {"type":"function_call","call_id":"view","name":"view_image","arguments":"{}"},
+            {
+                "type":"function_call_output",
+                "call_id":"view",
+                "output":"[{\"type\":\"input_image\",\"file_url\":\"data:image/png;base64,tool\"}]"
+            }
+        ]
+    }));
+    assert!(signals.has_current_turn_image);
+    assert!(signals.has_current_turn_tool_output);
+}
+
+#[test]
+fn user_envelope_tool_images_do_not_activate_image_route() {
+    let chat = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "messages": [{
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "content": [{"type":"input_image","file_url":"data:image/png;base64,tool"}]
+            }]
+        }]
+    }));
+    assert!(!chat.has_current_turn_image);
+
+    let responses = build_v3_current_turn_route_facts_from_value(&serde_json::json!({
+        "input": [{
+            "role": "user",
+            "type": "function_call_output",
+            "output": [{"type":"input_image","file_url":"data:image/png;base64,tool"}]
+        }]
+    }));
+    assert!(!responses.has_current_turn_image);
 }
 
 #[test]
@@ -1478,11 +1528,10 @@ fn normalized_responses_history_placeholder_does_not_route_multimodal() {
 
 // fbab9d4: Codex view_image returns the screenshot inside a
 // `function_call_output` whose `output` is a stringified JSON array of
-// input_image blocks carrying data: URLs. The current-turn walker must
-// decode that carrier and set has_current_turn_image so the request
-// routes to the configured multimodal pool (which excludes glm-5.3).
+// input_image blocks carrying data: URLs. That carrier is tool
+// continuation data, not a user image attachment.
 #[test]
-fn codex_view_image_function_call_output_drives_multimodal_route() {
+fn codex_view_image_function_call_output_is_tool_continuation_not_multimodal() {
     use serde_json::json;
     let request = json!({
         "model": "gpt-5.6-sol",
@@ -1497,8 +1546,8 @@ fn codex_view_image_function_call_output_drives_multimodal_route() {
     let entries = project_v3_current_turn_entries_from_value(&request);
     let signals = build_v3_current_turn_route_facts(&entries);
     assert!(
-        signals.has_current_turn_image,
-        "view_image function_call_output must activate the multimodal route fact; signals={signals:?}"
+        !signals.has_current_turn_image,
+        "view_image function_call_output image must not be a current-turn user image attachment; signals={signals:?}"
     );
     let route = classify_route(&RouteClassifierInput {
         latest_message_from_user: signals.latest_message_from_user,
@@ -1506,10 +1555,13 @@ fn codex_view_image_function_call_output_drives_multimodal_route() {
         has_current_turn_tool_output: signals.has_current_turn_tool_output,
         ..Default::default()
     });
-    assert_eq!(route.route_name, "multimodal");
+    assert_ne!(
+        route.route_name, "multimodal",
+        "tool continuation must not drive multimodal route"
+    );
     assert!(
-        route.reasoning.contains("multimodal:metadata-attachment"),
-        "expected multimodal:metadata-attachment reasoning, got {:?}",
+        !route.reasoning.contains("multimodal:metadata-attachment"),
+        "tool continuation must not emit multimodal route reasoning; got {:?}",
         route.reasoning
     );
 }
