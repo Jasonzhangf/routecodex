@@ -394,11 +394,13 @@ async fn public_recovery_witness_with_generation(
             .json(&json!({"model":"step-5-preview","messages":[{"role":"user","content":"step5 marker"}],"stream":false}))
             .send().await
     });
-    timeout(Duration::from_secs(2), peer.probe_entered.acquire())
-        .await
-        .expect("real probe must enter upstream")
-        .unwrap()
-        .forget();
+    match timeout(Duration::from_secs(2), peer.probe_entered.acquire()).await {
+        Ok(permit) => permit.expect("probe semaphore").forget(),
+        Err(_) => panic!(
+            "real probe must enter upstream; pool after the deadline = {}",
+            cooldown_pool(&client, &base).await
+        ),
+    }
     let before_release = timeout(Duration::from_millis(500), &mut request).await;
     let attempted_before_release = peer
         .captures
@@ -530,12 +532,45 @@ async fn public_recovery_witness_with_generation(
             .send().await
     });
     let exhausted_result = timeout(Duration::from_millis(500), &mut exhausted).await;
-    let closed = matches!(&exhausted_result, Ok(Ok(Err(_))));
-    eprintln!("public all-cooled witness: failed probe already captured, promptly closed={closed}");
-    if exhausted_result.is_err() {
-        exhausted.abort();
-        let _ = exhausted.await;
-    }
+    // v27 single/last eligible candidate passthrough (supersedes the retired
+    // "exhaustion must close the transport with no bytes" expectation): with no
+    // visible alternative the request terminates promptly either by closing the
+    // transport or by passing the provider's own real status/body through
+    // verbatim. What must never happen is waiting for a future scheduled recovery,
+    // and no proxy-generated envelope or fabricated success may appear.
+    let mut passthrough = false;
+    let closed = match exhausted_result {
+        Err(_) => {
+            exhausted.abort();
+            let _ = exhausted.await;
+            false
+        }
+        Ok(Err(join)) => panic!("the all-cooled request task must not panic: {join}"),
+        Ok(Ok(Err(_))) => true,
+        Ok(Ok(Ok(response))) => {
+            let status = response.status().as_u16();
+            let text = response.text().await.unwrap_or_default();
+            assert_eq!(
+                status, 503,
+                "the last candidate's real status must pass through verbatim: {text}"
+            );
+            assert!(
+                text.contains("owned failed probe"),
+                "the provider's own failure body must pass through verbatim: {text}"
+            );
+            assert!(
+                !text.contains("step5 complete") && !text.contains("routecodex"),
+                "no fabricated business success and no proxy envelope: {text}"
+            );
+            passthrough = true;
+            false
+        }
+    };
+    eprintln!("public all-cooled witness: failed probe already captured, closed={closed} passthrough={passthrough}");
+    assert!(
+        closed || passthrough,
+        "an all-cooled pinned request must terminate promptly instead of waiting for future recovery"
+    );
     let sibling = client.post(format!("{base}/v1/chat/completions"))
         .json(&json!({"model":"healthy.step-5-preview","messages":[{"role":"user","content":"sibling marker"}],"stream":false}))
         .send().await.unwrap();
@@ -545,14 +580,32 @@ async fn public_recovery_witness_with_generation(
         sibling_body["choices"][0]["message"]["content"],
         "step5 complete"
     );
-    if closed {
+    {
+        // Both terminal shapes are audited: a byte-less close proves the transport
+        // break boundary; a passthrough proves the real provider head/body are
+        // forwarded verbatim. Neither may carry fabricated business content.
         let all_cooled_raw = raw_chat(port, "cooled.step-5-preview", "all cooled raw", false).await;
+        let all_cooled_text = String::from_utf8_lossy(&all_cooled_raw);
         eprintln!("all-cooled nonstream client bytes={}", all_cooled_raw.len());
-        assert!(
-            all_cooled_raw.is_empty(),
-            "nonstream failure must close without HTTP status/body: {:?}",
-            String::from_utf8_lossy(&all_cooled_raw)
-        );
+        if closed && !passthrough {
+            assert!(
+                all_cooled_raw.is_empty(),
+                "a closed nonstream failure must carry no HTTP status/body: {all_cooled_text:?}"
+            );
+        } else {
+            assert!(
+                all_cooled_text.starts_with("HTTP/1.1 503"),
+                "the last candidate's real status must pass through: {all_cooled_text}"
+            );
+            assert!(
+                all_cooled_text.contains("owned failed probe"),
+                "the provider's own body must pass through verbatim: {all_cooled_text}"
+            );
+            assert!(
+                !all_cooled_text.contains("step5 complete"),
+                "passthrough must never fabricate business success: {all_cooled_text}"
+            );
+        }
         let stream_raw = raw_chat(port, "cooled.step-5-preview", "all cooled stream", true).await;
         let stream_text = String::from_utf8_lossy(&stream_raw);
         eprintln!("all-cooled stream wire={stream_text:?}");
@@ -560,8 +613,8 @@ async fn public_recovery_witness_with_generation(
             !stream_text.contains("data:")
                 && !stream_text.contains("[DONE]")
                 && !stream_text.contains("event: error")
-                && !stream_text.contains("503"),
-            "failure SSE must carry no business/error terminal: {stream_text}"
+                && !stream_text.contains("step5 complete"),
+            "the failure boundary must carry no business/SSE terminal: {stream_text}"
         );
         let forbidden_raw = raw_chat(
             port,
@@ -570,12 +623,27 @@ async fn public_recovery_witness_with_generation(
             false,
         )
         .await;
+        let forbidden_text = String::from_utf8_lossy(&forbidden_raw);
         eprintln!("actual upstream403 client bytes={}", forbidden_raw.len());
-        assert!(
-            forbidden_raw.is_empty(),
-            "real provider403 must remain internal, with no client wrapper: {:?}",
-            String::from_utf8_lossy(&forbidden_raw)
-        );
+        // v27 passthrough: the single visible healthy candidate's real 403 and its
+        // own body are the client answer; only a proxy replacement wrapper or a
+        // fabricated success is forbidden.
+        if forbidden_raw.is_empty() {
+            // A transport close remains lawful for this single-candidate failure.
+        } else {
+            assert!(
+                forbidden_text.starts_with("HTTP/1.1 403"),
+                "the real provider 403 must pass through verbatim: {forbidden_text}"
+            );
+            assert!(
+                forbidden_text.contains("owned upstream forbidden"),
+                "the provider's own 403 body must pass through verbatim: {forbidden_text}"
+            );
+            assert!(
+                !forbidden_text.contains("step5 complete") && !forbidden_text.contains("routecodex"),
+                "no fabricated success and no proxy envelope: {forbidden_text}"
+            );
+        }
         assert!(
             peer.captures
                 .lock()
@@ -614,7 +682,10 @@ async fn public_recovery_witness_with_generation(
     handle.shutdown().await;
     upstream.abort();
     let _ = upstream.await;
-    assert!(closed, "all-cooled failed probe waited for future recovery instead of closing the exhausted request");
+    assert!(
+        closed || passthrough,
+        "an all-cooled pinned request must terminate promptly (closed transport or real          provider passthrough) instead of waiting for future recovery"
+    );
     if require_pending_healthy_progress {
         assert!(attempted_before_release, "healthy Step5 was blocked by the owned pending rescue probe; releasing that probe restored the same request");
     }
