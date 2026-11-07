@@ -732,8 +732,11 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
         primary_availability.available,
         "one transport failure is below the consecutive ladder threshold and must not commit a cooldown"
     );
-    // The failed identity still leaves selection immediately as a pre-cool
-    // observation hold: a fresh request sends only to the eligible secondary.
+    // v31: the pre-cool observation is an observability substate only. Below the
+    // ladder threshold the identity stays routable, so a fresh request selects
+    // the priority primary again, counts its second consecutive failure, and
+    // switches to the healthy sibling inside that same request - never a
+    // same-identity retry, never a wait, never a fabricated success.
     {
         let fresh_transport = PartialClientDisconnectSseTransport {
             provider_ids: Mutex::new(Vec::new()),
@@ -760,12 +763,38 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
             provider_health.runtime_health(),
         )
         .await
-        .expect("the fresh request must complete without the failed identity");
+        .expect("the fresh request must complete through the healthy sibling");
         assert_eq!(fresh.status, 200);
         assert_eq!(
             fresh_transport.provider_ids.lock().unwrap().as_slice(),
-            [secondary.as_str()],
-            "the held primary must not receive a second business send; the sibling serves immediately"
+            [primary.as_str(), secondary.as_str()],
+            "the still-routable primary is attempted once and the sibling serves immediately"
+        );
+        assert!(
+            fresh.node_trace.contains(&"V3TargetLocalReselected"),
+            "the counted failure must switch inside the same request: {:?}",
+            fresh.node_trace
+        );
+        let fresh_failure = fresh
+            .observability
+            .as_ref()
+            .and_then(|observability| observability.provider_failure_events.first())
+            .expect("the fresh request must publish its counted primary failure");
+        assert_eq!(
+            fresh_failure.failure_count, 2,
+            "the second consecutive failure of the exact identity is counted immediately: {fresh_failure:?}"
+        );
+        assert_eq!(fresh_failure.health_state, "pre_cool_observation");
+        assert!(fresh_failure.cooldown_until_ms.is_none());
+        let after_second_failure = provider_health.store().availability(
+            primary.as_str(),
+            Some(primary.as_str()),
+            Some("chat-wire-model"),
+            probe_now_ms(),
+        );
+        assert!(
+            after_second_failure.available,
+            "two consecutive failures stay below the ladder threshold and keep the identity routable: {after_second_failure:?}"
         );
     }
     let secondary_availability = provider_health.store().availability(
@@ -2645,46 +2674,45 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     )
     .await
     .expect("a failed recovery probe must not hold the request open")
-    .expect("the exhausted request must still return its internal typed exhaustion projection");
-    assert_ne!(
+    .expect("the last eligible candidate must be attempted without health blocking");
+    // v31: the secondary is attempted first and fails; its request-local
+    // exclusion leaves the cooled primary as the only/last eligible candidate, so
+    // no cooldown, admission, wait, probe or recovery blocking applies to it. The
+    // provider's real business answer then passes through unchanged - nothing is
+    // fabricated and nothing is exhausted.
+    assert_eq!(
         first.status, 200,
-        "request-local exhaustion must not fabricate a successful client response"
+        "the real answer of the last eligible candidate must pass through: {first:?}"
     );
     assert!(
-        first.error_chain.is_some(),
-        "request-local exhaustion must retain the typed internal error chain"
+        first.error_chain.is_none(),
+        "a passed-through business answer must not carry an error chain"
     );
     assert!(
-        first.node_trace.contains(&"V3Error06ClientProjected"),
-        "exhaustion must publish the typed internal outcome: {:?}",
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the counted secondary failure must switch inside the same request: {:?}",
         first.node_trace
     );
-    assert_eq!(
-        first.error_chain.as_ref().map(Vec::len),
-        Some(6),
-        "the final eligible failure must retain the complete typed Error01-06 chain"
-    );
-    let source = first
-        .diagnostic_source
-        .as_ref()
-        .expect("request-local exhaustion must retain the original typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
-    );
-    let external = source
-        .external_error
-        .as_ref()
-        .expect("the terminal source must retain the actual upstream failure");
-    assert_eq!(external.code.as_deref(), Some("provider_failure"));
-    assert_eq!(external.provider_id.as_deref(), Some(secondary.as_str()));
     assert!(
-        external
-            .message
-            .as_deref()
-            .is_some_and(|message| message.contains("controlled secondary business failure")),
-        "the terminal source must preserve the sibling's actual failure: {external:?}"
+        !first.node_trace.contains(&"V3Error06ClientProjected"),
+        "a passed-through business answer must not publish an exhaustion outcome: {:?}",
+        first.node_trace
     );
+    assert!(matches!(
+        first.client_body,
+        V3OpenAiChatRelayClientBody::Json(_)
+    ));
+    let first_failure = first
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .expect("the secondary failure must stay in the typed observability");
+    assert_eq!(first_failure.status, 503);
+    assert_eq!(
+        first_failure.failure_count, 1,
+        "the secondary failure is counted immediately for its exact identity"
+    );
+    assert_eq!(first_failure.health_state, "pre_cool_observation");
     let secondary_availability = provider_health.store().availability(
         &secondary,
         Some(&secondary),
@@ -2693,16 +2721,48 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     );
     assert!(
         secondary_availability.available && secondary_availability.blocked_scopes.is_empty(),
-        "the final eligible failure must not mutate sibling health: {secondary_availability:?}"
+        "one counted failure keeps the sibling routable: {secondary_availability:?}"
+    );
+    // v31: the passed-through answer is the provider's declared success for this
+    // exact identity, so it resets that identity's evidence instead of leaving a
+    // session cooldown behind. Re-seed the committed cooldown here so the rest of
+    // this test still exercises the independent recovery-probe lifecycle.
+    provider_health
+        .store()
+        .record_provider_cooldown_failure(
+            &primary,
+            Some(&primary),
+            Some("chat-wire-model"),
+            "controlled network outage",
+            probe_now_ms(),
+            900_000,
+        )
+        .expect("re-seed the exact identity cooldown for the probe lifecycle");
+    let primary_reseeded = provider_health.store().availability(
+        &primary,
+        Some(&primary),
+        Some("chat-wire-model"),
+        probe_now_ms(),
+    );
+    assert!(
+        !primary_reseeded.available,
+        "the probe lifecycle tail needs the exact identity cooled: {primary_reseeded:?}"
     );
     let first_captures = transport.captures.lock().unwrap();
-    assert_eq!(first_captures.len(), 1);
+    assert_eq!(
+        first_captures.len(),
+        2,
+        "the request must attempt the sibling and then the last eligible candidate: {first_captures:?}"
+    );
     assert_eq!(first_captures[0].0, secondary);
     assert_eq!(
         first_captures[0].1,
         "http://secondary.invalid/v1/chat/completions"
     );
     assert_eq!(first_captures[0].2["model"], "chat-wire-model");
+    assert_eq!(first_captures[1].0, primary);
+    assert_eq!(first_captures[1].1, format!("{base_url}/chat/completions"));
+    assert_eq!(first_captures[1].2["model"], "chat-wire-model");
     drop(first_captures);
 
     let deadline = provider_health
@@ -2799,10 +2859,10 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     .expect("a restored provider must not hang a fresh request")
     .expect("a restored provider must serve the fresh request");
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 2);
-    assert_eq!(captures[1].0, primary);
-    assert_eq!(captures[1].1, format!("{base_url}/chat/completions"));
-    assert_eq!(captures[1].2["model"], "chat-wire-model");
+    assert_eq!(captures.len(), 3, "{captures:?}");
+    assert_eq!(captures[2].0, primary);
+    assert_eq!(captures[2].1, format!("{base_url}/chat/completions"));
+    assert_eq!(captures[2].2["model"], "chat-wire-model");
     drop(captures);
     assert_eq!(recovered.status, 200);
     assert!(recovered.error_chain.is_none());

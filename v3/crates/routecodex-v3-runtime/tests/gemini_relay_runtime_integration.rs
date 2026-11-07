@@ -1068,33 +1068,42 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             }
         }
 
-        // v29/v31: an uncommitted SSE failure is a local response-processing
-        // failure, not a provider health failure. It never cools the exact
-        // identity, never schedules a recovery probe, and never holds or
-        // waits a request on Provider lifecycle state.
+        // v31: an uncommitted SSE attempt is a local response-processing failure
+        // and enters the same typed Error chain, so it is counted immediately as
+        // one consecutive failure for the exact provider/interface/model/key
+        // identity. Three consecutive failures therefore commit the fixed 10s
+        // ladder cooldown, so the retired "health neutral above the threshold"
+        // claim no longer holds. The cooldown stays visibility only: it schedules
+        // its own independent recovery probe and never blocks, holds or waits a
+        // request.
         assert!(
-            provider_health
+            !provider_health
                 .store()
                 .provider_cooldown_probe_keys_due(u64::MAX)
-                .expect("health-neutral probe inventory")
+                .expect("cooldown probe inventory")
                 .is_empty(),
-            "{case} response-processing failures must not schedule recovery probes"
+            "{case} the committed cooldown owns its own recovery probe cadence"
         );
+        let cooled = provider_health
+            .store()
+            .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX);
         assert!(
-            provider_health
-                .store()
-                .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
-                .available,
-            "{case} response-processing failure must keep the exact identity visible"
+            !cooled.available
+                && cooled.blocked_scopes.iter().any(|scope| {
+                    scope == "provider_key_health_cooldown"
+                        || scope == "provider_cooldown_probe_pending"
+                }),
+            "{case} three consecutive response-processing failures commit exactly the failed identity: {cooled:?}"
         );
         assert!(
             provider_health
                 .store()
                 .availability(server_id, Some(server_id), Some("other-model"), u64::MAX)
-                .available
+                .available,
+            "{case} the committed cooldown must not hide a sibling model"
         );
-        // A fresh request on the same identity completes immediately without
-        // waiting on any probe or recovery: healthy business still succeeds.
+        // A fresh request selects the declared spare immediately: a committed
+        // cooldown never waits on, or blocks behind, its own recovery probe.
         let succeeding = JsonTransport {
             captured_url: Mutex::new(None),
             captured_body: Mutex::new(None),
@@ -1120,7 +1129,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             provider_health.runtime_health(),
         )
         .await
-        .expect("fresh request must complete immediately after a health-neutral failure");
+        .expect("fresh request must complete immediately; a cooldown never blocks a request");
         assert_eq!(fresh.status, 200, "{case}: {fresh:?}");
     }
 }
