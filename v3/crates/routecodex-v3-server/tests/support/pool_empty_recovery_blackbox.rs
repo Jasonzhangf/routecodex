@@ -331,9 +331,13 @@ async fn issue44cc3af_untried_tier_attempt_direct_refill_uses_visible_provider()
 
 async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
     let _guard = TEST_LOCK.lock().await;
-    if refill {
-        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(1));
-    }
+    // Process-global test override. It must be set explicitly for BOTH cases: this
+    // is the only site in the file that needs a refill round, and leaving `Some(1)`
+    // behind would hand a refill budget to whichever test runs next under
+    // `TEST_LOCK`, making that test's call counts depend on execution order.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(
+        if refill { Some(1) } else { Some(0) },
+    );
     let _home = TestHomeGuard::new("44cc3af-untried-tier-attempt");
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
 
@@ -1293,6 +1297,9 @@ async fn issue44cc3af_review_initial_preplan_does_not_renew_deadline() {
 
 async fn assert_review_preplan_deadline(recover: bool) {
     let _guard = TEST_LOCK.lock().await;
+    // Pin the production default so this test cannot inherit a refill budget from
+    // another test's process-global override (order-independence under TEST_LOCK).
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let _home = TestHomeGuard::new("44cc3af-preplan-deadline");
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2354,6 +2361,9 @@ async fn assert_stalled_rescue_probe_wait_budget(
     request_deadline_ms: Option<u64>,
 ) {
     let _guard = TEST_LOCK.lock().await;
+    // Pin the production default: this test asserts exact attempt counts, so it must
+    // never inherit another test's process-global refill budget.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let _home_guard = TestHomeGuard::new("44cc3af-probe-budget");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
