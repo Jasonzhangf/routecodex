@@ -443,6 +443,32 @@ impl V3TargetInterpreter {
         candidate_count == 1 && Self::blocked_only_by_automatic_cooldown(blocked_scopes)
     }
 
+    /// v31 single/last eligible candidate rule: when the captured target holds
+    /// only one admissible candidate, no cooldown, admission, wait, probe or
+    /// recovery blocking applies to that identity. The request is sent and its
+    /// real typed failure is passed through to the client. This covers *every*
+    /// health-owned block, including a manual/admin cooldown and an auth-key
+    /// cooldown, because the single candidate has no alternative to switch to
+    /// and the client must see the provider's real answer instead of a proxy
+    /// admission decision. Capacity, declared availability windows and
+    /// request-local blocks keep their own semantics: they are not health
+    /// visibility state.
+    pub fn ignores_single_candidate_health_blocking(
+        candidate_count: usize,
+        blocked_scopes: &[String],
+    ) -> bool {
+        candidate_count == 1
+            && blocked_scopes.iter().all(|scope| {
+                matches!(
+                    scope.as_str(),
+                    "provider_key_health_cooldown"
+                        | "provider_cooldown_probe_pending"
+                        | "provider_pre_cool_observation"
+                        | "provider_manual_cooldown"
+                ) || scope.starts_with("auth_key:")
+            })
+    }
+
     /// Whether `now_ms` falls inside the candidate's declared availability
     /// window. A candidate without a declared window is always inside it. This
     /// predicate is shared by admission, the direct send gate and real provider

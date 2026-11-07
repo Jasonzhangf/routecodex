@@ -52,21 +52,32 @@ async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
         let marker = format!("OWNED_RECOVERY_P6_STREAM_{stream}");
         let raw = raw_post_chat(case.port, &recovery_chat_request(&marker, stream)).await;
         let text = String::from_utf8_lossy(&raw);
-        if !stream && !raw.is_empty() {
+        // v27 single/last eligible candidate passthrough (supersedes the retired
+        // "exhaustion must deliver zero bytes" expectation): with every captured
+        // candidate failed the client receives the LAST candidate's real status and
+        // body verbatim - never a fabricated success, never a proxy replacement
+        // envelope - and a JSON request never gains SSE framing on that path.
+        let passthrough_ok = text.contains("503")
+            && text.contains("OWNED_B_503_PRIVATE")
+            && text.contains("owned_b_code");
+        if !passthrough_ok {
             controls.push(format!(
-                "{label}: exhausted JSON transport delivered bytes: {text}"
+                "{label}: last-candidate passthrough must return B's real status and body: {text}"
             ));
         }
-        if stream
-            && (text.contains("data:")
-                || text.contains("[DONE]")
-                || text.contains("event: error")
-                || text.contains("\"error\"")
-                || text.contains(KEY)
-                || text.contains("503"))
-        {
+        if text.contains(KEY) {
             controls.push(format!(
-                "{label}: exhausted SSE delivered a business/error terminal: {text}"
+                "{label}: passthrough must never leak the provider credential: {text}"
+            ));
+        }
+        if stream && (text.contains("data:") || text.contains("[DONE]")) {
+            controls.push(format!(
+                "{label}: passthrough must not fabricate SSE business frames: {text}"
+            ));
+        }
+        if text.contains("RCC_") {
+            controls.push(format!(
+                "{label}: passthrough must not fabricate business content: {text}"
             ));
         }
         let counts = case.counts().await;

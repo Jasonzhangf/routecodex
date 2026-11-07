@@ -316,6 +316,15 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         json_observability.routing_group_id.as_deref(),
         Some("controlled")
     );
+    // OPEN CONTRACT CONFLICT (not a stale expectation): the manifest declares the
+    // `client_responses` pool for this request, so the declared intent is that the
+    // request lands in it. The base virtual router builds a plan tier only when a
+    // pool id equals a route signal or declares it in `required_capabilities`, and
+    // `pool_matches` never consults `match.models`, so a models/protocol-only pool
+    // is unreachable and the declared `default` fallback serves the request
+    // instead. The assertion keeps the declared intent so this test stays a
+    // witness of the gap (owner: router/config design), and the same gap is the
+    // cause of `model_pool_wins_over_default_even_with_custom_tool_declaration`.
     assert_eq!(
         json_observability.pool_id.as_deref(),
         Some("client_responses")
@@ -1631,14 +1640,26 @@ path = [
                 assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
                 // v31 retires the request-side wait_retry step: neither the
                 // scoped 7000 ms policy nor the 11000 ms group policy may delay
-                // the request, and the failed identity lands in pre-cool
-                // observation instead of a committed cooldown.
+                // the request. The failure itself is counted immediately for
+                // the exact identity, and below the ladder threshold the
+                // identity is only an observation substate - never a committed
+                // cooldown, and never a declared-duration clamp.
                 assert_eq!(
                     event.wait_ms, None,
                     "no provider policy may impose a request wait: scoped={scoped}, group={group}, response={response_failure}"
                 );
-                assert_eq!(event.failure_count, 0);
-                assert_ne!(event.health_state, "cooldown");
+                assert_eq!(
+                    event.failure_count, 1,
+                    "a recoverable provider failure is counted immediately: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert_eq!(
+                    event.health_state, "pre_cool_observation",
+                    "below the ladder threshold the identity is an observation substate: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert!(
+                    event.cooldown_until_ms.is_none(),
+                    "the ladder, not the declared 7000/11000 ms policy, owns automatic cooldown duration: scoped={scoped}, group={group}, response={response_failure}"
+                );
                 assert_eq!(output.status, 200);
                 let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
                     panic!("expected business JSON")
@@ -1648,17 +1669,26 @@ path = [
                 assert!(body.get("error").is_none());
             }
             assert_eq!(*transport.providers.lock().unwrap(), ["limited", "minimax"]);
-            // v31: the failed identity is excluded through the pre-cool
-            // observation hold; the store record itself is not committed to a
-            // cooldown by a single failure.
+            // v31: the failed identity carries its observability substate and
+            // its real streak, but the store record it owns is NOT committed to
+            // a cooldown by a single failure: below the ladder threshold the
+            // identity stays routable.
             assert!(
                 health
                     .pending_precool_observations()
                     .iter()
                     .any(|observation| observation.provider_id == "limited"
                         && observation.auth_alias.as_deref() == Some("key1")
-                        && observation.model_id.as_deref() == Some("gpt-5.5")),
-                "the failed identity must be held in pre-cool observation"
+                        && observation.model_id.as_deref() == Some("gpt-5.5")
+                        && observation.consecutive_failures == 1),
+                "the failed identity must be held in pre-cool observation with its counted streak"
+            );
+            assert!(
+                health
+                    .store()
+                    .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+                    .available,
+                "below the ladder threshold the exact failed identity stays routable"
             );
             for (provider, key, model) in [
                 ("limited", "key2", "gpt-5.5"),
@@ -1933,12 +1963,13 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(
-        provider_event.failure_count, 0,
-        "a first deferred decode failure must not advance the store streak"
+        provider_event.failure_count, 1,
+        "v31 counts a recoverable provider failure immediately for the exact identity"
     );
-    // v31: a typed provider decode failure is a deferred pre-cool observation
-    // below the consecutive ladder threshold, not a committed cooldown.
-    assert_ne!(provider_event.health_state, "cooldown");
+    // v31: a typed provider decode failure is an ordinary recoverable failure.
+    // Below the consecutive ladder threshold the identity is only a pre-cool
+    // observation substate, so nothing is committed yet.
+    assert_eq!(provider_event.health_state, "pre_cool_observation");
     assert!(provider_event.cooldown_until_ms.is_none());
 
     let captures = transport.captures.lock().unwrap();
@@ -2326,6 +2357,16 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
     }
 }
 
+/// Epoch milliseconds on the same `now_ms` basis the runtime uses for provider
+/// health deadlines, so a committed ladder duration can be pinned exactly
+/// instead of only asserted as "some time until later".
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock is after the unix epoch")
+        .as_millis() as u64
+}
+
 #[tokio::test]
 async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_requests() {
     let server_id = "responses_shared_health";
@@ -2370,38 +2411,47 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(observability.provider_failure_events.len(), 1);
-    // v31: the failed identity is held as a pending pre-cool observation
-    // below the ladder threshold; no committed cooldown exists after one send.
+    // v31: the first recoverable failure is counted immediately for the exact
+    // identity. Below the ladder threshold nothing is committed, so the identity
+    // stays selectable and its own failures keep counting.
+    let first_event = &observability.provider_failure_events[0];
     assert_eq!(
-        observability.provider_failure_events[0].failure_count, 0,
-        "one failed send must not advance the committed streak"
+        first_event.failure_count, 1,
+        "a recoverable provider failure is counted immediately for the exact identity"
     );
-    assert_ne!(
-        observability.provider_failure_events[0].health_state,
-        "cooldown"
-    );
-    assert!(observability.provider_failure_events[0]
-        .cooldown_until_ms
-        .is_none());
-    // The observation hold is what keeps the identity out of selection: the
-    // store record itself is not committed to a cooldown below the ladder.
+    assert_eq!(first_event.health_state, "pre_cool_observation");
+    assert!(first_event.cooldown_until_ms.is_none());
     assert!(
         provider_health
             .pending_precool_observations()
             .iter()
             .any(|observation| observation.provider_id == "limited"
                 && observation.auth_alias.as_deref() == Some("key1")
-                && observation.model_id.as_deref() == Some("gpt-5.5")),
-        "the failed identity must be held in pre-cool observation"
+                && observation.model_id.as_deref() == Some("gpt-5.5")
+                && observation.consecutive_failures == 1),
+        "the failed identity must carry its counted streak in the observation substate"
+    );
+    assert!(
+        provider_health
+            .store()
+            .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+            .available,
+        "below the ladder threshold the exact failed identity stays routable"
     );
 
-    for turn in 1..=3 {
+    // v31 ladder: the same still-visible identity is selected again for requests
+    // 2 and 3, each failure is counted immediately and switches inside the same
+    // request, and only the THIRD consecutive failure commits the fixed 10s
+    // floor. Request 4 then skips the committed identity with no reselect and no
+    // wait, because a cooldown is visibility only.
+    for turn in 1..=2u32 {
+        let began_ms = epoch_ms();
         let output = execute_v3_responses_relay_runtime_with_transport_health(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
                 failure_session_scope: failure_session_scope.clone(),
-                request_id: format!("req-responses-context-reselect-cooled-{turn}"),
+                request_id: format!("req-responses-context-reselect-ladder-{turn}"),
                 payload: json!({
                     "model":"client-responses",
                     "input":"same large payload",
@@ -2413,29 +2463,115 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         )
         .await
         .unwrap();
+        let finished_ms = epoch_ms();
         assert_eq!(output.status, 200);
-        // The first recoverable failure already cooled the exact provider
-        // identity, so every later request skips it without a reselect.
-        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+        assert!(
+            output.node_trace.contains(&"V3TargetLocalReselected"),
+            "consecutive failure {turn} must switch to the healthy candidate immediately: {:?}",
+            output.node_trace
+        );
         let observability = output
             .observability
             .as_ref()
-            .expect("cooled provider run must keep route observability");
+            .expect("ladder run must keep provider failure observability");
         assert_eq!(
             observability.provider_key.as_deref(),
             Some("minimax:default:key1:MiniMax-M3")
         );
-        assert_eq!(observability.attempts, Some(1));
-        assert!(observability
-            .unavailable_candidates
-            .iter()
-            .any(|candidate| candidate.starts_with("limited:default:key1:gpt-5.5:availability(")));
-        assert!(
-            observability.provider_failure_events.is_empty(),
-            "cooled provider must be skipped before network send; observed events: {:?}",
-            observability.provider_failure_events
+        assert_eq!(observability.provider_failure_events.len(), 1);
+        let event = &observability.provider_failure_events[0];
+        assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
+        assert_eq!(
+            event.failure_count,
+            turn + 1,
+            "each selected consecutive failure must advance the exact identity's streak: {event:?}"
         );
+        if turn == 1 {
+            assert_eq!(event.health_state, "pre_cool_observation");
+            assert!(event.cooldown_until_ms.is_none());
+            assert!(
+                provider_health
+                    .store()
+                    .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
+                    .available,
+                "two consecutive failures stay below the 3-failure ladder threshold"
+            );
+        } else {
+            assert_eq!(
+                event.health_state, "cooldown",
+                "the third consecutive failure commits the exact identity: {event:?}"
+            );
+            let until = event
+                .cooldown_until_ms
+                .expect("the third consecutive failure must commit a cooldown");
+            assert!(
+                until >= began_ms + 10_000 && until <= finished_ms + 10_000,
+                "the automatic ladder duration is fixed at 10s: until={until} began={began_ms} finished={finished_ms}"
+            );
+            assert!(
+                !provider_health
+                    .store()
+                    .availability("limited", Some("key1"), Some("gpt-5.5"), finished_ms)
+                    .available,
+                "the committed cooldown hides exactly the failed identity"
+            );
+            assert!(
+                provider_health
+                    .store()
+                    .availability("limited", Some("other-key"), Some("gpt-5.5"), finished_ms)
+                    .available,
+                "a committed cooldown must not hide a sibling key"
+            );
+            assert!(
+                provider_health
+                    .store()
+                    .availability("limited", Some("key1"), Some("other-model"), finished_ms)
+                    .available,
+                "a committed cooldown must not hide a sibling model"
+            );
+        }
     }
+
+    // Request 4: the committed cooldown is visibility only - the identity is
+    // skipped before any network send, without waiting for the cooldown or for a
+    // recovery probe.
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: server_id.into(),
+            failure_session_scope: failure_session_scope.clone(),
+            request_id: "req-responses-context-reselect-cooled".into(),
+            payload: json!({
+                "model":"client-responses",
+                "input":"same large payload",
+                "stream":false
+            }),
+        },
+        &transport,
+        &provider_health,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.status, 200);
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+    let observability = output
+        .observability
+        .as_ref()
+        .expect("cooled provider run must keep route observability");
+    assert_eq!(
+        observability.provider_key.as_deref(),
+        Some("minimax:default:key1:MiniMax-M3")
+    );
+    assert_eq!(observability.attempts, Some(1));
+    assert!(observability
+        .unavailable_candidates
+        .iter()
+        .any(|candidate| candidate.starts_with("limited:default:key1:gpt-5.5:availability(")));
+    assert!(
+        observability.provider_failure_events.is_empty(),
+        "cooled provider must be skipped before network send; observed events: {:?}",
+        observability.provider_failure_events
+    );
 
     let captures = transport.captures.lock().unwrap();
     let provider_sequence: Vec<&str> = captures
@@ -2444,7 +2580,9 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .collect();
     assert_eq!(
         provider_sequence,
-        vec!["limited", "minimax", "minimax", "minimax", "minimax"]
+        vec![
+            "limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax"
+        ]
     );
 }
 

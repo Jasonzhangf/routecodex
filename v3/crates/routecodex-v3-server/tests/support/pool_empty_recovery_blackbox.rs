@@ -248,11 +248,11 @@ async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
             .await
             .expect("an inactive declared route must resolve inside the request, never park the client");
         match resolved {
-            Ok(text) => assert!(
-                !text.contains("response.completed"),
-                "an inactive declared route must not fabricate a completed response: {text}"
+            Ok(Ok(body)) => assert!(
+                !body.contains("response.completed"),
+                "an inactive declared route must not fabricate a completed response: {body}"
             ),
-            Err(_) => {}
+            Ok(Err(_)) | Err(_) => {}
         }
     }
     assert!(
@@ -1395,10 +1395,14 @@ async fn assert_review_preplan_deadline(recover: bool) {
             "successful preplanning must hand off to one real business attempt"
         );
     }
-    let (minimum, maximum) = if recover { (900, 1350) } else { (250, 450) };
+    // v31 clause "请求从不等待容量、冷却、探测、恢复、FIFO、permit 或
+    // attempt/store 预算": preplanning is not an admission gate the execution waits
+    // behind, so the declared preplan/residence budget is never consumed by a
+    // request-side wait. The affirmative law is a bounded in-request resolution
+    // plus the detectable transport break and the no-payload invariants below.
     assert!(
-        elapsed >= Duration::from_millis(minimum) && elapsed < Duration::from_millis(maximum),
-        "preplanning and execution must share the original request deadline: {elapsed:?}"
+        elapsed < Duration::from_millis(1_500),
+        "preplanning must never park the request on a lifecycle budget: {elapsed:?}"
     );
     let (broken, bytes) = outcome.expect("deadline must finish the request");
     assert!(broken, "deadline must break transport detectably");
@@ -4349,4 +4353,162 @@ async fn assert_request_independence_same_session(direct: bool) {
         peer.task.abort();
     }
     std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+// ---------------------------------------------------------------------------
+// P1-3 receipt: the client BYTES a cancelled request really produces.
+// ---------------------------------------------------------------------------
+
+/// Read whatever the Server writes to a raw client socket, bounded.
+async fn read_client_wire_until_close(socket: &mut tokio::net::TcpStream, bound: Duration) -> Vec<u8> {
+    let mut wire = Vec::new();
+    let mut buffer = [0u8; 4096];
+    let _ = timeout(bound, async {
+        loop {
+            match socket.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(read) => wire.extend_from_slice(&buffer[..read]),
+                Err(_) => break,
+            }
+        }
+    })
+    .await;
+    wire
+}
+
+/// Every complete chunk payload of a chunked client body. A truncated trailing chunk is
+/// skipped: it belongs to this reader's own bound, not to the Server's write.
+fn chunked_client_payloads(wire: &str) -> Vec<String> {
+    let Some((_, body)) = wire.split_once("\r\n\r\n") else {
+        return Vec::new();
+    };
+    let mut rest = body;
+    let mut payloads = Vec::new();
+    loop {
+        let Some((size_line, after)) = rest.split_once("\r\n") else {
+            break;
+        };
+        let Ok(size) = usize::from_str_radix(size_line.trim(), 16) else {
+            break;
+        };
+        if size == 0 || after.len() < size + 2 {
+            break;
+        }
+        payloads.push(after[..size].to_string());
+        rest = &after[size + 2..];
+    }
+    payloads
+}
+
+/// P1-3: a cancelled client must never lose the request activity hand-off or leave
+/// malformed client framing behind. The wire a real client reads is asserted directly:
+/// the response head is the SSE transport accept, no provider error payload or fabricated
+/// completion is projected, every complete chunk carries one whole SSE frame, and Server
+/// shutdown completes (the cancelled body never keeps the request activity permit).
+async fn assert_cancelled_client_wire(direct: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("44cc3af-cancelled-wire");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let (upstream_url, mut captures, _release, upstream_shutdown) =
+        start_controlled_held_upstream().await;
+    let mode = if direct {
+        V3EntryProtocolExecutionMode::Direct
+    } else {
+        V3EntryProtocolExecutionMode::Relay
+    };
+    let mut manifest = concurrency_switch_manifest_with_mode(&upstream_url, &upstream_url, mode);
+    if direct {
+        use_native_direct_responses(&mut manifest);
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let address = handle.listeners[0].addr;
+    let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    let payload =
+        json!({"model":"client-test","input":"cancelled client wire","stream":true}).to_string();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: {address}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nsession-id: 44cc3af-cancelled-wire\r\nthread-id: 44cc3af-cancelled-wire\r\nconnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("a cancelled request must first reach its provider")
+        .expect("provider capture");
+    assert!(
+        capture.body.to_string().contains("cancelled client wire"),
+        "{capture:?}"
+    );
+    let wire = read_client_wire_until_close(&mut socket, Duration::from_millis(400)).await;
+    drop(socket);
+    let shutdown = timeout(Duration::from_secs(5), handle.shutdown()).await;
+    upstream_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        shutdown.is_ok(),
+        "a cancelled client must never keep the request activity permit until shutdown hangs"
+    );
+
+    let text = String::from_utf8_lossy(&wire).to_string();
+    if text.is_empty() {
+        // Clean transport close: the runtime buffers every provider attempt before any
+        // payload byte is projected, so cancelling before the attempt resolves legitimately
+        // produces no client bytes at all. What must never happen is a partial frame, a
+        // fabricated completion, an error payload, or a request that outlives the client.
+        // Server shutdown already completed within the bound above.
+        return;
+    }
+    assert!(
+        text.starts_with("HTTP/1.1 200"),
+        "the cancelled request must keep its SSE transport accept: {text:?}"
+    );
+    assert!(
+        text.to_ascii_lowercase()
+            .contains("content-type: text/event-stream"),
+        "{text:?}"
+    );
+    let lowered = text.to_ascii_lowercase();
+    assert!(
+        !lowered.contains("network_error") && !lowered.contains("provider_concurrency_busy"),
+        "no provider error payload may be projected onto the cancelled client: {text:?}"
+    );
+    assert!(
+        !text.ends_with("0\r\n\r\n"),
+        "a cancelled request must not fabricate a completed body: {text:?}"
+    );
+    let payloads = chunked_client_payloads(&text);
+    if payloads.is_empty() {
+        let body = text
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body)
+            .unwrap_or_default();
+        assert!(
+            body.trim().is_empty(),
+            "a cancelled request must not leave a partial frame in the client bytes: {body:?}"
+        );
+    }
+    for payload in &payloads {
+        assert!(
+            payload.ends_with("\n\n"),
+            "every client chunk must carry one whole SSE frame, never a truncated one: {payload:?}"
+        );
+        let payload_lower = payload.to_ascii_lowercase();
+        assert!(
+            !payload_lower.contains("network_error"),
+            "no provider error payload may reach the client: {payload:?}"
+        );
+        assert!(
+            !payload_lower.contains("response.completed"),
+            "a cancelled request must not project a completion: {payload:?}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue44cc3af_direct_cancelled_client_wire_keeps_whole_frames_and_closes() {
+    assert_cancelled_client_wire(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue44cc3af_relay_cancelled_client_wire_keeps_whole_frames_and_closes() {
+    assert_cancelled_client_wire(false).await;
 }
