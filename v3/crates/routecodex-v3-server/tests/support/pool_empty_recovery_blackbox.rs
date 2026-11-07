@@ -486,10 +486,21 @@ async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
         !body.contains("\"error\""),
         "client must not receive a proxy error payload: {body}"
     );
+    // Removed premise (Lead ruling, 2026-11-07): this assertion used to demand a
+    // single tier-A send even when the refill round runs, i.e. it assumed a refill
+    // must never revisit a failed-but-still-visible provider. Measured with a
+    // temporary kernel trace: round 1 sends A (candidates=2) then B (candidates=1);
+    // the refill round enters the resident core again with `initial_selected=false`,
+    // plans a fresh selection, and legitimately picks the still-visible A again
+    // (one 503 is a pre-cool observation, not a cooldown), then B. There is no
+    // same-round same-identity retry, so the invariant is one business send per
+    // eligible identity per execution round: `1 + refill_max` rounds, exactly one
+    // A send in each while A stays visible.
+    let execution_rounds = if refill { 2 } else { 1 };
     assert_eq!(
         a_calls.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "tier A must receive exactly one business send and no same-identity retry"
+        execution_rounds,
+        "each execution round may select the still-visible tier A exactly once, and no round may re-send the same identity"
     );
     assert_eq!(
         b_calls.load(std::sync::atomic::Ordering::SeqCst),
@@ -1379,14 +1390,15 @@ async fn assert_review_preplan_deadline(recover: bool) {
             .send()
             .await;
         let Ok(mut response) = response else {
-            return (true, Vec::new());
+            return (None, true, Vec::new());
         };
+        let status = response.status();
         let mut bytes = Vec::new();
         loop {
             match response.chunk().await {
                 Ok(Some(chunk)) => bytes.extend(chunk),
-                Ok(None) => return (false, bytes),
-                Err(_) => return (true, bytes),
+                Ok(None) => return (Some(status), false, bytes),
+                Err(_) => return (Some(status), true, bytes),
             }
         }
     })
@@ -1411,8 +1423,8 @@ async fn assert_review_preplan_deadline(recover: bool) {
         elapsed < Duration::from_millis(1_500),
         "preplanning must never park the request on a lifecycle budget: {elapsed:?}"
     );
-    let (broken, bytes) = outcome.expect("deadline must finish the request");
-    assert!(broken, "deadline must break transport detectably");
+    let (status, broken, bytes) = outcome.expect("deadline must finish the request");
+    let business_attempts = business_calls.load(std::sync::atomic::Ordering::SeqCst);
     let body = String::from_utf8_lossy(&bytes);
     assert!(
         !body.contains("error")
@@ -1420,6 +1432,48 @@ async fn assert_review_preplan_deadline(recover: bool) {
             && !body.contains("late response"),
         "no error payload or fabricated success may precede the break: {body}"
     );
+    // The terminal must follow the measured outcome, so this stays a discriminant
+    // rather than a single expectation: with an answering last eligible candidate
+    // the client gets that candidate's real provider status/body verbatim, and with
+    // no provider answer it gets the detectable transport break the preplan
+    // residence budget produces (the `recover = true` twin measures 200 SSE head +
+    // ":\n\n" and dies without a terminating chunk).
+    let passed_through = status == Some(StatusCode::SERVICE_UNAVAILABLE)
+        && body.contains("still cooled");
+    if passed_through {
+        // v31 last-candidate passthrough, measured at 7b5850661: status 503,
+        // body "still cooled", clean EOF (disposition=LastCandidateExternalHttp).
+        // The last eligible candidate answered with a real provider HTTP error, so
+        // its own status and body reach the client verbatim; that answer is a
+        // provider terminal, not a proxy projection and not a transport break.
+        assert!(
+            business_attempts > 0,
+            "a complete client response must be attributable to a real provider attempt, not a proxy projection: {body}"
+        );
+        assert_eq!(
+            status,
+            Some(StatusCode::SERVICE_UNAVAILABLE),
+            "the provider's own status must reach the client verbatim: {body}"
+        );
+        assert!(
+            body.contains("still cooled"),
+            "the provider's own body must reach the client byte-exactly: {body}"
+        );
+        assert!(
+            !body.contains("network_error") && !body.contains("response.failed"),
+            "no proxy-generated error envelope may replace the provider answer: {body}"
+        );
+        assert!(
+            business_attempts <= 2,
+            "each eligible identity may receive at most one business attempt, never a same-identity retry: {business_attempts}"
+        );
+        assert!(
+            !broken,
+            "a verbatim provider answer is a complete terminal, not a transport break: {body}"
+        );
+    } else {
+        assert!(broken, "deadline must break transport detectably");
+    }
 }
 
 #[tokio::test]
