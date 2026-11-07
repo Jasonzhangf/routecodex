@@ -1820,12 +1820,27 @@ fn identity_test_response(text: &str) -> Response<Body> {
         .unwrap()
 }
 
+/// 2026-11-07 ruling (master-approved re-pin): one recoverable failure is a
+/// pre-cool observation, not an exclusion — the cooldown ladder starts at three
+/// consecutive failures and the observation entry carries `until_ms = null` — so
+/// the failed identity stays visible. This gate pins request independence and
+/// pre-cool non-exclusion instead of the retired expectation: the initial 429
+/// still reselects the healthy alternative promptly (A -> B), and the later
+/// fresh and due waves are each dispatched immediately to the still-visible
+/// limited identity, exactly once per request, with no proxy-side queueing and
+/// no same-identity retry. B-side parallel traffic for those waves is
+/// structurally unreachable in this scenario, so it is no longer asserted. The
+/// test names are kept so that the declared bindings in
+/// `docs/architecture/v3-verification-map.yml` do not move.
 async fn assert_identity_only_rate_limit(direct: bool) {
     let _guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("44cc3af-identity-only");
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     std::env::set_var("V3_P6_TEST_KEY", "limited-key");
     std::env::set_var("V3_IDENTITY_OTHER_KEY", "other-key");
+    // Records every dispatch the limited identity actually receives, so the
+    // request-independence waves can assert exact per-request counts.
+    let (arrivals_tx, mut arrivals_rx) = mpsc::unbounded_channel::<String>();
     let first_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let second_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let first_url = format!("http://{}/v1", first_listener.local_addr().unwrap());
@@ -1842,6 +1857,7 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         let recovery_release = recovery_release.clone();
         let model_release = model_release.clone();
         let restored_release = restored_release.clone();
+        let arrivals_tx = arrivals_tx.clone();
         move |headers: HeaderMap, axum::Json(body): axum::Json<Value>| {
             let failed_calls = failed_calls.clone();
             let failed_tx = failed_tx.clone();
@@ -1850,6 +1866,7 @@ async fn assert_identity_only_rate_limit(direct: bool) {
             let model_release = model_release.clone();
             let model_tx = model_tx.clone();
             let restored_release = restored_release.clone();
+            let arrivals_tx = arrivals_tx.clone();
             async move {
                 if headers.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer other-key")
                     || body["model"] == "wire-other" {
@@ -1859,6 +1876,7 @@ async fn assert_identity_only_rate_limit(direct: bool) {
                     }
                     return identity_test_response("independent identity completed");
                 }
+                let _ = arrivals_tx.send(body.to_string());
                 if failed_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
                     let _ = recovery_tx.send(());
                     if body.to_string().contains("restored-") {
@@ -1975,6 +1993,26 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         );
         return;
     }
+    // v31: the single 429 is a pre-cool observation, not an exclusion
+    // (`pre_cool_observation`, `until_ms = null`); the cooldown ladder starts at
+    // three consecutive failures. That state is what lets the visible identity
+    // serve the waves below, so it is asserted rather than inferred.
+    let pool_base = format!("http://{}", handle.listeners[0].addr);
+    let identity_entries =
+        pool_entries_for_transport_case(&reqwest::Client::new(), &pool_base).await;
+    let observed_entry = identity_entries
+        .iter()
+        .find(|entry| entry["provider_id"].as_str() == Some(first_provider_id.as_str()))
+        .expect("the failed identity must be listed in the cooldown pool");
+    assert_eq!(
+        observed_entry["state"].as_str(),
+        Some("pre_cool_observation"),
+        "one 429 is a pre-cool observation, not an exclusion: {observed_entry}"
+    );
+    assert!(
+        observed_entry["until_ms"].is_null(),
+        "a pre-cool observation must carry no cooldown deadline: {observed_entry}"
+    );
     let requests: Vec<_> = (0..4)
         .map(|i| spawn("client-test", &format!("fresh-{i}")))
         .collect();
@@ -1993,18 +2031,29 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         ),
     ];
     let wave_started = tokio::time::Instant::now();
-    let mut parallel_dispatches = 0;
-    while wave_started.elapsed() < Duration::from_millis(350) && parallel_dispatches < 4 {
+    // v31 request independence (2026-11-07 ruling): one 429 is a pre-cool
+    // observation (`pre_cool_observation`, `until_ms = null`; the cooldown
+    // ladder starts at three consecutive failures), so the limited identity
+    // stays visible and the fresh wave is dispatched straight to it.
+    let mut fresh_arrivals: Vec<(String, u128)> = Vec::new();
+    while wave_started.elapsed() < Duration::from_millis(350) && fresh_arrivals.len() < 4 {
         let remaining = Duration::from_millis(350).saturating_sub(wave_started.elapsed());
-        if timeout(remaining, healthy_rx.recv())
-            .await
-            .is_ok_and(|v| v.is_some())
-        {
-            parallel_dispatches += 1;
-        } else {
+        let Ok(Some(arrival)) = timeout(remaining, arrivals_rx.recv()).await else {
             break;
+        };
+        let at = wave_started.elapsed().as_millis();
+        for index in 0..4 {
+            let marker = format!("fresh-{index}");
+            if arrival.contains(&marker) && !fresh_arrivals.iter().any(|(seen, _)| seen == &marker) {
+                fresh_arrivals.push((marker, at));
+            }
         }
     }
+    let fresh_wave_dispatch_ms = fresh_arrivals
+        .iter()
+        .map(|(_, at)| *at)
+        .max()
+        .unwrap_or(u128::MAX);
     let mut independent_finished = true;
     let mut results = capacity_results;
     for task in &mut independent {
@@ -2018,41 +2067,56 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         }
     }
     let calls_before_release = failed_calls.load(std::sync::atomic::Ordering::SeqCst);
+    // The reselected request is held by the healthy alternative's answer, while
+    // the four fresh requests are held inside the visible identity's own
+    // response; they are joined after that release below.
     release.add_permits(16);
-    for task in std::iter::once(first).chain(requests) {
-        if first_delay < Duration::from_millis(350)
-            && parallel_dispatches == 4
-            && independent_finished
-        {
-            results.push(
-                timeout(Duration::from_secs(2), task)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap(),
-            );
-        } else {
-            task.abort();
-            let _ = task.await;
-        }
-    }
+    results.push(
+        timeout(Duration::from_secs(2), first)
+            .await
+            .expect("the reselected request must finish once the healthy alternative answers")
+            .expect("the reselected request must not fail")
+            .expect("the reselected request must return a body"),
+    );
     // v31: probes and recovery are provider-lifecycle only. Business requests
-    // never wait for A's observation or recovery; every later wave must be
-    // served by the still-visible B immediately.
+    // never wait for A's observation or recovery; the still-visible limited
+    // identity serves this wave immediately (2026-11-07 ruling), because the
+    // single 429 is only a pre-cool observation.
+    let due_started = tokio::time::Instant::now();
     let due_wave: Vec<_> = (0..3)
         .map(|i| spawn("client-test", &format!("due-{i}")))
         .collect();
-    let mut due_alternatives = 0;
-    for _ in 0..3 {
-        if timeout(Duration::from_millis(350), healthy_rx.recv())
-            .await
-            .is_ok_and(|v| v.is_some())
-        {
-            due_alternatives += 1;
+    let mut due_arrivals: Vec<(String, u128)> = Vec::new();
+    while due_started.elapsed() < Duration::from_millis(350) && due_arrivals.len() < 3 {
+        let remaining = Duration::from_millis(350).saturating_sub(due_started.elapsed());
+        let Ok(Some(arrival)) = timeout(remaining, arrivals_rx.recv()).await else {
+            break;
+        };
+        let at = due_started.elapsed().as_millis();
+        for index in 0..3 {
+            let marker = format!("due-{index}");
+            if arrival.contains(&marker) && !due_arrivals.iter().any(|(seen, _)| seen == &marker) {
+                due_arrivals.push((marker, at));
+            }
         }
     }
+    let due_wave_dispatch_ms = due_arrivals
+        .iter()
+        .map(|(_, at)| *at)
+        .max()
+        .unwrap_or(u128::MAX);
     recovery_release.add_permits(16);
     restored_release.add_permits(4);
+    let due_calls_after = failed_calls.load(std::sync::atomic::Ordering::SeqCst);
+    for task in requests {
+        results.push(
+            timeout(Duration::from_secs(2), task)
+                .await
+                .expect("a fresh request served by the visible identity must finish")
+                .expect("a fresh request must not fail")
+                .expect("a fresh request must return a body"),
+        );
+    }
     for mut task in due_wave {
         match timeout(Duration::from_secs(2), &mut task).await {
             Ok(Ok(Ok(body))) => results.push(body),
@@ -2084,21 +2148,88 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         first_delay < Duration::from_millis(350),
         "healthy B must not await failed A's backoff: {first_delay:?}"
     );
-    assert_eq!(
-        parallel_dispatches, 4,
-        "all fresh requests must reach healthy B concurrently instead of queueing on A"
-    );
     assert!(
         independent_finished,
         "other keys/models/providers must make independent progress"
     );
+    // 2026-11-07 ruling: one 429 leaves the limited identity in
+    // `pre_cool_observation` with `until_ms = null` (the cooldown ladder
+    // starts at three consecutive failures), so the identity stays visible and
+    // every later business wave is served by it — B-side parallel traffic is
+    // structurally unreachable in this scenario and is no longer asserted.
     assert_eq!(
-        calls_before_release, 1,
-        "fresh requests must skip the active429 identity without a retry storm"
+        fresh_arrivals.len(),
+        4,
+        "all four fresh requests must be dispatched to the still-visible highest-priority identity: {fresh_arrivals:?}"
+    );
+    for index in 0..4 {
+        let marker = format!("fresh-{index}");
+        assert_eq!(
+            fresh_arrivals.iter().filter(|(seen, _)| seen == &marker).count(),
+            1,
+            "each fresh request must reach the identity exactly once, with no same-identity retry: {fresh_arrivals:?}"
+        );
+    }
+    assert_eq!(
+        calls_before_release, 5,
+        "one 429 plus exactly one business send per fresh request: {calls_before_release}"
+    );
+    assert!(
+        healthy_rx.try_recv().is_err(),
+        "no request after the reselect may be dispatched to B: the pre-cool identity stays visible"
+    );
+    // Measured on this base while the four fresh requests are in flight:
+    // relay 175-204 ms, direct 9-11 ms (due wave: relay 87-89 ms, direct 3-5 ms),
+    // with the four fresh arrivals landing in the same millisecond. The budget
+    // keeps better than a 1.5x margin on the slower mode and stays inside the
+    // 350 ms collection window, so a request that waited on the failed identity's
+    // observation could not satisfy it: that cadence is the 5 s probe interval.
+    const WAVE_DISPATCH_BUDGET_MS: u128 = 320;
+    assert!(
+        fresh_wave_dispatch_ms < WAVE_DISPATCH_BUDGET_MS,
+        "the four fresh dispatches must land on the visible identity immediately, not queue: {fresh_wave_dispatch_ms}ms"
+    );
+    let fresh_spread = fresh_wave_dispatch_ms
+        - fresh_arrivals
+            .iter()
+            .map(|(_, at)| *at)
+            .min()
+            .unwrap_or(0);
+    assert!(
+        fresh_spread <= 100,
+        "the fresh wave must be dispatched as one concurrent burst, not serialized request by request: spread {fresh_spread}ms of {fresh_arrivals:?}"
     );
     assert_eq!(
-        due_alternatives, 3,
-        "no business request may wait for A's recovery: the whole due wave uses B"
+        due_arrivals.len(),
+        3,
+        "the whole due wave must be dispatched to the still-visible identity without waiting for its recovery: {due_arrivals:?}"
+    );
+    for index in 0..3 {
+        let marker = format!("due-{index}");
+        assert_eq!(
+            due_arrivals.iter().filter(|(seen, _)| seen == &marker).count(),
+            1,
+            "each due request must reach the identity exactly once: {due_arrivals:?}"
+        );
+    }
+    assert_eq!(
+        due_calls_after - calls_before_release,
+        3,
+        "the due wave must cost exactly one business send per request on the visible identity"
+    );
+    assert!(
+        due_wave_dispatch_ms < WAVE_DISPATCH_BUDGET_MS,
+        "the due wave must be served immediately by the visible identity, not by waiting for its recovery: {due_wave_dispatch_ms}ms"
+    );
+    let due_spread = due_wave_dispatch_ms
+        - due_arrivals
+            .iter()
+            .map(|(_, at)| *at)
+            .min()
+            .unwrap_or(0);
+    assert!(
+        due_spread <= 100,
+        "the due wave must be dispatched as one concurrent burst, not serialized request by request: spread {due_spread}ms of {due_arrivals:?}"
     );
     assert_eq!(
         model_capacity, 8,
