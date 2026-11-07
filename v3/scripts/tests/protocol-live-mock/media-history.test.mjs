@@ -32,10 +32,11 @@ const imageUrl =
 
 // The current OpenAI Chat wire history the case must forward, as one literal
 // independent expectation (not derived from any provider output index): the
-// assistant tool_use keeps its exact call id/name/arguments, the tool_result
-// stays paired by the same tool_call_id, the representable image is carried on
-// the following user message, and the intervening assistant text plus the final
-// user question keep their exact order.
+// assistant tool_use keeps its exact call id/name/arguments, tool results stay
+// paired by the same tool_call_id, the representable image is carried on the
+// following user message, and the intervening assistant text plus the final user
+// question keep their exact order. The ordinary business object carrying
+// scalar file_id must remain opaque JSON instead of becoming an image carrier.
 const currentFullHistory = [
   {
     role: 'user',
@@ -44,6 +45,15 @@ const currentFullHistory = [
       { type: 'text', text: '[Image]', future_sibling: { occurrence: 1 } },
       { type: 'text', text: '[Image]', future_sibling: { occurrence: 2 } },
     ],
+  },
+  {
+    role: 'assistant',
+    tool_calls: [{ id: 'toolu_business', type: 'function', function: { name: 'lookup_record', arguments: '{}' } }],
+  },
+  {
+    role: 'tool',
+    tool_call_id: 'toolu_business',
+    content: '[{"file_id":"record-123","note":"opaque business payload","status":"ready"}]',
   },
   {
     role: 'assistant',
@@ -91,7 +101,7 @@ function checkHistoricalMessages(messages) {
 
 test('older-turn tool-image oracle keeps the complete OpenAI Chat history', () => {
   // Feeding the literal history through the public assertion passes only if the
-  // fixture's declared oracle is that full six-message history, so a shifted
+  // fixture's declared oracle is that full eight-message history, so a shifted
   // subset that drops the intervening assistant turn can no longer pass.
   assert.deepEqual(checkCurrentMessages(currentFullHistory), { ok: true, diagnostics: [] });
 });
@@ -118,13 +128,13 @@ test('archived real provider capture is accepted only with its historical assist
 });
 
 test('negative controls: removing or reordering the assistant turn fails', () => {
-  const removed = currentFullHistory.filter((message, index) => index !== 4);
+  const removed = currentFullHistory.filter((message, index) => index !== 6);
   const removal = checkCurrentMessages(removed);
   assert.equal(removal.ok, false);
   assert.ok(removal.diagnostics.includes('provider body_must messages mismatch'));
 
   const reordered = structuredClone(currentFullHistory);
-  [reordered[4], reordered[5]] = [reordered[5], reordered[4]];
+  [reordered[6], reordered[7]] = [reordered[7], reordered[6]];
   const swap = checkCurrentMessages(reordered);
   assert.equal(swap.ok, false);
   assert.ok(swap.diagnostics.includes('provider body_must messages mismatch'));
@@ -132,8 +142,16 @@ test('negative controls: removing or reordering the assistant turn fails', () =>
 
 test('negative control: breaking the tool-result pairing fails', () => {
   const unpaired = structuredClone(currentFullHistory);
-  unpaired[2].tool_call_id = 'toolu_other';
+  unpaired[4].tool_call_id = 'toolu_other';
   const result = checkCurrentMessages(unpaired);
+  assert.equal(result.ok, false);
+  assert.ok(result.diagnostics.includes('provider body_must messages mismatch'));
+});
+
+test('negative control: replacing ordinary file_id business JSON with an image placeholder fails', () => {
+  const misclassified = structuredClone(currentFullHistory);
+  misclassified[2].content = '[Image]';
+  const result = checkCurrentMessages(misclassified);
   assert.equal(result.ok, false);
   assert.ok(result.diagnostics.includes('provider body_must messages mismatch'));
 });

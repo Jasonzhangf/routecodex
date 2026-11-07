@@ -11,6 +11,8 @@
       "max_tokens": 64,
       "messages": [
         {"role": "user", "content": [{"type":"text","text":"take a screenshot"}, {"type":"image","source":{"type":"url","url":"https://example.test/image.png"},"future_sibling":{"occurrence":1}}, {"type":"image","source":{"type":"url","url":"https://example.test/image.png"},"future_sibling":{"occurrence":2}}]},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_business", "name": "lookup_record", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_business", "content": [{"file_id": "record-123", "status": "ready", "note": "opaque business payload"}]}]},
         {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_1", "name": "screenshot", "input": {}}]},
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}]},
         {"role": "assistant", "content": [{"type": "text", "text": "It shows a login page."}]},
@@ -25,6 +27,8 @@
     "body_must": {
       "messages": [
         {"role": "user", "content": [{"type":"text","text":"take a screenshot"}, {"type":"text","text":"[Image]","future_sibling":{"occurrence":1}}, {"type":"text","text":"[Image]","future_sibling":{"occurrence":2}}]},
+        {"role": "assistant", "tool_calls": [{"id": "toolu_business", "type": "function", "function": {"name": "lookup_record", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "toolu_business", "content": "[{\"file_id\":\"record-123\",\"note\":\"opaque business payload\",\"status\":\"ready\"}]"},
         {"role": "assistant", "tool_calls": [{"id": "toolu_1", "type": "function", "function": {"name": "screenshot", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "toolu_1", "content": []},
         {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]},

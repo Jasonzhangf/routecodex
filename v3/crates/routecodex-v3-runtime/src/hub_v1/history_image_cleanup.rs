@@ -28,23 +28,6 @@ fn is_v3_text_content_part(row: &Map<String, Value>) -> bool {
     )
 }
 
-/// 统计 payload 中图片引用数（临时诊断辅助：image_url / data / file_id /
-/// file_url 键的 part）。
-pub(crate) fn count_v3_payload_image_refs(body: &Value) -> usize {
-    let mut total = 0;
-    if let Some(input) = body.get("input").and_then(Value::as_array) {
-        for item in input {
-            total += count_v3_item_image_refs(item);
-        }
-    }
-    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
-        for message in messages {
-            total += count_v3_item_image_refs(message);
-        }
-    }
-    total
-}
-
 fn count_v3_item_image_refs(item: &Value) -> usize {
     if is_top_level_input_image(item) {
         return 1;
@@ -399,7 +382,10 @@ fn is_v3_embedded_image_carrier(map: &Map<String, Value>) -> bool {
         });
     }
     if let Some(file_id) = map.get("file_id") {
-        return file_id
+        return matches!(
+            map.get("type").and_then(Value::as_str),
+            Some("image" | "input_image" | "output_image" | "image_url")
+        ) && file_id
             .as_str()
             .is_some_and(|value| !value.trim().is_empty());
     }

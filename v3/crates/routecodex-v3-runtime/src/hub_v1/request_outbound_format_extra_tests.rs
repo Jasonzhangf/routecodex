@@ -1,5 +1,6 @@
 use super::*;
 use routecodex_v3_config::V3WebSearchExecutionMode;
+use serde_json::{json, Value};
 
 #[test]
 fn responses_openai_chat_field_parity_responses_wire_projects_fc_item_ids() {
@@ -1760,5 +1761,117 @@ fn d701cc8_anthropic_to_anthropic_preserves_original_image_carrier() {
         first_image["source"],
         json!({"type": "url", "url": "https://example.test/image.png"}),
         "Anthropic target must preserve the original image source: {wire:#?}"
+    );
+}
+
+fn d701cc8_anthropic_canonical_with_historical_business_file_id() -> Value {
+    let anthropic = json!({
+        "model": "mock.chat-model",
+        "max_tokens": 64,
+        "messages": [
+            {"role": "user", "content": [
+                {"type":"text","text":"take a screenshot"},
+                {"type":"image","source":{"type":"url","url":"https://example.test/image.png"}}
+            ]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_business", "name": "lookup_record", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_business", "content": [
+                {"file_id":"record-123","status":"ready","note":"opaque business payload"}
+            ]}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_image", "name": "screenshot", "input": {}}]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_image", "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}}]}]},
+            {"role": "assistant", "content": [{"type": "text", "text": "It shows a login page."}]},
+            {"role": "user", "content": "what colour was the button?"}
+        ]
+    });
+    let raw = super::super::build_v3_hub_req_inbound_01_client_raw(
+        anthropic,
+        super::super::V3HubEntryProtocol::Anthropic,
+        super::super::V3HubInvocationSource::Client,
+        super::super::V3HubTransportIntent::Json,
+    );
+    let normalized =
+        super::super::build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+            .expect("Anthropic inbound normalization");
+    (*normalized.previous.payload.0).clone()
+}
+
+#[test]
+fn d701cc8_historical_tool_result_scalar_file_id_stays_business_json() {
+    let canonical = d701cc8_anthropic_canonical_with_historical_business_file_id();
+    let wire = super::super::project_v3_operation_runner_standard_provider_request(
+        &canonical,
+        super::super::V3HubEntryProtocol::Anthropic,
+        super::super::V3HubTransportIntent::Json,
+        super::super::V3HubProviderWireProtocol::OpenAiChat,
+        &d701cc8_target("openai_chat"),
+    )
+    .expect("Anthropic -> OpenAI-Chat projection")
+    .payload;
+    let messages = wire["messages"].as_array().expect("wire messages");
+    let tool = messages
+        .iter()
+        .find(|message| message["tool_call_id"] == "toolu_business")
+        .expect("historical business tool result must remain on the provider wire");
+    let business = tool["content"]
+        .as_str()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .or_else(|| {
+            tool["content"].as_array().and_then(|parts| {
+                parts.iter().find_map(|part| {
+                    part.get("text")
+                        .and_then(Value::as_str)
+                        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                })
+            })
+        })
+        .expect("business JSON must remain encoded in the tool result");
+    assert_eq!(
+        business,
+        json!([{"file_id":"record-123","status":"ready","note":"opaque business payload"}]),
+        "ordinary tool-result JSON with scalar file_id must stay opaque: {messages:#?}"
+    );
+    assert_eq!(
+        messages[0]["content"][1],
+        json!({"type":"text","text":"[Image]"}),
+        "historical URL image must still become a placeholder: {messages:#?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["content"].as_array().is_some_and(|parts| {
+                parts.iter().any(|part| {
+                    part["type"] == "image_url"
+                        && part["image_url"]["url"]
+                            .as_str()
+                            .is_some_and(|url| url.starts_with("data:image/png;base64,"))
+                })
+            })
+        }),
+        "latest tool image must still survive: {messages:#?}"
+    );
+}
+
+#[test]
+fn d701cc8_file_id_carrier_requires_typed_image_context() {
+    let mut ordinary = json!({"messages":[
+        {"role":"tool","content":[{"file_id":"record-123","status":"ready"}]},
+        {"role":"user","content":"next"}
+    ]});
+    crate::hub_v1::normalize_v3_history_image_placeholders(&mut ordinary);
+    assert_eq!(
+        ordinary["messages"][0]["content"][0],
+        json!({"file_id":"record-123","status":"ready"}),
+        "scalar file_id without a typed image part must stay opaque"
+    );
+
+    let mut typed = json!({"messages":[
+        {"role":"tool","content":[{"type":"input_image","file_id":"history-image"}]},
+        {"role":"tool","content":[{"type":"input_image","image_url":"data:image/png;base64,AAAA"}]},
+        {"role":"user","content":"next"}
+    ]});
+    crate::hub_v1::normalize_v3_history_image_placeholders(&mut typed);
+    assert_eq!(
+        typed["messages"][0]["content"][0],
+        json!({"type":"text","text":"[Image]"}),
+        "typed file_id image part must still become a placeholder"
     );
 }
