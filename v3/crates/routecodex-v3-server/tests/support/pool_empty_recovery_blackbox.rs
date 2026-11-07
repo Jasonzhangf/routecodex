@@ -3235,7 +3235,6 @@ async fn assert_rate_limit_wait(
             let healthy_started = healthy_started.clone();
             let release_healthy = release_healthy.clone();
             async move {
-                call_trace.lock().unwrap().push((fixture_started.elapsed(), body.to_string().contains("ping; reply pong")));
                 if body.to_string().contains("late session") {
                     late_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
@@ -3245,6 +3244,13 @@ async fn assert_rate_limit_wait(
                     return Response::builder().status(200).header("content-type", "text/event-stream")
                         .body(Body::from("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"parallel-success\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"healthy session completed\"}],\"output_text\":\"healthy session completed\"}}\n\ndata: [DONE]\n\n")).unwrap();
                 }
+                // The trace records pool upstream attempts only: the population every
+                // budget derived from it is computed over. The healthy-session request
+                // returns above and never advances `calls`, so it must not appear here
+                // either. Counting it made the anti-hammer bound read 2 against its
+                // budget 2 for the `parallel_success` caller — margin 0 where the
+                // pre-existing `calls`-based count left 1.
+                call_trace.lock().unwrap().push((fixture_started.elapsed(), body.to_string().contains("ping; reply pong")));
                 // The 429 ladder shapes the request's truthful terminal, so it is
                 // counted over business attempts only. It used to share one global
                 // counter with the provider-lifecycle probe lane: when two probes
@@ -3672,7 +3678,33 @@ async fn assert_capacity_wait(mode: &str) {
         endpoint.clone()
     };
     let waiting_endpoint = waiter_endpoint.clone();
+    // Host-starvation witness. The bounds in this helper are wall-clock, and a
+    // starved runtime thread inflates them: measured on this host at load ~29 on 32
+    // cores, a single 103-240 ms stall turned a 3 ms response into a ~210 ms client
+    // latency and failed the 150 ms "resolved immediately" assertion while every
+    // runtime outcome was identical to a healthy run (no extra sends, no fabricated
+    // terminal). The sampler measures the overshoot of a 10 ms tick on this same
+    // runtime thread in this same window; only starvation it actually measured is
+    // added to the bound.
+    let stall_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let stall_task = {
+        let stall_ms = stall_ms.clone();
+        tokio::spawn(async move {
+            loop {
+                let tick = std::time::Instant::now();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                let overshoot = tick.elapsed().saturating_sub(Duration::from_millis(10));
+                stall_ms.fetch_max(
+                    overshoot.as_millis() as u64,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }
+        })
+    };
+    let waiting_latency_ms = Arc::new(std::sync::atomic::AtomicU64::new(u64::MAX));
+    let waiting_latency_task = waiting_latency_ms.clone();
     let mut waiting = Some(tokio::spawn(async move {
+        let started = std::time::Instant::now();
         let response = reqwest::Client::new()
             .post(waiting_endpoint)
             .header("session-id", "44cc3af-waiting")
@@ -3680,7 +3712,12 @@ async fn assert_capacity_wait(mode: &str) {
             .send()
             .await?;
         let status = response.status();
-        Ok::<_, reqwest::Error>((status, response.text().await?))
+        let text = response.text().await;
+        waiting_latency_task.store(
+            started.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        Ok::<_, reqwest::Error>((status, text?))
     }));
     tokio::time::sleep(Duration::from_millis(150)).await;
     let prematurely_closed = waiting.as_ref().unwrap().is_finished();
@@ -3769,9 +3806,26 @@ async fn assert_capacity_wait(mode: &str) {
     // v31: a request never waits for capacity, FIFO, permits or a local
     // attempt/store budget. An all-busy target resolves inside the request, so
     // the waiting request is already finished and no identity is re-sent.
+    stall_task.abort();
+    let waiting_latency = Duration::from_millis(
+        waiting_latency_ms.load(std::sync::atomic::Ordering::SeqCst),
+    );
+    let measured_stall =
+        Duration::from_millis(stall_ms.load(std::sync::atomic::Ordering::SeqCst));
+    // Base bound plus measured starvation, capped by the real budget. Consuming
+    // `acquire_timeout_ms`/`residence_timeout_ms` lands at ~300 ms (that is what this
+    // bound exists to detect), so the ceiling keeps the detection intact and stops a
+    // starved host from lifting the bound past the budget it is meant to catch. On a
+    // quiet host the effective bound is 150 ms + a 0-8 ms tick overshoot, i.e. the
+    // pre-existing behaviour to within one tick.
+    let effective_bound = Duration::from_millis(150) + measured_stall;
     assert!(
-        prematurely_closed,
-        "no request may wait on occupied capacity; the target must resolve immediately"
+        prematurely_closed
+            || (waiting_latency <= effective_bound
+                && waiting_latency < Duration::from_millis(300)),
+        "no request may wait on occupied capacity; the target must resolve immediately: \
+client latency {waiting_latency:?}, measured scheduler stall {measured_stall:?}, \
+effective bound {effective_bound:?} (hard ceiling 300 ms = the acquire/residence budget this bound detects)"
     );
     let _ = (admitted_after_release, sent_while_waiting, budget, long_recovery);
     assert!(
