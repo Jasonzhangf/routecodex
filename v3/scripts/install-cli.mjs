@@ -72,36 +72,52 @@ function installLockMetadata(lockDir) {
       throw error;
     }
   };
-  const pidText = read('pid');
-  const createdAtText = read('created_at_ms');
-  const owner = read('owner');
-  const pid = pidText === null ? null : Number(pidText);
-  const createdAtMs = createdAtText === null ? null : Number(createdAtText);
-  if (
-    !Number.isInteger(pid) ||
-    pid <= 0 ||
-    !Number.isFinite(createdAtMs) ||
-    !owner
-  ) {
+  let ownerFile = null;
+  try {
+    ownerFile = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+  } catch {
     return null;
   }
-  return { pid, createdAtMs, owner };
+  const pid = ownerFile ? Number(ownerFile.pid) : NaN;
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+  return {
+    pid,
+    host: typeof ownerFile.host === 'string' ? ownerFile.host : null,
+    startedAt: Number(ownerFile.startedAt),
+  };
 }
 
 function writeInstallLockMetadata(lockDir) {
+  fs.writeFileSync(
+    path.join(lockDir, 'owner.json'),
+    `${JSON.stringify({
+      pid: process.pid,
+      host: os.hostname(),
+      startedAt: Date.now(),
+    })}\n`,
+  );
   fs.writeFileSync(path.join(lockDir, 'pid'), `${process.pid}\n`);
   fs.writeFileSync(path.join(lockDir, 'created_at_ms'), `${Date.now()}\n`);
   fs.writeFileSync(path.join(lockDir, 'owner'), `pid-${process.pid}@${process.cwd()}\n`);
 }
 
-function installLockOwnerIsAlive(pid) {
+// Classify the recorded owner before any reclaim decision:
+// alive  - same host and the pid is still running (probe success or EPERM);
+// dead   - same host and the kernel reports no such process (ESRCH);
+// unknown- cross-host owner, or metadata that cannot be probed safely.
+function classifyInstallLockOwner(metadata) {
+  if (!metadata || metadata.host !== os.hostname()) {
+    return 'unknown';
+  }
   try {
-    process.kill(pid, 0);
-    return true;
+    process.kill(metadata.pid, 0);
+    return 'alive';
   } catch (error) {
-    if (error?.code === 'ESRCH') return false;
-    // EPERM and other indeterminate errors mean the process may still exist.
-    return true;
+    if (error?.code === 'ESRCH') return 'dead';
+    // EPERM means the process exists but is not ours: it is alive.
+    return 'alive';
   }
 }
 
@@ -118,26 +134,44 @@ export function acquireInstallLock() {
   } catch (error) {
     if (error?.code !== 'EEXIST') throw error;
     const metadata = installLockMetadata(lockDir);
-    if (!metadata) {
+    const ownerState = classifyInstallLockOwner(metadata);
+    if (ownerState === 'alive') {
+      const pid = metadata?.pid ?? 'unknown';
       fail(
-        `RouteCodex install lock has incomplete or ambiguous owner metadata; refusing to reclaim: ${lockDir}`,
+        `RouteCodex install already in progress by live owner pid ${pid}: ${lockDir}`,
       );
     }
-    const ageMs = Date.now() - metadata.createdAtMs;
-    if (ageMs < 0) {
-      fail(
-        `RouteCodex install lock has ambiguous creation time; refusing to reclaim: ${lockDir}`,
-      );
+    if (ownerState === 'unknown') {
+      const lockAgeMs = Date.now() - fs.statSync(lockDir).mtimeMs;
+      if (lockAgeMs < INSTALL_LOCK_STALE_MS) {
+        fail(
+          `RouteCodex install lock has ambiguous or cross-host owner metadata and is younger than ${INSTALL_LOCK_STALE_MS}ms; refusing to reclaim: ${lockDir}`,
+        );
+      }
     }
-    if (installLockOwnerIsAlive(metadata.pid)) {
-      fail(
-        `RouteCodex install already in progress by live owner pid ${metadata.pid} (${metadata.owner}, age ${ageMs}ms; stale after ${INSTALL_LOCK_STALE_MS}ms): ${lockDir}`,
-      );
+    // The recorded owner is dead, or unknown and the lock is provably old.
+    // Rename is the atomic arbiter: only one reclaimer can move the lock into
+    // quarantine, and a lock that a live publisher just recreated cannot be
+    // renamed away.
+    const quarantineDir = `${lockDir}.reclaim-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      fs.renameSync(lockDir, quarantineDir);
+    } catch (reclaimError) {
+      if (reclaimError?.code === 'EEXIST' || reclaimError?.code === 'ENOENT') {
+        try {
+          fs.mkdirSync(lockDir);
+          writeInstallLockMetadata(lockDir);
+          return { acquired: true, lockDir };
+        } catch (retryError) {
+          if (retryError?.code === 'EEXIST') {
+            fail(`RouteCodex install already in progress: ${lockDir}`);
+          }
+          throw retryError;
+        }
+      }
+      throw reclaimError;
     }
-    // The recorded owner is dead. Remove only the stale lock directory and
-    // recreate it atomically; a concurrent reclaimer that wins the race will be
-    // seen as a live owner by this process.
-    fs.rmSync(lockDir, { recursive: true, force: true });
+    fs.rmSync(quarantineDir, { recursive: true, force: true });
     try {
       fs.mkdirSync(lockDir);
     } catch (reclaimError) {
@@ -155,6 +189,7 @@ export function releaseInstallLock(lock) {
   if (!lock?.acquired) {
     return;
   }
+  fs.rmSync(path.join(lock.lockDir, 'owner.json'), { force: true });
   fs.rmSync(path.join(lock.lockDir, 'pid'), { force: true });
   fs.rmSync(path.join(lock.lockDir, 'created_at_ms'), { force: true });
   fs.rmSync(path.join(lock.lockDir, 'owner'), { force: true });

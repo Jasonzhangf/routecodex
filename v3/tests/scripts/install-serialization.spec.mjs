@@ -42,6 +42,10 @@ function lockEnv(home, lockDir) {
 
 function writeOwnerMetadata(lockDir, { pid, createdAtMs, owner }) {
   fs.mkdirSync(lockDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(lockDir, 'owner.json'),
+    `${JSON.stringify({ pid, host: os.hostname(), startedAt: createdAtMs })}\n`,
+  );
   fs.writeFileSync(path.join(lockDir, 'pid'), `${pid}\n`);
   fs.writeFileSync(path.join(lockDir, 'created_at_ms'), `${createdAtMs}\n`);
   fs.writeFileSync(path.join(lockDir, 'owner'), `${owner}\n`);
@@ -189,6 +193,38 @@ test('an incomplete or ambiguous lock is refused instead of reclaimed', (t) => {
     /incomplete|ambiguous|refus/i,
   );
   assert.equal(fs.existsSync(lockDir), true, 'ambiguous lock must not be reclaimed');
+});
+
+test('an unknown owner with a fresh lock directory is refused as ambiguous', (t) => {
+  const home = tempHome(t);
+  const lockDir = path.join(home, '.rcc', 'locks', 'install-lifecycle.lock');
+  fs.mkdirSync(lockDir, { recursive: true });
+  // No owner.json at all: the owner cannot be classified, and the lock is young.
+  fs.utimesSync(lockDir, new Date(), new Date());
+
+  assert.throws(
+    () => acquireInstallLockWithEnv(lockEnv(home, lockDir)),
+    /ambiguous|refus/i,
+  );
+  assert.equal(fs.existsSync(lockDir), true, 'ambiguous lock must not be reclaimed');
+});
+
+test('an unknown owner is reclaimable once the lock directory exceeds the stale age', (t) => {
+  const home = tempHome(t);
+  const lockDir = path.join(home, '.rcc', 'locks', 'install-lifecycle.lock');
+  fs.mkdirSync(lockDir, { recursive: true });
+  // Cross-host owner can never be probed; only the mtime bound may clear it.
+  fs.writeFileSync(
+    path.join(lockDir, 'owner.json'),
+    `${JSON.stringify({ pid: 1, host: 'some-other-host', startedAt: Date.now() })}\n`,
+  );
+  const stale = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  fs.utimesSync(lockDir, stale, stale);
+
+  const reclaimed = acquireInstallLockWithEnv(lockEnv(home, lockDir));
+  assert.equal(reclaimed.acquired, true, 'a provably stale unknown lock must be reclaimable');
+  releaseInstallLock(reclaimed);
+  assert.equal(fs.existsSync(lockDir), false);
 });
 
 test('two concurrent acquisitions yield exactly one winner and stale recovery lets publication continue', async (t) => {
