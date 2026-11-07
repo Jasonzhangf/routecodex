@@ -716,14 +716,60 @@ async fn run_case_shape(
     }
     let mut images = Vec::new();
     image_references(&wire, &mut images);
-    assert!(
-        !wire_text.contains("[Image]"),
-        "history and current images must reach the selected provider intact, not as placeholders: {path} tool={tool} protocol={protocol} {wire_text}"
-    );
-    for expected in [OLD, PNG, OTHER] {
+    // P1-5 projection fidelity: the `[Image]` placeholder may only be produced
+    // when the *selected* target genuinely cannot represent the image. The
+    // fixture's default-pool target (`fallback`) declares the text-only
+    // capability set `["text","tools"]`, and the historical placeholder
+    // projection is the declared Anthropic-entry -> OpenAI-Chat target path.
+    // Every other selected target must keep the history images intact.
+    let placeholder_projection =
+        matches!(expect, Expect::Text) && path == "/v1/messages" && protocol == "openai_chat";
+    if placeholder_projection {
         assert!(
-            images.iter().any(|image| image == expected),
-            "complete original image {expected} must reach the selected provider: {path} tool={tool} protocol={protocol} {wire_text}"
+            wire_text.contains("[Image]"),
+            "a text-only selected target must still receive the deterministic [Image] history placeholder: {path} tool={tool} protocol={protocol} {wire_text}"
+        );
+        assert_eq!(
+            wire_text.matches("[Image]").count(),
+            2,
+            "the text-only placeholder projection keeps its deterministic one-token-per-history-image shape: {path} tool={tool} protocol={protocol} {wire_text}"
+        );
+        assert!(
+            !images.iter().any(|image| image == OLD),
+            "a text-only selected target cannot represent history image bytes, so they must not reach the wire: {path} tool={tool} protocol={protocol} {wire_text}"
+        );
+        for expected in [PNG, OTHER] {
+            assert!(
+                images.iter().any(|image| image == expected),
+                "the latest image carrier {expected} must still reach a text-only target intact: {path} tool={tool} protocol={protocol} {wire_text}"
+            );
+        }
+    } else {
+        assert!(
+            !wire_text.contains("[Image]"),
+            "history and current images must reach the selected provider intact, not as placeholders: {path} tool={tool} protocol={protocol} {wire_text}"
+        );
+        for expected in [OLD, PNG, OTHER] {
+            assert!(
+                images.iter().any(|image| image == expected),
+                "complete original image {expected} must reach the selected provider: {path} tool={tool} protocol={protocol} {wire_text}"
+            );
+        }
+        // Fidelity also pins the order: the history carrier precedes the
+        // current-turn carriers in the client's original order.
+        let mut positions = Vec::new();
+        for expected in [OLD, PNG, OTHER] {
+            positions.push(images.iter().position(|image| *image == expected).unwrap_or_else(
+                || {
+                    panic!(
+                        "complete original image {expected} must reach the selected provider: {path} tool={tool} protocol={protocol} {wire_text}"
+                    )
+                },
+            ));
+        }
+        assert!(
+            positions.windows(2).all(|pair| pair[0] < pair[1]),
+            "history and current images must keep their original order and count: {path} tool={tool} protocol={protocol} {positions:?} {wire_text}"
         );
     }
 }
@@ -751,6 +797,46 @@ fn earlier_turn_image_routes_to_default_pool_without_multimodal() {
                 for protocol in ["openai_chat", "responses", "anthropic"] {
                     run_case(path, tool, PoolState::MultimodalAbsent, protocol).await;
                 }
+            }
+        }
+    });
+}
+
+/// P1-5 public-entry proof for both projection directions on the single path
+/// that carries the historical placeholder projection (Anthropic entry ->
+/// OpenAI Chat target):
+/// - a vision-capable selected target receives the history image as a real
+///   `image_url` part (same count, order and data, no `[Image]`);
+/// - a text-only selected target keeps the exact `[Image]` placeholder.
+/// The two directions differ only in which declared pool/target gets selected;
+/// `run_case_shape` asserts the captured outbound provider payload itself.
+#[test]
+fn history_image_projection_follows_selected_target_capability() {
+    run_blackbox_test(async {
+        let _guard = TEST_LOCK.lock().await;
+        for tool in [false, true] {
+            for image_only in [false, true] {
+                // Vision target reachable: it keeps the history image as image content.
+                run_case_shape(
+                    "/v1/messages",
+                    tool,
+                    PoolState::MultimodalAvailable,
+                    "openai_chat",
+                    image_only,
+                    None,
+                )
+                .await;
+                // Only the text-only default target exists: same history image keeps
+                // the deterministic `[Image]` placeholder.
+                run_case_shape(
+                    "/v1/messages",
+                    tool,
+                    PoolState::MultimodalAbsent,
+                    "openai_chat",
+                    image_only,
+                    None,
+                )
+                .await;
             }
         }
     });

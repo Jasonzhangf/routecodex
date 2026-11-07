@@ -3014,8 +3014,17 @@ async fn assert_rate_limit_wait(
     // load-bearing invariant is that no identity is re-sent and no untried
     // identity is excluded.
     let _ = closed_early;
+    // v31 "请求独立。一个请求的错误不得阻塞其他请求": a provider failure is request-local,
+    // so a second session that joins while the first one is failing is NOT gated by that
+    // failure. One 429 also never creates a pool-wide backoff — the consecutive-failure
+    // ladder needs 3 failures of the same complete identity before it hides anything — so
+    // the late session legitimately selects the same still-visible identity and issues its
+    // own single business attempt. The load-bearing bound is therefore one business send
+    // per live request (a same-request resend of an identity stays forbidden), not one
+    // send per pool.
+    let live_requests = waiter_count + usize::from(late_join);
     let max_early_calls = if late_join {
-        1
+        live_requests
     } else if cooled {
         3
     } else {
