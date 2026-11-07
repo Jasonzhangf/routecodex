@@ -1955,7 +1955,16 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
     }
     V3ResponsesDirectRuntimeOutput {
         observability,
-        terminal_disposition: None,
+        // A provider-pool exhaustion terminal carries no client payload: the
+        // Error06 body is provider-private evidence and the client boundary
+        // breaks the transport without an error number, error payload or a
+        // normal empty completion. Every caller that holds a real provider
+        // witness - the single/last eligible candidate passthrough - overrides
+        // this field with its own typed disposition, so that exception keeps
+        // returning the real provider status/body.
+        terminal_disposition: projected
+            .pool_exhausted
+            .then_some(V3ProviderTerminalDisposition::NoResponse),
         diagnostic_source: Some(projected.diagnostic_source),
         diagnostic_cause: None,
         stream_observation: None,
