@@ -29,6 +29,7 @@ const STEPS = [
   ['verify:v3-provider-session-cooldown', 'Provider failure cooldown and recovery are session-isolated'],
   ['test:v3-provider-session-cooldown-red-fixtures', 'Session cooldown architecture mutations are rejected'],
   ['test:v3-provider-session-cooldown', 'Session cooldown and cross-session revive behavior'],
+  ['test:v3-runtime-private-semantics-gate', 'Runtime private provider-failure semantics: each selection runs with exact single-test form, zero-match fails'],
   ['test:v3-p5-router-target', 'Priority-first and same-priority weighted Router/Target selection'],
   ['verify:v3-module-boundaries', 'V3 declared module ownership and dependency boundaries'],
   ['test:v3-source-gate-red-fixtures', 'V3 module-boundary mutations are rejected'],
