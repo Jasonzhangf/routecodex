@@ -239,35 +239,51 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    // v31: one truncated-200 failure is a deferred observation below the
-    // consecutive ladder threshold: the store streak is not applied yet and no
-    // cooldown record exists.
+    // v31 counting basis: a truncated HTTP 200 body is an ordinary recoverable
+    // provider failure, so it is counted IMMEDIATELY as one consecutive failure
+    // for this complete provider/interface/model/key identity. Below the ladder
+    // threshold there is no committed cooldown, so the pre-cool observation row
+    // is only an observability substate carrying the real streak.
     assert_eq!(
-        event.failure_count, 0,
-        "a first deferred failure must not advance the store streak: {event:?}"
+        event.failure_count, 1,
+        "a recoverable provider failure is counted immediately for the exact identity: {event:?}"
     );
-    assert_ne!(
-        event.health_state, "cooldown",
+    assert_eq!(
+        event.health_state, "pre_cool_observation",
+        "below the ladder threshold the identity is only in the observation substate: {event:?}"
+    );
+    assert!(
+        event.cooldown_until_ms.is_none(),
         "one failure must not commit a provider cooldown: {event:?}"
     );
-    assert!(event.cooldown_until_ms.is_none());
 
     // The pre-cool hold is a runtime observation substate, not a store
     // cooldown: the exact identity is listed as pending observation while the
     // store record itself stays available below the ladder threshold.
-    assert!(
-        provider_health
-            .pending_precool_observations()
-            .iter()
-            .any(|observation| {
-                observation.provider_id == "limited"
-                    && observation.auth_alias.as_deref() == Some("key1")
-                    && observation.model_id.as_deref() == Some("gpt-5.5")
-            }),
-        "the exact failed identity must be held in pre-cool observation"
+    let observations = provider_health.pending_precool_observations();
+    let exact = observations
+        .iter()
+        .find(|observation| {
+            observation.provider_id == "limited"
+                && observation.auth_alias.as_deref() == Some("key1")
+                && observation.model_id.as_deref() == Some("gpt-5.5")
+        })
+        .unwrap_or_else(|| {
+            panic!("the exact failed identity must be held in pre-cool observation: {observations:?}")
+        });
+    assert_eq!(
+        exact.consecutive_failures, 1,
+        "the observation substate must carry the real consecutive streak: {exact:?}"
     );
 
     let now = u64::MAX;
+    assert!(
+        provider_health
+            .store()
+            .availability("limited", Some("key1"), Some("gpt-5.5"), now)
+            .available,
+        "below the ladder threshold the exact failed identity stays routable"
+    );
     assert!(
         provider_health
             .store()

@@ -503,6 +503,35 @@ fn set_manifest_provider_request_timeout(
 
 async fn assert_incomplete_sse_or_no_response(response: Result<reqwest::Response, reqwest::Error>) {
     if let Ok(mut response) = response {
+        if response.status() != StatusCode::OK {
+            // v31 single/last eligible candidate passthrough: with one candidate, or
+            // once the last eligible candidate is being attempted, no cooldown,
+            // admission, wait, probe or recovery block applies; the identity keeps its
+            // original typed Error and its real provider status/body are passed through
+            // to the client verbatim, with no proxy-generated replacement error and no
+            // fabricated success. Multi-candidate exhaustion keeps the payload-free
+            // transport break asserted below.
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            assert!(
+                (400..600).contains(&status.as_u16()),
+                "a passed-through provider failure must keep a real provider error status: {status} {body}"
+            );
+            let lowered = body.to_ascii_lowercase();
+            for proxy_generated in [
+                "network_error",
+                "transport break",
+                "response.failed",
+                "response.completed",
+                "proxy_generated",
+            ] {
+                assert!(
+                    !lowered.contains(proxy_generated),
+                    "the passthrough body must be the provider's real body, not a proxy envelope: {body}"
+                );
+            }
+            return;
+        }
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "text/event-stream");
         let mut wire = Vec::new();
@@ -6913,10 +6942,25 @@ async fn responses_relay_provider_503_never_reaches_the_client() {
         }))
         .send()
         .await;
-    assert!(
-        json_response.is_err(),
-        "a provider HTTP failure must not fabricate a client HTTP response"
-    );
+    // v31 single/last eligible candidate passthrough: this target has exactly one
+    // candidate, so no cooldown, admission, wait, probe or recovery block applies and
+    // the identity's original typed Error with its real provider status/body is passed
+    // through to the client verbatim. Only a proxy-generated replacement envelope or a
+    // fabricated 200 is forbidden; a multi-candidate exhaustion keeps the payload-free
+    // transport break, which is the `Err` arm.
+    if let Ok(response) = json_response {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        assert!(
+            (400..600).contains(&status.as_u16()),
+            "a passed-through provider failure must keep the real provider status: {status} {body}"
+        );
+        let lowered = body.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("network_error") && !lowered.contains("transport break"),
+            "no proxy-generated replacement envelope may reach the client: {body}"
+        );
+    }
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -9795,11 +9839,39 @@ targets = [
         .send()
         .await;
     let business = if exhausted {
-        if let Ok(response) = response {
-            assert!(
-                response.text().await.is_err(),
-                "exhaustion must break transport without a completion"
-            );
+        // v31 single/last eligible candidate passthrough: the final candidate's real
+        // provider status/body reaches the client; a bare transport break stays legal
+        // only when no candidate produced a response at all. Neither branch may carry a
+        // proxy-generated envelope or a fabricated completion.
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                assert!(
+                    !status.is_success(),
+                    "exhausted refill must never fabricate a successful response"
+                );
+                assert!(
+                    (400..600).contains(&status.as_u16()),
+                    "the last candidate's real provider status must be passed through: {status}"
+                );
+                let body = response.text().await.unwrap_or_default();
+                let lowered = body.to_lowercase();
+                for forbidden in [
+                    "network_error",
+                    "transport break",
+                    "proxy_generated",
+                    "response.failed",
+                    "response.completed",
+                ] {
+                    assert!(
+                        !lowered.contains(forbidden),
+                        "no proxy-generated envelope may reach the exhausted client: {body}"
+                    );
+                }
+            }
+            Err(_) => {
+                // Detectable transport close with no candidate response to pass through.
+            }
         }
         None
     } else {
@@ -9829,9 +9901,23 @@ targets = [
         .iter()
         .map(|call| call["model"].as_str().unwrap())
         .collect();
+    // v31 (P0 unified recoverable-error policy + refill boundary): one provider
+    // failure does not hide an identity (3 consecutive failures are required before a
+    // 10s cooldown), so the refill round is a fresh selection pass over the visible
+    // pool and legitimately hits the highest-priority `wire-first` again instead of
+    // re-using the identity that produced the previous partial round. The retired
+    // behaviour was a request-local cooldown observation (`selected_provider_unavailable`,
+    // a diagnostic code with no remaining producer in `src`), which consumed an
+    // evidence slot without a wire attempt.
     assert_eq!(
         models,
-        ["wire-first", "wire-second", "wire-second", "wire-last"],
+        [
+            "wire-first",
+            "wire-second",
+            "wire-first",
+            "wire-second",
+            "wire-last"
+        ],
         "actual execution/recovery sequence: {calls:?}"
     );
     if let Some(body) = business {
@@ -9848,7 +9934,7 @@ targets = [
         .filter(|event| event["node_id"] == "V3Transport13ResponsesHttpRequest")
         .count();
     assert_eq!(
-        sends, 4,
+        sends, 5,
         "all actual round transport nodes must be published once: {logs}"
     );
     let attempts = evidence["attempts"].as_array().unwrap();
@@ -9873,29 +9959,18 @@ targets = [
             "{attempt}"
         );
         assert_eq!(attempt["status"], 503, "{attempt}");
-        if index == 1 {
-            // The refill plan first observes the original identity's cooldown.
-            // This is a distinct local selection failure, not a second wire attempt.
-            assert!(attempt["provider_status"].is_null(), "{attempt}");
-            assert_eq!(
-                attempt["diagnostic_source"]["code"], "selected_provider_unavailable",
-                "{attempt}"
-            );
-            assert!(
-                attempt["failed_attempt_evidence"]["provider_response"].is_null(),
-                "{attempt}"
-            );
-        } else {
-            assert_eq!(attempt["provider_status"], 503, "{attempt}");
-            assert_eq!(
-                attempt["diagnostic_source"]["code"], "provider_http_503",
-                "{attempt}"
-            );
-            assert_eq!(
-                attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
-                "{attempt}"
-            );
-        }
+        // v31: the request path has no local cooldown observation, so every recorded
+        // attempt is a real provider send with the provider's own status. No attempt may
+        // be a request-local selection failure.
+        assert_eq!(attempt["provider_status"], 503, "{attempt}");
+        assert_eq!(
+            attempt["diagnostic_source"]["code"], "provider_http_503",
+            "{attempt}"
+        );
+        assert_eq!(
+            attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+            "{attempt}"
+        );
     }
 }
 
@@ -9969,11 +10044,39 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         .send()
         .await;
     let business_response = if exhausted {
-        if let Ok(response) = response {
-            assert!(
-                response.text().await.is_err(),
-                "exhaustion must break the request transport"
-            );
+        // v31 single/last eligible candidate passthrough: when the final candidate fails,
+        // the client reads that candidate's real provider status/body. A bare transport
+        // break stays legal only when no candidate produced any response. What is
+        // forbidden in both branches is a proxy-generated envelope or fabricated success.
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                assert!(
+                    !status.is_success(),
+                    "an exhausted request must never fabricate a successful response"
+                );
+                assert!(
+                    (400..600).contains(&status.as_u16()),
+                    "the last candidate's real provider status must be passed through: {status}"
+                );
+                let body = response.text().await.unwrap_or_default();
+                let lowered = body.to_lowercase();
+                for forbidden in [
+                    "network_error",
+                    "transport break",
+                    "proxy_generated",
+                    "response.failed",
+                    "response.completed",
+                ] {
+                    assert!(
+                        !lowered.contains(forbidden),
+                        "no proxy-generated envelope may reach the exhausted client: {body}"
+                    );
+                }
+            }
+            Err(_) => {
+                // Detectable transport close with no candidate response to pass through.
+            }
         }
         None
     } else if committed_failure {
@@ -10878,10 +10981,22 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     )
     .await
     .expect("fresh JSON request must finish without a fabricated provider error");
-    assert!(
-        json_response.is_err(),
-        "a provider HTTP failure must not fabricate a client HTTP response"
-    );
+    // v31 single/last eligible candidate passthrough: the one candidate's real provider
+    // status/body reach the client verbatim; only a proxy-generated replacement envelope
+    // or a fabricated 200 is forbidden.
+    if let Ok(response) = json_response {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        assert!(
+            (400..600).contains(&status.as_u16()),
+            "a passed-through provider failure must keep the real provider status: {status} {body}"
+        );
+        let lowered = body.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("network_error") && !lowered.contains("transport break"),
+            "no proxy-generated replacement envelope may reach the client: {body}"
+        );
+    }
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
     json_handle.shutdown().await;

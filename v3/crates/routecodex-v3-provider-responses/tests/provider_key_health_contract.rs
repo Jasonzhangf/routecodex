@@ -4,8 +4,9 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
-    V3ProviderHealthStore, V3ProviderKeyHealthStore, V3ProviderPrecoolObservationOutcome,
+    V3ProviderAvailabilityReader, V3ProviderFailureAction, V3ProviderFailureCooldownScope,
+    V3ProviderFailurePolicy, V3ProviderHealthStore, V3ProviderKeyHealthStore,
+    V3ProviderPrecoolObservationOutcome,
     V3ProviderProbePurpose, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
 };
 
@@ -1970,4 +1971,99 @@ fn declared_policy_duration_neither_undercuts_nor_extends_the_fixed_ladder() {
             "{expected} must own a committed row: {models:?}"
         );
     }
+}
+
+/// Regression guard for the multi-candidate manual/admin cooldown defect
+/// (`issue86b45e0_last_provider_policy::i86_multi_last_eligible_stays_routable`).
+///
+/// An accepted operator cooldown must hide the exact complete
+/// provider/interface/auth-key/model identity from multi-candidate selection,
+/// while the single-candidate terminal exception stays a target-side decision
+/// (the store never decides it). This test discriminates the two candidate
+/// causes reported for that defect by probing EVERY plausible identity spelling
+/// the runtime could pass for the same logical model:
+///
+///   - `wire-a`  (the wire name the `/cooldown-pool/add` body carries)
+///   - `internal-a` (an internal model id that differs from the wire name)
+///
+/// It also pins the manual row's projection shape so the row can never be
+/// mistaken for an automatic ladder row.
+#[test]
+fn manual_cooldown_hides_only_the_exact_identity_it_was_added_for() {
+    let store = V3ProviderKeyHealthStore::default();
+    let add_until = store
+        .add_cooldown_entry_for_interface("a", "default", Some("key"), Some("wire-a"), "probe",
+            60_000,
+            1_000,
+        )
+        .expect("operator cooldown is accepted");
+    assert_eq!(add_until, 61_000, "manual duration is exact");
+
+    // The projected row must be present and carry the exact declared duration.
+    let entries = store.cooldown_entries(1_000);
+    let row = entries
+        .iter()
+        .find(|entry| entry.model_id.as_deref() == Some("wire-a"))
+        .expect("the manual row must be projected into the cooldown pool");
+    assert_eq!(row.provider_id, "a");
+    assert_eq!(row.interface_id, "default");
+    assert_eq!(row.auth_alias.as_deref(), Some("key"));
+    assert_eq!(row.until_ms, Some(61_000));
+    assert_eq!(row.remaining_ms, Some(60_000));
+
+    // (1) The spelling the operator body used MUST be blocked.
+    let wire = store.availability_for_interface("a", "default", Some("key"), Some("wire-a"), 1_000);
+    assert!(
+        !wire.available,
+        "the exact identity the operator cooled must be unavailable: {wire:?}"
+    );
+    assert!(
+        wire.blocked_scopes.iter().any(|scope| scope.contains("cooldown")),
+        "the manual block must be visible as a cooldown scope: {wire:?}"
+    );
+
+    // (2) A different internal model id is a DIFFERENT identity: the manual row
+    //     must not leak to it (P0 identity independence).
+    let internal =
+        store.availability_for_interface("a", "default", Some("key"), Some("internal-a"), 1_000);
+    assert!(
+        internal.available,
+        "a manual cooldown must not exclude a sibling model identity: {internal:?}"
+    );
+
+    // (3) Sibling auth keys and other providers stay visible too.
+    for (provider, alias, model) in [
+        ("a", "other-key", "wire-a"),
+        ("b", "key", "wire-a"),
+    ] {
+        let sibling = store.availability_for_interface(
+            provider,
+            "default",
+            Some(alias),
+            Some(model),
+            1_000,
+        );
+        assert!(
+            sibling.available,
+            "manual cooldown must not leak to {provider}/{alias}/{model}: {sibling:?}"
+        );
+    }
+
+    // (4) Expiry alone does not restore routing: the identity stays a cooldown
+    //     substate (due probe) until a successful probe removes the row.
+    let due = store.availability_for_interface("a", "default", Some("key"), Some("wire-a"), 61_000);
+    assert!(
+        !due.available,
+        "expiry alone must not hide an excluded identity, it becomes a due probe: {due:?}"
+    );
+    let due_row = store
+        .cooldown_entries(61_000)
+        .into_iter()
+        .find(|entry| entry.model_id.as_deref() == Some("wire-a"))
+        .expect("the expired manual row remains a cooldown substate");
+    assert_eq!(due_row.until_ms, Some(61_000));
+    assert!(
+        due_row.remaining_ms.is_none_or(|remaining| remaining <= 0),
+        "the expired row reports no positive remaining time: {due_row:?}"
+    );
 }
