@@ -1,15 +1,26 @@
 //! Startup and write-time sample retention.
 //!
-//! Retention is optional housekeeping over the shared sample tree, so an
-//! unreadable or vanished directory must never fail the caller's mainline: the
+//! Retention is optional housekeeping over the shared sample tree. An
+//! unreadable or vanished directory never fails the caller's mainline: the
 //! affected entry is left untouched and the reason is recorded. The single
 //! contract-bound retention failure is the process-shared lock, which stays
 //! with its owner in [`crate::sample_store`]: uncoordinated retention would
 //! prune a tree another process is writing, so that case must surface as an
 //! explicit startup error instead of being skipped.
+//!
+//! A request directory containing `error.json` is a failure sample. Failure
+//! samples are protected by a time floor and must not be evicted by the
+//! success-sample count budget before the declared floor elapses.
 
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
+
+/// Failure evidence marker: a request directory containing this file is a failure sample.
+pub const V3_CODEX_SAMPLE_FAILURE_FILENAME: &str = "error.json";
+/// Default time floor, in milliseconds, a failure sample must survive before count-based
+/// retention may evict it. Independent of the success-sample count budget.
+pub const V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// Record one retention entry this pass could not inspect.
 fn record_v3_codex_sample_retention_skip(path: &Path, error: &dyn std::fmt::Display) {
@@ -109,6 +120,29 @@ pub(crate) fn enforce_v3_codex_sample_global_retention(
     if request_dirs.len() <= retention {
         return Ok(());
     }
+
+    let failure_floor_ms = std::env::var("V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(V3_CODEX_SAMPLE_FAILURE_RETENTION_FLOOR_MS);
+    let floor = Duration::from_millis(failure_floor_ms);
+    let now = SystemTime::now();
+
+    // A failure sample younger than the floor must not be evicted by count-based retention.
+    let is_protected_failure = |entry: &fs::DirEntry| -> bool {
+        if !entry
+            .path()
+            .join(V3_CODEX_SAMPLE_FAILURE_FILENAME)
+            .is_file()
+        {
+            return false;
+        }
+        let Ok(modified) = entry.metadata().and_then(|metadata| metadata.modified()) else {
+            return false;
+        };
+        matches!(now.duration_since(modified), Ok(age) if age < floor)
+    };
+
     request_dirs.sort_by(|left, right| {
         left.1
             .cmp(&right.1)
@@ -120,11 +154,12 @@ pub(crate) fn enforce_v3_codex_sample_global_retention(
         .filter(|(entry, _)| {
             protected_request_dir.is_none_or(|protected| entry.path() != protected)
         })
+        .filter(|(entry, _)| !is_protected_failure(entry))
         .take(excess)
         .collect::<Vec<_>>();
     if removable.len() != excess {
         return Err(format!(
-            "codex sample retention cannot preserve current request while removing {excess} directories"
+            "codex sample retention cannot remove {excess} directories because failure samples inside the retention floor must not be evicted"
         ));
     }
     for (entry, _) in removable {
