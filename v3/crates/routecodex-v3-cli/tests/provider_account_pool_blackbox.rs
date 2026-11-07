@@ -100,7 +100,7 @@ async fn early_429_fallback_and_manual_http_2xx_streaming_recovery_public() {
         .await
         .unwrap();
     });
-    let mut config = manifest(free_port(), port, 11, Mode::Relay);
+    let mut config = manifest(free_port(), port, Mode::Relay);
     config
         .providers
         .get_mut("poolpeer")
@@ -286,7 +286,6 @@ struct Peer {
 enum Scenario {
     FirstTenFail,
     AllFail,
-    BudgetEightFail,
 }
 
 struct CounterEnvironment {
@@ -531,7 +530,6 @@ async fn peer_provider(
     let should_fail = match peer.scenario {
         Scenario::FirstTenFail => index <= 10,
         Scenario::AllFail => true,
-        Scenario::BudgetEightFail => true,
     };
     if !valid_payload {
         return (
@@ -553,7 +551,6 @@ async fn peer_provider(
 fn manifest(
     server_port: u16,
     peer_port: u16,
-    request_max_attempts: u16,
     mode: Mode,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let execution = hub_v1_fixture::hub_v1_server_execution("test");
@@ -599,7 +596,7 @@ routing_group = "default"
 endpoints = ["responses"]
 
 {execution}
-attempt_store = {{ request_max_attempts = {request_max_attempts}, attempt_max_bytes = 67108864, attempt_max_frames = 262144, request_max_bytes = 67108864, process_max_bytes = 536870912, residence_timeout_ms = 600000 }}
+attempt_store = {{ residence_timeout_ms = 600000 }}
 
 [providers.poolpeer]
 {provider_block}
@@ -664,7 +661,7 @@ async fn run_json_sse_success(scenario: Scenario, mode: Mode) {
                 mode,
             });
         let peer_task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        let server = spawn_v3_server_aggregate(manifest(free_port(), peer_port, 11, mode))
+        let server = spawn_v3_server_aggregate(manifest(free_port(), peer_port, mode))
             .await
             .unwrap();
         let client = reqwest::Client::builder()
@@ -779,7 +776,7 @@ async fn run_all_fail(mode: Mode) {
             mode,
         });
     let peer_task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let server = spawn_v3_server_aggregate(manifest(free_port(), peer_port, 11, mode))
+    let server = spawn_v3_server_aggregate(manifest(free_port(), peer_port, mode))
         .await
         .unwrap();
     let client = reqwest::Client::builder()
@@ -822,66 +819,6 @@ async fn run_all_fail(mode: Mode) {
     peer_task.abort();
 }
 
-async fn run_budget_eight(mode: Mode) {
-    let _test_guard = TEST_LOCK.lock().await;
-    let _counter = CounterEnvironment::new();
-    let (receipts_tx, mut receipts_rx) = mpsc::unbounded_channel();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let peer_port = listener.local_addr().unwrap().port();
-    let app = Router::new()
-        .route(peer_route(mode), post(peer_provider))
-        .with_state(Peer {
-            receipts: receipts_tx,
-            scenario: Scenario::BudgetEightFail,
-            send_count: Arc::new(AtomicUsize::new(0)),
-            mode,
-        });
-    let peer_task = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let server = spawn_v3_server_aggregate(manifest(free_port(), peer_port, 8, mode))
-        .await
-        .unwrap();
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .unwrap();
-    let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
-
-    let result = client.post(&endpoint).json(&request(false)).send().await;
-    let raw = match result {
-        Err(_) => String::new(),
-        Ok(reply) => {
-            assert!(
-                !reply.status().is_success(),
-                "local budget stop cannot fabricate success"
-            );
-            reply.text().await.unwrap()
-        }
-    };
-    assert!(
-        !raw.contains("Endpoint is unavailable") && !raw.contains("server_error"),
-        "provider HTTP error body reached client: {raw}"
-    );
-
-    let received: Vec<_> = std::iter::from_fn(|| receipts_rx.try_recv().ok()).collect();
-    assert_eq!(received.len(), 8, "declared budget must permit eight sends");
-    assert!(
-        receipts_rx.try_recv().is_err(),
-        "declared budget 8 must stop before keys 9-11"
-    );
-    assert!(received.iter().all(|receipt| receipt.valid_payload));
-    assert_eq!(
-        received
-            .iter()
-            .map(|receipt| &receipt.identity)
-            .collect::<std::collections::BTreeSet<_>>()
-            .len(),
-        8,
-        "eight independent identities before local budget stop"
-    );
-    server.shutdown().await;
-    peer_task.abort();
-}
-
 #[tokio::test]
 async fn pool_11_first_10_fail_11_succeeds_direct() {
     run_json_sse_success(Scenario::FirstTenFail, Mode::Direct).await
@@ -900,14 +837,4 @@ async fn pool_11_all_fail_real_exhaustion_direct() {
 #[tokio::test]
 async fn pool_11_all_fail_real_exhaustion_relay() {
     run_all_fail(Mode::Relay).await
-}
-
-#[tokio::test]
-async fn pool_declared_budget_8_local_exhaustion_direct() {
-    run_budget_eight(Mode::Direct).await
-}
-
-#[tokio::test]
-async fn pool_declared_budget_8_local_exhaustion_relay() {
-    run_budget_eight(Mode::Relay).await
 }

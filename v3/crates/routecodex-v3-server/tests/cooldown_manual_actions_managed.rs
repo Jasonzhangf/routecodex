@@ -230,6 +230,21 @@ async fn pool_entries(client: &reqwest::Client, url: String) -> Vec<Value> {
     body["entries"].as_array().cloned().unwrap_or_default()
 }
 
+/// Decision 2 (2026-11-07): the pool API lists pending pre-cool observation
+/// substates next to committed cooldowns, so any "not cooled" assertion must
+/// filter those substates out and mean "no committed cooldown".
+fn committed_entries(entries: Vec<Value>) -> Vec<Value> {
+    entries
+        .into_iter()
+        .filter(|entry| {
+            matches!(
+                entry["state"].as_str(),
+                Some("session_cooldown") | Some("auth_key_cooldown")
+            )
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
     let _guard = TEST_LOCK.lock().await;

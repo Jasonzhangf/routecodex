@@ -366,7 +366,6 @@ pub struct V3Error04TargetExhaustionDecision {
     pub local_action: V3Error03TargetLocalAction,
     pub route_pool_remaining_after_exclusion: usize,
     pub default_pool_available: bool,
-    pub same_provider_retry_available: bool,
     pub target_recovery_pending: bool,
     pub target_exhausted: bool,
 }
@@ -540,9 +539,6 @@ impl V3Error05RecoveryAdmissionWitness {
 #[serde(rename_all = "snake_case")]
 pub enum V3Error05ExecutionAction {
     ReevaluateTarget,
-    WaitThenRetrySame {
-        recovery: V3Error05RecoveryAdmissionWitness,
-    },
     WaitThenReselect {
         recovery: V3Error05RecoveryAdmissionWitness,
     },
@@ -555,7 +551,6 @@ impl V3Error05ExecutionAction {
     pub const fn observability_label(&self) -> &'static str {
         match self {
             Self::ReevaluateTarget => "target_recovery_pending",
-            Self::WaitThenRetrySame { .. } => "retry_same_provider",
             Self::WaitThenReselect { .. } => "target_local_reselect",
             Self::ProjectTerminal | Self::RejectNonProviderError => "project_client_error",
             Self::ClientDisconnected => "project_client_disconnect",
@@ -571,7 +566,7 @@ impl V3Error05ExecutionAction {
 
     pub fn recovery_witness(&self) -> Option<&V3Error05RecoveryAdmissionWitness> {
         match self {
-            Self::WaitThenRetrySame { recovery } | Self::WaitThenReselect { recovery } => {
+            Self::WaitThenReselect { recovery } => {
                 Some(recovery)
             }
             Self::ReevaluateTarget
@@ -600,14 +595,12 @@ impl V3Error05ExecutionDecision {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
                     && self.exhaustion.route_pool_remaining_after_exclusion == 0
                     && !self.exhaustion.default_pool_available
-                    && !self.exhaustion.same_provider_retry_available
                     && self.exhaustion.target_exhausted
             }
             V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
                     && self.exhaustion.route_pool_remaining_after_exclusion == 0
                     && !self.exhaustion.default_pool_available
-                    && !self.exhaustion.same_provider_retry_available
                     && self.exhaustion.target_exhausted
             }
             V3ErrorSourceKind::ClientDisconnect => {
@@ -687,24 +680,40 @@ impl V3ExternalHttpWitness {
     pub fn body_read_failure(&self) -> Option<&str> {
         self.body_read_failure.as_deref()
     }
+
+    /// A complete real upstream HTTP error is eligible for the constrained v27
+    /// last-candidate passthrough. An incomplete body stays internal evidence
+    /// only, and a non-error status (for example a successful 200 head followed
+    /// by a local processing failure) is not a client error response.
+    pub fn is_complete_http_error(&self) -> bool {
+        self.status >= 400 && self.body_read_failure.is_none()
+    }
 }
 
 /// The provider failure terminal is either the real upstream HTTP response the
 /// provider returned, or no HTTP response at all.
 ///
-/// Provider failures never authorize a client error payload: neither branch
-/// fabricates a proxy 502, and neither branch decides what the client sees —
-/// every provider terminal is a client transport break. The real response is
-/// carried here only so the boundary can record it as provider-private
-/// evidence.
+/// Every variant records provider-private evidence. The sole exception to the
+/// client-error prohibition is `LastCandidateExternalHttp`, which the Server may
+/// return verbatim with its original status, body bytes, and legal end-to-end
+/// headers while no client HTTP head is committed. A mid-chain `ExternalHttp`
+/// never authorizes client projection, and `NoResponse` never fabricates one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderTerminalDisposition {
     /// A real upstream HTTP response was received and is recorded losslessly as
-    /// provider-private evidence, whatever its status.
+    /// provider-private evidence, whatever its status. It never authorizes
+    /// client projection.
     ExternalHttp(V3ExternalHttpWitness),
     /// No upstream HTTP response exists at all: the provider was never reached,
     /// or the transport failed before any response head arrived.
     NoResponse,
+    /// A normal last-candidate exhaustion whose current attempt received a
+    /// complete real upstream HTTP error. The Server may return this response
+    /// verbatim while no client HTTP head is committed. It is never produced
+    /// for a switching selection, a target-resolution fault, a request-local
+    /// compat/processing failure, an incomplete body, or a pre-head transport
+    /// error.
+    LastCandidateExternalHttp(V3ExternalHttpWitness),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1056,13 +1065,11 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_provider_availability(
     local_action: V3Error03TargetLocalAction,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
 ) -> V3Error04TargetExhaustionDecision {
     build_v3_error_04_target_exhaustion_decision_with_target_recovery(
         local_action,
         route_pool_remaining_after_exclusion,
         default_pool_available,
-        same_provider_retry_available,
         false,
     )
 }
@@ -1071,7 +1078,6 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
     local_action: V3Error03TargetLocalAction,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     target_recovery_pending: bool,
 ) -> V3Error04TargetExhaustionDecision {
     let provider_failure = matches!(
@@ -1084,14 +1090,6 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
         route_pool_remaining_after_exclusion == 0
             && !target_recovery_pending
             && !default_pool_available
-            && !(same_provider_retry_available
-                && local_action
-                    .classified
-                    .source
-                    .external_error
-                    .as_ref()
-                    .and_then(|error| error.status)
-                    == Some(429))
     } else {
         matches!(
             local_action.classified.source.source_kind,
@@ -1112,7 +1110,6 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
         local_action,
         route_pool_remaining_after_exclusion,
         default_pool_available,
-        same_provider_retry_available,
         target_recovery_pending,
         target_exhausted,
     }
@@ -1135,21 +1132,6 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
             if recoverable_response_processing && exhaustion.target_recovery_pending =>
         {
             V3Error05ExecutionAction::ReevaluateTarget
-        }
-        V3ErrorSourceKind::ProviderFailure
-            if exhaustion.same_provider_retry_available
-                && exhaustion
-                    .local_action
-                    .classified
-                    .source
-                    .external_error
-                    .as_ref()
-                    .and_then(|error| error.status)
-                    == Some(429) =>
-        {
-            V3Error05ExecutionAction::WaitThenRetrySame {
-                recovery: recovery.expect("429 retry requires global recovery admission"),
-            }
         }
         V3ErrorSourceKind::ProviderFailure if alternatives_available => {
             V3Error05ExecutionAction::WaitThenReselect {
@@ -1285,12 +1267,33 @@ impl V3ErrorHandlingCenter {
                 .source_kind,
             V3ErrorSourceKind::ProviderFailure,
         );
-        // The witness is evidence, never a client projection: exhaustion does
-        // not authorize a client error response, including a real upstream HTTP
-        // error, and the boundary records the witness as provider-private
-        // evidence before it breaks the client transport.
+        // The witness is evidence, never a client projection: a switching
+        // selection, a request-local compat/processing failure and every other
+        // terminal record the real upstream response as provider-private
+        // evidence before the boundary breaks the client transport. The v27
+        // narrow exception lives in `last_candidate_terminal_disposition` and is
+        // reserved for the normal last-candidate exhaustion.
         match witness {
             Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+            None => V3ProviderTerminalDisposition::NoResponse,
+        }
+    }
+
+    /// Build the constrained v27 normal last-candidate terminal.
+    ///
+    /// Only a complete real upstream HTTP error earns the client-visible
+    /// variant. An incomplete body, a non-error status and a missing response
+    /// all keep the existing provider-private evidence. The caller must already
+    /// have proven the normal last-candidate exhaustion: this constructor never
+    /// re-checks selection, health, or pin scope.
+    pub fn last_candidate_terminal_disposition(
+        witness: Option<V3ExternalHttpWitness>,
+    ) -> V3ProviderTerminalDisposition {
+        match witness {
+            Some(witness) if witness.is_complete_http_error() => {
+                V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness)
+            }
+            Some(witness) => V3ProviderTerminalDisposition::ExternalHttp(witness),
             None => V3ProviderTerminalDisposition::NoResponse,
         }
     }
@@ -1314,7 +1317,6 @@ impl V3ErrorHandlingCenter {
     pub fn decide_provider(
         input: V3ErrorHandlingCenterInput,
         default_pool_available: bool,
-        same_provider_retry_available: bool,
         recovery: Option<V3Error05RecoveryAdmissionWitness>,
     ) -> V3Error05ExecutionDecision {
         let classified = build_v3_error_02_classified_from_v3_error_01(input.source);
@@ -1327,7 +1329,6 @@ impl V3ErrorHandlingCenter {
             action,
             input.candidates_remaining,
             default_pool_available,
-            same_provider_retry_available,
         );
         build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, recovery)
     }
@@ -1342,7 +1343,7 @@ impl V3ErrorHandlingCenter {
             input.source.source_kind == V3ErrorSourceKind::RuntimeFailure;
         let target_pool_exhausted =
             input.source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
-        let execution = Self::decide_provider(input, false, false, None);
+        let execution = Self::decide_provider(input, false, None);
         let mut projected = Self::project_terminal(execution);
         let linked_status = projected
             .body
@@ -1550,7 +1551,7 @@ pub fn project_v3_post_commit_sse_source(
             0,
         );
         let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-            action, 0, false, false,
+            action, 0, false,
         );
         let decision = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
         let terminal = decision
@@ -1597,9 +1598,12 @@ pub fn project_v3_pending_endpoint_error(
 }
 
 mod sse_disposition;
-/// Consecutive real failures required by the default recoverable health policy.
-/// Authentication and explicitly terminal policies retain their own threshold.
-pub const V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD: u32 = 1;
+/// Consecutive real failures required by the default recoverable health policy
+/// before the exact complete identity enters the cooldown pool (v29: 3
+/// consecutive failures; cooldown ladder durations are owned by the provider
+/// health store). Authentication and explicitly terminal policies retain their
+/// own threshold.
+pub const V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD: u32 = 3;
 
 mod subscription;
 #[cfg(test)]

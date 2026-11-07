@@ -321,7 +321,7 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
         "Responses SSE event must be a JSON object",
     );
 
-    for _attempt in 0..1 {
+    for attempt in 0..3 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -342,14 +342,21 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
                 1,
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
             );
-        assert_eq!(
-            projection.available, false,
-            "one typed recoverable post-commit SSE failure must cool the exact identity"
-        );
-        assert!(projection
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope == "provider_cooldown_probe_pending"));
+        if attempt < 2 {
+            assert!(
+                projection.available,
+                "below the shared consecutive threshold a post-commit SSE failure must not cool"
+            );
+        } else {
+            assert!(
+                !projection.available,
+                "three typed recoverable post-commit SSE failures must cool the exact identity"
+            );
+            assert!(projection
+                .blocked_scopes
+                .iter()
+                .any(|scope| scope == "provider_cooldown_probe_pending"));
+        }
     }
 }
 
@@ -370,7 +377,7 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         "Responses SSE event must be a JSON object",
     );
 
-    for _ in 0..1 {
+    for _ in 0..3 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -381,6 +388,19 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
             )
             .expect("post-commit SSE failure observation");
     }
+    assert!(
+        !routecodex_v3_provider_responses::V3ProviderSchedulingReader::scheduling_projection(
+            &health,
+            "primary",
+            "key1",
+            "gpt-test",
+            1,
+            1,
+            v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
+        )
+        .available,
+        "the third consecutive post-commit SSE failure must commit the shared cooldown"
+    );
     let success = health
         .store()
         .record_provider_key_success(
@@ -427,7 +447,7 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         "a matching business success must remove the exact cooldown instead of keeping its probe"
     );
 
-    for _ in 0..1 {
+    for _ in 0..3 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -450,7 +470,7 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         );
     assert!(
         !after_post_success_failures.available,
-        "after the business-success release, one non-429 provider failure must cool again"
+        "after the business-success release, three consecutive non-429 provider failures must cool again"
     );
 
     let permit = health
@@ -505,15 +525,15 @@ fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
     assert!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(before_failures_ms + 4_999)
+            .provider_cooldown_probe_keys_due(before_failures_ms + 9_999)
             .expect("provider cooldown probe query")
             .is_empty(),
-        "the recovery probe must not be due before five seconds"
+        "the recovery probe must not be due before the cooldown floor"
     );
     let after_failures_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
     let probe_keys = health
         .store()
-        .provider_cooldown_probe_keys_due(after_failures_ms + 5_000)
+        .provider_cooldown_probe_keys_due(after_failures_ms + 10_000)
         .expect("provider cooldown probe query");
     assert_eq!(
         probe_keys,
@@ -522,7 +542,7 @@ fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
             Some("key1".to_string()),
             Some("gpt-test".to_string()),
         )],
-        "three post-commit SSE failures must enter the 429-equivalent recovery ladder at 5s"
+        "three post-commit SSE failures must enter the ordinary recovery ladder at the 10s cooldown floor"
     );
 }
 

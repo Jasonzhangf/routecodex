@@ -140,6 +140,25 @@ targets = {targets}
             tasks: vec![a_task, b_task],
         }
     }
+    /// v27 single/last eligible candidate passthrough: the client receives the
+    /// provider's own status and body verbatim (the helper keeps only the body
+    /// text), never a proxy-generated replacement envelope and never a fabricated
+    /// success.
+    fn assert_passthrough(body: &str) {
+        assert!(
+            body.contains("controlled provider failure"),
+            "the provider's own failure body must pass through verbatim: {body}"
+        );
+        assert!(
+            !body.contains("BUSINESS_"),
+            "a failed attempt must never be fabricated as a business success: {body}"
+        );
+        assert!(
+            !body.contains("routecodex"),
+            "no proxy-generated error envelope may be fabricated: {body}"
+        );
+    }
+
     async fn request(&self) -> Result<String, reqwest::Error> {
         self.request_stream(true).await
     }
@@ -233,10 +252,12 @@ async fn i86_last_eligible_failure_is_terminal() {
         pool["entries"].as_array().unwrap().is_empty(),
         "last candidate must not acquire cooldown: {pool}"
     );
-    assert!(
-        replies.iter().all(Result::is_err),
-        "failed attempt must terminate transport, never return normal empty success"
-    );
+    for reply in &replies {
+        let body = reply
+            .as_ref()
+            .unwrap_or_else(|error| panic!("the single candidate must answer the client: {error}"));
+        Entry::assert_passthrough(body);
+    }
 }
 
 #[tokio::test]
@@ -285,10 +306,12 @@ async fn i86_exhaustion_is_request_local() {
         entry.stop().await;
         sibling.stop().await;
         assert_eq!(calls, (1, 1), "each failed candidate is sent once");
-        assert!(
-            failed.is_err(),
-            "JSON/SSE exhaustion must be detectable transport termination"
-        );
+        {
+            let body = failed.as_ref().unwrap_or_else(|error| {
+                panic!("the last eligible candidate must answer the client: {error}")
+            });
+            Entry::assert_passthrough(body);
+        }
         assert!(
             healthy.unwrap().contains("BUSINESS_B"),
             "failure must not terminate an independent request"
@@ -327,7 +350,12 @@ async fn i86_relay_switch_and_last_terminal() {
         calls, 2,
         "Relay must send each new request once without terminal retry"
     );
-    assert!(one.is_err() && two.is_err());
+    for reply in [&one, &two] {
+        let body = reply
+            .as_ref()
+            .unwrap_or_else(|error| panic!("the relay last candidate must answer the client: {error}"));
+        Entry::assert_passthrough(body);
+    }
     assert!(
         pool["entries"].as_array().unwrap().is_empty(),
         "Relay last candidate cannot cool: {pool}"

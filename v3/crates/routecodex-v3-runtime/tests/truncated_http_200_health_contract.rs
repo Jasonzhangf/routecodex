@@ -9,8 +9,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime_with_health_and_retry_policy, V3ResponsesRelayClientBody,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    execute_v3_responses_relay_runtime_with_transport_health, V3ResponsesRelayClientBody,
+    V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::json;
@@ -202,7 +202,7 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         captures: Mutex::new(Vec::new()),
         turn: AtomicUsize::new(0),
     };
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -221,9 +221,6 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         },
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("truncated primary must reselect into the healthy secondary");
@@ -242,18 +239,35 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    assert_eq!(event.failure_count, 1);
-    assert_eq!(event.health_state, "cooldown");
-    assert!(event.cooldown_until_ms.is_some());
+    // v31: one truncated-200 failure is a deferred observation below the
+    // consecutive ladder threshold: the store streak is not applied yet and no
+    // cooldown record exists.
+    assert_eq!(
+        event.failure_count, 0,
+        "a first deferred failure must not advance the store streak: {event:?}"
+    );
+    assert_ne!(
+        event.health_state, "cooldown",
+        "one failure must not commit a provider cooldown: {event:?}"
+    );
+    assert!(event.cooldown_until_ms.is_none());
+
+    // The pre-cool hold is a runtime observation substate, not a store
+    // cooldown: the exact identity is listed as pending observation while the
+    // store record itself stays available below the ladder threshold.
+    assert!(
+        provider_health
+            .pending_precool_observations()
+            .iter()
+            .any(|observation| {
+                observation.provider_id == "limited"
+                    && observation.auth_alias.as_deref() == Some("key1")
+                    && observation.model_id.as_deref() == Some("gpt-5.5")
+            }),
+        "the exact failed identity must be held in pre-cool observation"
+    );
 
     let now = u64::MAX;
-    assert!(
-        !provider_health
-            .store()
-            .availability("limited", Some("key1"), Some("gpt-5.5"), now)
-            .available,
-        "the exact failed identity must be cooled"
-    );
     assert!(
         provider_health
             .store()
@@ -290,7 +304,7 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
         captures: Mutex::new(Vec::new()),
         turn: AtomicUsize::new(0),
     };
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -309,9 +323,6 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
         },
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("a last-candidate transport failure still projects a typed terminal");
@@ -348,7 +359,7 @@ async fn complete_http_502_is_health_neutral_when_it_is_the_last_candidate() {
     let manifest = single_candidate_manifest(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -367,9 +378,6 @@ async fn complete_http_502_is_health_neutral_when_it_is_the_last_candidate() {
         },
         &CompleteHttp502Transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("a last-candidate HTTP error must project a typed terminal");

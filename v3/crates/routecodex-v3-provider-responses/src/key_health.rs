@@ -70,14 +70,6 @@ pub enum V3ProviderPrecoolObservationOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum V3ProviderRateLimitProbeDisposition {
-    NotApplicable,
-    Superseded,
-    Retained,
-    Reclassified,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct V3ProbeAcquisitionId(pub(crate) u64);
 
 impl V3ProviderHealthProbePermit {

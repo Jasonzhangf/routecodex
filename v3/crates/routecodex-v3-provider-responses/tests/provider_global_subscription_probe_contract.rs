@@ -21,7 +21,46 @@ fn fail(store: &V3ProviderHealthStore, session_id: &str, model_id: &str, now_ms:
 #[test]
 fn default_failure_blocks_exact_key_model_across_sessions() {
     let store = V3ProviderHealthStore::default();
+    // The consecutive count is scoped to the complete provider/key/model
+    // identity across sessions: the third failure (from any session) commits
+    // the v29 cooldown for that exact identity.
     fail(&store, "session-a", "model-a", 10);
+    fail(&store, "session-a", "model-a", 11);
+    assert!(
+        store
+            .availability_for_session(
+                &scope("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("model-a"),
+                11,
+            )
+            .available,
+        "below the consecutive threshold the identity stays visible"
+    );
+    fail(&store, "session-b", "model-a", 12);
+    for session_id in ["session-a", "session-b"] {
+        assert!(
+            !store
+                .availability_for_session(
+                    &scope(session_id),
+                    "provider-a",
+                    Some("key-a"),
+                    Some("model-a"),
+                    13,
+                )
+                .available,
+            "the committed cooldown must cover every session of the identity"
+        );
+    }
+}
+
+#[test]
+fn different_keys_and_models_do_not_combine() {
+    let store = V3ProviderHealthStore::default();
+    for now_ms in [10, 11, 12] {
+        fail(&store, "session-a", "model-a", now_ms);
+    }
     assert!(
         !store
             .availability_for_session(
@@ -29,29 +68,11 @@ fn default_failure_blocks_exact_key_model_across_sessions() {
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                10,
-            )
-            .available
-    );
-    fail(&store, "session-b", "model-a", 11);
-    assert!(
-        !store
-            .availability_for_session(
-                &scope("session-b"),
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
                 13,
             )
-            .available
+            .available,
+        "three consecutive failures on one exact identity must cool it"
     );
-}
-
-#[test]
-fn different_keys_and_models_do_not_combine() {
-    let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 10);
-    fail(&store, "session-a", "model-a", 12);
     assert!(
         store
             .availability_for_session(
@@ -81,7 +102,9 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
     fail(&store, "session-a", "model-a", 2);
-    let first_due = 5_002;
+    fail(&store, "session-a", "model-a", 3);
+    // The committed 10s cooldown minimum gates the first probe.
+    let first_due = 10_003;
     assert!(store
         .provider_cooldown_probe_keys_due(first_due - 1)
         .unwrap()
@@ -129,8 +152,9 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
     fail(&store, "session-a", "model-a", 2);
+    fail(&store, "session-a", "model-a", 3);
     let due = store
-        .cooldown_entries(2)
+        .cooldown_entries(3)
         .into_iter()
         .find(|entry| entry.kind == "probe")
         .unwrap()
@@ -196,7 +220,8 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
     fail(&store, "session-a", "model-a", 2);
-    let first_due = 5_002;
+    fail(&store, "session-a", "model-a", 3);
+    let first_due = 10_003;
     let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
@@ -239,6 +264,7 @@ fn probe_acquisition_is_single_flight() {
     let store = V3ProviderHealthStore::default();
     fail(&store, "session-a", "model-a", 1);
     fail(&store, "session-a", "model-a", 2);
+    fail(&store, "session-a", "model-a", 3);
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()

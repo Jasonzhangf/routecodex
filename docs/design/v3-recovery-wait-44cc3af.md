@@ -1,8 +1,20 @@
 # 44cc3af: recovery waiting before terminal exhaustion
 
+> **SUPERSEDED 2026-11-07 by requirements v31.** The 429-only "two-minute episode /
+> 30-minute minimum / one-hour probe-required" contract described below is retired and
+> is not runtime behaviour. Every recoverable provider failure (429/500/502 and every
+> other HTTP/error-channel failure) shares one policy: one consecutive failure is counted
+> immediately for the exact provider/interface/model/key identity per listener, 3 count
+> commits a 10s cooldown, 5 commits 30s, 10 commits 1h, and a declared success resets the
+> count. The cooldown changes only that identity's pool visibility; it never blocks,
+> waits for, or resends a request, and a failed probe advances only its own probe cadence.
+> Requests are never admitted through a recovery wait, and with a single/last eligible
+> candidate the original typed Error plus the real provider status/body pass through to the
+> client. The text below is kept as historical design record only.
+
 ## Current pool-empty recovery contract
 
-### Sustained 429 policy override, 2026-10-26
+### Sustained 429 policy override, 2026-10-26 (historical; superseded by requirements v31)
 
 Early 429 remains exact-identity capacity backpressure. A new real 429 spanning
 at least two minutes since the first unresolved 429 commits a 30-minute minimum

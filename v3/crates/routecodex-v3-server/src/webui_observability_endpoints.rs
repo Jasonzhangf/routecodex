@@ -40,7 +40,11 @@ fn loopback_guard(
 }
 
 /// feature_id: v3.server_internal_observability_projection
-/// GET /_routecodex/health/cooldown-pool — returns current cooldown entries for this listener.
+/// GET /_routecodex/health/cooldown-pool — returns current cooldown entries
+/// for this listener. Pending pre-cool observation holds are listed as
+/// cooldown substates (AGENTS.md Runtime Ownership: probe/observation holds
+/// are cooldown substates and expiry alone must not hide an excluded
+/// identity); they are visibility holds, not committed cooldowns.
 pub(crate) async fn cooldown_pool(
     State(state): State<Arc<V3ListenerState>>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -49,8 +53,27 @@ pub(crate) async fn cooldown_pool(
         return response;
     }
     let now_ms = now_ms();
-    let store = state.provider_health.store();
-    let entries = store.cooldown_entries(now_ms);
+    let mut entries: Vec<serde_json::Value> = state
+        .provider_health
+        .store()
+        .cooldown_entries(now_ms)
+        .into_iter()
+        .map(|entry| serde_json::to_value(entry).unwrap_or_default())
+        .collect();
+    for observation in state.provider_health.pending_precool_observations() {
+        entries.push(serde_json::json!({
+            "provider_id": observation.provider_id,
+            "interface_id": observation.interface_id,
+            "auth_alias": observation.auth_alias,
+            "model_id": observation.model_id,
+            "state": "pre_cool_observation",
+            "until_ms": serde_json::Value::Null,
+            "remaining_ms": serde_json::Value::Null,
+            "reason": observation.reason,
+            "failure_count": observation.consecutive_failures,
+            "kind": "probe",
+        }));
+    }
     Json(serde_json::json!({
         "port": state.server.port,
         "server_id": state.server.id,

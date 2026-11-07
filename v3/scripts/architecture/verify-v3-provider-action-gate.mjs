@@ -197,41 +197,53 @@ assertCallerInvokesCallee({
   callee_symbol: 'run_v3_relay_provider_failure_policy_with_response_source',
   callee_file: files.policy,
 });
+// The Provider-lifecycle observation lease is the only retained gate
+// machinery (2026-11-07: the request-admission permit lane was removed with
+// the 429-ordinary-path port). No token here may reintroduce request
+// admission, waiter queues, or request waits.
 for (const token of [
   'pub const V3_PROVIDER_ACTION_ISOLATED_DELAY_MS: u64 = 1_000;',
   'pub const V3_PROVIDER_ACTION_SUSTAINED_DELAY_MS: u64 = 5_000;',
   'pub fn process_shared() -> Self',
   'static SHARED: OnceLock<V3ProviderActionGate>',
-  'pub(crate) struct V3ProviderActionPermit',
-  'impl Drop for V3ProviderActionPermit',
-  'self.gate.abandon_admission(&self.key, self.generation)',
-  'waiter_queue: VecDeque<u64>',
-  'state.admitted_generation.is_some()',
-  '!require_admission && state.admitted_generation.is_some()',
-  'let active_admission_owned = states',
-  'if !active_admission_owned {',
-  '(!self.admit_action || !exact_has_active_admission)',
-  'record_failure_and_commit_terminal_projection',
-  'pub async fn wait_for_recovery_ticket(',
-  'pub fn abandon_admission(',
-  'pub fn commit_terminal_admission(',
-  'V3ProviderActionRecoveryTransition',
-  'state.next_admission_at = now + Duration::from_millis(sustained_delay_ms());',
+  'pub(crate) struct V3ProviderObservationLease',
+  'impl Drop for V3ProviderObservationLease',
+  'pub(crate) fn try_admit_observation(',
+  'fn release_observation(',
+  'pub(crate) fn observation_due_at(',
+  'pub fn record_failure_with_minimum_delay(',
+  'pub fn record_provider_success(',
 ]) {
   requireText(text.gate, files.gate, token);
 }
-requireText(text.gate, files.gate, 'admitted_generation');
+if (/waiter_queue|admitted_generation|require_admission/u.test(text.gate)) {
+  failures.push(`${files.gate}: retired request-admission permit machinery must stay removed`);
+}
 const recordProviderSuccessBody = findFunctionBody(
   text.gate,
   'V3ProviderActionGate::record_provider_success',
   files.gate,
 );
 if (
-  !/key\.provider_scope\s*==\s*\*provider_scope/u
+  !/key\.provider_scope\s*!=\s*\*scope/u
     .test(recordProviderSuccessBody)
 ) {
   failures.push(
     `${files.gate}: provider success may release only its exact provider scope`,
+  );
+}
+const releaseObservationBody = findFunctionBody(
+  text.gate,
+  'V3ProviderActionGate::release_observation',
+  files.gate,
+);
+if (
+  !/state\.observing_generation\s*!=\s*Some\(generation\)/u
+    .test(releaseObservationBody)
+  || !/state\.observing_generation\s*=\s*None/u.test(releaseObservationBody)
+) {
+  failures.push(
+    `${files.gate}: observation release must require and clear the exact observing generation`,
   );
 }
 for (const forbidden of [
@@ -247,33 +259,12 @@ for (const forbidden of [
     failures.push(`${files.gate}: retired cross-request coupling ${forbidden}`);
   }
 }
-for (const requiredDiagnostic of [
-  'provider action gate state disappeared without an explicit transition',
-  'provider action gate notification channel closed without an explicit transition',
-]) {
-  requireText(text.gate, files.gate, requiredDiagnostic);
-}
-if (
-  /generation:\s*0,[\s\S]{0,180}?released_by_success:\s*true/u.test(text.gate)
-) {
+// The observation lease is generation-scoped state, not a notification
+// channel: the exact observing generation is the only release authority.
+requireText(text.gate, files.gate, 'observing_generation');
+if (/ReleasedBySuccess|released_by_success|wait_for_recovery_ticket/u.test(text.gate)) {
   failures.push(
-    `${files.gate}: missing state or notification closure must not be wrapped as provider success`,
-  );
-}
-if (
-  text.gate.includes(
-    'state.admitted_generation == Some(state.generation)\n                    && now >= state.next_admission_at',
-  )
-) {
-  failures.push(
-    `${files.gate}: admitted provider action must not expire from wall-clock time while its permit is owned`,
-  );
-}
-if (
-  !/ReleasedBySuccess\s*\(\s*V3ProviderActionRecoveryTicket\s*\)/u.test(text.gate)
-) {
-  failures.push(
-    `${files.gate}: success-released recovery transition must carry the exact retained recovery ticket`,
+    `${files.gate}: retired admission-wait machinery must stay removed`,
   );
 }
 
@@ -328,27 +319,12 @@ for (const [name, source, rel] of [
   ['Responses Relay', text.responses, files.responses],
   ['Anthropic Relay', text.anthropic, files.anthropic],
 ]) {
-  requireText(source, rel, 'wait_for_error05_recovery');
-  requireText(source, rel, 'V3ProviderActionGateAdmission');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::Superseded');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::ReleasedBySuccess');
-  requireText(source, rel, 'V3ProviderActionGateTerminalReevaluation');
-  const successReleaseRearm =
-    /V3ProviderActionRecoveryTransition::ReleasedBySuccess\(ticket\)[\s\S]{0,80}?=>\s*\{[\s\S]{0,480}?pending_provider_action_recovery\s*=[\s\S]{0,220}?ticket[\s\S]{0,120}?recovery_witness\(\)/u;
-  if (!successReleaseRearm.test(source)) {
-    failures.push(
-      `${rel}: ${name} must re-arm the exact retained recovery ticket after provider success releases a queued waiter`,
-    );
-  }
+  // v27: the request path owns no provider lifecycle wait. The Provider
+  // observation gate remains a Provider-lifecycle resource, so this verifier
+  // no longer requires recovery-wait plumbing in the request callers; it only
+  // keeps the negative invariants that forbid reviving it.
   if (!source.includes('V3Error05ExecutionAction')) {
     failures.push(`${rel}: ${name} must consume typed Error05 actions`);
-  }
-  requireText(source, rel, 'let mut pending_provider_action_recovery = None;');
-  const recoveryOnlyWait = /if\s+let\s+Some\(recovery\)\s*=\s*pending_provider_action_recovery\.take\(\)\s*\{[\s\S]{0,700}?wait_for_error05_recovery/u;
-  if (!recoveryOnlyWait.test(source)) {
-    failures.push(
-      `${rel}: ${name} must wait on the provider action gate only after the current request enters Error05 recovery`,
-    );
   }
   if (source.includes('pending_provider_action_gate')) {
     failures.push(`${rel}: ${name} must not retain bool-only provider action recovery state`);
@@ -358,33 +334,12 @@ for (const [name, source, rel] of [
   }
 }
 // openai_chat/gemini 已收敛到统一 relay 骨架：完整 provider action gate 语义
-// 分布在骨架（recovery 等待/重试循环）与共享失败策略（Error05 action 消费）中。
+// 分布在骨架（Provider lifecycle observation）与共享失败策略（Error05 action 消费）中。
 {
   const source = `${text.relayCore}\n${text.relayShared}`;
   const rel = `${files.relayCore} + ${files.relayShared}`;
   const name = 'Relay Skeleton';
-  requireText(source, rel, 'wait_for_error05_recovery');
-  requireText(source, rel, 'V3ProviderActionGateAdmission');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::Superseded');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::ReleasedBySuccess');
-  requireText(source, rel, 'V3ProviderActionGateTerminalReevaluation');
-  const successReleaseRearm =
-    /V3ProviderActionRecoveryTransition::ReleasedBySuccess\(ticket\)[\s\S]{0,80}?=>\s*\{[\s\S]{0,480}?pending_provider_action_recovery\s*=[\s\S]{0,220}?ticket[\s\S]{0,120}?recovery_witness\(\)/u;
-  if (!successReleaseRearm.test(source)) {
-    failures.push(
-      `${rel}: ${name} must re-arm the exact retained recovery ticket after provider success releases a queued waiter`,
-    );
-  }
-  if (!source.includes('V3Error05ExecutionAction')) {
-    failures.push(`${rel}: ${name} must consume typed Error05 actions`);
-  }
-  requireText(source, rel, 'let mut pending_provider_action_recovery = None;');
-  const recoveryOnlyWait = /if\s+let\s+Some\(recovery\)\s*=\s*pending_provider_action_recovery\.take\(\)\s*\{[\s\S]{0,700}?wait_for_error05_recovery/u;
-  if (!recoveryOnlyWait.test(source)) {
-    failures.push(
-      `${rel}: ${name} must wait on the provider action gate only after the current request enters Error05 recovery`,
-    );
-  }
+  requireText(source, rel, 'V3Error05ExecutionAction');
   if (source.includes('pending_provider_action_gate')) {
     failures.push(`${rel}: ${name} must not retain bool-only provider action recovery state`);
   }
@@ -418,8 +373,6 @@ if (!targetResolutionFailure) {
 }
 for (const token of [
   'V3ProviderActionRecoveryTicket',
-  'V3ProviderActionRecoveryTransition',
-  'wait_for_recovery_ticket',
   'recovery_ticket',
 ]) {
   requireText(text.gate, files.gate, token);
@@ -455,7 +408,7 @@ if (text.providerSseJsonCodec.includes('matches!(event_type, "response.completed
     `${files.providerSseJsonCodec}: provider response.done must not satisfy the response.completed terminal contract`,
   );
 }
-requireOccurrenceCount(text.direct, files.direct, 'drop(provider_action_permit.take());', 3);
+// v27: Direct request execution acquires no provider action permit.
 requireText(
   text.direct,
   files.direct,
@@ -479,37 +432,10 @@ for (const forbidden of [
     failures.push(`${files.direct} + ${files.directSse}: forbidden removed Direct lifecycle symbol ${forbidden}`);
   }
 }
-requireOccurrenceCount(
-  text.responses,
-  files.responses,
-  'drop(_provider_action_permit.take());',
-  9,
-);
-// openai_chat/gemini 的局部变量 permit drop（每协议 4 处）已收敛到统一 relay 骨架。
-requireOccurrenceCount(
-  text.relayCore,
-  files.relayCore,
-  'drop(provider_action_permit.take());',
-  4,
-);
-requireOccurrenceCount(
-  text.openaiChat,
-  files.openaiChat,
-  'drop(self._provider_action_permit.take());',
-  1,
-);
-requireOccurrenceCount(
-  text.anthropic,
-  files.anthropic,
-  'drop(_provider_action_permit.take());',
-  7,
-);
-requireOccurrenceCount(
-  text.gemini,
-  files.gemini,
-  'drop(self._provider_action_permit.take());',
-  1,
-);
+// v27: the request path acquires no provider action permit and owns no
+// provider lifecycle lease, so the retired per-caller permit-drop plumbing is
+// no longer required here. Provider lifecycle ownership is verified through
+// the Provider observation state and its public behavior tests.
 for (const [name, source, rel] of [
   ['Anthropic Relay', text.anthropic, files.anthropic],
 ]) {
@@ -537,7 +463,7 @@ requireText(
 );
 for (const token of [
   'project_v3_client_disconnect',
-  'record_provider_action_failure',
+  'apply_v3_internal_provider_failure_policy',
   'last_candidate_terminal',
   'build_v3_relay_provider_error_05_decision',
   'terminal_projection_for',
@@ -566,25 +492,17 @@ for (const forbidden of [
 }
 
 const requiredGateTests = [
-  'isolated_failure_blocks_one_action_for_at_least_one_second',
-  'isolated_terminal_projection_commits_without_waiting_for_provider_action_admission',
-  'terminal_projection_advances_an_active_exact_key_and_preserves_its_permit',
-  'unrelated_success_cannot_delay_a_terminal_projection',
-  'process_shared_handles_observe_the_same_cross_request_generation',
-  'terminal_transition_wakes_old_waiter_for_reselection_then_serializes_next_generation',
-  'admitted_action_requires_explicit_drop_before_replacement_generation',
-  'unrelated_same_group_provider_success_cannot_release_an_owned_action_permit',
-  'fifo_waiter_cancellation_removes_only_its_ticket',
-  'success_released_recovery_reenters_the_retained_five_second_generation',
+  'configured_backoff_is_a_minimum_for_provider_observation',
+  'consecutive_failures_follow_one_three_five_and_success_resets',
 ];
+
 for (const testName of requiredGateTests) {
   assertRustTest(text.gateTests, files.gateTests, testName);
 }
 for (const testName of [
   'non429_failure_does_not_escalate_another_identity_in_the_same_session',
-  'admitted_identity_cannot_occupy_another_identity_in_the_same_session',
-  'terminal_identity_cannot_supersede_another_identity_in_the_same_session',
-  'rate_limit_lane_and_success_release_are_shared_across_sessions',
+  'session_success_does_not_clear_another_observation_scope',
+  'rate_limit_backoff_is_independent_for_other_auth_keys',
 ]) {
   assertRustTest(text.sessionGateTests, files.sessionGateTests, testName);
 }
@@ -712,12 +630,7 @@ for (const [nodeId, owner] of [
   ['V3ProviderReqOutbound08WirePayload', 'routecodex-v3-runtime'],
   ['V3Error01SourceRaised', 'routecodex-v3-error'],
   ['V3Error05ExecutionDecision', 'routecodex-v3-error'],
-  ['V3Error05RecoveryWitness', 'routecodex-v3-error'],
-  ['V3ProviderActionGateAdmission', 'routecodex-v3-runtime'],
-  ['V3ProviderActionGateTerminalAdmission', 'routecodex-v3-runtime'],
-  ['V3ProviderActionGateTerminalCommitted', 'routecodex-v3-runtime'],
   ['V3ProviderActionPermitInFlight', 'routecodex-v3-runtime'],
-  ['V3ProviderActionPermitAbandonRequested', 'routecodex-v3-runtime'],
   ['V3ProviderActionPermitAbandoned', 'routecodex-v3-runtime'],
   ['V3ProviderActionSuccessObserved', 'routecodex-v3-runtime'],
   ['V3ProviderActionFailureObserved', 'routecodex-v3-runtime'],
@@ -740,13 +653,7 @@ assertExactStrings(
 );
 assertExactStrings(
   manifest?.return_path,
-  [
-    'V3ProviderActionPermitInFlight',
-    'V3ProviderActionGateTerminalCommitted',
-    'V3ProviderActionSuccessRecorded',
-    'V3ProviderActionFailureRecorded',
-    'V3ProviderActionPermitAbandoned',
-  ],
+  ['V3ProviderActionSuccessRecorded', 'V3ProviderActionFailureRecorded'],
   `${files.manifest}: return_path`,
 );
 
@@ -826,20 +733,20 @@ if (
 assertIncludes(
   resource?.allowed_writers,
   [
-    'V3ProviderActionGate::abandon_admission',
-    'V3ProviderActionGate::commit_terminal_admission',
-    'V3ProviderActionGate::record_failure_and_commit_terminal_projection',
+    'V3ProviderActionGate::try_admit_observation',
+    'V3ProviderActionGate::record_failure',
+    'V3ProviderActionGate::record_provider_success',
   ],
   `${files.resourceMap}: v3.error.provider_action_gate.allowed_writers`,
 );
 if (
-  manifest?.admission_permit?.owner_type !== 'V3ProviderActionPermit'
-  || manifest?.admission_permit?.wall_clock_expiry !== 'forbidden'
-  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== 'http_429_only'
-  || manifest?.admission_permit?.waiter_order !== 'fifo_ticket'
+  manifest?.observation_lease?.owner_type !== 'V3ProviderObservationLease'
+  || manifest?.observation_lease?.wall_clock_expiry !== 'forbidden'
+  || manifest?.observation_lease?.request_admission !== 'forbidden'
+  || manifest?.observation_lease?.request_wait !== 'forbidden'
 ) {
   failures.push(
-    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request sharing only for HTTP 429`,
+    `${files.manifest}: observation_lease must stay Provider-lifecycle only with no request admission or request wait`,
   );
 }
 if (Object.hasOwn(manifest, 'admission_lease')) {
@@ -866,33 +773,10 @@ assertExactStrings(
 for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-01', 'Compat', 'E05'],
   ['v3-provider-action-gate-02', 'Wire', 'E05'],
-  ['v3-provider-action-gate-03', 'E05', 'Witness'],
-  ['v3-provider-action-gate-04', 'Witness', 'Gate'],
   ['v3-provider-action-gate-05', 'E05', 'E06'],
-  ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
-  ['v3-provider-action-gate-07', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-08', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-10', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-11', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-12', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-13', 'Witness', 'Gate'],
   ['v3-provider-action-gate-14', 'E01', 'E05'],
   ['v3-provider-action-gate-15', 'E01', 'E05'],
   ['v3-provider-action-gate-16', 'E01', 'E05'],
-  ['v3-provider-action-gate-19', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-20', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-21', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-22', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-23', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-24', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-25', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-26', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-27', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-28', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-29', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-30', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-31', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-32', 'AbandonRequest', 'Abandoned'],
   ['v3-provider-action-gate-33', 'Permit', 'SuccessObserved'],
   ['v3-provider-action-gate-34', 'SuccessObserved', 'SuccessRecorded'],
   ['v3-provider-action-gate-35', 'Abandoned', 'FailureObserved'],
@@ -912,11 +796,6 @@ for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-49', 'ProviderCodec', 'ProviderOutcome'],
   ['v3-provider-action-gate-50', 'ProviderRaw', 'ProviderCodec'],
   ['v3-provider-action-gate-51', 'ProviderCodec', 'ProviderOutcome'],
-  ['v3-provider-action-gate-52', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-53', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-54', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-55', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-56', 'Wire', 'Witness'],
 ]) {
   assertWikiEdge(v3WikiMermaid, files.wiki, stepId, fromAlias, toAlias);
 }

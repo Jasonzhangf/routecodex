@@ -116,7 +116,7 @@ pub struct V3Router07OpaqueTargetPlanEntry {
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum V3VirtualRouterError {
-    #[error("server {0} is absent or disabled")]
+    #[error("server {0} is absent")]
     ServerUnavailable(String),
     #[error("route group {0} is absent")]
     RouteGroupMissing(String),
@@ -144,12 +144,6 @@ pub enum V3VirtualRouterError {
     PoolMatchMissing { group_id: String, pool_id: String },
     #[error("routing facts entry protocol is empty or does not match endpoint {0}")]
     InvalidRoutingFacts(String),
-    #[error("direct route {provider}.{model} cannot serve this request: model lacks {capability}")]
-    DirectModelMediaUnsatisfied {
-        provider: String,
-        model: String,
-        capability: String,
-    },
 }
 
 #[derive(Debug, Default)]
@@ -204,7 +198,6 @@ impl V3VirtualRouter {
         let server = manifest
             .servers
             .get(server_id)
-            .filter(|server| server.enabled)
             .ok_or_else(|| V3VirtualRouterError::ServerUnavailable(server_id.to_string()))?;
         Ok(V3Router05RequestClassified {
             server_id: server.id.clone(),
@@ -253,11 +246,58 @@ impl V3VirtualRouter {
                         pool_id: route_pool_id.to_string(),
                     });
                 }
+                // A route-policy pool is an explicit leading tier, not the whole
+                // plan. Keep the policy-selected pool first, then any ordinary
+                // matching pools in classifier order, and append the required
+                // default floor last so a busy/failed policy tier cannot turn
+                // into an immediate terminal before the declared fallback chain
+                // has been attempted.
+                let default_pool = group.pools.get(DEFAULT_ROUTE).ok_or_else(|| {
+                    V3VirtualRouterError::DefaultPoolMissing(
+                        classified.routing_group_id.clone(),
+                    )
+                })?;
+                if default_pool.targets.is_empty() {
+                    return Err(V3VirtualRouterError::DefaultPoolEmpty(
+                        classified.routing_group_id,
+                    ));
+                }
+                let mut plan_pools: Vec<&V3RoutePoolManifest> = vec![pool];
+                let mut planned_pool_ids = BTreeSet::from([pool.id.as_str()]);
+                for candidate in &classified.facts.route_classification.candidates {
+                    if candidate == DEFAULT_ROUTE {
+                        continue;
+                    }
+                    if let Some(matching) = select_best_matching_pool(
+                        &classified.routing_group_id,
+                        &group.pools,
+                        &classified.facts,
+                        Some(candidate),
+                        |pool_id, rule| pool_route_signal_matches(pool_id, rule, candidate),
+                    )? {
+                        if planned_pool_ids.insert(matching.id.as_str()) {
+                            plan_pools.push(matching);
+                        }
+                    }
+                    if candidate == "search" {
+                        if let Some(tools) = group
+                            .pools
+                            .get("tools")
+                            .filter(|tools| !tools.targets.is_empty())
+                        {
+                            if planned_pool_ids.insert(tools.id.as_str()) {
+                                plan_pools.push(tools);
+                            }
+                        }
+                    }
+                }
+                plan_pools.push(default_pool);
+                let tiers = plan_pools.into_iter().map(build_plan_tier).collect();
                 return Ok(V3Router06RoutePoolResolved {
                     server_id: classified.server_id,
                     routing_group_id: classified.routing_group_id,
                     facts: classified.facts,
-                    tiers: vec![build_plan_tier(pool)],
+                    tiers,
                 });
             }
         }
@@ -333,11 +373,12 @@ impl V3VirtualRouter {
         // Ordinary request. The classifier hands over its current-turn
         // candidate signals in the fixed order (hosted web_search >
         // multimodal > longcontext > coding > thinking > search > tools >
-        // default). Take the first candidate that maps to a configured,
-        // non-empty classification pool and hand off exactly that one pool. Do
-        // not synthesize implicit capability pools and do not append default or
-        // any other pool after a hit.
-        let mut selected_pool: Option<&V3RoutePoolManifest> = None;
+        // default). Build one ordered plan tier per distinct matching,
+        // non-empty pool and keep the required default pool last. A search hit
+        // also retains tools as its explicit route fallback. Do not synthesize
+        // implicit capability pools.
+        let mut plan_pools: Vec<&V3RoutePoolManifest> = Vec::new();
+        let mut planned_pool_ids = BTreeSet::new();
         for candidate in &classified.facts.route_classification.candidates {
             if candidate == DEFAULT_ROUTE {
                 continue;
@@ -349,20 +390,32 @@ impl V3VirtualRouter {
                 Some(candidate),
                 |pool_id, rule| pool_route_signal_matches(pool_id, rule, candidate),
             )? {
-                selected_pool = Some(pool);
-                break;
+                if planned_pool_ids.insert(pool.id.clone()) {
+                    plan_pools.push(pool);
+                }
+            }
+            if candidate == "search" {
+                if let Some(tools) = group
+                    .pools
+                    .get("tools")
+                    .filter(|pool| !pool.targets.is_empty())
+                {
+                    if planned_pool_ids.insert(tools.id.clone()) {
+                        plan_pools.push(tools);
+                    }
+                }
             }
         }
-        // Default is the unconditional floor: when no other pool is
-        // configured, is empty, or does not satisfy the candidate signal, the
-        // request is served by the required non-empty default pool.
-        let selected_pool = selected_pool.unwrap_or(default_pool);
+        // Default is the unconditional last floor. Earlier matching pools keep
+        // their precedence and may exhaust into this required non-empty pool.
+        plan_pools.push(default_pool);
+        let tiers = plan_pools.into_iter().map(build_plan_tier).collect();
 
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
             routing_group_id: classified.routing_group_id,
             facts: classified.facts,
-            tiers: vec![build_plan_tier(selected_pool)],
+            tiers,
         })
     }
 
@@ -504,8 +557,8 @@ where
 /// entirely. Every other model string — no dot, an unknown provider segment, or
 /// an enabled provider that declares no such model — falls back to normal
 /// classification (returns None), which is the same path the `auto` and virtual
-/// entry names take. Only a resolved direct model that cannot serve the
-/// request's media requirement fails explicitly without rerouting.
+/// entry names take. A resolved direct model is always pinned; request
+/// capability declarations are not an admission gate for it.
 /// Provider/model interpretation stays in the config layer
 /// (`resolve_direct_provider_model`); the router only consumes the resolution.
 fn resolve_v3_direct_model_plan(
@@ -513,7 +566,7 @@ fn resolve_v3_direct_model_plan(
     classified: &V3Router05RequestClassified,
 ) -> Option<Result<V3Router06RoutePoolResolved, V3VirtualRouterError>> {
     let requested = classified.facts.client_model.as_deref()?;
-    let (direct_provider_id, direct_model_id, model_capabilities) =
+    let (direct_provider_id, direct_model_id, _model_capabilities) =
         match manifest.resolve_direct_provider_model(requested) {
             V3DirectModelResolution::NotDirect => return None,
             V3DirectModelResolution::Resolved {
@@ -522,19 +575,6 @@ fn resolve_v3_direct_model_plan(
                 model_capabilities,
             } => (provider_id, model_id, model_capabilities),
         };
-    for media_capability in ["vision", "multimodal"] {
-        if classified.facts.capabilities.contains(media_capability)
-            && !model_capabilities
-                .iter()
-                .any(|capability| capability == "vision" || capability == "multimodal")
-        {
-            return Some(Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
-                provider: direct_provider_id,
-                model: direct_model_id,
-                capability: media_capability.to_string(),
-            }));
-        }
-    }
     let mut facts = classified.facts.clone();
     // Rewrite to the bare canonical model so downstream requested-model
     // filtering matches the provider's visible model ids.
@@ -564,18 +604,11 @@ fn resolve_v3_direct_model_plan(
 fn pool_matches(
     rule: &V3RoutePoolMatchManifest,
     facts: &V3RouterRequestFacts,
-    route_signal: Option<&str>,
+    _route_signal: Option<&str>,
 ) -> bool {
     rule.entry_protocol
         .as_ref()
         .is_none_or(|protocol| protocol == &facts.entry_protocol)
-        // The classifier already selected the request route. A route label
-        // repeated in required_capabilities is a pool selector, not a second
-        // request-capability gate (e.g. 7777 thinking/search/tools pools).
-        && rule.required_capabilities.iter().all(|capability| {
-            route_signal.is_some_and(|signal| signal == capability)
-                || facts.capabilities.contains(capability)
-        })
         && rule
             .min_input_tokens
             .is_none_or(|minimum| facts.current_turn_input_tokens >= minimum)

@@ -4266,33 +4266,10 @@ features:
   mainline_bindings:
   - v3-provider-action-gate-01
   - v3-provider-action-gate-02
-  - v3-provider-action-gate-03
-  - v3-provider-action-gate-04
   - v3-provider-action-gate-05
-  - v3-provider-action-gate-06
-  - v3-provider-action-gate-07
-  - v3-provider-action-gate-08
-  - v3-provider-action-gate-10
-  - v3-provider-action-gate-11
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
   - v3-provider-action-gate-14
   - v3-provider-action-gate-15
   - v3-provider-action-gate-16
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-21
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-23
-  - v3-provider-action-gate-24
-  - v3-provider-action-gate-25
-  - v3-provider-action-gate-26
-  - v3-provider-action-gate-27
-  - v3-provider-action-gate-28
-  - v3-provider-action-gate-29
-  - v3-provider-action-gate-30
-  - v3-provider-action-gate-31
-  - v3-provider-action-gate-32
   - v3-provider-action-gate-33
   - v3-provider-action-gate-34
   - v3-provider-action-gate-35
@@ -4312,11 +4289,6 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
-  - v3-provider-action-gate-52
-  - v3-provider-action-gate-53
-  - v3-provider-action-gate-54
-  - v3-provider-action-gate-55
-  - v3-provider-action-gate-56
   entry_symbols:
   - V3ProviderActionGate
   - V3ProviderActionGate::try_admit_exact_rate_limit
@@ -4662,10 +4634,6 @@ features:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-provider-action-gate
   mainline_bindings:
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-27
   - v3-chat-direct-relay-handoff-02
   runtime_status: source_controlled_runtime_boundary_verified
 
@@ -4802,9 +4770,6 @@ features:
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
   - collapse_direct_client_sse_to_json
   mainline_bindings:
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-24
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.provider_global_subscription_probe
@@ -4814,10 +4779,10 @@ features:
   cross_feature_extensions:
   - path: v3/crates/routecodex-v3-config/src/internal.rs
     owner_feature_id: v3.simplified_user_config
-    reason: Declares the internal typed429 observation, minimumcooldown and probe-required windows consumed by the provider health owner, without adding user configuration or runtime state.
+    reason: Declares the internal shared recoverable-failure statuses and pre-cooldown observation settings consumed by the provider health owner, without adding user configuration or runtime state.
   - path: v3/crates/routecodex-v3-config/src/internal.toml
     owner_feature_id: v3.simplified_user_config
-    reason: Single source for the user-authorized120000,1800000,3600000 millisecond policy declarations; data-plane payloads and public config remain unchanged.
+    reason: Single source for the internal recoverable and irrecoverable status, cooldown, and probe-interval declarations; data-plane payloads and public config remain unchanged.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -4835,7 +4800,6 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
-  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
@@ -4977,7 +4941,6 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
-  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
