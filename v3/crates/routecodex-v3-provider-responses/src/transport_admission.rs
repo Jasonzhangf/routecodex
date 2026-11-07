@@ -68,7 +68,7 @@ pub(crate) fn take_or_acquire_provider_admission(
     controller: V3AdaptiveConcurrencyController,
     provider_key: String,
 ) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
-    take_or_acquire_provider_admission_scoped(pre_acquired, controller, provider_key, None)
+    take_or_acquire_provider_admission_scoped(pre_acquired, controller, provider_key, None, false)
 }
 
 pub(crate) fn take_or_acquire_provider_admission_scoped(
@@ -76,6 +76,7 @@ pub(crate) fn take_or_acquire_provider_admission_scoped(
     controller: V3AdaptiveConcurrencyController,
     provider_key: String,
     scope: Option<&V3ConcurrencyIdentityScope>,
+    capacity_bypass: bool,
 ) -> Result<V3AdaptiveConcurrencyLease, V3ProviderAdmissionError> {
     match pre_acquired {
         Some(lease)
@@ -93,6 +94,13 @@ pub(crate) fn take_or_acquire_provider_admission_scoped(
         }
         None => controller
             .try_acquire_business_scoped(&provider_key, scope)
+            .or_else(|| {
+                // 2026-11-07 ruling ①: the single/last eligible candidate is
+                // exempt from capacity admission. The over-budget send holds a
+                // counter-free lease so `in_flight` and the 429 watermark stay
+                // truthful, and the provider's real answer passes through.
+                capacity_bypass.then(|| controller.capacity_bypass_lease(&provider_key, scope))
+            })
             .ok_or(V3ProviderAdmissionError::Busy),
     }
 }
@@ -148,7 +156,8 @@ mod tests {
                     Some(lease),
                     controller.clone(),
                     "provider:key".into(),
-                    Some(&target)
+                    Some(&target),
+                    false
                 ),
                 Err(V3ProviderAdmissionError::LeaseMismatch)
             ));

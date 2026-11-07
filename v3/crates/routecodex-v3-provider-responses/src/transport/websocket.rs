@@ -86,6 +86,7 @@ pub(super) async fn acquire_admission_and_connection_slot(
         controller.clone(),
         provider_key.clone(),
         request.identity_scope.as_ref(),
+        request.capacity_admission_bypass,
     );
     if admission.is_err() {
         if let Some(attempt_key) = attempt_key {

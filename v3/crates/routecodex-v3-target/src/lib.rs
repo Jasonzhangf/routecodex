@@ -443,17 +443,25 @@ impl V3TargetInterpreter {
         candidate_count == 1 && Self::blocked_only_by_automatic_cooldown(blocked_scopes)
     }
 
-    /// v31 single/last eligible candidate rule: when the captured target holds
-    /// only one admissible candidate, no cooldown, admission, wait, probe or
-    /// recovery blocking applies to that identity. The request is sent and its
-    /// real typed failure is passed through to the client. This covers *every*
+    /// v31 single/last eligible candidate rule (2026-11-06, extended
+    /// 2026-11-07): when the captured target holds only one admissible
+    /// candidate, or the current attempt is the last eligible one, no
+    /// cooldown, admission, wait, probe or recovery blocking applies to that
+    /// identity. The request is sent and its real typed failure is passed
+    /// through to the client.
+    ///
+    /// The 2026-11-07 ruling adds capacity admission to the same exemption:
+    /// the last eligible candidate is sent over the adaptive budget instead of
+    /// returning a proxy `ConcurrencyBusy`. That half is carried by the
+    /// transport request's capacity bypass flag; this predicate answers the
+    /// scheduling-block half from the health scopes it can see, and its name
+    /// therefore says "scheduling" rather than "health". It covers every
     /// health-owned block, including a manual/admin cooldown and an auth-key
     /// cooldown, because the single candidate has no alternative to switch to
     /// and the client must see the provider's real answer instead of a proxy
-    /// admission decision. Capacity, declared availability windows and
-    /// request-local blocks keep their own semantics: they are not health
-    /// visibility state.
-    pub fn ignores_single_candidate_health_blocking(
+    /// admission decision. Declared availability windows and request-local
+    /// blocks keep their own semantics: they are not health visibility state.
+    pub fn ignores_single_candidate_scheduling_blocking(
         candidate_count: usize,
         blocked_scopes: &[String],
     ) -> bool {
