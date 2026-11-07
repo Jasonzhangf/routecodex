@@ -49,6 +49,7 @@ async fn provider_health_observes_failure_without_request_alternative() {
                 &selected, source, 503,
                 &mut V3DirectProviderFailurePolicyState {
                     failed_candidates: &mut failed, trace: &mut trace,
+                    capacity_skipped: &BTreeSet::new(),
                 },
                 None,
             ).await.expect("Direct failure policy").event.unwrap().health_state
@@ -62,7 +63,8 @@ async fn provider_health_observes_failure_without_request_alternative() {
                 selected, "V3ProviderRespInbound01Raw", 503, Some("HTTP_503".into()),
                 "real provider failure without an alternative".into(), None,
                 &mut V3RelayProviderFailurePolicyState {
-                    failed_candidates: &mut failed, trace: &mut trace, last_external_http: &mut None,
+                    failed_candidates: &mut failed, trace: &mut trace,
+                    last_external_http: &mut None,
                 },
             ).await.expect("Relay failure policy").event.health_record.state
         };
@@ -135,6 +137,7 @@ async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_erro
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut BTreeSet::new(),
             trace: &mut Vec::new(),
+            capacity_skipped: &BTreeSet::new(),
         },
         Some(&witness),
     )
@@ -168,6 +171,7 @@ async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_erro
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut BTreeSet::new(),
             trace: &mut Vec::new(),
+            capacity_skipped: &BTreeSet::new(),
         },
         Some(&witness),
     )
@@ -258,6 +262,7 @@ async fn assert_first_byte_timeout_preserves_untried_siblings(
         502,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
+            capacity_skipped: &BTreeSet::new(),
             trace: &mut trace,
         },
         None,
@@ -484,6 +489,7 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         200,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
+            capacity_skipped: &BTreeSet::new(),
             trace: &mut trace,
         },
         None,

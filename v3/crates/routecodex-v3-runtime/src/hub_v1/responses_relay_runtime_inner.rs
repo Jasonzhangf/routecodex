@@ -242,6 +242,15 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             None => V3PlanExecutionTargetSource::OpaqueHit(resolved_target.opaque_hit),
         };
         let mut failed_candidates = initial_request_local_excluded_candidates;
+        // 2026-11-07 ruling ①: complete identities refused at capacity
+        // admission. They were never contacted, they are not provider failures,
+        // and they stay eligible for the single/last-candidate exemption.
+        let mut capacity_skipped: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        // Set once, after every real candidate failed and only a
+        // capacity-skipped identity remains: the next send goes out over the
+        // adaptive budget with the transport bypass flag.
+        let mut capacity_bypass_granted = false;
         let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> =
             None;
         let mut initial_selected_target = initial_selected_target;
@@ -445,6 +454,64 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         source,
                         ..
                     }) => {
+                        // 2026-11-07 ruling ①: exhaustion is not terminal while a
+                        // capacity-skipped identity can still be tried. It was
+                        // never sent, so it is not a failed attempt; restore it
+                        // once and reselect. The plan then holds that single
+                        // remaining candidate and the send is stamped with the
+                        // capacity bypass instead of returning Busy again.
+                        // The exemption exists so a real provider answer is not
+                        // replaced by a proxy capacity decision. A pool that is
+                        // only *busy* has no provider answer to pass through:
+                        // nothing failed, so the request keeps its truthful
+                        // exhaustion instead of oversubscribing occupied
+                        // capacity.
+                        let real_failure_recorded = failed_candidates
+                            .iter()
+                            .any(|key| !capacity_skipped.contains(key));
+                        if !capacity_bypass_granted
+                            && !capacity_skipped.is_empty()
+                            && real_failure_recorded
+                        {
+                            for key in capacity_skipped.iter() {
+                                failed_candidates.remove(key);
+                            }
+                            capacity_bypass_granted = true;
+                            trace.push("V3CapacityAdmissionBypassGranted");
+                            continue;
+                        }
+                        // 2026-11-07 ruling ① diagnostic convention: capacity refusals never run
+                        // the failure policy, so the request-local terminal action is stamped on
+                        // the last capacity-skipped attempt instead of a policy event.
+                        if !real_failure_recorded {
+                            if let Some(last) = provider_failure_events.last_mut() {
+                                if last.action == "CapacitySkipped" {
+                                    last.action = "terminal_request_local_provider_compat_exhausted".to_string();
+                                }
+                            }
+                        }
+                        // A pool that is busy only (no real provider failure)
+                        // keeps its truthful typed capacity category: the typed
+                        // source must stay `provider_concurrency_busy`, not the
+                        // generic exhaustion code.
+                        let all_capacity_skipped = !capacity_skipped.is_empty()
+                            && failed_candidates
+                                .iter()
+                                .all(|key| capacity_skipped.contains(key));
+                        let busy_source = if all_capacity_skipped {
+                            crate::shared::direct_plain_error(
+                                routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                                "V3Target10ConcreteProviderSelected",
+                                "provider_concurrency_busy",
+                                format!(
+                                    "selected target exhausted after {:?}",
+                                    exhaustion.attempted_candidates
+                                ),
+                            )
+                            .ok()
+                        } else {
+                            None
+                        };
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,
@@ -473,7 +540,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             attach_v3_provider_failure_events_to_failure(
                                 super::responses_relay_failures::terminalize_v3_responses_relay_provider_failure_with_source(
                                     failure,
-                                    source,
+                                    busy_source.or(source),
                                     last_external_http.clone(),
                                 ),
                                 &provider_failure_events,
@@ -594,6 +661,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
                                 failed_candidates: &mut failed_candidates,
+                                capacity_skipped: &capacity_skipped,
                                 retry_selected: &mut retry_selected,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
@@ -676,6 +744,17 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             ) {
                 handle_provider_request_failure!(error);
             }
+            // 2026-11-07 ruling ①: the last eligible candidate is exempt from
+            // capacity admission. After the capacity-skipped identities were
+            // restored, the plan holds exactly one candidate; this send is
+            // stamped so the transport admits it over the adaptive budget and
+            // the provider's real answer (or original typed error) passes
+            // through to the client.
+            let transport_request = if capacity_bypass_granted && selected.candidate_count == 1 {
+                transport_request.with_capacity_admission_bypass()
+            } else {
+                transport_request
+            };
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
             provider_send_attempts = handle_error_before_resp03!(
@@ -807,6 +886,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
                                 failed_candidates: &mut failed_candidates,
+                                capacity_skipped: &capacity_skipped,
                                 retry_selected: &mut retry_selected,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
@@ -826,6 +906,26 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
+                    // 2026-11-07 ruling ①: capacity admission is local provider
+                    // capacity, not a provider failure. The identity was never
+                    // contacted, so it is recorded as capacity-skipped (the
+                    // selection moves on) and the request continues with the
+                    // next visible candidate instead of cooling a healthy
+                    // provider or turning the refusal into a terminal.
+                    if !capacity_bypass_granted
+                        && matches!(&error, V3ProviderError::ConcurrencyBusy { .. })
+                    {
+                        let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
+                        capacity_skipped.insert(busy_key.clone());
+                        failed_candidates.insert(busy_key);
+                        trace.push("V3ProviderCapacitySkipped");
+                        provider_failure_events.push(
+                            super::relay_runtime_shared::build_v3_runtime_capacity_skipped_failure_observation(
+                                &selected.candidate,
+                            ),
+                        );
+                        continue;
+                    }
                     if let Some(witness) =
                         crate::hub_v1::external_http_witness_from_provider_error(&error)
                     {
@@ -850,6 +950,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             failure,
                             &mut V3ResponsesRelayProviderRetryState {
                                 failed_candidates: &mut failed_candidates,
+                                capacity_skipped: &capacity_skipped,
                                 retry_selected: &mut retry_selected,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
@@ -905,6 +1006,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
                                         failed_candidates: &mut failed_candidates,
+                                        capacity_skipped: &capacity_skipped,
                                         retry_selected: &mut retry_selected,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
@@ -968,6 +1070,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failure,
                                 &mut V3ResponsesRelayProviderRetryState {
                                     failed_candidates: &mut failed_candidates,
+                                    capacity_skipped: &capacity_skipped,
                                     retry_selected: &mut retry_selected,
                                     provider_failure_events: &mut provider_failure_events,
                                     provider_failure_event_sink: provider_failure_event_sink
@@ -1030,6 +1133,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
+                                            capacity_skipped: &capacity_skipped,
                                             retry_selected: &mut retry_selected,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
@@ -1238,6 +1342,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     failure.clone(),
                                     &mut V3ResponsesRelayProviderRetryState {
                                         failed_candidates: &mut failed_candidates,
+                                        capacity_skipped: &capacity_skipped,
                                         retry_selected: &mut retry_selected,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
@@ -1347,6 +1452,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
+                                            capacity_skipped: &capacity_skipped,
                                             retry_selected: &mut retry_selected,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:

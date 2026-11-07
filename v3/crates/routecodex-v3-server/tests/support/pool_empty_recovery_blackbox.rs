@@ -2083,6 +2083,131 @@ async fn issue44cc3af_direct_initial_busy_candidate_recovers_after_selected_peer
     assert_mixed_capacity_recovery(true, true).await;
 }
 
+// 2026-11-07 ruling ①: capacity admission is local provider capacity, not a
+// health fact and not a pool-visibility decision. When the only remaining
+// eligible candidate is the identity that is merely *busy*, the request must
+// send to it over the occupied budget and pass its real business answer
+// through, instead of turning the peer's real failure into a last-candidate
+// terminal. The failed peer is contacted exactly once and never re-sent.
+#[tokio::test]
+async fn issue44cc3af_capacity_skip_passes_through_last_eligible_candidate() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home_guard = TestHomeGuard::new("44cc3af-capacity-passthrough");
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
+    let (held_url, mut held_captures, held_release, held_shutdown) =
+        start_controlled_held_upstream().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let failure_payloads = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let (failure_tx, mut failures) = mpsc::unbounded_channel();
+    let app = Router::new().route(
+        "/v1/responses",
+        post({
+            let failure_payloads = failure_payloads.clone();
+            let failure_tx = failure_tx.clone();
+            move |axum::Json(payload): axum::Json<Value>| {
+                let failure_payloads = failure_payloads.clone();
+                let failure_tx = failure_tx.clone();
+                async move {
+                    failure_payloads.lock().unwrap().push(payload);
+                    let _ = failure_tx.send(());
+                    (
+                        StatusCode::BAD_GATEWAY,
+                        axum::Json(json!({"error":{"message":"selected provider failed"}})),
+                    )
+                }
+            }
+        }),
+    );
+    let failing_upstream = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let failing_url = format!("http://{address}/v1");
+    std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
+    let mut manifest = concurrency_switch_manifest(&failing_url, &held_url);
+    let held_id = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    // The holder binds the held identity and takes its single capacity slot.
+    let held_endpoint = endpoint.clone();
+    let held_model = format!("{held_id}.test");
+    let holder = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(held_endpoint)
+            .header("session-id", "44cc3af-passthrough-holder")
+            .json(&json!({"model": held_model, "input":"held","stream":true}))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+    });
+    timeout(Duration::from_secs(3), held_captures.recv())
+        .await
+        .expect("the holder must reach the held identity")
+        .expect("held identity capture receipt");
+    let client = reqwest::Client::new();
+    let request_endpoint = endpoint.clone();
+    let request = tokio::spawn(async move {
+        client
+            .post(request_endpoint)
+            .header("session-id", "44cc3af-passthrough-recovery")
+            .json(&json!({"model":"client-test","input":"capacity passthrough","stream":true}))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+    });
+    // The failing peer answers its one business attempt with a real 502.
+    timeout(Duration::from_secs(3), failures.recv())
+        .await
+        .expect("the selected peer must receive the business attempt")
+        .expect("failed attempt receipt");
+    // The formerly busy identity is now the last eligible candidate: it is sent
+    // over the occupied budget while the holder is still in flight.
+    timeout(Duration::from_secs(3), held_captures.recv())
+        .await
+        .expect("the last eligible candidate must be sent over occupied capacity")
+        .expect("over-capacity capture receipt");
+    let sent_over_capacity = !holder.is_finished();
+    held_release.add_permits(2);
+    let held_body = timeout(Duration::from_secs(3), holder)
+        .await
+        .expect("the holder must finish once capacity is released")
+        .unwrap();
+    let result = timeout(Duration::from_secs(4), request).await;
+    let physical_calls = failure_payloads.lock().unwrap().clone();
+    handle.shutdown().await;
+    let _ = held_shutdown.send(());
+    failing_upstream.abort();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        sent_over_capacity,
+        "the last eligible candidate must be sent while capacity is still occupied"
+    );
+    assert_responses_sse_delivered_business_text(&held_body, "held response released");
+    assert_eq!(
+        held_captures.try_recv().is_err(),
+        true,
+        "the exempted send is exactly one attempt, not a retry loop"
+    );
+    assert_eq!(
+        physical_calls.len(),
+        1,
+        "a failed business request must not be retried: {physical_calls:?}"
+    );
+    let body = result
+        .expect("bounded capacity passthrough")
+        .unwrap()
+        .expect("intact client transport");
+    assert_responses_sse_delivered_business_text(&body, "held response released");
+    assert!(!body.contains("response.failed"), "{body}");
+    assert!(!body.contains("selected provider failed"), "{body}");
+    assert!(!body.contains("network_error"), "{body}");
+}
+
 async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool) {
     let _guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("44cc3af-mixed-capacity");
