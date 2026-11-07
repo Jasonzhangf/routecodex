@@ -123,30 +123,24 @@ payload.
 - The transport module must not import Runtime, provider transport, or
   payload-parsing code.
 
-## Exec replacement drain
+## Exec replacement closeout
 
-The Server activity gate owns reversible maintenance during exec preparation:
+Exec replacement does not gate parsed HTTP dispatch and does not wait for all
+Provider work to drain. It uses the restart handoff's own probe and Front
+checkpoint boundaries. The existing `v3.front.client_closeout_frame` resource
+remains owned by `V3StableFrontSocket` and `V3FrontTransportCloseoutState`.
 
-1. atomically pause new business dispatch while preserving active bodies;
-2. preserve ordinary request deadlines and wait for body/error/drop termination; successful Body EOF transfers the existing activity permit to Front until Hyper submits the HTTP tail and an ordered socket flush acknowledges all captured frames;
-3. in the formal borrowed `prepare_exec_attempt`, only then quiesce the sample worker and freeze Front checkpoints;
-4. in the consuming `prepare_for_exec`, close listener accept loops and remaining idle transports after quiescence.
+`V3FrontHttpIo::poll_flush` submits the ordered flush command after Hyper
+submits the body data and HTTP framing tail. The `V3StableFrontSocket` worker
+writes queued frames through `write_front_command`. If the biased select takes
+the close signal first, the worker drains commands already in `write_rx` under
+`V3_FRONT_CLOSE_FLUSH`: it loops `write_rx.try_recv()` and calls
+`write_front_command` for each queued command before `shutdown`. This protects a
+queued head or tail while bounding a client that stopped reading.
 
-A control peer disconnect cancels borrowed preparation. Dropping the maintenance
-and sample guards restores queued dispatch and the original serving owner. The
-restart operation budget never becomes a client body cutoff.
-
-`V3FrontHttpIo::poll_flush` captures only EOF permits already present when that
-flush starts. The ordered Front worker owns those permits until actual socket
-write/flush completes. An earlier flush cannot release a later EOF permit or
-Hyper tail. Normal and close-flush frames share `write_front_response_frame`.
-The existing 500ms close flush is for terminal cleanup; healthy restart drain
-does not use it. A real write failure or disconnect releases its failed transport
-and preserves the diagnostic without a fabricated successful terminal.
-
-A provider timeout remains a request-local Error chain outcome. A healthy body
-without a finite terminal can keep preparation pending until the controlling
-client cancels; no fixed restart timeout truncates it or fabricates completion.
+A real write failure or disconnect releases its failed transport and preserves
+the diagnostic without a fabricated successful terminal. The restart operation
+budget never becomes a client body cutoff.
 
 ## Gate
 

@@ -1,7 +1,7 @@
 use crate::*;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Response, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode};
 use futures_util::{FutureExt, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -526,14 +526,13 @@ pub(crate) struct V3ProviderTerminalEvidence<'a> {
 
 /// Project a provider-terminal outcome onto the client boundary.
 ///
-/// The client entry is never coupled to a provider. A provider terminal is either
-/// absorbed by a remaining candidate (the runtime keeps rotating before it reaches
-/// this point) or becomes a client transport break. The provider's own status,
-/// headers, and body are provider-private: they are recorded as provider-terminal
-/// evidence, they stay in the typed Error chain, and they must not be projected as
-/// a client response. The disposition is matched exhaustively so a new terminal
-/// shape has to state its client boundary explicitly instead of inheriting
-/// provider passthrough.
+/// The client entry is not coupled to intermediate providers. A provider terminal
+/// is either absorbed by a remaining candidate (the runtime keeps rotating before it
+/// reaches this point) or reaches a client boundary. Provider-private evidence stays
+/// in the typed Error chain and debug artifacts. The sole projection exception is a
+/// normal last-candidate complete HTTP error, which returns the original response.
+/// The disposition is matched exhaustively so a new terminal shape must state its
+/// client boundary explicitly instead of inheriting provider passthrough.
 pub(crate) fn provider_terminal_response(
     state: &Arc<V3ListenerState>,
     connection: Option<V3FrontConnectionIdentity>,
@@ -556,14 +555,14 @@ pub(crate) fn provider_terminal_response(
     model_transport_break_response(state, connection, disposition, requested_stream)
 }
 
-/// Break the model client's transport for a terminal outcome that has no client payload.
+/// Project a terminal outcome that has no successful client payload.
 ///
-/// This is the single implementation of the model-client break. The provider terminal
-/// entry `provider_terminal_response` records the provider witness first and then
-/// delegates here; a model-entry outcome that carries no provider response enters
-/// directly through `commit_model_transport_outcome`. Neither entry projects a provider
-/// status, header, or body to the client, and only the provider terminal entry has a
-/// witness to record.
+/// This is the single implementation of the model-client terminal boundary. The
+/// provider terminal entry `provider_terminal_response` records the witness first and
+/// then delegates here. A model-entry outcome with no provider response enters
+/// directly through `commit_model_transport_outcome`. Intermediate provider errors
+/// break the transport; only `LastCandidateExternalHttp` returns the complete original
+/// HTTP error, with status, body bytes, and legal end-to-end headers.
 fn model_transport_break_response(
     state: &V3ListenerState,
     connection: Option<V3FrontConnectionIdentity>,
@@ -571,11 +570,21 @@ fn model_transport_break_response(
     requested_stream: bool,
 ) -> Response<Body> {
     match disposition {
-        // A real compatible upstream HTTP error is still a provider error. Its real
-        // status, headers, and body are recorded as provider-terminal evidence and in
-        // the Error chain, and the client observes a transport break instead of the
-        // provider's response.
+        // The Runtime grants this variant only after the captured target normally
+        // exhausts following a real last-candidate failure. If a fresh SSE channel
+        // did not already own the client head, this response reaches the model client
+        // unchanged. Once a keepalive or business frame has committed the SSE channel,
+        // the client transport owner closes that body without a second head or error
+        // frame, so requested_stream itself is not a commit fact.
+        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+            witness,
+        ) if witness.is_complete_http_error() => {
+            return last_candidate_http_error_response(&witness);
+        }
+        // Intermediate provider HTTP errors remain provider-private. Their status,
+        // headers, and body stay in the typed Error chain and evidence artifacts.
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+        | routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(_)
         | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
     }
     if requested_stream {
@@ -604,6 +613,65 @@ fn model_transport_break_response(
     );
     // The socket has been closed before Hyper can write this return value.
     Response::new(Body::empty())
+}
+
+/// Return the original complete upstream error without JSON conversion or a proxy
+/// error template. Hop-by-hop fields, fields named by `Connection`, and stale HTTP
+/// framing are removed. Hyper forms the new framing from the exact body bytes.
+fn last_candidate_http_error_response(
+    witness: &routecodex_v3_error::V3ExternalHttpWitness,
+) -> Response<Body> {
+    let mut excluded = [
+        "connection",
+        "content-length",
+        "transfer-encoding",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "upgrade",
+    ]
+    .into_iter()
+    .filter_map(|name| HeaderName::from_bytes(name.as_bytes()).ok())
+    .collect::<Vec<_>>();
+
+    for (name, value) in witness.headers() {
+        let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        if name != axum::http::header::CONNECTION {
+            continue;
+        }
+        let Ok(value) = HeaderValue::from_bytes(value) else {
+            continue;
+        };
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        for token in value.split(',').map(str::trim).filter(|token| !token.is_empty()) {
+            if let Ok(token) = HeaderName::from_bytes(token.as_bytes()) {
+                excluded.push(token);
+            }
+        }
+    }
+
+    let mut response = Response::new(Body::from(witness.body().to_vec()));
+    *response.status_mut() =
+        StatusCode::from_u16(witness.status()).expect("upstream HTTP error status");
+    for (name, value) in witness.headers() {
+        let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        if excluded.iter().any(|excluded| excluded == &name) {
+            continue;
+        }
+        let Ok(value) = HeaderValue::from_bytes(value) else {
+            continue;
+        };
+        response.headers_mut().append(name, value);
+    }
+    response
 }
 
 /// Break the client SSE transport for a provider terminal that has no client payload.

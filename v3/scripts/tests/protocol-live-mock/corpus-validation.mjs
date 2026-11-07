@@ -303,15 +303,10 @@ function validateRuntimeSetup(relative, setup, findings) {
       fail('runtime_setup.attempt_store must be an object');
       return;
     }
-    const keys = ['request_max_attempts', 'attempt_max_bytes', 'attempt_max_frames', 'request_max_bytes', 'process_max_bytes', 'residence_timeout_ms'];
+    const keys = ['residence_timeout_ms'];
     for (const [key, value] of Object.entries(store)) {
       if (!keys.includes(key)) fail(`runtime_setup.attempt_store.${key} is not a supported field`);
       if (!Number.isInteger(value) || value < 1) fail(`runtime_setup.attempt_store.${key} must be a positive integer`);
-    }
-    for (const [lower, upper] of [['attempt_max_bytes', 'request_max_bytes'], ['request_max_bytes', 'process_max_bytes']]) {
-      if (store[lower] !== undefined && store[upper] !== undefined && store[lower] > store[upper]) {
-        fail(`runtime_setup.attempt_store.${lower} must not exceed ${upper}`);
-      }
     }
   }
   if (setup.provider_concurrency !== undefined) {

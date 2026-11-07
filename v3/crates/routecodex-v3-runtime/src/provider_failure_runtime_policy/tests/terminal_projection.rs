@@ -11,7 +11,6 @@ async fn transient_terminal_projection_releases_action_admission() {
         _ => panic!("valid fixture must select the provider"),
     };
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -23,7 +22,6 @@ async fn transient_terminal_projection_releases_action_admission() {
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
 
@@ -39,7 +37,6 @@ async fn transient_terminal_projection_releases_action_admission() {
             None,
             &mut V3RelayProviderFailurePolicyState {
                 failed_candidates: &mut failed_candidates,
-                same_candidate_retries: &mut same_candidate_retries,
                 trace: &mut trace,
                 last_external_http: &mut None,
             },
@@ -113,7 +110,6 @@ targets = [
         _ => panic!("valid fixture must select the provider"),
     };
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -121,7 +117,6 @@ targets = [
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
             .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
     let matched_policy = manifest
@@ -140,7 +135,6 @@ targets = [
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },
@@ -157,17 +151,13 @@ targets = [
         result.event.action
     );
     assert!(result.retry_selected.is_none());
-    assert!(
-        same_candidate_retries.values().all(|retries| *retries == 0),
-        "reselect exhaustion must not consume a same-candidate retry budget"
-    );
     assert!(!trace.contains(&"V3TargetLocalRetried"));
     assert!(!trace.contains(&"V3DefaultFloorBackoffWait"));
 }
 
 #[tokio::test]
-async fn request_local_compat_with_retry_same_policy_does_not_retry_same() {
-    let scope = "request_local_retry_same";
+async fn request_local_compat_with_reselection_policy_does_not_retry_same() {
+    let scope = "request_local_reselection";
     let source = r#"
 version = 3
 [servers.__SCOPE__]
@@ -181,12 +171,12 @@ base_url = "http://first.invalid/v1"
 default_model = "gpt-test"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "FIRST_KEY" }] }
 [[providers.first.response_error_policy]]
-policy_id = "retry_same_policy"
+policy_id = "reselection_policy"
 [providers.first.response_error_policy.match]
 http_status = 502
 [[providers.first.response_error_policy.path]]
 step = "wait_retry"
-retry_mode = "retry_same"
+retry_mode = "reselect_before_client_projection"
 max_attempts = 3
 backoff_ms = 7000
 [[providers.first.response_error_policy.path]]
@@ -213,7 +203,6 @@ targets = [
         _ => panic!("valid fixture must select the provider"),
     };
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -221,16 +210,13 @@ targets = [
         failure_session_scope: test_provider_failure_scope(scope, scope, "session-policy-id")
             .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy {
-            same_candidate_retries: 3,
-        },
         deterministic_sample: 0,
     };
     let matched_policy = manifest
         .error
         .provider_error_action_policy
         .iter()
-        .find(|policy| policy.policy_id == "retry_same_policy")
+        .find(|policy| policy.policy_id == "reselection_policy")
         .expect("compiled retry policy");
     let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
@@ -248,7 +234,6 @@ targets = [
         Some(matched_policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut last_external_http,
         },
@@ -261,10 +246,6 @@ targets = [
         "terminal_request_local_provider_compat_exhausted"
     );
     assert!(result.retry_selected.is_none());
-    assert!(
-        same_candidate_retries.values().all(|retries| *retries == 0),
-        "request-local compat must not consume a same-candidate retry budget"
-    );
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
     // The request-local compat failure is the terminal, but the real upstream 429
     // head that arrived on an earlier attempt is still the provider terminal's
@@ -272,5 +253,67 @@ targets = [
     assert_eq!(
         result.terminal_disposition,
         Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+    );
+}
+
+#[tokio::test]
+async fn normal_last_candidate_complete_http_error_is_the_constrained_terminal() {
+    // v27 narrow exception: a real provider HTTP error with no untried eligible
+    // alternative is the only path that earns the client-visible variant. The
+    // witness here is the current attempt's complete 503 response.
+    let scope = "normal_last_candidate_http_error";
+    let manifest = target_resolution_manifest(scope);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
+        V3RelayProviderTargetResolution::Selected(selected) => selected,
+        _ => panic!("valid fixture must select the provider"),
+    };
+    let mut failed_candidates = BTreeSet::new();
+    let mut trace = Vec::new();
+    let context = V3RelayProviderFailurePolicyContext {
+        manifest: &manifest,
+        captured_target_09: None,
+        failure_session_scope: test_provider_failure_scope(scope, scope, "session-last-http")
+            .expect("test failure session scope"),
+        provider_health: &health,
+        deterministic_sample: 0,
+    };
+    let upstream = routecodex_v3_error::V3ExternalHttpWitness::new(
+        503,
+        vec![("retry-after".to_string(), b"30".to_vec())],
+        br#"{"error":{"type":"unavailable"}}"#.to_vec(),
+    );
+    let mut last_external_http = Some(upstream.clone());
+    let result = run_v3_relay_provider_failure_policy(
+        &context,
+        selected,
+        "V3ProviderRespInbound01Raw",
+        503,
+        Some("provider_http_503".to_string()),
+        "provider unavailable without an alternative".to_string(),
+        None,
+        &mut V3RelayProviderFailurePolicyState {
+            failed_candidates: &mut failed_candidates,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        },
+    )
+    .await
+    .expect("normal last-candidate HTTP failure must project terminally");
+
+    assert!(
+        matches!(
+            result.event.action.as_str(),
+            "terminal_default_floor_exhausted" | "terminal_route_and_default_exhausted"
+        ),
+        "unexpected terminal action: {}",
+        result.event.action
+    );
+    assert!(result.retry_selected.is_none());
+    assert_eq!(
+        result.terminal_disposition,
+        Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(upstream)
+        )
     );
 }

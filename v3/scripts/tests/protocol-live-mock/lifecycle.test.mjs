@@ -107,11 +107,11 @@ test('generateRccConfig writes a supported execution policy and receipts the wri
 });
 
 test('generateRccConfig authors the declared runtime attempt_store policy', async () => {
-  const budgetCases = [
-    { attempt_max_bytes: 1024 },
-    { attempt_max_bytes: 16384, attempt_max_frames: 4 },
+  const residenceCases = [
+    { residence_timeout_ms: 1000 },
+    { residence_timeout_ms: 5000 },
   ];
-  for (const [index, attemptStore] of budgetCases.entries()) {
+  for (const [index, attemptStore] of residenceCases.entries()) {
     const workRoot = mkdtempSync(join(tmpdir(), `lifecycle-attempt-store-test-${index}-`));
     const generated = await generateRccConfig({
       mockPort: 12345, rccPort: 12346, adminPort: 12350 + index, providerProtocol: 'openai_chat',
@@ -125,7 +125,7 @@ test('generateRccConfig authors the declared runtime attempt_store policy', asyn
       },
     });
     try {
-      // The declared budget lands in the V3 owner's field, not a local echo.
+      // The declared residence reaches the existing V3 config owner.
       assert.deepEqual(generated.attempt_store, attemptStore);
       assert.equal(generated.attempt_store_receipt.configured, true);
       assert.deepEqual(generated.attempt_store_receipt.policy, attemptStore);
@@ -193,10 +193,10 @@ test('generateRccConfig rejects an unsupported or non-positive attempt_store fie
           model: 'mock.chat-model',
           wire_model: 'chat-model',
           candidate_ids: ['mock-openai_chat/mock.chat-model'],
-          attempt_store: { attempt_max_bytes: 0 },
+          attempt_store: { residence_timeout_ms: 0 },
         },
       }),
-      /attempt_max_bytes must be a positive integer/u,
+      /residence_timeout_ms must be a positive integer/u,
     );
     await assert.rejects(
       generateRccConfig({

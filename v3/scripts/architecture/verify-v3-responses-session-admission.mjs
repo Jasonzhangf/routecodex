@@ -45,9 +45,6 @@ const serverFrameBuilders = readRequired(
   "v3/crates/routecodex-v3-server/src/frame_builders.rs",
 );
 const serverAll = server + "\n" + serverFrameBuilders;
-const admission = readRequired(
-  "v3/crates/routecodex-v3-server/src/session_admission.rs",
-);
 const config = readRequired("v3/crates/routecodex-v3-config/src/lib.rs");
 const configTypes = readRequired("v3/crates/routecodex-v3-config/src/types.rs");
 const configTests = readRequired(
@@ -72,7 +69,7 @@ const admissionFunctionContract = yamlListEntry(
 );
 const admissionResourceContract = yamlListEntry(
   resourceMap,
-  "  - resource_id: v3.server.responses_session_admission",
+  "  - resource_id: v3.server.validated_http_input",
 );
 const admissionMainlineContract = yamlListEntry(
   mainlineMap,
@@ -96,27 +93,20 @@ try {
   failures.push(`package.json is not valid JSON: ${parseError.message}`);
 }
 
-forbidMatch(`${server}\n${admission}`, /V3ResponsesSessionAdmission|hold_response_body_admission_permit/,
-  "Independent requests must not regain a session/conversation business mutex");
+forbidMatch(
+  server,
+  /V3ResponsesSessionAdmission|V3ServerRequestActivityGate|hold_response_body_admission_permit|hold_response_body_request_activity_permit|request_activity_gate|wait_for_quiescence/,
+  "Independent requests must not regain a session/conversation or maintenance activity mutex",
+);
 requireMatch(
   server,
-  /read_json_payload\(request\)\.await[\s\S]*request_activity_gate\.admit\(\)\.await[\s\S]*pending_endpoint_after_json_parse/,
-  "Parsed requests must independently enter Runtime through the explicit maintenance owner",
+  /async fn pending_model_request\([\s\S]*?let payload = match read_json_payload\(request\)\.await[\s\S]*?pending_endpoint_after_json_parse\(/,
+  "Parsed requests must enter Runtime directly after canonical JSON parsing",
 );
 forbidMatch(
   server,
   /responses_session_admission_middleware|V3ResponsesAdmissionParsedPayload/,
   "Session admission must not create middleware JSON parsing or parsed-payload bypass owners",
-);
-requireMatch(
-  `${server}\n${admission}`,
-  /hold_response_body_request_activity_permit[\s\S]*body\.into_data_stream\(\)[\s\S]*Body::from_stream[\s\S]*hold_activity_until_flush\(permit\)/,
-  "Request-local activity must retain body and front-flush custody",
-);
-requireMatch(
-  admission,
-  /pub\(crate\) async fn wait_for_quiescence\(&self\)[\s\S]*let notified = self\.gate\.notify\.notified\(\);[\s\S]*tokio::pin!\(notified\);[\s\S]*notified\.as_mut\(\)\.enable\(\);[\s\S]*\.active\s*== 0[\s\S]*notified\.await/,
-  "The exec drain gate must register its predicate waiter before the quiescence check",
 );
 forbidMatch(
   server,
@@ -158,12 +148,6 @@ requireMatch(
   /v3_client_sse_body\(stream,\s*None\)/,
   "Error06/foundation SSE must bypass success keepalive injection",
 );
-forbidMatch(
-  admission,
-  /provider|virtual_router|continuation|codec|history|tool_call|fallback/i,
-  "Session admission owner must not contain provider, routing, continuation, codec, history, tool, or fallback semantics",
-);
-
 for (const [source, pattern, label] of [
   [
     functionMap,
@@ -172,8 +156,8 @@ for (const [source, pattern, label] of [
   ],
   [
     resourceMap,
-    /resource_id:\s*v3\.front\.request_activity_gate\b/,
-    "V3 resource map must register the maintenance activity owner",
+    /resource_id:\s*v3\.server\.validated_http_input\b/,
+    "V3 resource map must register the canonical HTTP input consumed by independent dispatch",
   ],
   [
     mainlineMap,
@@ -290,9 +274,14 @@ for (const scriptName of [
 }
 requireMatch(workflow, /npm --prefix v3 run verify:ci/, "CI must dispatch the canonical V3 verification stack");
 requireMatch(
-  `${admissionFunctionContract}\n${admissionResourceContract}\n${admissionMainlineContract}\n${admissionVerificationContract}\n${manifest}\n${wiki}`,
-  /V3ServerRequestActivityGate::admit/,
-  "Canonical maps must bind the existing maintenance activity owner",
+  admissionFunctionContract,
+  /entry_symbols:[\s\S]*read_json_payload[\s\S]*pending_endpoint_after_json_parse/,
+  "Function map must bind direct parsed dispatch",
+);
+requireMatch(
+  `${admissionResourceContract}\n${admissionMainlineContract}\n${manifest}`,
+  /v3\.server\.validated_http_input[\s\S]*caller_symbol:\s*pending_model_request[\s\S]*callee_symbol:\s*pending_endpoint_after_json_parse/,
+  "Canonical maps must bind parsed dispatch to the validated HTTP input resource",
 );
 forbidMatch(
   `${admissionMainlineContract}\n${admissionVerificationContract}\n${manifest}\n${wiki}`,
@@ -300,9 +289,9 @@ forbidMatch(
   "Canonical admission contracts must not retain the retired HTTP 409 overlap path",
 );
 forbidMatch(
-  `${functionMap}\n${resourceMap}`,
-  /V3ResponsesSessionAdmissionPermit::drop/,
-  "Maps must not claim a nonexistent inherent permit drop symbol",
+  `${functionMap}\n${resourceMap}\n${mainlineMap}\n${manifest}\n${wiki}`,
+  /V3ServerRequestActivityGate|hold_response_body_request_activity_permit|hold_activity_until_flush|request_activity_gate|wait_for_quiescence/,
+  "Canonical static bindings must not retain retired maintenance activity consumers",
 );
 
 if (failures.length > 0) {

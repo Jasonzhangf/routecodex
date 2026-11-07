@@ -1,11 +1,10 @@
 mod manual;
 mod persistence;
 mod probe_schedule;
-mod rate_limit;
 
 pub use manual::V3_COOLDOWN_MANUAL_MAX_MS;
 
-use crate::global_cooldown::{V3ProviderCooldownFailureClass, V3ProviderRateLimitEpisode};
+use crate::global_cooldown::V3ProviderCooldownFailureClass;
 use crate::key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderProbePurpose,
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
@@ -328,7 +327,6 @@ pub(super) struct V3ProviderHealthState {
 
 #[derive(Debug, Clone)]
 struct V3ProviderAdaptiveHistory {
-    rate_limit_episode: Option<V3ProviderRateLimitEpisode>,
     attempts: u32,
     failures: u32,
     recovery_ewma_ms: Option<u64>,
@@ -347,7 +345,6 @@ struct V3ProviderAdaptiveHistory {
 impl Default for V3ProviderAdaptiveHistory {
     fn default() -> Self {
         Self {
-            rate_limit_episode: None,
             attempts: 0,
             failures: 0,
             recovery_ewma_ms: None,
@@ -551,17 +548,22 @@ impl V3ProviderHealthStore {
             failure_policies,
             ..V3ProviderHealthState::default()
         };
-        if let Some((writer, persisted_entries, episodes)) = start_provider_health_persistence(
+        if let Some((writer, persisted_entries)) = start_provider_health_persistence(
             manifest,
             persistence_path,
             legacy_persistence_path,
             prune_scope_suffix,
         ) {
             for (key, blocked_until_ms, next_probe_at_ms) in persisted_entries {
+                // The retired 429 episode class is tolerated on load but never
+                // restored into a cooldown: HTTP 429 now uses the ordinary
+                // recoverable health path.
+                if key.failure_class == V3ProviderCooldownFailureClass::RateLimit {
+                    continue;
+                }
                 if !matches!(
                     key.failure_class,
                     V3ProviderCooldownFailureClass::Semantic
-                        | V3ProviderCooldownFailureClass::RateLimit
                         | V3ProviderCooldownFailureClass::ProbeLong
                         | V3ProviderCooldownFailureClass::ManualAuth
                 ) {
@@ -593,9 +595,6 @@ impl V3ProviderHealthStore {
                 state.provider_cooldown_probes.insert(
                     probe_key.clone(),
                     V3ProviderCooldownProbeState {
-                        cooldown_cause: (key.failure_class
-                            == V3ProviderCooldownFailureClass::RateLimit)
-                            .then_some(V3ProviderCooldownFailureClass::RateLimit),
                         blocked_until_ms: Some(blocked_until_ms),
                         next_probe_at_ms: Some(next_probe_at_ms),
                         probe_interval_ms: V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS,
@@ -619,25 +618,6 @@ impl V3ProviderHealthStore {
                             .is_some_and(|policy| policy.advisory_probe),
                     },
                 );
-            }
-            for (key, episode) in episodes {
-                if !persistence::manifest_contains_cooldown_key(manifest, &key)
-                    || state.health_disabled.contains(&key.provider_id)
-                    || state.configured_disabled.contains(&key.provider_id)
-                {
-                    continue;
-                }
-                let key = provider_cooldown_probe_key_for_interface(
-                    &key.provider_id,
-                    &key.interface_id,
-                    key.auth_alias.as_deref(),
-                    key.model_id.as_deref(),
-                );
-                state
-                    .adaptive_history
-                    .entry(key)
-                    .or_default()
-                    .rate_limit_episode = Some(episode);
             }
             state.persistence = Some(writer);
         }
@@ -1554,23 +1534,7 @@ impl V3ProviderHealthStore {
         {
             return Ok(None);
         }
-        if action
-            .failure_fingerprint
-            .as_ref()
-            .is_some_and(|fingerprint| fingerprint.http_status == 429)
-            && !state.health_disabled.contains(provider_id)
-        {
-            rate_limit::observe_rate_limit(&mut state, &key, now_ms, true);
-            let projection = key_health_projection(&state, &key, now_ms);
-            persist_cooldown_state(state);
-            self.publish_availability_change();
-            return Ok(Some(projection));
-        }
-        if matches!(
-            action.recovery,
-            V3ProviderRecoveryKind::NotProviderHealth
-                | V3ProviderRecoveryKind::HealthNeutralTransient
-        ) {
+        if matches!(action.recovery, V3ProviderRecoveryKind::NotProviderHealth) {
             return Ok(Some(key_health_projection(&state, &key, now_ms)));
         }
         if state.health_disabled.contains(provider_id) {
@@ -1611,10 +1575,8 @@ impl V3ProviderHealthStore {
                 if action.scope == V3ProviderHealthScope::GlobalProviderKey =>
             {
                 // 连续失败必须同源：只有同一个 typed fingerprint 的失败才累计
-                // streak，500/502 这类不同错误不会凑够阈值而误冷却 provider。
-                // 没有上游状态的失败已由分类器落到失败类别身份，不比较 class_code
-                // 之外的隐式状态。HTTP 429 走同一个有界 hold：指纹相同的连续 429
-                // 累计 streak，但阈值已由分类器置为 1，所以首个 429 立刻触发。
+                // streak，500/502/429 这类不同错误不会凑够阈值而误冷却 provider。
+                // HTTP 429 与普通可恢复错误共用同一路径，仅原始上游证据不同。
                 history.failure_streak =
                     if history.failure_fingerprint == action.failure_fingerprint {
                         history.failure_streak.saturating_add(1)
@@ -1658,8 +1620,8 @@ impl V3ProviderHealthStore {
                     _ => false,
                 };
             if should_block {
-                // Real 429 observations already returned through the episode
-                // owner. Ordinary failures retain their business ladder.
+                // Every recoverable failure, HTTP 429 included, commits its
+                // typed cooldown through this single business ladder.
                 let blocked_until_ms = now_ms.saturating_add(provider_failure_cooldown_ms(
                     failure_streak,
                     observed_attempts,
@@ -1722,36 +1684,20 @@ impl V3ProviderHealthStore {
         // 全局复活（bug 61863a0）：冷却中的 key 收到真实成功调用时立即解除
         // 全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
         // （complete_probe_success）仍是无人成功调用时的恢复路径。
-        let business_may_restore = rate_limit::reset_on_business_success(&mut state, &key, now_ms);
-        if business_may_restore
-            && state
-                .provider_cooldown_probes
-                .get(&key)
-                .is_some_and(|probe| {
-                    probe.cooldown_cause == Some(V3ProviderCooldownFailureClass::RateLimit)
-                })
-            && !state.auth_key_cooldowns.contains_key(&key)
-        {
-            complete_provider_probe_success_at_generation(&mut state, &key, now_ms, None)
-                .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        } else {
-            // Matching business success releases this exact recoverable identity.
-            // Preserve the normal +1 score accounting and explicit auth holds.
-            if business_may_restore && !state.auth_key_cooldowns.contains_key(&key) {
-                state.provider_cooldown_probes.remove(&key);
-            }
-            // Healthy identities retain their normal score increment. Explicit
-            // auth holds stay owned by the operator/probe control path.
-            let history = state.adaptive_history.entry(key.clone()).or_default();
-            history.attempts = 0;
-            history.failures = 0;
-            record_health_delta(history, 1);
-            history.failure_streak = 0;
-            history.failure_fingerprint = None;
-            history.success_streak = history.success_streak.saturating_add(1);
-            history.last_success_at_ms = Some(now_ms);
-            history.score_generation = history.score_generation.saturating_add(1);
+        if !state.auth_key_cooldowns.contains_key(&key) {
+            state.provider_cooldown_probes.remove(&key);
         }
+        // Healthy identities retain their normal score increment. Explicit
+        // auth holds stay owned by the operator/probe control path.
+        let history = state.adaptive_history.entry(key.clone()).or_default();
+        history.attempts = 0;
+        history.failures = 0;
+        record_health_delta(history, 1);
+        history.failure_streak = 0;
+        history.failure_fingerprint = None;
+        history.success_streak = history.success_streak.saturating_add(1);
+        history.last_success_at_ms = Some(now_ms);
+        history.score_generation = history.score_generation.saturating_add(1);
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
         self.publish_availability_change();

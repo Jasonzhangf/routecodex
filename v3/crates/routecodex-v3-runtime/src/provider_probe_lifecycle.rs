@@ -111,7 +111,6 @@ mod probe_error_chain_tests {
 
 fn complete_v3_provider_health_probe(
     cancellation: &V3ProviderProbeCancellationGuard,
-    action_gate: &V3ProviderActionGate,
     result: Result<(), V3ProviderHealthProbeFailure>,
     now_ms: u64,
 ) -> Result<V3ProbeCompletion, String> {
@@ -124,21 +123,8 @@ fn complete_v3_provider_health_probe(
                     now_ms,
                 )
                 .map_err(|error| error.to_string())?;
-            let permit = &cancellation.permit;
-            if let (Some(auth), Some(model)) = (permit.auth_alias(), permit.model_id()) {
-                if recovered {
-                    action_gate.record_provider_success(
-                        &V3ProviderActionProviderScope::rate_limit_identity(
-                            v3_relay_provider_candidate_key_parts(
-                                permit.provider_id(),
-                                Some(permit.interface_id()),
-                                Some(auth),
-                                Some(model),
-                            ),
-                        ),
-                    )?;
-                    return Ok(V3ProbeCompletion::Recovered);
-                }
+            if recovered {
+                return Ok(V3ProbeCompletion::Recovered);
             }
             // A real2xx can still be inside the committed quota minimum or
             // superseded by a newer failure. It must not reopen admission.
@@ -149,20 +135,9 @@ fn complete_v3_provider_health_probe(
         }
         Err(error) => {
             if let V3ProviderHealthProbeFailure::Provider(error) = error {
-                let (status, action) = classify_provider_probe_failure(error)?;
-                if let Some(status) = status {
-                    let disposition = cancellation
-                        .store
-                        .record_provider_rate_limit_probe_status_with_permit(
-                            &cancellation.permit,
-                            status,
-                            &action,
-                            now_ms,
-                        )?;
-                    if disposition == routecodex_v3_provider_responses::V3ProviderRateLimitProbeDisposition::Superseded {
-                        return Ok(V3ProbeCompletion::Superseded);
-                    }
-                }
+                // Keep the real provider error in the typed diagnostic chain,
+                // then let the ordinary cooldown-probe owner close the attempt.
+                let _ = classify_provider_probe_failure(error)?;
                 cancellation
                     .store
                     .complete_provider_cooldown_probe_failure_with_permit(
@@ -348,7 +323,7 @@ impl V3ProviderFailureRuntimeHealth {
             let _slot = slot;
             let (cancellation, result) = execution.await;
             let now_ms = health.observation_now_ms(v3_relay_provider_policy_now_epoch_ms()?);
-            complete_v3_provider_health_probe(&cancellation, &health.action_gate, result, now_ms)
+            complete_v3_provider_health_probe(&cancellation, result, now_ms)
         })
     }
 

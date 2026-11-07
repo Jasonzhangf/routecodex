@@ -11,9 +11,8 @@ use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime,
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
     execute_v3_responses_relay_runtime,
-    execute_v3_responses_relay_runtime_with_health_and_retry_policy,
-    execute_v3_responses_relay_runtime_with_retry_policy, V3AnthropicRelayRuntimeInput,
-    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
+    execute_v3_responses_relay_runtime_with_transport_health, V3AnthropicRelayRuntimeInput,
+    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
@@ -1603,7 +1602,7 @@ path = [
             // The explicit auth-key policy cools the attempted identity. The
             // healthy alternative prevents last-candidate neutrality hiding it.
             {
-                let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+                let output = execute_v3_responses_relay_runtime_with_transport_health(
                     &manifest,
                     V3ResponsesRelayRuntimeInput {
                         server_id: group.into(),
@@ -1619,9 +1618,6 @@ path = [
                     },
                     &transport,
                     &health,
-                    V3ResponsesRelayRetryPolicy {
-                        same_candidate_retries: 0,
-                    },
                 )
                 .await
                 .unwrap();
@@ -2264,7 +2260,7 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
             stream_response: false,
             custom_tool,
         };
-        let output = execute_v3_responses_relay_runtime_with_retry_policy(
+        let output = execute_v3_responses_relay_runtime(
             &responses_single_limited_manifest_for_scope(&server_id),
             V3ResponsesRelayRuntimeInput {
                 server_id,
@@ -2282,9 +2278,6 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
                 }),
             },
             &transport,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         )
         .await
         .expect("one candidate is enough to return representable duplicate tool identities");
@@ -2329,7 +2322,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
     )
     .expect("test provider failure session scope");
 
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -2343,9 +2336,6 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         },
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 3,
-        },
     )
     .await
     .unwrap();
@@ -2376,7 +2366,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
     );
 
     for turn in 1..=3 {
-        let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        let output = execute_v3_responses_relay_runtime_with_transport_health(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -2390,9 +2380,6 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
             },
             &transport,
             &provider_health,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 3,
-            },
         )
         .await
         .unwrap();
@@ -2438,7 +2425,7 @@ async fn responses_relay_default_floor_projects_error_after_single_failure() {
         captures: Mutex::new(Vec::new()),
         fail_count: usize::MAX,
     };
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest_for_scope(server_id),
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -2456,9 +2443,6 @@ async fn responses_relay_default_floor_projects_error_after_single_failure() {
             }),
         },
         &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2492,7 +2476,7 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
     };
     let output = tokio::time::timeout(
         Duration::from_secs(14),
-        execute_v3_responses_relay_runtime_with_retry_policy(
+        execute_v3_responses_relay_runtime(
             &responses_single_limited_manifest_for_scope(server_id),
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -2510,9 +2494,6 @@ async fn responses_relay_default_floor_projects_error_without_retry_wait() {
                 }),
             },
             &transport,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         ),
     )
     .await
@@ -2548,7 +2529,7 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_sendi
         captures: Mutex::new(Vec::new()),
     };
     let started = Instant::now();
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_request_compat_reselect_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "compat_reselect".into(),
@@ -2567,9 +2548,6 @@ async fn responses_relay_provider_request_compat_failure_reselects_without_sendi
             }),
         },
         &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("request projection failure must use the error chain");
@@ -2616,7 +2594,7 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
         sends: Mutex::new(Vec::new()),
     };
     let run = |request_id: &'static str| {
-        execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+        execute_v3_responses_relay_runtime_with_transport_health(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: "compat_storm".into(),
@@ -2636,9 +2614,6 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
             },
             &transport,
             &provider_health,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         )
     };
 
@@ -2685,7 +2660,7 @@ async fn concurrent_provider_request_compat_failures_reselect_with_private_cause
 
 #[tokio::test]
 async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malformed_sse() {
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2703,9 +2678,6 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
             }),
         },
         &ResponsesSseBodyReadErrorTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2730,7 +2702,7 @@ async fn responses_relay_sse_body_read_error_is_not_projected_as_transport_malfo
 async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_bypasses_recovery() {
     let server_id = "responses_terminal_missing_fresh_isolation";
     let manifest = responses_single_limited_manifest_for_scope(server_id);
-    let failed = execute_v3_responses_relay_runtime_with_retry_policy(
+    let failed = execute_v3_responses_relay_runtime(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -2748,9 +2720,6 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
             }),
         },
         &ResponsesSseTerminalMissingTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2774,7 +2743,7 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
     };
     let fresh = tokio::time::timeout(
         Duration::from_millis(500),
-        execute_v3_responses_relay_runtime_with_retry_policy(
+        execute_v3_responses_relay_runtime(
             &manifest,
             V3ResponsesRelayRuntimeInput {
                 server_id: server_id.into(),
@@ -2792,9 +2761,6 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
                 }),
             },
             &success_transport,
-            V3ResponsesRelayRetryPolicy {
-                same_candidate_retries: 0,
-            },
         ),
     )
     .await
@@ -2806,7 +2772,7 @@ async fn responses_relay_terminal_missing_fails_explicitly_but_fresh_request_byp
 
 #[tokio::test]
 async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2824,9 +2790,6 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
             }),
         },
         &ResponsesSseUnterminatedFramingTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();
@@ -2859,7 +2822,7 @@ async fn responses_relay_invalid_sse_framing_stays_transport_malformed_sse() {
 
 #[tokio::test]
 async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse() {
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &responses_single_limited_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "controlled".into(),
@@ -2877,9 +2840,6 @@ async fn responses_relay_event_payload_json_error_is_not_transport_malformed_sse
             }),
         },
         &ResponsesSseMalformedEventJsonTransport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .unwrap();

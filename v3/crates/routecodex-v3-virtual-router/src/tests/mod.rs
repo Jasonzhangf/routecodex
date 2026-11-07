@@ -307,6 +307,47 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
     assert_eq!(plan.tiers[0].pool_id, "thinking");
 }
 
+#[test]
+fn extra_required_capability_does_not_block_classifier_selected_pool() {
+    // 红测：classifier 已选中的池不得因 required_capabilities 含一个请求
+    // 未声明的额外能力而被拒绝；能力声明只是池选择信号，不是准入门禁。
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(
+        &mut manifest,
+        "thinking",
+        1,
+        vec!["thinking", "unknown-extra"],
+        None,
+    );
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["thinking".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("thinking", &["thinking", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["thinking", "default"],
+        "an extra declared required_capability must not block the classifier-selected pool"
+    );
+}
+
 fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
     RouteClassification {
         route_name: route.to_string(),
@@ -464,7 +505,7 @@ fn compact_route_signal_uses_configured_independent_route_object_pool() {
 }
 
 #[test]
-fn route_policy_pool_action_is_consumed_as_one_explicit_pool() {
+fn route_policy_pool_action_keeps_default_fallback() {
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
@@ -474,9 +515,51 @@ fn route_policy_pool_action_is_consumed_as_one_explicit_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tools", "default"],
+        "a route-policy pool must keep the required default floor"
+    );
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "tools");
-    assert_eq!(hit.target_plan.len(), 2);
+}
+
+#[test]
+fn route_policy_pool_keeps_classifier_tiers_before_default() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: Some("client-model".into()),
+                capabilities: BTreeSet::from(["thinking".into(), "tools".into()]),
+                input_tokens: 10,
+                current_turn_input_tokens: 10,
+                route_classification: test_route("thinking", &["thinking", "tools", "default"]),
+            },
+        )
+        .unwrap();
+    let classified =
+        V3VirtualRouter::with_route_policy_pool(classified, Some("thinking".to_string()));
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["thinking", "tools", "default"],
+        "route policy must lead, then classifier tiers, then the default floor"
+    );
 }
 
 #[test]
@@ -524,7 +607,7 @@ fn direct_unknown_model_falls_back_to_normal_pool_routing() {
 }
 
 #[test]
-fn direct_media_mismatch_fails_without_reroute() {
+fn direct_model_ignores_request_capability_mismatch() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -532,16 +615,47 @@ fn direct_media_mismatch_fails_without_reroute() {
             &manifest,
             "s",
             "/v1/responses",
-            direct_facts("prov.model-x", BTreeSet::from(["vision".into()])),
+            direct_facts(
+                "prov.model-x",
+                BTreeSet::from(["vision".into(), "multimodal".into()]),
+            ),
         )
         .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+    assert_eq!(hit.pool_id, "direct");
     assert_eq!(
-        router.resolve_route_pool_plan(&manifest, classified),
-        Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
-            provider: "prov".into(),
-            model: "model-x".into(),
-            capability: "vision".into(),
-        })
+        hit.target_plan[0].direct_provider_model,
+        Some(("prov".to_string(), "model-x".to_string()))
+    );
+    assert_eq!(hit.request_client_model.as_deref(), Some("model-x"));
+}
+
+#[test]
+fn disabled_server_is_routable_but_absent_server_fails() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest.servers.get_mut("s").unwrap().enabled = false;
+
+    let classified = router
+        .classify_request_with_facts(&manifest, "s", "/v1/responses", matching_facts())
+        .unwrap();
+    assert_eq!(classified.server_id, "s");
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    assert_eq!(plan.tiers[0].pool_id, "tools");
+
+    assert_eq!(
+        router.classify_request_with_facts(
+            &manifest,
+            "absent",
+            "/v1/responses",
+            matching_facts()
+        ),
+        Err(V3VirtualRouterError::ServerUnavailable("absent".into()))
     );
 }
 

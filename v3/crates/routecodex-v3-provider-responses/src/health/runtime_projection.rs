@@ -74,15 +74,10 @@ fn key_health_projection(
     now_ms: u64,
 ) -> V3ProviderKeyHealthProjection {
     let history = state.adaptive_history.get(key);
-    let cooldown_until_ms = history
-        .and_then(|history| history.rate_limit_episode.as_ref())
-        .and_then(|episode| episode.not_before_ms)
-        .or_else(|| {
-            state
-                .provider_cooldown_probes
-                .get(key)
-                .and_then(|probe| probe.next_probe_at_ms)
-        });
+    let cooldown_until_ms = state
+        .provider_cooldown_probes
+        .get(key)
+        .and_then(|probe| probe.next_probe_at_ms);
     let cooldown = key_blocks_availability(state, key, now_ms);
     V3ProviderKeyHealthProjection {
         provider_id: key.provider_id.clone(),
@@ -103,20 +98,13 @@ fn record_health_delta(history: &mut V3ProviderAdaptiveHistory, delta: i32) {
     history.score_milli = (i64::from(history.score_milli) + i64::from(delta)).clamp(0, 150) as u32;
 }
 
-/// All availability projections read mandatory episode restrictions before
-/// advisory probe state. A timer cannot substitute for a required probe.
+/// Availability projections read the ordinary cooldown/probe state. HTTP 429
+/// and every other recoverable failure share this single path.
 fn key_blocks_availability(
     state: &V3ProviderHealthState,
     key: &V3ProviderCooldownProbeKey,
     now_ms: u64,
 ) -> bool {
-    if state.adaptive_history.get(key)
-        .and_then(|history| history.rate_limit_episode.as_ref())
-        .is_some_and(|episode| episode.probe_required
-            || episode.not_before_ms.is_some_and(|until| now_ms < until))
-    {
-        return true;
-    }
     let Some(probe) = state.provider_cooldown_probes.get(key) else {
         return false;
     };
@@ -348,15 +336,6 @@ fn complete_provider_probe_success_at_generation(
         }
     }
 
-    if !rate_limit::accept_qualified_probe_success(
-        state,
-        key,
-        now_ms,
-        expected_generation.is_some(),
-    ) {
-        return Ok(false);
-    }
-
     record_adaptive_success(state, key, now_ms);
     if let Some(history) = state.adaptive_history.get_mut(key) {
         history.failure_streak = 0;
@@ -427,7 +406,6 @@ fn upsert_provider_cooldown_probe_with_interval(
             // re-stamps `RateLimit` right after this upsert, so inheriting a
             // previous cause here would let a later non-429 failure keep the
             // bounded rate-limit marker and lose its probe-owned window.
-            cooldown_cause: None,
             blocked_until_ms: Some(blocked_until_ms),
             next_probe_at_ms: Some(now_ms.saturating_add(probe_interval_ms.max(1))),
             probe_interval_ms,

@@ -1,5 +1,7 @@
-//! Public regression: early429 is capacity-only; failed non429 observation
-//! cools only the attempted identity. Healthy fallback stays usable.
+//! Public regression: provider failures, including HTTP 429, immediately
+//! exclude only the attempted identity. Healthy fallback, sibling models, keys
+//! and providers stay usable while independent probe lifecycles control only
+//! the exact failed identities' visibility.
 //! Command: CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml
 //! -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
 //! Run with an isolated test HOME, as server error sampling uses HOME/.rcc.
@@ -29,6 +31,19 @@ struct Upstream {
     identity_receipts: Mutex<BTreeMap<String, usize>>,
 }
 
+fn input_marker(body: &Value) -> String {
+    fn find_marker(value: &Value) -> Option<&str> {
+        match value {
+            Value::String(text) if text.starts_with("route-case:") => Some(text),
+            Value::Array(items) => items.iter().find_map(find_marker),
+            Value::Object(fields) => fields.values().find_map(find_marker),
+            _ => None,
+        }
+    }
+
+    find_marker(&body["input"]).unwrap_or_default().to_string()
+}
+
 /// The independent provider mirrors the primary upstream contract on its own
 /// path, so its attempts are attributable without a shared receipt counter.
 async fn independent_provider(
@@ -38,29 +53,29 @@ async fn independent_provider(
     if body["input"].to_string().contains("ping; reply pong") {
         return controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "probe_unavailable");
     }
-    let input = body["input"].as_str().unwrap_or("");
+    let input = input_marker(&body);
     *state
         .receipts
         .lock()
         .await
         .entry(format!("independent:{input}"))
         .or_default() += 1;
-    upstream_response(input)
+    upstream_response(&input)
 }
 
 async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
-    let input = body["input"].as_str().unwrap_or("");
+    let input = input_marker(&body);
     if body["input"].to_string().contains("ping; reply pong") {
         return controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "probe_unavailable");
     }
     // Startup/recovery probes are distinct from business receipts.
-    if input.starts_with("health-test:") {
+    if input.starts_with("route-case:") {
         let model = body["model"].as_str().unwrap_or("").to_string();
         *state
             .receipts
             .lock()
             .await
-            .entry(input.to_string())
+            .entry(input.clone())
             .or_default() += 1;
         *state
             .identity_receipts
@@ -69,19 +84,19 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
             .entry(format!("{input}@{model}"))
             .or_default() += 1;
     }
-    upstream_response(input)
+    upstream_response(&input)
 }
 
 /// Shared upstream contract: auth/server/fail inputs are controlled failures,
 /// everything else is a real successful business response.
 fn upstream_response(input: &str) -> Response<Body> {
-    if input.starts_with("health-test:fail")
-        || input.starts_with("health-test:auth")
-        || input.starts_with("health-test:server")
+    if input.starts_with("route-case:fail")
+        || input.starts_with("route-case:auth")
+        || input.starts_with("route-case:server")
     {
-        let (status, kind) = if input.starts_with("health-test:auth") {
+        let (status, kind) = if input.starts_with("route-case:auth") {
             (StatusCode::UNAUTHORIZED, "invalid_api_key")
-        } else if input.starts_with("health-test:server") {
+        } else if input.starts_with("route-case:server") {
             (StatusCode::INTERNAL_SERVER_ERROR, "server_error")
         } else {
             (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error")
@@ -174,17 +189,25 @@ targets = [
   {{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }},
   {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
 ]
-[route_groups.health.pools.other]
-match = {{ models = ["other"], precedence = 10 }}
+[route_groups.health.pools.tools]
+match = {{ precedence = 10, required_capabilities = ["tools"] }}
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "main", key = "sibling", priority = 100 }}
+]
+[route_groups.health.pools.thinking]
+match = {{ precedence = 10, required_capabilities = ["thinking"] }}
+targets = [
+  {{ kind = "provider_model", provider = "primary", model = "main", key = "{alias}", priority = 100 }},
+  {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
+]
+[route_groups.health.pools.coding]
+match = {{ precedence = 10, required_capabilities = ["coding"] }}
 targets = [
   {{ kind = "provider_model", provider = "primary", model = "other", key = "{alias}", priority = 100 }},
   {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
 ]
-[route_groups.health.pools.sibling]
-match = {{ models = ["sibling"], precedence = 10 }}
-targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "sibling", priority = 100 }}]
-[route_groups.health.pools.independent]
-match = {{ models = ["independent"], precedence = 10 }}
+[route_groups.health.pools.search]
+match = {{ precedence = 10, required_capabilities = ["search"] }}
 targets = [
   {{ kind = "provider_model", provider = "independent", model = "main", key = "independent", priority = 100 }},
   {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
@@ -194,17 +217,84 @@ targets = [
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
-async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str) {
+async fn request_with_current_turn_call(
+    client: &reqwest::Client,
+    base: &str,
+    model: &str,
+    marker: &str,
+    tool_name: &str,
+    arguments: Value,
+) {
     timeout(Duration::from_secs(8), async {
+        let mut body = json!({"model":model,"input":marker,"stream":false});
+        body["tools"] = json!([{"type":"function","name":"lookup","parameters":{"type":"object"}}]);
+        body["input"] = json!([
+            {"role":"user","content":[{"type":"input_text","text":marker}]},
+            {
+                "type":"function_call",
+                "name":tool_name,
+                "call_id":"call_route_signal",
+                "arguments":arguments
+            },
+            {
+                "type":"function_call_output",
+                "call_id":"call_route_signal",
+                "output":"ok"
+            }
+        ]);
         let response = client
             .post(format!("{base}/v1/responses"))
             .header("session-id", marker)
             .header("thread-id", marker)
-            .json(&json!({"model":model,"input":marker,"stream":false}))
+            .json(&body)
             .send()
             .await
             .expect("healthy candidate must answer");
-        assert_eq!(response.status(), 200);
+        assert_eq!(response.status(), 200, "request marker={marker}");
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains(marker),
+            "must return the real successful provider payload: {body}"
+        );
+        assert!(
+            !body.contains("\"error\""),
+            "client must not receive an error envelope: {body}"
+        );
+    })
+    .await
+    .expect("healthy fallback must complete headers and body within the unchanged bound");
+}
+
+async fn request_with_current_turn_tool(
+    client: &reqwest::Client,
+    base: &str,
+    model: &str,
+    marker: &str,
+    command: &str,
+) {
+    request_with_current_turn_call(
+        client,
+        base,
+        model,
+        marker,
+        "exec_command",
+        json!({"cmd":command}),
+    )
+    .await;
+}
+
+async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str) {
+    timeout(Duration::from_secs(8), async {
+        let body = json!({"model":model,"input":marker,"stream":false});
+        let response = client
+            .post(format!("{base}/v1/responses"))
+            .header("session-id", marker)
+            .header("thread-id", marker)
+            .json(&body)
+            .send()
+            .await
+            .expect("healthy candidate must answer");
+        assert_eq!(response.status(), 200, "request marker={marker}");
         let body = response.text().await.unwrap();
         assert!(
             body.contains(marker),
@@ -292,14 +382,14 @@ fn assert_identities(entries: Vec<Value>, expected: &[(&str, &str, &str, &str)])
 }
 
 async fn fallback(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
-    let input = body["input"].as_str().unwrap_or("");
+    let input = input_marker(&body);
     *state
         .fallback_receipts
         .lock()
         .await
-        .entry(input.to_string())
+        .entry(input.clone())
         .or_default() += 1;
-    successful_response(input)
+    successful_response(&input)
 }
 
 /// Asserts an exact requested model reached upstream exactly once.
@@ -310,6 +400,17 @@ async fn receipt_at(state: &Upstream, input: &str, model: &str) {
         Some(&1),
         "{key}: must reach upstream exactly once for that identity"
     );
+}
+
+async fn identity_count(state: &Upstream, input: &str, model: &str) -> usize {
+    let key = format!("{input}@{model}");
+    state
+        .identity_receipts
+        .lock()
+        .await
+        .get(&key)
+        .copied()
+        .unwrap_or_default()
 }
 
 #[tokio::test]
@@ -346,79 +447,118 @@ async fn no_first_failure_cooldown_public_http() {
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
 
     let began = tokio::time::Instant::now();
-    request(&client, &base, "main", "health-test:fail-isolated").await;
-    receipt(&state, "health-test:fail-isolated").await;
-    fallback_receipt(&state, "health-test:fail-isolated").await;
+    request(&client, &base, "main", "route-case:fail-isolated").await;
+    receipt(&state, "route-case:fail-isolated").await;
+    fallback_receipt(&state, "route-case:fail-isolated").await;
     assert_identities(pool(&client, &base).await, &[]);
-    request(&client, &base, "main", "health-test:fresh-after-429").await;
+    request(&client, &base, "main", "route-case:fresh-after-429").await;
     assert!(
         !state
             .receipts
             .lock()
             .await
-            .contains_key("health-test:fresh-after-429"),
+            .contains_key("route-case:fresh-after-429"),
         "fresh session must skip gated primary"
     );
-    fallback_receipt(&state, "health-test:fresh-after-429").await;
-    receipt(&state, "health-test:fail-isolated").await;
+    fallback_receipt(&state, "route-case:fresh-after-429").await;
+    receipt(&state, "route-case:fail-isolated").await;
     assert!(
         began.elapsed() < Duration::from_millis(900),
         "fresh proof must precede the earliest 1s backoff expiry"
     );
     assert_identities(pool(&client, &base).await, &[]);
-    request(&client, &base, "other", "health-test:other-model").await;
-    request(&client, &base, "sibling", "health-test:other-key").await;
-    request(&client, &base, "independent", "health-test:independent").await;
-    receipt(&state, "health-test:other-model").await;
-    receipt(&state, "health-test:other-key").await;
-    assert_eq!(
-        state
-            .receipts
-            .lock()
-            .await
-            .get("independent:health-test:independent"),
-        Some(&1)
-    );
-    assert_identities(pool(&client, &base).await, &[]);
-
-    request(&client, &base, "other", "health-test:server-terminal").await;
-    receipt_at(&state, "health-test:server-terminal", "other").await;
-    fallback_receipt(&state, "health-test:server-terminal").await;
-    assert_identities(pool(&client, &base).await, &[]);
-    assert_identities(
-        wait_for_cooldown_count(&client, &base, 1).await,
-        &[("primary", "default", &alias, "other")],
-    );
-    request(
+    request_with_current_turn_call(
         &client,
         &base,
-        "sibling",
-        "health-test:after-server-failure",
+        "main",
+        "route-case:other-model",
+        "apply_patch",
+        json!({"input":"*** Begin Patch\n*** End Patch"}),
     )
     .await;
-    receipt(&state, "health-test:after-server-failure").await;
-    assert_identities(
-        pool(&client, &base).await,
-        &[("primary", "default", &alias, "other")],
+    request_with_current_turn_tool(&client, &base, "main", "route-case:sibling-key", "cargo test")
+        .await;
+    request_with_current_turn_tool(&client, &base, "main", "route-case:independent", "rg -n route src")
+        .await;
+    assert_eq!(
+        identity_count(&state, "route-case:other-model", "other").await,
+        1
     );
-
-    request(&client, &base, "independent", "health-test:auth-terminal").await;
+    receipt(&state, "route-case:sibling-key").await;
     assert_eq!(
         state
             .receipts
             .lock()
             .await
-            .get("independent:health-test:auth-terminal"),
+            .get("independent:route-case:independent"),
         Some(&1)
     );
-    fallback_receipt(&state, "health-test:auth-terminal").await;
-    assert_identities(
-        pool(&client, &base).await,
-        &[("primary", "default", &alias, "other")],
-    );
+    assert_identities(pool(&client, &base).await, &[]);
+
+    request_with_current_turn_call(
+        &client,
+        &base,
+        "main",
+        "route-case:server-terminal",
+        "apply_patch",
+        json!({"input":"*** Begin Patch\n*** End Patch"}),
+    )
+    .await;
+    receipt_at(&state, "route-case:server-terminal", "other").await;
+    fallback_receipt(&state, "route-case:server-terminal").await;
+    assert_identities(pool(&client, &base).await, &[]);
     assert_identities(
         wait_for_cooldown_count(&client, &base, 2).await,
         &[
+            ("primary", "default", &alias, "main"),
+            ("primary", "default", &alias, "other"),
+        ],
+    );
+    request_with_current_turn_tool(
+        &client,
+        &base,
+        "main",
+        "route-case:after-server-failure",
+        "cargo test",
+    )
+    .await;
+    receipt(&state, "route-case:after-server-failure").await;
+    assert_identities(
+        pool(&client, &base).await,
+        &[
+            ("primary", "default", &alias, "main"),
+            ("primary", "default", &alias, "other"),
+        ],
+    );
+
+    request_with_current_turn_tool(
+        &client,
+        &base,
+        "main",
+        "route-case:auth-terminal",
+        "rg -n route src",
+    )
+    .await;
+    assert_eq!(
+        state
+            .receipts
+            .lock()
+            .await
+            .get("independent:route-case:auth-terminal"),
+        Some(&1)
+    );
+    fallback_receipt(&state, "route-case:auth-terminal").await;
+    assert_identities(
+        pool(&client, &base).await,
+        &[
+            ("primary", "default", &alias, "main"),
+            ("primary", "default", &alias, "other"),
+        ],
+    );
+    assert_identities(
+        wait_for_cooldown_count(&client, &base, 3).await,
+        &[
+            ("primary", "default", &alias, "main"),
             ("primary", "default", &alias, "other"),
             ("independent", "default", "independent", "main"),
         ],

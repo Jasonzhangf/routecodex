@@ -1,7 +1,7 @@
 {
   "id": "v3.initial_preplan_recovery",
   "version": "1",
-  "description": "Existing Runtime lifecycle design for an accepted request that must bind its original control, reach a ready plan or a typed terminal disposition while existing health probes recover, dispatch only a ready plan, and close out with one internal request disposition receipt. Probe start or completion is not health success and cannot substitute for normal candidate eligibility; this graph requires no probe handoff or immediate first-poll recheck. Request-local recovery waits do not acquire business capacity or renew the original residence deadline; attempt exhaustion must not block a normal, legal untried tier/default identity.",
+  "description": "An accepted request binds its original cancellation and residence deadline, consumes one immediate route selection, dispatches transport, and closes with one typed disposition receipt. The original route owner orders visible tier/pool/default candidates; Provider lifecycle affects visibility only. Captured selection enters transport without health recheck, recovery/probe waits, permits, capacity or attempt/store admission. Every real failure, including ordinary HTTP 429, preserves typed Error and adds only its actual complete identity to a failset that survives default, probe success and the at-most-one Chat Process refill. The original Target selects an alternative once before health side effects. Selected permits ordinary exact-identity health and immediate dispatch; normal Exhausted after an actual selected-candidate failure creates a last-candidate terminal with no new health, observation, probe, wait or resend. The Provider response-head await inside dispatch is bounded by the earlier of the Provider response timeout and the original request residence deadline. The residence edge drops the owned send future, removes the held transport attempt, and yields a request-local typed source (request_residence_deadline_expired) that is distinct from a Provider response timeout; it triggers no reselect, probe, cooldown, new business send or refill, while a Provider timeout that binds first keeps the existing typed Provider Error and other-identity selection. Client cancellation cancels the owned Runtime send future without stopping sibling requests; a prior attempt's checkpoint is cleaned by the existing attempt closeout. Under requirements v27, an uncommitted complete real HTTP error returns its current-attempt status, raw body and safe headers through the existing Server boundary. Intermediate errors stay internal; a prior attempt witness cannot stand in for the last failure. The internal receipt itself is not client payload. Initial no-eligible results and selection faults do not prove last-candidate failure. Non-HTTP or incomplete errors, post-head representation, explicit-pin fallback and postcommit provider continuity retain their explicit OPEN boundaries. Switching does not consume or reset refill; cancellation and the original deadline remain effective.",
   "inputs": [
     {
       "id": "accepted-request-context",
@@ -25,7 +25,7 @@
       "iterator": "Whole",
       "resources": {
         "reads": [],
-        "writes": ["v3.execution.request_lifecycle_control", "v3.execution.attempt_budget"]
+        "writes": ["v3.execution.request_lifecycle_control"]
       }
     },
     {
@@ -44,9 +44,7 @@
       "resources": {
         "reads": [
           "v3.execution.request_lifecycle_control",
-          "v3.execution.attempt_budget",
           "v3.provider.availability_projection",
-          "v3.provider.cooldown_probe_state",
           "v3.operation_runner.request_local_exclusions"
         ],
         "writes": []
@@ -69,7 +67,7 @@
         "reads": [
           "v3.hub.resolved_target",
           "v3.operation_runner.execution_mode",
-          "v3.provider.adaptive_concurrency_admission"
+          "v3.execution.request_lifecycle_control"
         ],
         "writes": [
           "v3.target.concrete_provider",
@@ -91,7 +89,7 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.execution.attempt_budget", "v3.error.chain"],
+        "reads": ["v3.execution.request_lifecycle_control", "v3.error.chain"],
         "writes": []
       }
     }

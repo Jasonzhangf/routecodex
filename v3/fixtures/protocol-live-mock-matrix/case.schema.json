@@ -85,11 +85,6 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "request_max_attempts": {"type": "integer", "minimum": 1},
-            "attempt_max_bytes": {"type": "integer", "minimum": 1},
-            "attempt_max_frames": {"type": "integer", "minimum": 1},
-            "request_max_bytes": {"type": "integer", "minimum": 1},
-            "process_max_bytes": {"type": "integer", "minimum": 1},
             "residence_timeout_ms": {"type": "integer", "minimum": 1}
           }
         }

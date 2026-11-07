@@ -2,7 +2,6 @@ use crate::client_transport_observation::{
     V3ClientResponseObservation, V3ClientTransportObservation,
 };
 use crate::restart_closeout::V3FrontTransportCloseoutState;
-use crate::session_admission::V3ServerRequestActivityPermit;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
@@ -1017,7 +1016,7 @@ async fn write_front_command(
         V3FrontWriteCommand::Frame(frame, response) => {
             write_front_response_frame(write_half, observation, closeout, &frame, &response).await
         }
-        V3FrontWriteCommand::Flush(permits, ack) => {
+        V3FrontWriteCommand::Flush(ack) => {
             let result = write_half.flush().await;
             let ok = result.is_ok();
             if let Err(error) = &result {
@@ -1029,8 +1028,6 @@ async fn write_front_command(
                 );
                 closeout.close();
             }
-            // The worker owns completion even if Hyper/restart stops polling.
-            drop(permits);
             let _ = ack.send(result);
             ok
         }
@@ -1041,7 +1038,6 @@ async fn write_front_command(
 #[derive(Clone, Debug)]
 pub struct V3StableFrontSocket {
     write_tx: mpsc::Sender<V3FrontWriteCommand>,
-    pending_activity: Arc<Mutex<Vec<V3ServerRequestActivityPermit>>>,
     observation: Arc<V3ClientTransportObservation>,
     close_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
     closeout_state: Arc<V3FrontTransportCloseoutState>,
@@ -1050,10 +1046,7 @@ pub struct V3StableFrontSocket {
 #[derive(Debug)]
 enum V3FrontWriteCommand {
     Frame(Vec<u8>, V3ClientResponseObservation),
-    Flush(
-        Vec<V3ServerRequestActivityPermit>,
-        oneshot::Sender<std::io::Result<()>>,
-    ),
+    Flush(oneshot::Sender<std::io::Result<()>>),
 }
 
 impl V3StableFrontSocket {
@@ -1069,8 +1062,6 @@ impl V3StableFrontSocket {
         observation: Arc<V3ClientTransportObservation>,
     ) -> Self {
         let (write_tx, mut write_rx) = mpsc::channel::<V3FrontWriteCommand>(32);
-        let pending_activity = Arc::new(Mutex::new(Vec::new()));
-        let worker_pending_activity = Arc::clone(&pending_activity);
         let (close_tx, mut close_rx) = oneshot::channel();
         let closeout_state = V3FrontTransportCloseoutState::new();
         let worker_closeout_state = Arc::clone(&closeout_state);
@@ -1124,26 +1115,14 @@ impl V3StableFrontSocket {
                 .await;
             }
             worker_closeout_state.close();
-            worker_pending_activity
-                .lock()
-                .expect("front activity lock")
-                .clear();
             let _ = write_half.shutdown().await;
             worker_observation.emit("socket_closed", &worker_observation.current(), None, None);
         });
         Self {
             write_tx,
-            pending_activity,
             observation,
             close_tx: Arc::new(Mutex::new(Some(close_tx))),
             closeout_state,
-        }
-    }
-
-    pub(crate) fn hold_activity_until_flush(&self, permit: V3ServerRequestActivityPermit) {
-        let mut pending = self.pending_activity.lock().expect("front activity lock");
-        if !self.is_closed() {
-            pending.push(permit);
         }
     }
 
@@ -1201,16 +1180,6 @@ struct V3FrontHttpIo {
     front_socket: V3StableFrontSocket,
     flush: Option<std::pin::Pin<Box<dyn Future<Output = std::io::Result<()>> + Send>>>,
     dirty: bool,
-}
-
-impl Drop for V3FrontHttpIo {
-    fn drop(&mut self) {
-        self.front_socket
-            .pending_activity
-            .lock()
-            .expect("front activity lock")
-            .clear();
-    }
 }
 
 impl AsyncRead for V3FrontHttpIo {
@@ -1273,16 +1242,8 @@ impl AsyncWrite for V3FrontHttpIo {
     ) -> std::task::Poll<std::io::Result<()>> {
         loop {
             if self.flush.is_none() {
-                // Snapshot only permits whose Body EOF preceded this Hyper flush.
                 // Hyper has now submitted its body data and HTTP framing tail.
-                let permits = std::mem::take(
-                    &mut *self
-                        .front_socket
-                        .pending_activity
-                        .lock()
-                        .expect("front activity lock"),
-                );
-                if !self.dirty && permits.is_empty() {
+                if !self.dirty {
                     return std::task::Poll::Ready(Ok(()));
                 }
                 self.dirty = false;
@@ -1290,7 +1251,7 @@ impl AsyncWrite for V3FrontHttpIo {
                 self.flush = Some(Box::pin(async move {
                     let (ack_tx, ack_rx) = oneshot::channel();
                     sender
-                        .send(V3FrontWriteCommand::Flush(permits, ack_tx))
+                        .send(V3FrontWriteCommand::Flush(ack_tx))
                         .await
                         .map_err(|_| {
                             std::io::Error::new(
@@ -1370,7 +1331,6 @@ where
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(ConnectInfo(remote_addr));
             request.extensions_mut().insert(connection_identity);
-            request.extensions_mut().insert(front_socket.clone());
             let response = service.call(request).await?;
             front_socket
                 .observation

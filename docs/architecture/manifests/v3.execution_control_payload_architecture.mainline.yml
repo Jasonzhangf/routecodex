@@ -1,7 +1,7 @@
 lifecycle_id: v3.execution_control_payload_architecture
 status: active
 owner_feature_id: v3.execution_request_lifecycle
-summary: One resident request lifecycle owns immutable target planning, cumulative recovery budget, bounded attempt payloads, terminal success, and closeout; diagnostics and persistence are bounded side channels without execution authority.
+summary: One request lifecycle preserves the original deadline, complete attempt payloads, terminal success and closeout. Route selection is independent and request execution has no local transport attempt or storage admission. Chat Process permits at most one additional consecutive refill; diagnostics and persistence have no execution authority.
 canonical_docs:
   problem: docs/goals/v3-execution-control-payload-architecture-audit-problem.md
   design: docs/goals/v3-execution-control-payload-architecture-audit-design.md
@@ -54,16 +54,13 @@ module_contracts:
     owns: [attempt_store_policy_compilation, storage_path_policy_compilation]
     forbids: [runtime_append, runtime_flush, history_rotation, request_hot_path_io]
 budget_contract:
-  per_attempt: required
-  per_request: required
-  process_global: required
   residence_or_deadline: required
   provider_stream_deadline_guard: required_for_direct_and_relay_before_semantic_terminal
   residence_expiry: typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty
   reserve_before_append_or_copy: true
   provider_attempt_and_client_replay_share_request_budget: true
   server_budget_construction: forbidden
-  initial_storage: bounded_memory_only
+  initial_storage: memory_only
   disk_spill: forbidden
 sealed_replay_body_contract:
   responses: typed_non_optional

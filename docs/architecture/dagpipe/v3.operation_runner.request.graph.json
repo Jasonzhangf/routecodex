@@ -1,7 +1,7 @@
 {
   "id": "v3.operation_runner.request",
   "version": "1",
-  "description": "The invocation origin resource carries client, dry_run, and refill. A refill is a new execution that re-enters this same request mainline through the normal Runtime entry loop; the static DAG has no back-edge. Capacity admission reads the selected typed provider/interface/model/auth identity: its dynamic bucket is bounded by the shared provider/auth hard ceiling, and its lease carries that scope into transport. Identity partitioning does not add a payload edge or change this SESE operator topology; release and validated recovery remain in the mapped provider admission lease lifecycle.",
+  "description": "The invocation origin resource carries client, dry_run and refill. Chat Process allows at most one extra refill, zero disables it, and the static request graph has no back-edge. The original route owner orders visible tier/pool/default candidates and immediately uses declared default when the current pool has no visible candidate. Captured selection enters transport without health recheck, lifecycle waits, permits, capacity or attempt/store admission. The complete failed-identity set survives default, refill and probe success. Every real failure, including ordinary HTTP 429, preserves typed Error. The original Target selects once: an eligible captured alternative is dispatched immediately with applicable exact-identity health; normal exhaustion after an actual candidate fails produces a typed last-candidate terminal without new health, observation, probe, wait or resend. Requirements v27 authorize Server to return that current attempt's complete real HTTP error status, raw body and safe headers before client head commit; intermediate errors remain internal. Initial invisible pools and selection faults are not last-candidate failure. Non-HTTP, incomplete-body, post-head and postcommit representations remain separately OPEN. Error switching neither consumes nor resets refill. Cancellation, the original residence deadline and real transport failure retain their semantics. This request graph ends at Provider transport; client error delivery is the separate typed terminal/Server flow.",
   "inputs": [
     { "id": "source-request", "schema": "Any", "schema_ref": "v3.operation_runner.arc.source_request" }
   ],
@@ -58,8 +58,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.provider.adaptive_concurrency_admission", "v3.error.provider_action_gate", "v3.operation_runner.request_local_exclusions"],
-        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.error.provider_action_gate", "v3.operation_runner.request_local_exclusions"]
+        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.operation_runner.request_local_exclusions"],
+        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.request_local_exclusions"]
       }
     },
     {

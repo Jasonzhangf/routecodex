@@ -148,8 +148,8 @@ for (const edge of chain?.edges ?? []) {
     failures.push(`${paths.mainlineMap}: retired negative or duplicate Direct parity edge ${edge.step_id}`);
   }
 }
-const action = (mainlineMap?.chains ?? []).find((entry) => entry?.chain_id === 'v3.provider_action_gate.mainline');
-const compatError = (action?.edges ?? []).find((edge) => edge?.step_id === 'v3-provider-action-gate-01');
+const compatError = (chain?.edges ?? []).find((edge) => edge?.step_id === 'v3-protocol-field-parity-responses-provider-compat-error-01');
+if (!compatError) failures.push(`${paths.mainlineMap}: missing independent ProviderReqCompat06 typed failure edge`);
 for (const [key, expected] of Object.entries({
   from_node: 'ProviderReqCompat06ProviderCompat', to_node: 'V3Error05ExecutionDecision',
   caller_symbol: 'execute_v3_responses_relay_runtime_inner_with_refill',
@@ -157,7 +157,7 @@ for (const [key, expected] of Object.entries({
   callee_symbol: 'handle_v3_responses_relay_provider_failure',
   callee_file: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs',
 })) {
-  if (compatError?.[key] !== expected) failures.push(`${paths.mainlineMap}: ProviderReqCompat06 typed failure edge ${key} must be ${expected}`);
+  if (compatError?.[key] !== expected) failures.push(`${paths.mainlineMap}: independent ProviderReqCompat06 typed failure edge ${key} must be ${expected}`);
 }
 const direct = (mainlineMap?.chains ?? []).find((entry) => entry?.chain_id === 'v3.responses_direct.required_mainline');
 for (const [id, expected] of Object.entries({

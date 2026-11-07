@@ -271,7 +271,6 @@ impl V3TargetInterpreter {
                                 candidate.interface_id.clone(),
                                 candidate.auth_alias.clone(),
                                 candidate.model_id.clone(),
-                                candidate_satisfies_required_capabilities(&candidate),
                             );
                             if let Some(index) = candidate_indices.get(&key).copied() {
                                 merge_candidate_route_provenance(
@@ -299,15 +298,7 @@ impl V3TargetInterpreter {
                 last_error = Some(V3TargetError::OpaqueTargetMissing);
                 continue;
             };
-            let mut required_capabilities = route_required_capabilities.clone();
-            // The default tier is reached after capability tiers are absent or
-            // exhausted. ProviderReqCompat projects retained images to the
-            // session placeholder for a selected text-only target.
-            if entry.pool_id == "default" {
-                required_capabilities.retain(|capability| {
-                    !matches!(capability.as_str(), "web_search" | "multimodal" | "vision")
-                });
-            }
+            let required_capabilities = route_required_capabilities.clone();
             let mut visited = BTreeSet::new();
             match self.expand_route_target(
                 manifest,
@@ -330,7 +321,6 @@ impl V3TargetInterpreter {
                             candidate.interface_id.clone(),
                             candidate.auth_alias.clone(),
                             candidate.model_id.clone(),
-                            candidate_satisfies_required_capabilities(&candidate),
                         );
                         if let Some(index) = candidate_indices.get(&key).copied() {
                             merge_candidate_route_provenance(&mut candidates[index], &candidate);
@@ -455,19 +445,16 @@ impl V3TargetInterpreter {
             .is_none_or(|availability| availability.is_available_at(now_ms))
     }
 
-    /// A candidate is admitted when its declared capabilities match the
-    /// request and its provider-model availability window contains `now_ms`.
-    /// This is the single admission basis shared by Target10 selection, the
-    /// direct send gate, remaining-candidate accounting and recovery probes:
-    /// every consumer must agree on which candidates the route can actually
-    /// reach, or a candidate admitted by one stage is refused by another and a
-    /// provider that was never contacted receives a health failure.
+    /// A candidate is admitted when its provider-model availability window
+    /// contains `now_ms`. This is the single admission basis shared by
+    /// Target10 selection, the direct send gate, remaining-candidate
+    /// accounting and recovery probes: every consumer must agree on which
+    /// candidates the route can actually reach.
     pub fn candidate_admitted(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
-        candidate_satisfies_required_capabilities(candidate)
-            && Self::candidate_in_availability_window(candidate, now_ms)
+        Self::candidate_in_availability_window(candidate, now_ms)
     }
 
-    /// Number of candidates admitted by capability and declared availability.
+    /// Number of candidates admitted by declared availability.
     pub fn admitted_candidate_count(
         expanded: &V3Target09CandidateSetExpanded,
         now_ms: u64,
@@ -532,32 +519,14 @@ impl V3TargetInterpreter {
         // the main slot over; a request-local failure never does.
         let mut sticky_cooled = BTreeSet::new();
         let mut eligible = Vec::new();
-        // Automatic-cooldown exemption counts only candidates still admitted by
-        // capability and declared availability, so a window-inactive or
-        // capability-mismatched sibling cannot inflate the pool size.
-        let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
         for (index, candidate) in expanded.candidates.iter().enumerate() {
-            if !candidate_satisfies_required_capabilities(candidate) {
-                unavailable.push(format!(
-                    "{}:{}:{}:capability_mismatch",
-                    candidate.provider_id, candidate.auth_alias, candidate.model_id
-                ));
-                continue;
-            }
-            // Availability is declared on the provider model and is not a
-            // fallback tier: outside its windows the candidate is not eligible.
-            if !Self::candidate_admitted(candidate, now_ms) {
+            if !Self::candidate_in_availability_window(candidate, now_ms) {
                 unavailable.push(format!(
                     "{}:{}:{}:{}:availability_inactive",
                     candidate.provider_id,
                     candidate.interface_id,
                     candidate.auth_alias,
                     candidate.model_id
-                ));
-                sticky_cooled.insert(V3StickyKey::new(
-                    &candidate.provider_id,
-                    &candidate.auth_alias,
-                    &candidate.model_id,
                 ));
                 continue;
             }
@@ -593,17 +562,6 @@ impl V3TargetInterpreter {
                 candidate.weight,
                 now_ms,
             );
-            // A configured singleton does not participate in automatic health
-            // scheduling. Keep manual auth, capacity and request-local blocks.
-            if !projection.available
-                && Self::ignores_single_candidate_automatic_cooldown(
-                    admitted_candidate_count,
-                    &projection.blocked_scopes,
-                )
-            {
-                projection.available = true;
-                projection.blocked_scopes.clear();
-            }
             let scheduled_priority =
                 self.provider_priority_schedule_priority(&expanded, candidate, now_ms);
             projection.effective_priority = projection
@@ -642,24 +600,17 @@ impl V3TargetInterpreter {
                 ));
             }
         }
-        // The attempt budget includes the text candidates that become
-        // selectable after the available vision candidates fail.
+        let selected_pool_visible = eligible.iter().any(|(_, candidate, ..)| {
+            candidate.pool_ids.contains(&expanded.route.pool_id)
+        });
+        eligible.retain(|(_, candidate, ..)| {
+            if selected_pool_visible {
+                candidate.pool_ids.contains(&expanded.route.pool_id)
+            } else {
+                candidate.default_pool_member
+            }
+        });
         let candidate_count = eligible.len().max(1);
-        // A text-only default candidate may project images only after every
-        // captured, available vision candidate has been exhausted.
-        if expanded
-            .route
-            .request_capabilities
-            .iter()
-            .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
-            && eligible.iter().any(|(_, candidate, _, _, _, _)| {
-                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-            })
-        {
-            eligible.retain(|(_, candidate, _, _, _, _)| {
-                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-            });
-        }
         // A route pool can encode its configured tiers as target priority.
         // Plan tier index orders separate pools; scheduled priority orders the
         // tiers inside one pool. Near-limit is only a same-tier demotion, so it
@@ -1374,13 +1325,6 @@ fn merge_candidate_route_provenance(
     existing.default_pool_member |= duplicate.default_pool_member;
 }
 
-fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> bool {
-    candidate
-        .required_capabilities
-        .iter()
-        .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
-}
-
 fn legacy_selection_sample(expanded: &V3Target09CandidateSetExpanded) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for value in [
@@ -1441,15 +1385,6 @@ fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_toke
         + 9_999)
         / 10_000)
         .min(u128::from(u64::MAX)) as u64
-}
-
-fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
-    let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
-    match required {
-        "search" | "web_search" => has("web_search"),
-        "multimodal" | "vision" => has("multimodal") || has("vision"),
-        _ => true,
-    }
 }
 
 fn format_candidate_availability_unavailable(

@@ -119,7 +119,6 @@ fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
 fn provider_error_05(
     code: &str,
     stage: &'static str,
-    same_retry: bool,
 ) -> V3Error05ExecutionDecision {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
@@ -136,7 +135,7 @@ fn provider_error_05(
         1,
     );
     let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 1, false, same_retry,
+        action, 1, false,
     );
     let witness = V3Error05RecoveryAdmissionWitness::new(
         V3ProviderFailureSessionScope::new("server", "group", "session").expect("scope"),
@@ -155,7 +154,7 @@ fn provider_http_errors_reselect_when_route_pool_remains() {
         "provider_http_429",
         "provider_http_502",
     ] {
-        let decision = provider_error_05(code, "V3ProviderRespInbound01Raw", false);
+        let decision = provider_error_05(code, "V3ProviderRespInbound01Raw");
         assert!(
             matches!(
                 decision.action,
@@ -167,7 +166,7 @@ fn provider_http_errors_reselect_when_route_pool_remains() {
 }
 
 #[test]
-fn transient_stream_failures_reselect_even_when_same_provider_budget_is_reported() {
+fn transient_stream_failures_switch_candidates_without_same_identity_retry() {
     for (code, stage) in [
         ("provider_response_sse_stream", "V3ProviderRespInbound01Raw"),
         (
@@ -175,7 +174,7 @@ fn transient_stream_failures_reselect_even_when_same_provider_budget_is_reported
             "V3ProviderReqOutbound09TransportRequest",
         ),
     ] {
-        let decision = provider_error_05(code, stage, true);
+        let decision = provider_error_05(code, stage);
         assert!(
             matches!(
                 decision.action,
@@ -200,7 +199,7 @@ fn exhausted_provider_error_05(code: &str) -> V3Error05TerminalDecision {
         0,
     );
     let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 0, false, false,
+        action, 0, false,
     );
     build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None)
         .try_into_terminal()
@@ -268,6 +267,46 @@ fn real_upstream_502_and_2xx_are_recorded_as_evidence_without_client_projection(
     assert_eq!(terminal_2xx.status(), 200);
     assert_eq!(terminal_2xx.body(), b"ok");
     assert_eq!(terminal_2xx.body_read_failure(), None);
+}
+
+#[test]
+fn last_candidate_terminal_only_projects_a_complete_real_http_error() {
+    // v27 narrow exception: only a normal last-candidate exhaustion whose
+    // current attempt received a complete real HTTP error earns the constrained
+    // client-visible variant. Everything else keeps provider-private evidence.
+    let complete_429 = V3ExternalHttpWitness::new(
+        429,
+        vec![("retry-after".to_string(), b"7".to_vec())],
+        br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
+    );
+    assert!(complete_429.is_complete_http_error());
+    assert_eq!(
+        V3ErrorHandlingCenter::last_candidate_terminal_disposition(Some(complete_429.clone())),
+        V3ProviderTerminalDisposition::LastCandidateExternalHttp(complete_429)
+    );
+
+    // A 2xx head followed by a local failure is not a client error response.
+    let non_error_status = V3ExternalHttpWitness::new(200, vec![], b"{\"id\":\"ok\"}".to_vec());
+    assert!(!non_error_status.is_complete_http_error());
+    assert_eq!(
+        V3ErrorHandlingCenter::last_candidate_terminal_disposition(Some(non_error_status.clone())),
+        V3ProviderTerminalDisposition::ExternalHttp(non_error_status)
+    );
+
+    // A head with an unreadable body stays internal evidence only.
+    let incomplete_body = V3ExternalHttpWitness::new(503, vec![], b"partial".to_vec())
+        .with_body_read_failure("provider body read failed");
+    assert!(!incomplete_body.is_complete_http_error());
+    assert_eq!(
+        V3ErrorHandlingCenter::last_candidate_terminal_disposition(Some(incomplete_body.clone())),
+        V3ProviderTerminalDisposition::ExternalHttp(incomplete_body)
+    );
+
+    // A pre-head transport failure has no HTTP witness to project.
+    assert_eq!(
+        V3ErrorHandlingCenter::last_candidate_terminal_disposition(None),
+        V3ProviderTerminalDisposition::NoResponse
+    );
 }
 
 #[test]

@@ -259,7 +259,6 @@ fn test_v3_listener_state_with_debug(
         )),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-        request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
         webui_observability: V3WebuiObservability::new(),
     })
@@ -1082,6 +1081,66 @@ async fn genuine_provider_http_502_terminal_still_records_502() {
         row.meta.error_category.as_deref(),
         Some("http_502"),
         "a real provider HTTP 502 keeps the honest http_502 category"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// v27: the constrained last-candidate variant still derives
+/// `provider_status`/`error_category` from the real upstream witness, not from
+/// the client status and not from an internal 599.
+#[tokio::test]
+async fn last_candidate_external_http_terminal_records_real_provider_status() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-last-candidate-http-ledger-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+
+    let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_http_429",
+        "provider returned HTTP 429",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(429),
+            code: Some("HTTP_429".to_string()),
+            provider_id: Some("provider-a".to_string()),
+            upstream_request_id: None,
+            message: Some("provider returned HTTP 429".to_string()),
+        },
+    );
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        b"{\"error\":\"upstream\"}".to_vec(),
+    );
+    let output = make_provider_terminal_output(
+        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness),
+        source,
+        429,
+    );
+    publish_terminal_outcome(&state, "req-last-candidate-http-ledger", output);
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&build_v3_obs_request_key(5555, "req-last-candidate-http-ledger"))
+        .expect("last candidate terminal must record a ledger row");
+    assert_eq!(
+        row.meta.provider_status,
+        Some(429),
+        "the real upstream status must not be replaced by the client status"
+    );
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("http_429"),
+        "the honest upstream category must not be replaced by an internal 599"
     );
 
     fs::remove_dir_all(root).unwrap();
@@ -4993,7 +5052,6 @@ fn error_projection_appends_human_console_failure_line() {
         )),
         provider_health: Arc::new(test_v3_provider_health(&manifest)),
         realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-        request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
         front_transport_broker: V3FrontTransportBroker::new(1),
         webui_observability: V3WebuiObservability::new(),
     };
@@ -5230,6 +5288,86 @@ async fn responses_relay_json_error_returns_typed_no_response() {
         .is_some());
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert!(body.is_empty());
+}
+
+#[tokio::test]
+async fn provider_terminal_last_candidate_http_projects_complete_response_without_hop_headers() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-provider-terminal-last-candidate-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let log_file = root.join("server.log");
+    let state = test_v3_listener_state_with_debug(&log_file, 5555, true, true, None, true);
+    let mut sample_worker = state.codex_sample_store.start_persist_worker().unwrap();
+    let raw_body = b"raw-error-body\n\twith whitespace  ".to_vec();
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        429,
+        vec![
+            ("content-type".to_string(), b"application/octet-stream".to_vec()),
+            ("x-end-to-end".to_string(), b"first".to_vec()),
+            ("x-end-to-end".to_string(), b"second".to_vec()),
+            (
+                "connection".to_string(),
+                b"keep-alive, x-listed-hop".to_vec(),
+            ),
+            ("keep-alive".to_string(), b"timeout=5".to_vec()),
+            ("x-listed-hop".to_string(), b"must-not-cross".to_vec()),
+            ("proxy-authenticate".to_string(), b"must-not-cross".to_vec()),
+            ("content-length".to_string(), b"17".to_vec()),
+        ],
+        raw_body.clone(),
+    );
+    let response = provider_terminal_response(
+        &state,
+        None,
+        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness),
+        true,
+        V3ProviderTerminalEvidence {
+            entry_protocol: "openai_chat",
+            endpoint: "/v1/chat/completions",
+            request_id: "provider-terminal-last-candidate-unit",
+        },
+    );
+    sample_worker.wait_until_idle().await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()["content-type"], "application/octet-stream");
+    assert_eq!(
+        response
+            .headers()
+            .get_all("x-end-to-end")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["first", "second"]
+    );
+    for name in [
+        "connection",
+        "keep-alive",
+        "x-listed-hop",
+        "proxy-authenticate",
+        "content-length",
+    ] {
+        assert!(!response.headers().contains_key(name), "{name} crossed");
+    }
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.as_ref(), raw_body.as_slice());
+
+    let evidence: Value = serde_json::from_str(
+        &fs::read_to_string(root.join(
+            ".rcc/codex-samples/openai-chat-completions/ports/5555/\
+             provider-terminal-last-candidate-unit/provider-terminal.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(evidence["kind"], "external_http", "{evidence}");
+    assert_eq!(evidence["status"], 429, "{evidence}");
+    assert_eq!(evidence["body"], json!(raw_body), "{evidence}");
 }
 
 #[tokio::test]

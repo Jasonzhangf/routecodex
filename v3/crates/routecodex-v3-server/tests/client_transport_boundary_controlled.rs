@@ -341,9 +341,12 @@ async fn chat_json_client_still_waits_for_the_runtime_outcome() {
 #[tokio::test]
 async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client() {
     let _guard = TEST_LOCK.lock().await;
-    // A failed last identity waits the original declared recovery budget. It
-    // does not end the client channel immediately after the provider error.
-    let mut entry = start_controlled_entry_with_timeout_and_budget(None, Some(1800)).await;
+    // The single controlled provider is an actual last candidate. This fixture
+    // commits HTTP 200 and a keepalive before the provider is released, so this
+    // is deliberately the post-head case. It records the current transport
+    // termination without claiming that post-head error delivery is closed.
+    let mut entry =
+        start_controlled_entry_with_timeout_and_budget(Some(10_000), Some(1800)).await;
     let started = std::time::Instant::now();
     let client = reqwest::Client::new();
 
@@ -376,45 +379,54 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
 
     entry.release_provider();
     let mut received = Vec::new();
-    let mut aborted = false;
+    let mut stream_error = false;
+    let mut clean_eof = false;
+    let stream_end_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     loop {
-        match tokio::time::timeout(Duration::from_secs(5), body.next()).await {
+        match tokio::time::timeout_at(stream_end_deadline, body.next()).await {
             Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
-            Ok(Some(Err(_))) | Err(_) => {
-                aborted = true;
+            Ok(Some(Err(_))) => {
+                stream_error = true;
                 break;
             }
-            Ok(None) => break,
+            Ok(None) => {
+                clean_eof = true;
+                break;
+            }
+            Err(_) => panic!(
+                "waiting for the actual last-candidate Provider failure timed out"
+            ),
         }
     }
-    assert!(
-        aborted,
-        "a provider terminal must stay an explicit client transport failure, not a clean end"
-    );
-    assert!(
-        started.elapsed() >= Duration::from_millis(1500),
-        "provider failure must not shortcut the declared request recovery budget"
-    );
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(
-        received.contains(":\n\n"),
-        "the terminal must reach the client behind a transport comment frame instead of a silent close: {received:?}"
+        stream_error,
+        "the committed post-head channel must end as a real stream error, got clean_eof={clean_eof}"
     );
     assert!(
-        received
-            .lines()
-            .filter(|line| !line.is_empty())
-            .all(|line| line.starts_with(':')),
-        "only transport comment frames may follow the committed head before the terminal: {received:?}"
+        started.elapsed() < Duration::from_millis(1500),
+        "the actual last-candidate Provider failure must not wait for the old recovery budget, waited {:?}",
+        started.elapsed()
+    );
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "the failed last identity must not receive an automatic business retry"
     );
     assert!(
         !received.contains("raw provider secret detail"),
-        "provider detail must never reach the client: {received}"
+        "the committed post-head channel must not append provider detail: {received}"
     );
     assert!(
-        !received.contains("data:"),
-        "no error frame may be projected to the client: {received}"
+        !received.contains("[DONE]"),
+        "the committed channel must not fabricate a normal completion terminal: {received:?}"
     );
+    assert!(
+        !received.contains("\"choices\""),
+        "the failed request must not fabricate business success: {received:?}"
+    );
+    // This is an observation-only post-head case. The v27 pre-head complete HTTP
+    // error path must be proven by a separate fixture whose client head is not
+    // committed; do not count this function as that PASS target.
     stop_controlled_entry(entry).await;
 }
 
@@ -496,9 +508,9 @@ async fn chat_sse_head_commit_carries_a_json_success_for_an_sse_client() {
     stop_controlled_entry(entry).await;
 }
 
-/// An exec replacement must let the client responses that are already in flight
-/// finish. The provider attempt stays gated while `prepare_for_exec` runs, so the
-/// committed response can only complete if the preparation waited for it.
+/// A formal exec replacement does not wait for a held Provider or request
+/// recovery. It closes the client transport without an error body or fabricated
+/// terminal, while the existing Front owner flushes bytes that reached its queue.
 #[tokio::test]
 async fn exec_preparation_drains_an_in_flight_client_response_before_closing_transports() {
     let _guard = TEST_LOCK.lock().await;
@@ -537,52 +549,87 @@ async fn exec_preparation_drains_an_in_flight_client_response_before_closing_tra
         .expect("the provider must hold the buffered attempt")
         .expect("the provider capture channel must stay open");
 
-    // Release the provider only after the preparation started, so a preparation
-    // that closes transports without draining cuts this response.
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let _ = release.send(true);
-    });
+    // Let another keepalive reach the Front writer before the replacement close.
+    // Delivered bytes do not independently prove queue order; the Front closeout
+    // tests own that narrower invariant.
+    tokio::time::sleep(Duration::from_millis(KEEPALIVE_MS + 100)).await;
     let started = std::time::Instant::now();
-    let _preparation = handle.prepare_for_exec().await;
+    let _preparation = tokio::time::timeout(Duration::from_secs(2), handle.prepare_for_exec())
+        .await
+        .expect("formal exec must not wait for the held Provider");
     assert!(
-        started.elapsed() >= Duration::from_millis(300),
-        "exec preparation must wait for the in-flight client response, waited {:?}",
+        started.elapsed() < Duration::from_millis(1500),
+        "formal exec must not wait for the held Provider or its recovery budget, waited {:?}",
         started.elapsed()
     );
+    assert!(
+        captures.try_recv().is_err(),
+        "the Provider must still be held when formal exec preparation completes"
+    );
 
-    let mut rest = Vec::new();
-    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(5), body.next())
-        .await
-        .expect("the drained client response must stay readable until it completes")
-    {
-        rest.extend_from_slice(&chunk.expect("the drained client response must not break"));
+    let mut received = Vec::new();
+    let mut stream_error = false;
+    let mut clean_eof = false;
+    let stream_end_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match tokio::time::timeout_at(stream_end_deadline, body.next()).await {
+            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
+            Ok(Some(Err(_))) => {
+                stream_error = true;
+                break;
+            }
+            Ok(None) => {
+                clean_eof = true;
+                break;
+            }
+            Err(_) => panic!("formal exec close must not wait for the held Provider"),
+        }
     }
-    let rest = String::from_utf8(rest).unwrap();
     assert!(
-        rest.contains("\"content\":\"first\""),
-        "the drained response must deliver its payload: {rest}"
+        stream_error,
+        "formal exec must interrupt the unfinished SSE transport detectably, clean_eof={clean_eof}"
     );
     assert!(
-        rest.contains("data: [DONE]"),
-        "the drained response must deliver its terminal frame: {rest}"
+        received
+            .windows(KEEPALIVE_FRAME.len())
+            .any(|window| window == KEEPALIVE_FRAME),
+        "a keepalive written before the replacement close must still reach the client"
     );
+    let received = String::from_utf8_lossy(&received).to_string();
+    assert!(
+        !received.contains("data:"),
+        "formal exec must not project a data or error frame: {received:?}"
+    );
+    assert!(
+        !received.contains("\"error\""),
+        "formal exec must not project a proxy or Provider error payload: {received:?}"
+    );
+    assert!(
+        !received.contains("[DONE]"),
+        "formal exec must not fabricate a normal completion terminal: {received:?}"
+    );
+    assert!(
+        !received.contains("\"content\":\"first\""),
+        "formal exec must not wait for or drain the held Provider business payload: {received:?}"
+    );
+    let _ = release.send(true);
     let _ = upstream_shutdown.send(());
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
-/// The provider request deadline, rather than a restart drain cutoff, ends an
-/// unsuccessful attempt. Its error remains request-local with no client payload.
+/// Without a maintenance operation, the original request residence deadline
+/// ends a stalled attempt without projecting a Provider error or normal terminal.
 #[tokio::test]
 async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal() {
     let _guard = TEST_LOCK.lock().await;
     let ControlledEntry {
         endpoint,
-        handle,
+        handle: _handle,
         mut captures,
-        release: _release,
+        release,
         upstream_shutdown,
-    } = start_controlled_entry_with_timeout_and_budget(Some(1200), Some(3000)).await;
+    } = start_controlled_entry_with_timeout_and_budget(Some(10_000), Some(1200)).await;
+    let started = std::time::Instant::now();
     let client = reqwest::Client::new();
     let response = tokio::time::timeout(
         Duration::from_secs(5),
@@ -598,6 +645,7 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
     .await
     .expect("the committed client SSE head must arrive while the provider is gated")
     .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
     let mut body = response.bytes_stream();
     let first = tokio::time::timeout(Duration::from_secs(2), body.next())
         .await
@@ -610,34 +658,61 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
         .expect("the provider must hold the buffered attempt")
         .expect("the provider capture channel must stay open");
 
-    let started = std::time::Instant::now();
-    let _preparation = tokio::time::timeout(Duration::from_secs(20), handle.prepare_for_exec())
-        .await
-        .expect("exec preparation must never wait forever for an in-flight response");
-    let elapsed = started.elapsed();
-    assert!(
-        elapsed >= Duration::from_millis(2500) && elapsed < Duration::from_secs(10),
-        "exec preparation must preserve the original recovery budget after the provider timeout, waited {elapsed:?}"
-    );
-
     let mut received = Vec::new();
+    let mut stream_error = false;
+    let mut clean_eof = false;
+    let stream_end_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        match tokio::time::timeout(Duration::from_secs(5), body.next()).await {
+        match tokio::time::timeout_at(stream_end_deadline, body.next()).await {
             Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
-            Ok(Some(Err(_))) | Err(_) | Ok(None) => break,
+            Ok(Some(Err(_))) => {
+                stream_error = true;
+                break;
+            }
+            Ok(None) => {
+                clean_eof = true;
+                break;
+            }
+            Err(_) => panic!(
+                "the original request deadline did not terminate the held attempt before the test guard"
+            ),
         }
     }
+    assert!(
+        stream_error,
+        "the original request deadline must interrupt the unfinished SSE transport detectably, clean_eof={clean_eof}"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_millis(1000)
+            && started.elapsed() < Duration::from_secs(5),
+        "the residence deadline must remain independently effective and must not renew, waited {:?}",
+        started.elapsed()
+    );
     let received = String::from_utf8_lossy(&received).to_string();
     assert!(
-        !received.contains("data: [DONE]"),
-        "an unfinished provider attempt must not project a terminal frame: {received}"
+        !received.contains("data:"),
+        "no SSE data or error frame may be projected: {received}"
     );
+    assert!(
+        !received.contains("\"error\""),
+        "no proxy or Provider error payload may be projected: {received}"
+    );
+    assert!(
+        !received.contains("[DONE]"),
+        "an unfinished provider attempt must not project a normal terminal: {received}"
+    );
+    assert!(
+        !received.contains("\"choices\""),
+        "the expired attempt must not fabricate business success: {received}"
+    );
+    let _ = release.send(true);
     let _ = upstream_shutdown.send(());
     std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
 }
 
-/// Borrowed preparation must restore queued business dispatch when its caller
-/// cancels, while the already committed SSE remains healthy.
+/// A borrowed preparation only holds its own probe and persistence work. A new
+/// business request still reaches the Provider, and dropping the preparation
+/// must preserve both the pending SSE and the independent request.
 #[tokio::test]
 async fn borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse() {
     let _guard = TEST_LOCK.lock().await;
@@ -674,33 +749,26 @@ async fn borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pend
         .await
         .expect("borrowed preparation must not drain the held provider")
         .unwrap();
-    let mut queued = Box::pin(client.post(&endpoint).json(&json!({
+    let mut independent = Box::pin(client.post(&endpoint).json(&json!({
         "model": "chat-client-alias", "messages": [{"role":"user", "content":"queued"}], "stream":false
     })).send());
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), &mut queued)
-            .await
-            .is_err()
-    );
-    assert!(
-        captures.try_recv().is_err(),
-        "queued dispatch must not reach the provider"
-    );
-    drop(preparation);
-    // Poll the queued JSON concurrently: it reaches the still-held provider
-    // before that provider is released, proving cancellation reopened admission.
     tokio::select! {
-        result = &mut queued => panic!("provider must still be held: {result:?}"),
+        result = &mut independent => panic!(
+            "the independent request reached a result before the held Provider: {result:?}"
+        ),
         captured = captures.recv() => {
             assert_eq!(captured.unwrap()["messages"][0]["content"], "queued");
         }
-        _ = tokio::time::sleep(Duration::from_secs(5)) => panic!("cancelled preparation did not restore dispatch"),
+        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            panic!("borrowed preparation blocked independent business dispatch")
+        }
     }
+    drop(preparation);
     release.send(true).unwrap();
-    let queued = queued.await.unwrap();
-    assert_eq!(queued.status(), StatusCode::OK);
+    let independent = independent.await.unwrap();
+    assert_eq!(independent.status(), StatusCode::OK);
     assert_eq!(
-        queued.json::<Value>().await.unwrap()["id"],
+        independent.json::<Value>().await.unwrap()["id"],
         "chatcmpl-controlled"
     );
     let held_body = held.text().await.unwrap();

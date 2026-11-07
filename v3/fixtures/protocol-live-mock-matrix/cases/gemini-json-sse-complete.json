@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "case_id": "gemini-json-sse-budget-adequate",
+  "case_id": "gemini-json-sse-complete",
   "cell": {
     "entry_protocol": "gemini",
     "provider_protocol": "openai_chat",
@@ -158,7 +158,7 @@
     "tests": [
       "internal/gateway/gemini_function_parts_test.go::TestGeminiFunctionResponseImageReachesUpstream"
     ],
-    "adaptation": "The pinned Magpie reference supplies the existing Gemini-to-Chat stimulus basis only. This budget scenario is a local RCC regression from materialized_sse_incremental_budget.rs: 32 valid Chat data frames carry 4096 text bytes. The 16384-byte control sends the same prefix followed by a real stop/DONE; the complete Gemini text and STOP must survive."
+    "adaptation": "The Magpie reference supplies the existing Gemini-to-Chat stimulus basis. Valid Chat data frames carry complete text followed by a real stop/DONE. Gemini JSON projection must preserve the complete text and STOP without an attempt-store allowance."
   },
   "contract_differences": [],
   "runtime_setup": {
@@ -167,10 +167,7 @@
     "wire_model": "chat-model",
     "candidate_ids": [
       "mock-openai_chat/mock.chat-model"
-    ],
-    "attempt_store": {
-      "attempt_max_bytes": 16384
-    }
+    ]
   },
   "expected_provider_by_attempt": [
     {},

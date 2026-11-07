@@ -27,8 +27,8 @@ fn source(kind: V3ErrorSourceKind, code: &str, status: u16) -> V3Error01SourceRa
     )
 }
 
-#[test]
-fn early_429_retains_diagnostics_without_health_cooldown() {
+#[tokio::test]
+async fn early_429_uses_the_ordinary_recoverable_cooldown_path() {
     let mut manifest = global_pool_alive_manifest("no_first_failure_counted");
     normalize_global_pool_priorities(&mut manifest);
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
@@ -36,6 +36,8 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
         test_provider_failure_scope("no_first_failure_counted", "no_first_failure_counted", "s")
             .unwrap();
     let failure = source(V3ErrorSourceKind::ProviderFailure, "provider_http_429", 429);
+    // First 429 follows the ordinary precool observation path like any other
+    // recoverable provider failure; no special health-neutral window exists.
     let first_failure = health
         .record_provider_failure_record_from_source(
             &scope,
@@ -46,107 +48,47 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
             100,
         )
         .unwrap();
-    // The early 429 window is capacity backpressure. The returned record must
-    // stay neutral with streak 0 instead of counting a provider failure.
     assert_eq!(first_failure.failure_count, 0);
-    assert_eq!(first_failure.state, "rate_limit_capacity_wait");
-    assert_eq!(first_failure.cooldown_until_ms, None);
-    let recovered_by_business = health
-        .store()
-        .record_provider_key_success("first", "key1", "gpt-test", 101)
-        .unwrap();
-    assert_eq!(
-        recovered_by_business.failure_streak, 0,
-        "429 backpressure must not leave a provider failure streak"
-    );
-    health
-        .store()
-        .record_provider_success_in_session(&scope, "first", Some("key1"), Some("gpt-test"), 101)
-        .unwrap();
+    assert_eq!(first_failure.state, "pre_cool_observation");
     assert!(
-        health
+        !health
             .availability("first", Some("key1"), Some("gpt-test"), 101)
-            .available,
-        "a business success before any cooldown must leave the exact identity eligible"
-    );
-    for now_ms in 102..=104 {
-        let record = health
-            .record_provider_failure_record_from_source(
-                &scope,
-                "first",
-                Some("key1"),
-                Some("gpt-test"),
-                &failure,
-                now_ms,
-            )
-            .unwrap();
-        assert_eq!(
-            record.failure_count, 0,
-            "repeated 429s inside the early window must keep streak 0"
-        );
-        assert_eq!(record.state, "rate_limit_capacity_wait");
-        assert_eq!(
-            health
-                .availability("first", Some("key1"), Some("gpt-test"), now_ms)
-                .available,
-            true
-        );
-    }
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 102)
             .available
     );
     assert!(
         health
-            .availability("first", Some("key2"), Some("gpt-test"), 102)
+            .availability("first", Some("key2"), Some("gpt-test"), 101)
             .available
     );
     assert!(
         health
-            .availability("first", Some("key1"), Some("other"), 102)
+            .availability("first", Some("key1"), Some("other"), 101)
             .available
     );
     assert!(
         health
-            .availability("second", Some("key1"), Some("gpt-test"), 102)
+            .availability("second", Some("key1"), Some("gpt-test"), 101)
             .available
     );
-    assert!(
-        health
-            .store()
-            .provider_cooldown_probe_keys_due(u64::MAX)
-            .unwrap()
-            .is_empty(),
-        "429 backpressure must not create a cooldown probe"
-    );
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 104)
-            .available
-    );
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 5_105)
-            .available
-    );
-    let after_recovery = health
+    // Complete the precool observation with a negative probe; this commits
+    // the typed threshold and moves the identity into ordinary cooldown.
+    complete_due_precool_failures(&health, 101).await;
+    let after_observation = health
         .record_provider_failure_record_from_source(
             &scope,
             "first",
             Some("key1"),
             Some("gpt-test"),
             &failure,
-            5_106,
+            102,
         )
         .unwrap();
-    // This source wrapper retains request/session error bookkeeping even though
-    // provider health stays routable and never needs a recovery probe.
-    assert_eq!(after_recovery.failure_count, 0);
-    assert_eq!(after_recovery.state, "rate_limit_capacity_wait");
+    assert_eq!(after_observation.state, "cooldown");
+    assert!(after_observation.failure_count >= 1);
+    assert!(after_observation.cooldown_until_ms.is_some());
     assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 5_106)
+        !health
+            .availability("first", Some("key1"), Some("gpt-test"), 102)
             .available
     );
 }
@@ -245,7 +187,7 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
 }
 
 #[test]
-fn early_quota_429_stays_health_neutral_before_and_after_business_success() {
+fn early_quota_429_follows_account_failure_policy() {
     let store = V3ProviderHealthStore::default();
     let failure = source(
         V3ErrorSourceKind::ProviderFailure,
@@ -261,16 +203,15 @@ fn early_quota_429_stays_health_neutral_before_and_after_business_success() {
     );
     assert_eq!(
         action.recovery,
-        V3ProviderRecoveryKind::HealthNeutralTransient
+        V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
     );
-    assert_eq!(action.failure_threshold, 0);
+    assert_eq!(action.failure_threshold, 1);
     for time in 100..103 {
-        assert_eq!(
+        assert!(
             store
                 .record_provider_failure_action("p", "k", "m", &action, time)
                 .unwrap()
-                .cooldown,
-            false
+                .cooldown
         );
     }
     assert!(

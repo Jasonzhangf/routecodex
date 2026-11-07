@@ -1,6 +1,7 @@
 {
   "id": "v3.operation_runner.error",
   "version": "2",
+  "description": "The Error object flow preserves source, cause, internal classification and actual upstream status separately and closes with an internal typed outcome. The outcome itself is not client payload. Requirements v27 allow only a normal last-selected-candidate failure, proven by the original Target's Exhausted result, to carry its own complete real HTTP witness to the existing Server boundary for status/raw-body/safe-header delivery before client head commit. Selected alternatives keep intermediate errors internal and switch immediately. Selection faults and initial no-eligible results do not grant that terminal eligibility. Non-HTTP, incomplete-body, post-head and postcommit representations remain explicit OPEN work; this graph does not certify their delivery.",
   "inputs": [
     { "id": "source-failure", "schema": "Object", "schema_ref": "v3.operation_runner.arc.source_failure" }
   ],

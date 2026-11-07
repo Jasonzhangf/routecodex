@@ -17,7 +17,6 @@ mod responses_direct_server_outcome;
 mod restart_closeout;
 mod restart_handoff;
 mod scope_metadata;
-mod session_admission;
 mod websocket;
 mod webui_observability;
 mod webui_observability_endpoints;
@@ -137,10 +136,6 @@ use routecodex_v3_sse::{
     SseTransportLimits,
 };
 use serde_json::{json, Map, Value};
-use session_admission::{
-    hold_response_body_request_activity_permit, V3ServerMaintenanceGuard,
-    V3ServerRequestActivityGate,
-};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fmt;
@@ -191,7 +186,6 @@ struct V3ListenerState {
     codex_sample_store: Arc<routecodex_v3_debug::V3CodexSampleStore>,
     provider_health: Arc<V3ResponsesRelayProviderHealthHandle>,
     realtime_cooled_provider_keys: Arc<Mutex<BTreeMap<String, u64>>>,
-    request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     webui_observability: V3WebuiObservability,
 }
@@ -251,7 +245,6 @@ pub struct V3ListenerHandle {
 pub struct V3ServerAggregateHandle {
     pub listeners: Vec<V3ListenerHandle>,
     probe_lifecycle: aggregate_probe_lifecycle::AggregateProbeLifecycle,
-    request_activity_gate: Arc<V3ServerRequestActivityGate>,
     front_transport_broker: V3FrontTransportBroker,
     provider_health: Vec<Arc<V3ResponsesRelayProviderHealthHandle>>,
     observability_writers: Vec<V3WebuiObservability>,
@@ -263,7 +256,6 @@ pub struct V3ServerExecPreparation {
     pub front_checkpoints: Vec<V3RuntimeHandoffCheckpoint>,
     pub codex_sample_persist_failures: Vec<routecodex_v3_debug::V3CodexSamplePersistFailure>,
     _codex_sample_exec_guard: Option<routecodex_v3_debug::V3CodexSampleExecGuard>,
-    _maintenance_guard: Option<V3ServerMaintenanceGuard>,
     _probe_quiescence_guard: Option<aggregate_probe_lifecycle::ProbeQuiescenceGuard>,
 }
 
@@ -283,8 +275,7 @@ pub fn build_v3_server_startup_01_listener_set_from_config_05(
 
 impl V3ServerAggregateHandle {
     pub async fn prepare_exec_attempt(&self) -> Result<V3ServerExecPreparation, String> {
-        let maintenance_guard = self.request_activity_gate.pause_dispatch().await;
-        let probe_quiescence_guard = self.probe_lifecycle.quiesce(maintenance_guard).await?;
+        let probe_quiescence_guard = self.probe_lifecycle.quiesce().await?;
         self.flush_runtime_persistence();
         let codex_sample_exec_guard = match self.codex_sample_persist_worker.as_ref() {
             Some(worker) => match tokio::time::timeout(
@@ -315,7 +306,6 @@ impl V3ServerAggregateHandle {
             front_checkpoints: self.front_transport_broker.freeze(Instant::now()),
             codex_sample_persist_failures,
             _codex_sample_exec_guard: codex_sample_exec_guard,
-            _maintenance_guard: None,
             _probe_quiescence_guard: Some(probe_quiescence_guard),
         })
     }
@@ -349,11 +339,9 @@ impl V3ServerAggregateHandle {
         codex_sample_persist_failures
     }
 
-    /// Stop new business dispatch, wait for accepted requests to finish, then
-    /// close the remaining idle transports before exec replacement.
+    /// Stop probe owners and close the remaining transports before exec replacement.
     pub async fn prepare_for_exec(mut self) -> V3ServerExecPreparation {
         self.probe_lifecycle.terminate();
-        let maintenance_guard = self.request_activity_gate.begin_maintenance().await;
         self.probe_lifecycle.join().await;
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
@@ -375,7 +363,6 @@ impl V3ServerAggregateHandle {
             front_checkpoints: checkpoints,
             codex_sample_persist_failures,
             _codex_sample_exec_guard: None,
-            _maintenance_guard: Some(maintenance_guard),
             _probe_quiescence_guard: None,
         }
     }
@@ -595,7 +582,6 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     }
 
     let request_counter = Arc::new(Mutex::new(V3RequestIdCounter::new()));
-    let request_activity_gate = Arc::new(V3ServerRequestActivityGate::default());
     // Generation zero is reserved for an uninitialized handoff carrier. A
     // listener may accept requests as soon as it binds, so the normal startup
     // broker must already carry a valid positive runtime generation.
@@ -675,7 +661,6 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
                 codex_sample_store: codex_sample_store.clone(),
                 provider_health: listener_provider_health,
                 realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
-                request_activity_gate: Arc::clone(&request_activity_gate),
                 front_transport_broker: front_transport_broker.clone(),
                 webui_observability,
             })
@@ -762,7 +747,6 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
     Ok(V3ServerAggregateHandle {
         listeners,
         probe_lifecycle,
-        request_activity_gate,
         front_transport_broker,
         provider_health: provider_health_handles,
         observability_writers,
@@ -1044,10 +1028,6 @@ async fn pending_endpoint(
 }
 
 async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) -> Response<Body> {
-    let front_socket = request
-        .extensions()
-        .get::<restart_handoff::V3StableFrontSocket>()
-        .cloned();
     let front_connection_identity = request
         .extensions()
         .get::<V3FrontConnectionIdentity>()
@@ -1207,7 +1187,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             );
         }
     };
-    let request_activity_permit = state.request_activity_gate.admit().await;
     // The Runtime owns full-attempt buffering, so no provider payload byte is
     // projected before the runtime outcome exists. The Server owns the client
     // transport: a client that requested SSE must not stay on a silent
@@ -1273,8 +1252,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         }
         None => runtime_outcome.await,
     };
-    let response =
-        hold_response_body_request_activity_permit(response, request_activity_permit, front_socket);
     // The client-response sample must record the wire the client receives, so the
     // recorder wraps the final body after every transport owner has framed it.
     observe_v3_live_client_wire(response)

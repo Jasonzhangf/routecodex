@@ -20,7 +20,7 @@ struct V3PrecoolObservationGuard {
     health: V3ProviderFailureRuntimeHealth,
     identity: V3PrecoolIdentity,
     generation: u64,
-    _admission: crate::provider_action_gate::V3ProviderActionPermit,
+    _observation_lease: crate::provider_action_gate::V3ProviderObservationLease,
 }
 
 impl Drop for V3PrecoolObservationGuard {
@@ -103,47 +103,7 @@ impl V3ProviderFailureRuntimeHealth {
             cooldown_until_ms: None,
             reason: reason.map(str::to_owned),
         };
-        if action
-            .failure_fingerprint
-            .as_ref()
-            .is_some_and(|failure| failure.http_status == 429)
-        {
-            let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
-                return Err(
-                    "429 observation requires a complete provider/interface/auth/model identity"
-                        .into(),
-                );
-            };
-            let projection = self.store.record_provider_failure_action_for_interface(
-                provider_id,
-                interface_id,
-                auth_alias,
-                model_id,
-                action,
-                self.observation_now_ms(now_ms),
-            )?;
-            record.state = if projection.available {
-                "rate_limit_capacity_wait"
-            } else {
-                "rate_limit_cooldown"
-            }
-            .into();
-            record.cooldown_until_ms = projection.cooldown_until_ms;
-            if projection.cooldown {
-                let mut pending = self.precool.lock().map_err(|error| error.to_string())?;
-                if let Some(previous) = pending.remove(&precool_identity(
-                    provider_id, interface_id, Some(auth_alias), Some(model_id),
-                )) {
-                    self.action_gate.record_success(previous.ticket.key())?;
-                }
-            }
-            return Ok(record);
-        }
-        if matches!(
-            action.recovery,
-            V3ProviderRecoveryKind::NotProviderHealth
-                | V3ProviderRecoveryKind::HealthNeutralTransient
-        ) {
+        if matches!(action.recovery, V3ProviderRecoveryKind::NotProviderHealth) {
             return Ok(record);
         }
         if auth_alias.is_none() || model_id.is_none() {
@@ -261,7 +221,7 @@ impl V3ProviderFailureRuntimeHealth {
                     health: self.clone(),
                     identity: identity.clone(),
                     generation: action.ticket.generation(),
-                    _admission: admission,
+                    _observation_lease: admission,
                 },
                 V3ProviderProbeCancellationGuard {
                     store: self.store.clone(),
@@ -350,48 +310,7 @@ impl V3ProviderFailureRuntimeHealth {
             }
             Err(V3ProviderHealthProbeFailure::Internal(error)) => Err(error),
             Err(V3ProviderHealthProbeFailure::Provider(error)) => {
-                let (status, action) = classify_provider_probe_failure(error)?;
-                if let Some(status) = status {
-                    let disposition = self
-                        .store
-                        .record_provider_rate_limit_probe_status_with_permit(
-                            &cancellation.permit,
-                            status,
-                            &action,
-                            now_ms,
-                        )?;
-                    if disposition == routecodex_v3_provider_responses::V3ProviderRateLimitProbeDisposition::Superseded {
-                        return Ok(V3ProbeCompletion::Superseded);
-                    }
-                    if status == 429 {
-                        let cooled = !self
-                            .store
-                            .scheduling_projection_for_key_with_interface(
-                                &identity.provider_id,
-                                &identity.interface_id,
-                                identity.auth_alias.as_deref().unwrap(),
-                                identity.model_id.as_deref().unwrap(),
-                                1,
-                                1,
-                                now_ms,
-                            )?
-                            .available;
-                        if cooled {
-                            // Hand the physical identity to the existing cooldown
-                            // owner. Retaining a precool entry would shadow it.
-                            self.action_gate.record_success(entry.ticket.key())?;
-                            pending.remove(identity);
-                        } else {
-                            entry.ticket = self
-                                .action_gate
-                                .record_failure(entry.ticket.key())?
-                                .recovery_ticket()
-                                .clone();
-                        }
-                        self.store.publish_availability_change();
-                        return Ok(V3ProbeCompletion::ProviderFailed);
-                    }
-                }
+                let (_, action) = classify_provider_probe_failure(error)?;
                 let mut committed = false;
                 while entry.applied < entry.failures.len() {
                     let failure = &entry.failures[entry.applied];

@@ -372,7 +372,9 @@ async fn json_function_call_governance_preserves_gemini_name_mapping() {
     );
 }
 
-struct ErrorTransport;
+struct ErrorTransport {
+    sends: Mutex<usize>,
+}
 
 #[async_trait]
 impl ResponsesTransport for ErrorTransport {
@@ -380,6 +382,7 @@ impl ResponsesTransport for ErrorTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.sends.lock().unwrap() += 1;
         Err(V3ProviderError::HttpStatus {
             response: Box::new(V3ProviderHttpFailure {
                 request_id: request.request_id().to_string(),
@@ -513,17 +516,9 @@ impl ResponsesTransport for MalformedErrorTransport {
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let server_id = "gemini_provider_error_projection";
-    let mut manifest = manifest_for_action_gate_scope(server_id);
-    manifest
-        .servers
-        .get_mut(server_id)
-        .expect("gemini relay test server")
-        .execution
-        .as_mut()
-        .expect("execution policy")
-        .attempt_store
-        .residence_timeout_ms = 500;
-    let error = execute_v3_gemini_relay_runtime(
+    let manifest = manifest_for_action_gate_scope(server_id);
+    let transport = ErrorTransport { sends: Mutex::new(0) };
+    let output = execute_v3_gemini_relay_runtime(
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
@@ -540,18 +535,42 @@ async fn provider_error_enters_error01_06_without_success_projection() {
                 "stream":false
             }),
         },
-        &ErrorTransport,
+        &transport,
     )
     .await
-    .expect_err("a 429-only Gemini pool must remain recoverable until the residence bound");
-    assert!(
-        matches!(
-            &error,
-            routecodex_v3_runtime::V3GeminiRelayRuntimeError::Target(message)
-                if message.contains("provider action wait exceeded request residence deadline")
-        ),
-        "provider failure must wait for recovery and terminate only at the declared residence bound: {error}"
+    .expect("a 429-only Gemini pool must terminal immediately, never wait on lifecycle");
+
+    // 失败身份不得重发：完整身份只发送一次，不等待、不重试。
+    assert_eq!(*transport.sends.lock().unwrap(), 1, "failed identity must not be re-sent");
+
+    // 不伪造成功：client 只得到 transport break。
+    assert_eq!(output.status, 502);
+    let client_error = match output.client_body {
+        V3GeminiRelayClientBody::Json(value) => value,
+        V3GeminiRelayClientBody::Sse(_) => panic!("failed attempt must not produce client SSE"),
+    };
+    assert_eq!(client_error["error"]["code"], "network_error");
+
+    // 原始429被原样保留为provider-private terminal证据。
+    assert_eq!(
+        output.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
+            routecodex_v3_error::V3ExternalHttpWitness::new(
+                429,
+                vec![],
+                br#"{"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}}"#.to_vec(),
+            )
+        ))
     );
+
+    // 失败走typed Error链，不写health/precool/probe/wait。
+    assert_eq!(output.error_chain.as_ref().map(Vec::len), Some(6));
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    assert_eq!(output.provider_failure_attempts.len(), 1);
+    let attempt = &output.provider_failure_attempts[0];
+    assert_eq!(attempt.status, 429);
+    assert_eq!(attempt.health_state, "last_candidate_terminal");
+    assert_eq!(attempt.wait_ms, None);
 }
 
 #[tokio::test]
@@ -1680,34 +1699,17 @@ async fn non_gemini_route_target_returns_gemini_client_projection() {
 }
 
 async fn run_json_client_with_chat_sse(
-    limit: usize,
-    hold_open: bool,
+    content: &str,
 ) -> Result<routecodex_v3_runtime::V3GeminiRelayRuntimeOutput, String> {
     let (sender, receiver) = tokio::sync::mpsc::channel(4);
-    let content = if hold_open {
-        "x".repeat(2048)
-    } else {
-        "complete JSON".to_string()
-    };
     let mut bytes = format!("data: {}\n\n", json!({"id":"chat-json","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":content}}]})).into_bytes();
-    if !hold_open {
-        bytes.extend_from_slice(b"data: {\"id\":\"chat-json\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
-    }
+    bytes.extend_from_slice(b"data: {\"id\":\"chat-json\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
     sender.send(Ok(bytes)).await.unwrap();
-    let sender = hold_open.then_some(sender);
+    drop(sender);
     let transport = ControlledSseTransport {
         receiver: Mutex::new(Some(receiver)),
     };
-    let mut manifest = manifest_with_provider_type("openai_chat");
-    manifest
-        .servers
-        .get_mut("controlled")
-        .unwrap()
-        .execution
-        .as_mut()
-        .unwrap()
-        .attempt_store
-        .attempt_max_bytes = limit;
+    let manifest = manifest_with_provider_type("openai_chat");
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = tokio::time::timeout(
@@ -1719,10 +1721,10 @@ async fn run_json_client_with_chat_sse(
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
                     "test-server",
                     "test-group",
-                    format!("json-chat-sse-{limit}-{hold_open}"),
+                    format!("json-chat-sse-{}", content.len()),
                 )
                 .unwrap(),
-                request_id: format!("json-chat-sse-{limit}-{hold_open}"),
+                request_id: format!("json-chat-sse-{}", content.len()),
                 endpoint_path: "/v1beta/models/gemini-client:generateContent".into(),
                 payload: json!({"contents":[{"role":"user","parts":[{"text":"hello"}]}]}),
             },
@@ -1731,28 +1733,14 @@ async fn run_json_client_with_chat_sse(
         ),
     )
     .await
-    .map_err(|_| "runtime did not settle before the held-open provider terminal".to_string())?
+    .map_err(|_| "runtime did not materialize the complete provider stream".to_string())?
     .map_err(|error| error.to_string());
-    drop(sender);
-    if hold_open {
-        let availability = provider_health.store().availability(
-            "controlled",
-            Some("controlled"),
-            Some("gemini-wire"),
-            u64::MAX,
-        );
-        assert!(
-            availability.available,
-            "local resource exhaustion must not cool the provider"
-        );
-        assert!(availability.blocked_scopes.is_empty());
-    }
     output
 }
 
 #[tokio::test]
 async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
-    let output = run_json_client_with_chat_sse(16384, false).await.unwrap();
+    let output = run_json_client_with_chat_sse("complete JSON").await.unwrap();
     let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
         panic!("JSON client must receive projected JSON")
     };
@@ -1765,21 +1753,14 @@ async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
 }
 
 #[tokio::test]
-async fn gemini_json_client_stops_over_budget_chat_sse_before_terminal() {
-    let error = match run_json_client_with_chat_sse(1024, true).await {
-        Err(error) => error,
-        Ok(output) => match output.client_body {
-            V3GeminiRelayClientBody::Json(payload) => panic!(
-                "over-budget attempt returned status={} payload={payload} trace={:?}",
-                output.status, output.node_trace
-            ),
-            _ => panic!("over-budget attempt returned a stream"),
-        },
+async fn gemini_json_client_preserves_large_chat_sse_as_json() {
+    let text = "x".repeat(2048);
+    let output = run_json_client_with_chat_sse(&text).await.unwrap();
+    let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
+        panic!("JSON client must receive projected JSON");
     };
-    assert!(
-        error.contains("V3ExecutionAttemptPayloadStore"),
-        "unexpected failure: {error}"
-    );
+    assert_eq!(payload["candidates"][0]["content"]["parts"][0]["text"], text);
+    assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
 }
 
 async fn collect_sse_failure(

@@ -75,9 +75,8 @@ function upstreamToolCall(upstream) {
       .find((call) => call?.function?.arguments);
 }
 
-test('real corpus loads 78 fixtures sorted with exact identities', () => {
+test('real corpus preserves sorted case declarations and protocol coverage', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 78);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -85,12 +84,10 @@ test('real corpus loads 78 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 78);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 46);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);

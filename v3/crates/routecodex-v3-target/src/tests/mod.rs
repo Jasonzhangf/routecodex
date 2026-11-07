@@ -523,13 +523,10 @@ fn provider_model_availability_omitted_keeps_model_available_any_time() {
 }
 
 #[test]
-fn provider_model_availability_admitted_count_ignores_window_inactive_siblings() {
-    // The single-candidate automatic-cooldown exemption must count only
-    // candidates admitted by capability and availability. Here provider a is
-    // the only candidate admitted at 10:00 Asia/Shanghai (b and c declare
-    // windows that exclude that instant), so a cooled provider a must still be
-    // exempted: a window-inactive sibling must never inflate the pool size and
-    // suppress the exemption.
+fn provider_model_availability_counts_only_in_window_candidates_without_health_bypass() {
+    // Only provider a is inside its availability window at 10:00 Asia/Shanghai.
+    // A window-inactive sibling must not be selected, and it must not make a
+    // cooled provider a routable.
     let mut manifest = provider_priority_schedule_manifest();
     let window_excluding_ten_am =
         routecodex_v3_config::V3ProviderModelAvailabilityAuthoringConfig {
@@ -586,17 +583,23 @@ fn provider_model_availability_admitted_count_ignores_window_inactive_siblings()
             projection
         }
     }
-    let selected = target
+    let error = target
         .select_available_with_health(expanded, &OnlyProviderACooled, now_ms, 0)
-        .expect("a must stay usable as the only admitted candidate");
-    assert_eq!(selected.candidate.provider_id, "a");
+        .expect_err("window-inactive siblings must not bypass provider a cooldown");
+    assert!(error
+        .attempted_candidates
+        .iter()
+        .any(|reason| reason.contains("availability_inactive")));
+    assert!(error
+        .attempted_candidates
+        .iter()
+        .any(|reason| reason.contains("provider_key_health")));
 }
 
 #[test]
-fn provider_model_availability_sibling_in_window_keeps_automatic_cooldown() {
-    // Control for the exemption test: once a sibling is genuinely admitted the
-    // pool is no longer a singleton, so the cooled candidate stays excluded and
-    // the healthy sibling wins.
+fn provider_model_availability_sibling_in_window_wins_when_primary_is_cooled() {
+    // A window-visible sibling remains selectable. Cooling provider a does not
+    // mutate the sibling's declared availability.
     let manifest = provider_model_availability_manifest(None);
     let target = V3TargetInterpreter::default();
     let expanded = expanded_with(&manifest, &target, 0);
@@ -1694,7 +1697,7 @@ fn route_tier_precedes_default_target_priority_when_both_are_available() {
 
 #[test]
 fn streaming_is_not_a_candidate_capability_filter() {
-    let expanded = expanded_tools();
+    let mut expanded = expanded_tools();
     let mut candidate = expanded
         .candidates
         .first()
@@ -1702,16 +1705,25 @@ fn streaming_is_not_a_candidate_capability_filter() {
         .clone();
     candidate.required_capabilities = vec!["streaming".into()];
     candidate.model_capabilities = vec!["text".into(), "tools".into()];
+    expanded.candidates = vec![candidate.clone()];
 
-    assert!(
-        candidate_satisfies_required_capabilities(&candidate),
-        "stream is a transport intent and must not make an otherwise valid candidate unavailable"
-    );
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("stream is a transport intent and must not make the candidate unavailable");
+    assert_eq!(selected.candidate, candidate);
+    assert_eq!(selected.route.pool_id, "tools");
+    assert_eq!(selected.candidate.path[0], "pool:tools");
 }
 
 #[test]
 fn tools_are_route_signals_not_target_capability_filters() {
-    let expanded = expanded_tools();
+    let mut expanded = expanded_tools();
     let mut candidate = expanded
         .candidates
         .first()
@@ -1719,16 +1731,25 @@ fn tools_are_route_signals_not_target_capability_filters() {
         .clone();
     candidate.required_capabilities = vec!["tools".into()];
     candidate.model_capabilities = vec!["text".into()];
+    expanded.candidates = vec![candidate.clone()];
 
-    assert!(
-        candidate_satisfies_required_capabilities(&candidate),
-        "tools are a request/route/protocol surface, not a provider model hard capability"
-    );
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("tools are route signals, not a target capability filter");
+    assert_eq!(selected.candidate, candidate);
+    assert_eq!(selected.route.pool_id, "tools");
+    assert_eq!(selected.candidate.path[0], "pool:tools");
 }
 
 #[test]
-fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
-    let expanded = expanded_tools();
+fn web_search_and_vision_mismatches_do_not_exclude_target_candidates() {
+    let mut expanded = expanded_tools();
     let mut search_candidate = expanded
         .candidates
         .first()
@@ -1736,25 +1757,44 @@ fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
         .clone();
     search_candidate.required_capabilities = vec!["web_search".into()];
     search_candidate.model_capabilities = vec!["text".into()];
+    expanded.candidates = vec![search_candidate.clone()];
 
-    assert!(
-        !candidate_satisfies_required_capabilities(&search_candidate),
-        "web_search/search requires an explicit model/provider capability because the model may not have search"
-    );
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("web_search metadata must not exclude the target candidate");
+    assert_eq!(selected.candidate, search_candidate);
+    assert_eq!(selected.route.pool_id, "tools");
+    assert_eq!(selected.candidate.path[0], "pool:tools");
 
+    let mut expanded = expanded_tools();
     let mut vision_candidate = search_candidate.clone();
     vision_candidate.required_capabilities = vec!["vision".into()];
     vision_candidate.model_capabilities = vec!["text".into(), "web_search".into()];
+    expanded.candidates = vec![vision_candidate.clone()];
 
-    assert!(
-        !candidate_satisfies_required_capabilities(&vision_candidate),
-        "vision/multimodal requires an explicit model/provider capability because the model may not read images"
-    );
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("vision metadata must not exclude the target candidate");
+    assert_eq!(selected.candidate, vision_candidate);
+    assert_eq!(selected.route.pool_id, "tools");
+    assert_eq!(selected.candidate.path[0], "pool:tools");
 }
 
 #[test]
 fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_mismatch() {
-    let expanded = expanded_tools();
+    let mut expanded = expanded_tools();
     let mut candidate = expanded
         .candidates
         .first()
@@ -1767,11 +1807,55 @@ fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_misma
         "thinking".into(),
     ];
     candidate.model_capabilities = vec!["text".into(), "tools".into(), "web_search".into()];
+    expanded.candidates = vec![candidate.clone()];
 
-    assert!(
-        candidate_satisfies_required_capabilities(&candidate),
-        "reasoning/thinking is a soft proxy compatibility request for no-image traffic; only hard execution semantics such as tools and vision should make a candidate unavailable"
-    );
+    let selected = V3TargetInterpreter::default()
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .expect("reasoning/thinking metadata must not make the candidate unavailable");
+    assert_eq!(selected.candidate, candidate);
+    assert_eq!(selected.route.pool_id, "tools");
+    assert_eq!(selected.candidate.path[0], "pool:tools");
+}
+
+#[test]
+fn invisible_selected_pool_uses_default_without_another_optional_pool() {
+    let mut candidates = expanded_tools();
+    let first = candidates.candidates.iter_mut().find(|c| c.provider_id == "a").unwrap();
+    first.pool_ids = vec!["tools".into()];
+    first.default_pool_member = false;
+    let mut other = candidates.candidates.iter().find(|c| c.provider_id == "b").unwrap().clone();
+    other.provider_id = "optional".into();
+    other.pool_ids = vec!["coding".into()];
+    other.default_pool_member = false;
+    candidates.candidates.push(other);
+    let mut coding = candidates.route.target_plan[0].clone();
+    coding.pool_id = "coding".into();
+    coding.tier_index = 1;
+    for entry in &mut candidates.route.target_plan {
+        if entry.pool_id == "default" {
+            entry.tier_index = 2;
+        }
+    }
+    candidates.route.target_plan.push(coding);
+    let target = V3TargetInterpreter::default();
+    let initial = target.select_available(
+        candidates.clone(),
+        &Availability { blocked: BTreeSet::new() },
+        0,
+    ).unwrap();
+    assert_eq!(initial.candidate.provider_id, "a", "the selected pool keeps its visible provider");
+    let selected = target.select_available(
+        candidates,
+        &Availability { blocked: BTreeSet::from(["a:default:ka:m".into()]) },
+        0,
+    ).unwrap();
+    assert_eq!(selected.candidate.provider_id, "b", "an invisible selected pool must immediately use default");
 }
 
 #[test]
@@ -1865,7 +1949,7 @@ fn optional_candidate_merges_selected_pool_and_default_floor_provenance() {
 }
 
 #[test]
-fn multimodal_route_skips_text_only_candidate_even_when_text_candidate_is_available() {
+fn multimodal_pool_keeps_text_candidate_without_capability_mismatch() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1925,7 +2009,7 @@ targets = [
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
 
-    let vision_first = target
+    let selected = target
         .select_available(
             expanded.clone(),
             &Availability {
@@ -1933,26 +2017,33 @@ targets = [
             },
             0,
         )
-        .expect("an available vision candidate serves the multimodal request");
-    assert_eq!(vision_first.candidate.provider_id, "vision");
-    assert_eq!(vision_first.route.pool_id, "default");
+        .expect("a visible text candidate must not be excluded by capability metadata");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert_eq!(selected.route.pool_id, "default");
+    assert!(
+        selected
+            .candidate
+            .required_capabilities
+            .iter()
+            .any(|capability| capability == "multimodal"),
+        "the multimodal route fact must remain attached to the selected candidate"
+    );
 
-    let selected = target
+    let vision = target
         .select_available(
             expanded.clone(),
             &Availability {
-                blocked: BTreeSet::from(["vision:default:key:m".into()]),
+                blocked: BTreeSet::from(["text:default:key:m".into()]),
             },
             0,
         )
-        .expect("the same pool keeps a projectable text candidate after vision cools");
-    assert_eq!(selected.candidate.provider_id, "text");
-    assert_eq!(selected.route.pool_id, "default");
-    assert!(selected
+        .expect("the same pool keeps the other visible candidate after text becomes unavailable");
+    assert_eq!(vision.candidate.provider_id, "vision");
+    assert_eq!(vision.route.pool_id, "default");
+    assert!(vision
         .unavailable_candidates
         .iter()
-        .any(|reason| reason == "vision:default:key:m:availability(vision:default:key:m)"));
-    assert!(selected.candidate.required_capabilities.is_empty());
+        .any(|reason| reason == "text:default:key:m:availability(text:default:key:m)"));
 
     let exhausted = target
         .select_available(
@@ -1976,9 +2067,10 @@ targets = [
 }
 
 #[test]
-fn multimodal_pool_exhaustion_falls_through_to_default_pool() {
-    // A routed multimodal pool that only contains an incapable candidate must
-    // exhaust itself in that pool and then cross into the default floor.
+fn multimodal_pool_keeps_visible_text_candidate_and_uses_default_only_when_unavailable() {
+    // Capability metadata does not exhaust a visible pool candidate. The
+    // declared default floor is used only when the selected-pool identity is
+    // actually unavailable.
     let source = r#"
 version = 3
 [servers.s]
@@ -2041,9 +2133,15 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    // The multimodal pool's incapable text candidate is a capability_mismatch
-    // and gets filtered from selection, but the default pool's vision candidate
-    // is still reachable as the floor.
+    // Both the selected pool's metadata-mismatched text candidate and the
+    // default floor's vision candidate remain reachable.
+    assert!(
+        expanded
+            .candidates
+            .iter()
+            .any(|candidate| candidate.provider_id == "text"),
+        "the multimodal pool text candidate must remain reachable"
+    );
     assert!(
         expanded
             .candidates
@@ -2053,17 +2151,32 @@ targets = [
     );
     let selected = target
         .select_available(
-            expanded,
+            expanded.clone(),
             &Availability {
                 blocked: BTreeSet::new(),
             },
             0,
         )
-        .expect(
-            "the default pool vision candidate must serve after the multimodal pool is exhausted",
-        );
-    assert_eq!(selected.candidate.provider_id, "vision");
-    assert_eq!(selected.route.pool_id, "default");
+        .expect("a visible text candidate must not be excluded by capability metadata");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert_eq!(selected.route.pool_id, "multimodal");
+    assert!(selected
+        .candidate
+        .required_capabilities
+        .iter()
+        .any(|capability| capability == "multimodal"));
+
+    let fallen = target
+        .select_available(
+            expanded,
+            &Availability {
+                blocked: BTreeSet::from(["text:default:key:m".into()]),
+            },
+            0,
+        )
+        .expect("the default floor serves only after the selected-pool identity is unavailable");
+    assert_eq!(fallen.candidate.provider_id, "vision");
+    assert_eq!(fallen.route.pool_id, "default");
 }
 
 #[test]
@@ -2135,6 +2248,8 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
+    assert!(expanded.route.request_capabilities.contains("multimodal"));
+    assert!(expanded.route.request_capabilities.contains("vision"));
     let selected = target
         .select_available(
             expanded,
@@ -2143,13 +2258,15 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
             },
             0,
         )
-        .expect("image-bearing longcontext request must skip text-only candidates");
+        .expect("visible candidates must not be excluded by capability metadata");
 
     assert_eq!(selected.candidate.provider_id, "vision");
-    assert_eq!(
-        selected.unavailable_candidates,
-        vec!["text:key:m:capability_mismatch"]
-    );
+    assert!(selected
+        .candidate
+        .required_capabilities
+        .iter()
+        .any(|capability| capability == "multimodal"));
+    assert!(selected.unavailable_candidates.is_empty());
 }
 
 #[test]
@@ -2351,7 +2468,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
 }
 
 #[test]
-fn missing_web_search_pool_uses_default_without_hosted_capability() {
+fn missing_web_search_pool_uses_default_and_preserves_capability_fact() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2406,6 +2523,7 @@ targets = [
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
+    assert!(expanded.route.request_capabilities.contains("web_search"));
     let selected = target
         .select_available(
             expanded,
@@ -2417,7 +2535,7 @@ targets = [
         .expect("default tier remains available when hosted search is unavailable");
 
     assert_eq!(selected.candidate.provider_id, "text");
-    assert!(!selected
+    assert!(selected
         .candidate
         .required_capabilities
         .iter()

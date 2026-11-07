@@ -19,10 +19,6 @@ pub struct V3ProviderCooldownProbeKey {
 
 #[derive(Debug, Clone)]
 pub struct V3ProviderCooldownProbeState {
-    /// Cause of this cooldown, independent of subsequent failure history. A
-    /// `RateLimit` cause marks a bounded 429 hold: the identity auto-releases
-    /// when `blocked_until_ms` passes and is released early by real success.
-    pub cooldown_cause: Option<crate::global_cooldown::V3ProviderCooldownFailureClass>,
     pub blocked_until_ms: Option<u64>,
     pub next_probe_at_ms: Option<u64>,
     pub probe_interval_ms: u64,

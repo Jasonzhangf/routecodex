@@ -31,8 +31,7 @@ pub use health::{
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
     V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
-    V3ProviderRateLimitProbeDisposition, V3ProviderSchedulingProjection,
-    V3ProviderSchedulingReader,
+    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
 pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};

@@ -191,7 +191,7 @@ pub(crate) async fn probe_v3_provider_global_target_impl(
     let now_ms =
         v3_relay_provider_policy_now_epoch_ms().map_err(V3ProviderHealthProbeFailure::Internal)?;
     let admission = concurrency
-        .try_acquire_scoped(&provider_key, Some(&identity_scope), now_ms)
+        .try_acquire_scoped(&provider_key, Some(&identity_scope))
         .ok_or(V3ProviderHealthProbeFailure::ConcurrencyBusy)?;
     ReqwestResponsesTransport::default()
         .send_probe(request.with_pre_acquired_admission(admission))

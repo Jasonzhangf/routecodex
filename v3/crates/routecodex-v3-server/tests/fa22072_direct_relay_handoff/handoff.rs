@@ -14,10 +14,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use futures_util::StreamExt;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, Semaphore};
 
 static LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
@@ -29,6 +30,8 @@ const ALPHA_TEXT: &str = "A_HANDOFF_HEALTHY";
 const BETA_TEXT: &str = "B_HANDOFF_DONE";
 const TOOL_CALL_ID: &str = "call_owned_handoff";
 const TOOL_RESULT: &str = "OWNED_HANDOFF_HISTORY_RESULT";
+const OPENAI_CHAT_DIRECT_BINDING: &str = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_direct_server_outcome", runtime_owner_path = "v3/crates/routecodex-v3-server/src/executors.rs" }"#;
+const OPENAI_CHAT_RELAY_BINDING: &str = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
 
 #[derive(Debug, Clone)]
 struct Capture {
@@ -110,7 +113,22 @@ fn handoff_manifest(
     beta: u16,
     beta_only: bool,
 ) -> V3Config05ManifestPublished {
-    let declaration = hub_v1_fixture::hub_v1_test_declaration();
+    handoff_manifest_with_chat_mode(port, alpha, beta, beta_only, false)
+}
+
+fn handoff_manifest_with_chat_mode(
+    port: u16,
+    alpha: u16,
+    beta: u16,
+    beta_only: bool,
+    chat_relay: bool,
+) -> V3Config05ManifestPublished {
+    let declaration = if chat_relay {
+        hub_v1_fixture::hub_v1_test_declaration()
+            .replace(OPENAI_CHAT_DIRECT_BINDING, OPENAI_CHAT_RELAY_BINDING)
+    } else {
+        hub_v1_fixture::hub_v1_test_declaration()
+    };
     let execution = hub_v1_fixture::hub_v1_server_execution("direct_relay_handoff");
     let targets = if beta_only {
         r#"[{ kind = "provider_model", provider = "beta", model = "beta-wire", key = "key1", priority = 1 }]"#
@@ -303,6 +321,32 @@ async fn serve_beta_held(
     write_beta_response(&mut socket, stream).await;
 }
 
+async fn serve_beta_response_head_held(
+    listener: TcpListener,
+    first_arrived: oneshot::Sender<Capture>,
+    release: Arc<Semaphore>,
+    captures: Arc<Mutex<Vec<Capture>>>,
+    order: Arc<Mutex<Vec<&'static str>>>,
+) {
+    let mut first_arrived = Some(first_arrived);
+    loop {
+        let Ok((mut socket, _)) = listener.accept().await else {
+            return;
+        };
+        let Some(capture) = read_request(&mut socket).await else {
+            continue;
+        };
+        let stream = capture.body["stream"] == true;
+        captures.lock().await.push(capture.clone());
+        order.lock().await.push("beta");
+        if let Some(first_arrived) = first_arrived.take() {
+            let _ = first_arrived.send(capture);
+        }
+        let _permit = Arc::clone(&release).acquire_owned().await;
+        write_beta_response(&mut socket, stream).await;
+    }
+}
+
 async fn serve_beta_drop(
     listener: TcpListener,
     captures: Arc<Mutex<Vec<Capture>>>,
@@ -471,7 +515,6 @@ async fn fa22072_direct_relay_captured_plan_and_exclusions_public_consumer() {
             &manifest,
         ),
         now,
-        true,
         None,
         None,
     )
@@ -790,6 +833,167 @@ async fn fa22072_direct_to_relay_business_continuation_public_entry() {
 }
 
 #[tokio::test]
+async fn fa22072_generic_relay_send_await_obeys_residence_deadline_public_entry() {
+    let (home, _lock) = LOCK.lock().await;
+    std::env::set_var(KEY_ENV, KEY);
+
+    let beta_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let beta_port = beta_listener.local_addr().unwrap().port();
+    let beta_captures = Arc::new(Mutex::new(Vec::new()));
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let (arrived_tx, arrived_rx) = oneshot::channel();
+    let release = Arc::new(Semaphore::new(0));
+    let beta_task = tokio::spawn(serve_beta_response_head_held(
+        beta_listener,
+        arrived_tx,
+        Arc::clone(&release),
+        Arc::clone(&beta_captures),
+        Arc::clone(&order),
+    ));
+
+    let mut manifest = handoff_manifest_with_chat_mode(
+        test_ports::free_port(),
+        9,
+        beta_port,
+        true,
+        true,
+    );
+    const RESIDENCE_TIMEOUT_MS: u64 = 1_200;
+    const PROVIDER_REQUEST_TIMEOUT_MS: u64 = 10_000;
+    for server in manifest.servers.values_mut() {
+        if let Some(execution) = server.execution.as_mut() {
+            execution.attempt_store.residence_timeout_ms = RESIDENCE_TIMEOUT_MS;
+        }
+    }
+    manifest
+        .providers
+        .get_mut("beta")
+        .unwrap()
+        .request_timeout_ms = PROVIDER_REQUEST_TIMEOUT_MS;
+
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let client = reqwest::Client::new();
+    let started = std::time::Instant::now();
+    let response = tokio::time::timeout(Duration::from_secs(5), async {
+        client
+            .post(format!("http://{addr}/v1/chat/completions"))
+            .header("accept", "text/event-stream")
+            .json(&chat_request(
+                "OWNED_GENERIC_RELAY_RESIDENCE_DEADLINE",
+                true,
+                "auto",
+            ))
+            .send()
+            .await
+    })
+    .await
+    .expect("the client SSE head must be committed while beta's response head is held")
+    .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"].to_str().unwrap(),
+        "text/event-stream"
+    );
+    let mut body = response.bytes_stream();
+
+    let capture = tokio::time::timeout(Duration::from_secs(5), arrived_rx)
+        .await
+        .expect("the held beta Provider request must arrive")
+        .unwrap();
+    assert_eq!(capture.path, "/v1/responses");
+    assert_eq!(capture.body["model"], BETA_WIRE);
+    assert!(
+        capture.body["input"].as_array().is_some(),
+        "the cross-protocol public Chat entry must use the generic Relay body: {capture:?}"
+    );
+
+    let mut received = Vec::new();
+    let mut stream_error = false;
+    let mut clean_eof = false;
+    let stream_end_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout_at(stream_end_deadline, body.next()).await {
+            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
+            Ok(Some(Err(_))) => {
+                stream_error = true;
+                break;
+            }
+            Ok(None) => {
+                clean_eof = true;
+                break;
+            }
+            Err(_) => panic!(
+                "generic Relay send-await did not obey the residence deadline before the guard"
+            ),
+        }
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        stream_error,
+        "the residence deadline must interrupt the unfinished SSE transport, clean_eof={clean_eof}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(1_000) && elapsed < Duration::from_secs(5),
+        "generic Relay must use the original deadline, waited {elapsed:?}"
+    );
+    let received = String::from_utf8_lossy(&received).to_string();
+    assert!(!received.contains("data:"), "{received}");
+    assert!(!received.contains("\"error\""), "{received}");
+    assert!(!received.contains("[DONE]"), "{received}");
+    assert!(!received.contains("\"choices\""), "{received}");
+
+    release.add_permits(2);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let captures = beta_captures.lock().await;
+    assert_eq!(
+        captures.len(),
+        1,
+        "the deadline-expired identity must not receive another business send: {captures:?}"
+    );
+    drop(captures);
+    assert_eq!(order.lock().await.as_slice(), ["beta"]);
+
+    let logs: Value = client
+        .get(format!("http://{addr}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let modes = logs["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["node_id"] == "V3Server03HttpRequestRaw" && event["event"] == "received")
+        .filter_map(|event| event["details"]["execution_mode"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modes,
+        vec!["relay"],
+        "the public Chat entry must enter the generic Relay skeleton: {logs}"
+    );
+    assert!(
+        logs["logs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["details"]["path"] == "/v1/chat/completions"),
+        "the public entry must remain the Chat endpoint: {logs}"
+    );
+    eprintln!(
+        "generic-relay-residence-deadline elapsed={elapsed:?} residence_ms={RESIDENCE_TIMEOUT_MS} provider_request_ms={PROVIDER_REQUEST_TIMEOUT_MS} stream_error={stream_error} clean_eof={clean_eof} provider_captures=1"
+    );
+
+    beta_task.abort();
+    let _ = beta_task.await;
+    handle.shutdown().await;
+    std::env::remove_var(KEY_ENV);
+    drop(home);
+}
+
+#[tokio::test]
 async fn fa22072_direct_to_relay_beta_positive_public_entry() {
     let (home, _lock) = LOCK.lock().await;
     std::env::set_var(KEY_ENV, KEY);
@@ -845,17 +1049,32 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
     );
     raw.port = Some(port);
     raw.pipeline_id = Some("owned-kernel-handoff-pipeline".into());
-    let observed_failures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed_failures = Arc::new(std::sync::Mutex::new(0usize));
     let sink_failures = observed_failures.clone();
     let failure_sink: routecodex_v3_runtime::V3RuntimeProviderFailureEventSink =
         Arc::new(move |_, event| {
-            sink_failures.lock().unwrap().push(event.clone());
+            let _ = event;
+            let mut failures = sink_failures.lock().unwrap();
+            *failures = failures.saturating_add(1);
         });
-    let selected = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let selected = Arc::new(std::sync::Mutex::new((
+        0usize,
+        None::<String>,
+        None::<Vec<String>>,
+        None::<usize>,
+        0usize,
+    )));
     let sink_selected = selected.clone();
     let route_sink: routecodex_v3_runtime::V3RuntimeRouteSelectionEventSink =
         Arc::new(move |event| {
-            sink_selected.lock().unwrap().push(format!("{event:?}"));
+            let mut selected = sink_selected.lock().unwrap();
+            selected.0 = selected.0.saturating_add(1);
+            if selected.0 == 1 {
+                selected.1 = event.provider_id.clone();
+                selected.2 = Some(event.target_path.clone());
+                selected.3 = event.attempts;
+                selected.4 = event.provider_failure_events.len();
+            }
         });
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -873,7 +1092,6 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
             &manifest,
         ),
         now,
-        true,
         Some(&failure_sink),
         Some(&route_sink),
     )
@@ -889,10 +1107,21 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
     let _ = beta_accept_task.await;
     std::env::remove_var(KEY_ENV);
     drop(home);
+    let selected = selected.lock().unwrap().clone();
     eprintln!(
-        "kernel-handoff A={} B_received={beta_received} selected={:?} output={output:?} cleanup=true",
+        "kernel-handoff A={} B_received={beta_received} route_events={} first_provider={:?} first_target_path={:?} first_attempts={:?} first_failure_count={} output_handoff={:?} output_error={} output_terminal={} cleanup=true",
         alpha_captures.len(),
-        selected.lock().unwrap()
+        selected.0,
+        selected.1,
+        selected.2,
+        selected.3,
+        selected.4,
+        output
+            .protocol_relay_handoff
+            .as_ref()
+            .map(|handoff| handoff.target.candidate.provider_id.as_str()),
+        output.error_chain.is_some(),
+        output.terminal_disposition.is_some(),
     );
     assert_eq!(
         alpha_captures.len(),
@@ -933,7 +1162,7 @@ async fn fa22072_direct_kernel_returns_selected_relay_handoff_public_consumer() 
         .request_local_excluded_candidates
         .contains("beta:default:key1:beta-wire"));
     assert_eq!(handoff.provider_failure_events.len(), 1);
-    assert_eq!(observed_failures.lock().unwrap().len(), 1);
+    assert_eq!(*observed_failures.lock().unwrap(), 1);
     assert!(handoff.node_trace.contains(&"V3TargetLocalReselected"));
     assert!(handoff
         .node_trace

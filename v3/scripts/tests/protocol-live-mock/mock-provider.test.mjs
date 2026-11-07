@@ -538,7 +538,10 @@ test('every real corpus provider path is served by the mock', async (t) => {
 test('prefix observation closes its own held-open connection and never accepts a missing prefix', { timeout: 4000 }, async (t) => {
   const server = await startMockProvider();
   t.after(() => server.close());
-  const corpusCase = readCase('gemini-json-sse-budget-before-terminal');
+  const corpusCase = structuredClone(readCase('gemini-json-sse-complete'));
+  delete corpusCase.upstream_response.attempts;
+  corpusCase.upstream_response.sse_events = corpusCase.upstream_response.sse_events.slice(0, 1);
+  corpusCase.upstream_response.fault = 'hold-open';
   const prefix = firstRawFrame(corpusCase.upstream_response);
   server.setActiveCase(corpusCase);
   const url = `${server.url}${corpusCase.expected_provider.paths[0]}`;

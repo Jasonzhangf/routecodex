@@ -187,10 +187,31 @@ const cases = [
     diagnostic: /malformed-arguments runtime edge caller_symbol/u,
   },
   {
-    name: 'Provider compat failure no longer enters typed Error05', file: 'docs/architecture/v3-mainline-call-map.yml',
-    from: 'step_id: v3-provider-action-gate-01\n      from_node: ProviderReqCompat06ProviderCompat\n      to_node: V3Error05ExecutionDecision',
-    to: 'step_id: v3-provider-action-gate-01\n      from_node: ProviderReqCompat06ProviderCompat\n      to_node: V3ProviderReqOutbound09TransportRequest',
-    diagnostic: /ProviderReqCompat06 typed failure edge/u,
+    name: 'Provider compat independent typed Error05 edge removed', file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: `  - step_id: v3-protocol-field-parity-responses-provider-compat-error-01
+    from_node: ProviderReqCompat06ProviderCompat
+    to_node: V3Error05ExecutionDecision
+    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
+    callee_symbol: handle_v3_responses_relay_provider_failure
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
+    status: anchored
+    binding_kind: typed_provider_compat_failure_execution_edge
+    owner_feature_id: v3.protocol_conversion_field_parity
+    resource_flow:
+      consumes: [v3.error.source]
+      produces: []
+      side_channel_reads: [v3.error.execution_decision]
+      side_channel_writes: []
+`,
+    to: '',
+    diagnostic: /missing independent ProviderReqCompat06 typed failure edge/u,
+  },
+  {
+    name: 'Provider compat independent typed Error05 edge miswired to transport', file: 'docs/architecture/v3-mainline-call-map.yml',
+    from: 'step_id: v3-protocol-field-parity-responses-provider-compat-error-01\n    from_node: ProviderReqCompat06ProviderCompat\n    to_node: V3Error05ExecutionDecision',
+    to: 'step_id: v3-protocol-field-parity-responses-provider-compat-error-01\n    from_node: ProviderReqCompat06ProviderCompat\n    to_node: V3ProviderReqOutbound09TransportRequest',
+    diagnostic: /independent ProviderReqCompat06 typed failure edge to_node/u,
   },
   {
     name: 'OpenAI Chat outbound drops same-protocol web search field', file: 'v3/crates/routecodex-v3-runtime/tables/request_field_map.json',

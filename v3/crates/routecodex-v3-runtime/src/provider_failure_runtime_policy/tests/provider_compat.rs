@@ -45,7 +45,6 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
             _ => panic!("valid fixture must select the default-floor provider"),
         };
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -57,12 +56,10 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
     let mut state = V3RelayProviderFailurePolicyState {
         failed_candidates: &mut failed_candidates,
-        same_candidate_retries: &mut same_candidate_retries,
         trace: &mut trace,
         last_external_http: &mut None,
     };
@@ -93,7 +90,6 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
     );
     assert!(result.retry_selected.is_none());
     assert!(result.terminal_projection.is_some());
-    assert!(state.same_candidate_retries.is_empty());
 }
 
 #[tokio::test]
@@ -113,7 +109,6 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
         .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
         .expect("capture Target09 before execution");
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -125,7 +120,6 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
 
@@ -139,7 +133,6 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },
@@ -193,7 +186,6 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
             )
             .available
     );
-    assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
 }
 
@@ -206,12 +198,12 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the first model"),
     };
+    let failed_key = v3_relay_provider_candidate_key(&selected.candidate);
     let target = V3TargetInterpreter::default();
     let captured_target_09 = target
         .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
         .expect("capture Target09 before execution");
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -223,7 +215,6 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
 
@@ -237,7 +228,6 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },
@@ -245,13 +235,9 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     .await
     .expect("generic provider HTTP 400 must follow provider-scoped health handling");
 
-    // A generic provider HTTP 400 is an ordinary recoverable failure here: the
-    // exact identity is held by typed observation, not by a permanent
-    // request-local exclusion.
-    assert!(
-        failed_candidates.is_empty(),
-        "generic provider HTTP 400 must not add a permanent request-local exclusion"
-    );
+    // The request excludes the attempted identity; Provider observation owns
+    // its independent lifecycle. The sibling candidate remains eligible.
+    assert_eq!(failed_candidates, BTreeSet::from([failed_key]));
     assert_ne!(
         result.event.health_record.state,
         "request_local_provider_compat"
@@ -305,7 +291,6 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
             .available
     );
     assert!(result.terminal_projection.is_none());
-    assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
 }
 
@@ -323,7 +308,6 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
         .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
         .expect("capture Target09 before execution");
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -335,7 +319,6 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
 
@@ -349,7 +332,6 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },
@@ -380,7 +362,6 @@ async fn relay_upstream_invalid_request_error_keeps_same_provider_sibling_health
         Some("first:default:key:sibling")
     );
     assert!(result.terminal_projection.is_none());
-    assert!(same_candidate_retries.is_empty());
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
 }
 
@@ -393,9 +374,10 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select a provider"),
     };
+    let failed_candidate = selected.candidate.clone();
+    let failed_key = v3_relay_provider_candidate_key(&failed_candidate);
     manifest.providers.clear();
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -407,7 +389,6 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
 
@@ -421,7 +402,6 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },
@@ -449,18 +429,17 @@ async fn relay_provider_failure_projects_target_expansion_error() {
         projection.body["error"]["code"],
         "captured_target_plan_expansion_failed"
     );
-    // The attempt stays health-neutral because its own target resolution proved
-    // no alternative exists. An ordinary provider failure adds no permanent
-    // request-local exclusion before that typed projection.
-    assert_eq!(result.event.health_record.state, "last_candidate_terminal");
+    // A subsequent expansion error does not erase the real Provider failure.
+    assert_eq!(result.event.health_record.state, "pre_cool_observation");
+    assert_eq!(failed_candidates, BTreeSet::from([failed_key]));
     assert!(
-        failed_candidates.is_empty(),
-        "an ordinary provider failure must not add a permanent request-local exclusion"
-    );
-    assert!(
-        health
-            .availability("first", Some("key1"), Some("gpt-test"), 20_000)
-            .available,
-        "a terminal target-resolution projection must not mutate provider health"
+        !health.availability_for_interface(
+            &failed_candidate.provider_id,
+            &failed_candidate.interface_id,
+            Some(&failed_candidate.auth_alias),
+            Some(&failed_candidate.model_id),
+            20_000,
+        ).available,
+        "the failed identity remains under independent Provider observation"
     );
 }

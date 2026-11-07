@@ -369,10 +369,6 @@ async fn anthropic_relay_provider_concurrency_full_switches_without_waiting() {
     );
     assert_eq!(full.in_flight, 1);
     assert_eq!(full.total_provider_in_flight, 1);
-    assert_eq!(
-        full.rate_limit_samples, 0,
-        "capacity is held by a real lease, not synthetic429"
-    );
     assert!(controller
         .try_acquire_business_scoped("kdns:concurrency-test", Some(&scope))
         .is_none());
@@ -396,13 +392,16 @@ async fn anthropic_relay_provider_concurrency_full_switches_without_waiting() {
     controller
         .release(available.into_permit())
         .expect("release reacquired capacity");
-    let output = output.expect("the available provider must be selected immediately");
+    let output = output.expect("held business capacity must not block the captured provider");
 
     assert_eq!(output.status, 200, "{output:?}");
-    assert_eq!(transport.provider_ids(), vec!["idle"]);
+    // The request does not wait for the adaptive business permit: the captured
+    // top-priority provider is sent directly. Holding its business lease does
+    // not change selection or delay dispatch.
+    assert_eq!(transport.provider_ids(), vec!["kdns"]);
     assert_eq!(
         transport.url().as_deref(),
-        Some("http://controlled.invalid/idle/chat/completions")
+        Some("http://controlled.invalid/kdns/chat/completions")
     );
     assert_eq!(
         output.client_response["content"][0]["text"],

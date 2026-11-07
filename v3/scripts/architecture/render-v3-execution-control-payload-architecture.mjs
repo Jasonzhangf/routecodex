@@ -73,7 +73,7 @@ function validateContracts() {
   requireValue(manifest.sealed_replay_body_contract?.anthropic === 'typed_non_optional', `${manifestRel}: Anthropic sealed replay body must be typed and non-optional`);
   requireValue(manifest.sealed_replay_body_contract?.server_consumption === 'exhaustive_match', `${manifestRel}: Server sealed replay consumption must be exhaustive`);
   requireValue(manifest.sealed_replay_body_contract?.option_stream_with_expect === 'forbidden', `${manifestRel}: optional sealed replay plus expect must be forbidden`);
-  for (const dimension of ['per_attempt', 'per_request', 'process_global', 'residence_or_deadline']) {
+  for (const dimension of ['residence_or_deadline']) {
     requireValue(manifest.budget_contract?.[dimension] === 'required', `${manifestRel}: missing budget ${dimension}`);
   }
   for (const kind of ['Upstream', 'Protocol', 'LocalResourceExhausted', 'ObservationFailure', 'PersistenceFailure', 'ClientCancelled']) {
@@ -157,15 +157,12 @@ function renderMarkdown() {
     '| lane | resources | execution authority |',
     '| --- | --- | --- |',
     `| control | ${codeList(manifest.control_resources)} | request lifecycle only |`,
-    `| payload | ${codeList(manifest.payload_resources)} | none; bounded storage only |`,
+    `| payload | ${codeList(manifest.payload_resources)} | none; complete attempt storage only |`,
     `| diagnostics | ${codeList(manifest.diagnostic_resources)} | none |`,
     `| persistence | ${codeList(manifest.persistence_resources)} | none; ordered bounded writers |`,
     '',
     '## Budget Contract',
     '',
-    `- Per attempt: \`${manifest.budget_contract.per_attempt}\``,
-    `- Per request: \`${manifest.budget_contract.per_request}\``,
-    `- Process global: \`${manifest.budget_contract.process_global}\``,
     `- Residence/deadline: \`${manifest.budget_contract.residence_or_deadline}\``,
     `- Provider stream deadline guard: \`${manifest.budget_contract.provider_stream_deadline_guard}\``,
     `- Residence expiry: \`${manifest.budget_contract.residence_expiry}\``,

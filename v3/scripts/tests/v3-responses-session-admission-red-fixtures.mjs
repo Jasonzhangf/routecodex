@@ -15,17 +15,23 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const verifier = resolve(
-  repo,
-  "v3/scripts/architecture/verify-v3-responses-session-admission.mjs",
-);
+const verifiers = {
+  admission: resolve(
+    repo,
+    "v3/scripts/architecture/verify-v3-responses-session-admission.mjs",
+  ),
+  client: resolve(
+    repo,
+    "v3/scripts/architecture/verify-v3-client-sse-head-commit.mjs",
+  ),
+};
 const copied = [
   "package.json",
   "v3/package.json",
   ".github/workflows/test.yml",
   "v3/crates/routecodex-v3-server/src/lib.rs",
   "v3/crates/routecodex-v3-server/src/frame_builders.rs",
-  "v3/crates/routecodex-v3-server/src/session_admission.rs",
+  "v3/crates/routecodex-v3-server/src/client_sse_transport.rs",
   "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs",
   "v3/crates/routecodex-v3-config/src/lib.rs",
   "v3/crates/routecodex-v3-config/src/types.rs",
@@ -35,6 +41,7 @@ const copied = [
   "docs/architecture/v3-mainline-call-map.yml",
   "docs/architecture/v3-verification-map.yml",
   "docs/architecture/manifests/v3.responses_session_admission.mainline.yml",
+  "docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml",
   "docs/architecture/manifests/v3.sse.http_keepalive.mainline.yml",
   "docs/architecture/wiki/v3-responses-session-admission.md",
   "docs/architecture/wiki/v3-sse-http-keepalive.md",
@@ -42,26 +49,34 @@ const copied = [
 const cases = [
   {
     name: "session business mutex is reintroduced",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) =>
       `${source}\nstruct V3ResponsesSessionAdmissionGate;\n`,
-    diagnostic: /must not regain a session\/conversation business mutex/u,
+    diagnostic: /must not regain a session\/conversation or maintenance activity mutex/u,
   },
   {
-    name: "successful EOF releases activity before front flush",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
-    mutate: (source) => source.replace("front.hold_activity_until_flush(permit);", "drop(permit);"),
-    diagnostic: /Request-local activity must retain body and front-flush custody/u,
-  },
-  {
-    name: "exec drain waiter is not registered before the quiescence check",
-    path: "v3/crates/routecodex-v3-server/src/session_admission.rs",
+    name: "request activity gate is reinserted before parsed dispatch",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
     mutate: (source) =>
       source.replace(
-        "            notified.as_mut().enable();\n            if self\n                .gate",
-        "            if self\n                .gate",
+        "Box::pin(pending_endpoint_after_json_parse(",
+        "request_activity_gate.admit().await;\n        Box::pin(pending_endpoint_after_json_parse(",
       ),
-    diagnostic: /exec drain gate must register its predicate waiter/u,
+    diagnostic: /must not regain a session\/conversation or maintenance activity mutex/u,
+  },
+  {
+    name: "body permit maintenance gate is reintroduced",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    mutate: (source) =>
+      `${source}\nfn hold_response_body_request_activity_permit() {}\n`,
+    diagnostic: /must not regain a session\/conversation or maintenance activity mutex/u,
+  },
+  {
+    name: "maintenance quiescence waiter is reintroduced",
+    path: "v3/crates/routecodex-v3-server/src/lib.rs",
+    mutate: (source) =>
+      `${source}\nasync fn wait_for_quiescence() {}\n`,
+    diagnostic: /must not regain a session\/conversation or maintenance activity mutex/u,
   },
   {
     name: "error SSE receives success keepalive",
@@ -180,6 +195,57 @@ const cases = [
       ),
     diagnostic: /must not retain the retired HTTP 409 overlap path/u,
   },
+  {
+    name: "Front closeout resource binding is removed from Client SSE",
+    verifier: "client",
+    path: "docs/architecture/v3-function-map.yml",
+    mutate: (source) => source.replace("  - v3.front.client_closeout_frame\n", ""),
+    diagnostic: /must bind the Front closeout\/flush resource/u,
+  },
+  {
+    name: "Front body EOF handoff restores the phantom activity caller",
+    verifier: "client",
+    path: "docs/architecture/v3-mainline-call-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "caller_symbol: V3FrontHttpIo::poll_flush",
+        "caller_symbol: V3StableFrontSocket::hold_activity_until_flush",
+      ),
+    diagnostic: /body EOF handoff must use its real Front owner/u,
+  },
+  {
+    name: "Front flush completion is detached from write_front_command",
+    verifier: "client",
+    path: "docs/architecture/v3-mainline-call-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "    callee_symbol: write_front_command\n    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs",
+        "    callee_symbol: phantom_front_flush\n    callee_file: v3/crates/routecodex-v3-server/src/restart_handoff.rs",
+      ),
+    diagnostic: /Front flush completion must use its real Front owner/u,
+  },
+  {
+    name: "Front closeout resource loses its declared owner",
+    verifier: "client",
+    path: "docs/architecture/v3-resource-operation-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - resource_id: v3.front.client_closeout_frame\n    resource_kind: transport_control_resource\n    lifecycle: v3.runtime.restart_handoff_skeleton\n    owner_crate: routecodex-v3-server\n    owner_node: V3StableFrontSocket",
+        "  - resource_id: v3.front.client_closeout_frame\n    resource_kind: transport_control_resource\n    lifecycle: v3.runtime.restart_handoff_skeleton\n    owner_crate: routecodex-v3-server\n    owner_node: V3RequestActivityGate",
+      ),
+    diagnostic: /Front closeout\/flush resource must retain its declared owner/u,
+  },
+  {
+    name: "client manifest drops the Front closeout resource read",
+    verifier: "client",
+    path: "docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - resource_id: v3.front.client_closeout_frame\n    owner_node: V3StableFrontSocket\n    consumer: write_front_command\n",
+        "",
+      ),
+    diagnostic: /must read the real Front closeout\/flush resource/u,
+  },
 ];
 
 const failures = [];
@@ -199,7 +265,7 @@ for (const testCase of cases) {
       continue;
     }
     writeFileSync(target, mutated);
-    const result = spawnSync(process.execPath, [verifier], {
+    const result = spawnSync(process.execPath, [verifiers[testCase.verifier ?? "admission"]], {
       cwd: root,
       env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
       encoding: "utf8",

@@ -1,6 +1,186 @@
 include!("../../tests/support/kernel_unit.rs");
 
-async fn assert_first_byte_timeout_excludes_same_provider_siblings(
+#[tokio::test]
+async fn provider_health_observes_failure_without_request_alternative() {
+    use crate::provider_failure_runtime_policy::{
+        run_v3_relay_provider_failure_policy, V3RelayProviderFailurePolicyContext,
+        V3RelayProviderFailurePolicyState,
+    };
+    for direct in [true, false] {
+        let manifest = provider_concurrency_two_provider_manifest(
+            if direct { "isolated_health_direct" } else { "isolated_health_relay" },
+            "unused_health_peer", 50,
+        );
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let scope = test_failure_session_scope("default");
+        let raw = crate::nodes::build_v3_server_03_http_request_raw(
+            "test".into(), scope.clone(), "independent-health".into(),
+            "independent-health-exec".into(), "POST".into(), "/v1/responses".into(),
+            json!({"model":"client-model","input":"hello"}),
+        );
+        let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+        let mut expanded = plan.expanded;
+        expanded.candidates.truncate(1);
+        let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+            route: expanded.route.clone(), candidate: expanded.candidates[0].clone(),
+            candidate_count: 1, unavailable_candidates: vec![], attempts: 1,
+            default_floor_protected: false,
+        };
+        let selected_key = candidate_key(&selected.candidate);
+        let mut failed = BTreeSet::new();
+        let mut trace = vec![];
+        let record = if direct {
+            let source = build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure, "V3ProviderRespInbound01Raw",
+                "provider_http_503", "real provider failure without an alternative",
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider, status: Some(503),
+                    code: Some("HTTP_503".into()),
+                    provider_id: Some(selected.candidate.provider_id.clone()),
+                    upstream_request_id: None, message: Some("provider unavailable".into()),
+                },
+            );
+            run_v3_direct_provider_failure_policy(
+                &V3DirectProviderFailurePolicyContext {
+                    failure_session_scope: &scope, provider_health: &health,
+                    availability: &health.session_bound_availability(&scope),
+                    expanded: Some(&expanded), provider_pinned: false, now_epoch_ms: 0,
+                },
+                &selected, source, 503,
+                &mut V3DirectProviderFailurePolicyState {
+                    failed_candidates: &mut failed, trace: &mut trace,
+                },
+                None,
+            ).await.expect("Direct failure policy").event.unwrap().health_state
+        } else {
+            run_v3_relay_provider_failure_policy(
+                &V3RelayProviderFailurePolicyContext {
+                    manifest: &manifest, captured_target_09: Some(&expanded),
+                    failure_session_scope: scope, provider_health: &health,
+                    deterministic_sample: 0,
+                },
+                selected, "V3ProviderRespInbound01Raw", 503, Some("HTTP_503".into()),
+                "real provider failure without an alternative".into(), None,
+                &mut V3RelayProviderFailurePolicyState {
+                    failed_candidates: &mut failed, trace: &mut trace, last_external_http: &mut None,
+                },
+            ).await.expect("Relay failure policy").event.health_record.state
+        };
+        assert_eq!(record, "last_candidate_terminal",
+            "a proven last candidate must terminate without a health mutation; direct={direct}");
+        assert!(failed.contains(&selected_key),
+            "the real failed identity must stay excluded from this request; direct={direct}");
+    }
+}
+
+#[tokio::test]
+async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_errors() {
+    let manifest =
+        provider_concurrency_two_provider_manifest("direct_terminal_qualified", "unused_peer", 50);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let scope = test_failure_session_scope("default");
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".into(),
+        scope.clone(),
+        "direct-terminal-qualified".into(),
+        "direct-terminal-qualified-exec".into(),
+        "POST".into(),
+        "/v1/responses".into(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
+    let mut expanded = plan.expanded;
+    expanded.candidates.truncate(1);
+    let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
+        route: expanded.route.clone(),
+        candidate: expanded.candidates[0].clone(),
+        candidate_count: 1,
+        unavailable_candidates: vec![],
+        attempts: 1,
+        default_floor_protected: false,
+    };
+    let witness = V3ExternalHttpWitness::new(
+        400,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        br#"{"error":{"message":"request failed"}}"#.to_vec(),
+    );
+    let availability = health.session_bound_availability(&scope);
+    let context = V3DirectProviderFailurePolicyContext {
+        failure_session_scope: &scope,
+        provider_health: &health,
+        availability: &availability,
+        expanded: Some(&expanded),
+        provider_pinned: false,
+        now_epoch_ms: 0,
+    };
+
+    let ordinary = run_v3_direct_provider_failure_policy(
+        &context,
+        &selected,
+        build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "provider_http_400",
+            "ordinary provider HTTP error",
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(400),
+                code: Some("provider_http_400".to_string()),
+                provider_id: Some(selected.candidate.provider_id.clone()),
+                upstream_request_id: None,
+                message: Some("ordinary provider HTTP error".to_string()),
+            },
+        ),
+        400,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut BTreeSet::new(),
+            trace: &mut Vec::new(),
+        },
+        Some(&witness),
+    )
+    .await
+    .expect("ordinary terminal provider error");
+    assert_eq!(
+        ordinary.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+            witness.clone()
+        ))
+    );
+
+    let request_local = run_v3_direct_provider_failure_policy(
+        &context,
+        &selected,
+        build_v3_error_01_source_raised_external(
+            V3ErrorSourceKind::ProviderFailure,
+            "ProviderReqCompat06ProviderCompat",
+            "provider_request_compat_error",
+            "request-local provider compatibility failure",
+            V3ExternalErrorLink {
+                kind: V3ExternalErrorKind::Provider,
+                status: Some(400),
+                code: Some("provider_request_compat_error".to_string()),
+                provider_id: Some(selected.candidate.provider_id.clone()),
+                upstream_request_id: None,
+                message: Some("request-local provider compatibility failure".to_string()),
+            },
+        ),
+        400,
+        &mut V3DirectProviderFailurePolicyState {
+            failed_candidates: &mut BTreeSet::new(),
+            trace: &mut Vec::new(),
+        },
+        Some(&witness),
+    )
+    .await
+    .expect("request-local terminal provider error");
+    assert_eq!(
+        request_local.terminal_disposition,
+        Some(V3ProviderTerminalDisposition::ExternalHttp(witness)),
+        "a complete witness must not upgrade a request-local compat terminal"
+    );
+}
+
+async fn assert_first_byte_timeout_preserves_untried_siblings(
     source_stage: &'static str,
     code: &'static str,
 ) {
@@ -63,7 +243,6 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
     )
     .expect("typed first-byte timeout source");
     let mut failed_candidates = BTreeSet::new();
-    let mut retries = std::collections::BTreeMap::new();
     let mut trace = Vec::new();
     let result = run_v3_direct_provider_failure_policy(
         &V3DirectProviderFailurePolicyContext {
@@ -79,9 +258,9 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         502,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("first-byte timeout policy");
@@ -102,16 +281,16 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         .and_then(|event| event.next_provider_key.clone())
         .expect("first-byte timeout must publish the concrete next candidate");
     assert_eq!(
-        retry_key, other_provider_key,
-        "{code} must skip the same provider's sibling auth key"
+        retry_key, sibling_key,
+        "{code} must preserve the next untried complete identity"
     );
     assert!(
         failed_candidates.contains(&selected_key),
         "the failed exact key stays request-local excluded"
     );
     assert!(
-        failed_candidates.contains(&sibling_key),
-        "the same provider's sibling auth key is excluded for this request"
+        !failed_candidates.contains(&sibling_key),
+        "an untried sibling auth key must remain eligible"
     );
     assert!(
         !failed_candidates.contains(&other_provider_key),
@@ -120,8 +299,8 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
 }
 
 #[tokio::test]
-async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn transport_hang_preserves_untried_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_preserves_untried_siblings(
         "V3Transport13ResponsesHttpRequest",
         routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE,
     )
@@ -129,8 +308,8 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
 }
 
 #[tokio::test]
-async fn sse_first_event_timeout_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn sse_first_event_timeout_preserves_untried_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_preserves_untried_siblings(
         "V3ProviderResp14Raw",
         "provider_response_sse_first_event_timeout",
     )
@@ -142,7 +321,6 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     use crate::provider_failure_runtime_policy::{
         run_v3_relay_provider_failure_policy_with_response_source,
         V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
-        V3RelayProviderFailureRetryPolicy,
     };
     let manifest =
         provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b", 50);
@@ -182,7 +360,6 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         })
         .collect();
     let mut failed = BTreeSet::new();
-    let mut retries = std::collections::BTreeMap::new();
     let mut trace = Vec::new();
     let mut last = None;
     let result = run_v3_relay_provider_failure_policy_with_response_source(
@@ -191,7 +368,6 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
             captured_target_09: Some(&plan.expanded),
             failure_session_scope: scope.clone(),
             provider_health: &health,
-            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
             deterministic_sample: 0,
         },
         selected,
@@ -202,7 +378,6 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed,
-            same_candidate_retries: &mut retries,
             trace: &mut trace,
             last_external_http: &mut last,
         },
@@ -213,13 +388,12 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     )
     .await
     .expect("typed Relay recovery");
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = result.decision.action else {
-        panic!("expected reselection")
-    };
-    assert_eq!(recovery.provider_runtime_identity(), key);
-    assert_eq!(recovery.failure_session_scope(), &scope);
+    assert!(
+        result.decision.action.recovery_witness().is_none(),
+        "Relay reselection must not carry a Provider lifecycle witness"
+    );
+    assert_eq!(result.decision.action, V3Error05ExecutionAction::ReevaluateTarget);
     assert_eq!(failed, BTreeSet::from([key]));
-    assert!(retries.is_empty());
     assert_eq!(
         result.event.diagnostic_source.source_kind,
         V3ErrorSourceKind::RuntimeFailure
@@ -295,7 +469,6 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
     .expect("typed markup source");
     assert_eq!(source.source_kind, V3ErrorSourceKind::RuntimeFailure);
     let mut failed_candidates = BTreeSet::new();
-    let mut retries = std::collections::BTreeMap::new();
     let mut trace = vec![];
     let result = run_v3_direct_provider_failure_policy(
         &V3DirectProviderFailurePolicyContext {
@@ -311,29 +484,24 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         200,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut retries,
             trace: &mut trace,
         },
+        None,
     )
     .await
     .expect("response processing recovery");
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = &result.decision.action else {
-        panic!(
-            "must reselect through Error05: {:?}",
-            result.decision.action
-        );
-    };
-    assert_eq!(recovery.normalized_error_family(), source.code);
-    assert_eq!(recovery.failure_session_scope(), &scope);
+    assert!(
+        result.decision.action.recovery_witness().is_none(),
+        "request-local reselection must not carry a Provider lifecycle witness"
+    );
     assert_eq!(
-        recovery.provider_runtime_identity(),
-        candidate_key(&selected.candidate)
+        result.decision.action,
+        V3Error05ExecutionAction::ReevaluateTarget
     );
     assert_eq!(
         failed_candidates,
         BTreeSet::from([candidate_key(&selected.candidate)])
     );
-    assert!(retries.is_empty());
     assert!(trace.contains(&"V3Error01SourceRaised"));
     assert!(trace.contains(&"V3Error05ExecutionDecision"));
     let event = result.event.expect("typed failure observation");

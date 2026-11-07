@@ -1,173 +1,49 @@
-# V3 Provider Action Gate
+# Provider 独立观察生命周期
 
-Canonical implementation plan:
-`docs/goals/direct-relay-cross-request-error-storm-control-plan.md`.
+状态：候选源码。本文不证明生产升级或完整请求恢复已验收。`v3.provider_action_gate` 的既有feature/resource标识继续定位同一owner；请求waiter、FIFO、业务admission、Error05恢复witness和terminal commit已退役。
 
-Each request retains its own cancellation, attempts, exclusions and original
-deadline. A real session is never a business action lock. Distinct complete
-provider/interface/model/key identities cannot change each other's action delay,
-generation, permit or terminal disposition. Waiter count is not a new failure.
-Only the declared exact429 and health observation owners coordinate recovery
-within their listener. Normal provider capacity limits remain effective.
+Provider探测、冷却、恢复只改变VR候选可见性。请求不持观察lease，不等待probe，不参与Provider观察的generation和节奏。请求当次消费已捕获的选择后直接transport；真实执行错误交统一typed Error和原路由owner重选。refill由Chat Process独立决定，连续最多额外一次。
+
+## 单次观察的对象流
+
+下图只描述已到期的一个Provider观察批次。未到期或已在观察的身份保留在独立生命周期中，等待下次调度；静态图不画回边。入口是该批次调度，出口是观察处置，符合SESE。它不是新的DAGPipe Operator注册声明。
 
 ```mermaid
 flowchart TD
-  Compat[ProviderReqCompat06ProviderCompat]
-  Wire[V3ProviderReqOutbound08WirePayload]
-  E01[V3Error01SourceRaised]
-  E05[V3Error05ExecutionDecision]
-  E06[V3Error06ClientProjected]
-  Witness[V3Error05RecoveryWitness]
-  Gate[V3ProviderActionGateAdmission]
-  TerminalAdmission[V3ProviderActionGateTerminalAdmission]
-  TerminalCommit[V3ProviderActionGateTerminalCommitted]
-  Permit[V3ProviderActionPermitInFlight]
-  AbandonRequest[V3ProviderActionPermitAbandonRequested]
-  Abandoned[V3ProviderActionPermitAbandoned]
-  SuccessObserved[V3ProviderActionSuccessObserved]
-  FailureObserved[V3ProviderActionFailureObserved]
-  SuccessFinalize[V3ProviderActionSuccessFinalize]
-  SuccessRecorded[V3ProviderActionSuccessRecorded]
-  FailureRecorded[V3ProviderActionFailureRecorded]
-  ProviderRaw[V3ProviderRespInbound01Raw]
-  ProviderCodec[V3ProviderResponsesEventCodec]
-  ProviderOutcome[V3ProviderResponsesTerminalOrFailureObserved]
-  Success[V3 Provider Success]
-  Terminal[V3 Terminal Exhaustion]
-  Reevaluate[V3SelectionAndError05Reevaluation]
+  Start([Provider观察批次]):::boundary --> Due{到期且未在观察?}:::decision
+  Due -->|否| Pending[(保留原观察状态)]:::data
+  Due -->|是| Observe[获取观察lease并执行真实probe]:::action
+  Observe --> Result{当前身份的真实结果}:::decision
+  Result -->|成功且满足typed限制| Restore[(恢复VR可见性)]:::data
+  Result -->|失败或尚未满足限制| Retain[(保留限制和独立恢复节奏)]:::data
+  Result -->|取消或已被新结果替代| Cancel[(释放本次观察资源)]:::data
+  Restore --> Release[释放本次观察lease]:::action
+  Retain --> Release
+  Cancel --> Release
+  Pending --> End([观察批次处置]):::boundary
+  Release --> End
 
-  Compat -->|v3-provider-action-gate-01| E05
-  Wire -->|v3-provider-action-gate-02| E05
-  E05 -->|v3-provider-action-gate-03| Witness
-  Witness -->|v3-provider-action-gate-04| Gate
-  E05 -->|v3-provider-action-gate-05| E06
-  TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit
-  Wire -->|v3-provider-action-gate-07| Witness
-  Witness -->|v3-provider-action-gate-08| Gate
-  Witness -->|v3-provider-action-gate-10| Gate
-  Witness -->|v3-provider-action-gate-11| Gate
-  Witness -->|v3-provider-action-gate-12| Gate
-  Witness -->|v3-provider-action-gate-13| Gate
-  E01 -->|v3-provider-action-gate-14| E05
-  E01 -->|v3-provider-action-gate-15| E05
-  E01 -->|v3-provider-action-gate-16| E05
-  Gate -->|v3-provider-action-gate-19| Permit
-  Gate -->|v3-provider-action-gate-20| Permit
-  Gate -->|v3-provider-action-gate-21| Permit
-  Gate -->|v3-provider-action-gate-22| Permit
-  Gate -->|v3-provider-action-gate-23| Permit
-  Permit -->|v3-provider-action-gate-24| AbandonRequest
-  Permit -->|v3-provider-action-gate-25| AbandonRequest
-  Permit -->|v3-provider-action-gate-26| AbandonRequest
-  Permit -->|v3-provider-action-gate-27| AbandonRequest
-  Permit -->|v3-provider-action-gate-28| AbandonRequest
-  Permit -->|v3-provider-action-gate-29| AbandonRequest
-  Permit -->|v3-provider-action-gate-30| AbandonRequest
-  Permit -->|v3-provider-action-gate-31| AbandonRequest
-  AbandonRequest -->|v3-provider-action-gate-32| Abandoned
-  Permit -->|v3-provider-action-gate-33| SuccessObserved
-  SuccessObserved -->|v3-provider-action-gate-34| SuccessRecorded
-  Abandoned -->|v3-provider-action-gate-35| FailureObserved
-  FailureObserved -->|v3-provider-action-gate-36| FailureRecorded
-  Permit -->|v3-provider-action-gate-37| SuccessObserved
-  SuccessObserved -->|v3-provider-action-gate-38| SuccessRecorded
-  Permit -->|v3-provider-action-gate-39| FailureObserved
-  Abandoned -->|v3-provider-action-gate-40| FailureRecorded
-  Permit -->|v3-provider-action-gate-41| SuccessObserved
-  SuccessObserved -->|v3-provider-action-gate-42| SuccessRecorded
-  Permit -->|v3-provider-action-gate-43| FailureObserved
-  Abandoned -->|v3-provider-action-gate-44| FailureRecorded
-  Permit -->|v3-provider-action-gate-45| SuccessRecorded
-  Permit -->|v3-provider-action-gate-46| SuccessFinalize
-  SuccessFinalize -->|v3-provider-action-gate-47| SuccessRecorded
-  ProviderRaw -->|v3-provider-action-gate-48| ProviderCodec
-  ProviderCodec -->|v3-provider-action-gate-49| ProviderOutcome
-  ProviderRaw -->|v3-provider-action-gate-50| ProviderCodec
-  ProviderCodec -->|v3-provider-action-gate-51| ProviderOutcome
-  Wire -->|v3-provider-action-gate-52| Witness
-  Wire -->|v3-provider-action-gate-53| Witness
-  Wire -->|v3-provider-action-gate-54| Witness
-  Wire -->|v3-provider-action-gate-55| Witness
-  Wire -->|v3-provider-action-gate-56| Witness
-  Success -->|reset scoped failure state| Gate
-  Terminal -->|advance sustained generation| Gate
-  Gate -->|typed terminal wake, no provider send| Reevaluate
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef data fill:#F1EAFE,stroke:#7C3AED,color:#0F172A,stroke-width:1.5px
 ```
 
-The gate is a process-local control side channel keyed by server, routing group,
-session, provider runtime identity, and normalized error family. Received HTTP 429
-uses an exact-identity lane shared across sessions and listeners. It does not enter request,
-response, metadata, continuation, snapshot, or persistent provider-health truth.
+## 唯一owner与调用
 
-Review locks:
+| 责任 | Owner |
+|---|---|
+| 登记真实失败并建立precool观察 | `V3ProviderFailureRuntimeHealth::defer_provider_health_action` |
+| 按原观察节奏选择独立probe | `V3ProviderFailureRuntimeHealth::managed_precool_probe` |
+| 同一观察身份的并发lease | `V3ProviderActionGate::try_admit_observation`、`V3ProviderObservationLease` |
+| 消费真实probe结果并更新health | `V3ProviderFailureRuntimeHealth::complete_precool_observation`及既有Provider health store |
+| 释放观察lease并保留恢复节奏 | `V3ProviderObservationLease::drop`、`V3ProviderActionGate::release_observation` |
+| VR中候选可见性 | 既有Provider health投影与Target选择owner |
 
-- First isolated provider failure waits at least 1 second.
-- A second failure before success or an overlapping waiter promotes the scope to
-  sustained mode and waits at least 5 seconds.
-- Switching provider runtime identity or normalized error family inside the same active
-  server/routing-group lane remains sustained and cannot restart the one-second floor.
-- One generation admits exactly one retry or reselect action.
-- Fresh normal requests do not consume an unrelated Error05 recovery lane. Only the
-  current request's typed retry/reselect transition enables its next gate wait.
-- Admission returns a Rust-owned `V3ProviderActionPermit`. Elapsed wall-clock time never
-  releases an owned provider action, including a legal lazy SSE longer than five
-  seconds.
-- Provider success, provider failure, terminal commit, or permit drop/explicit abandon
-  releases ownership. Abandon is health-neutral and starts a new sustained five-second
-  floor without incrementing consecutive failures.
-- A caller that observes provider failure releases its admitted permit before awaiting
-  Error05 retry/reselect/terminal policy. Holding that permit across terminal admission
-  is a self-deadlock because terminal admission cannot become the permit's own release
-  signal.
-- Provider success resets the matching state.
-- When success releases a queued recovery waiter, the typed transition carries the
-  exact retained key and new generation. Direct and every Relay runtime must re-arm
-  that ticket and wait through the sustained five-second floor before provider send;
-  success is not permission for the released waiter to bypass the gate.
-- A same-group success from an unrelated provider runtime identity cannot reset an owned
-  permit or its matching failure state.
-- Missing gate state or notification-channel closure fails explicitly; neither can be
-  wrapped as provider success.
-- Streaming success is recorded only after protocol terminal evidence and clean EOF.
-  For provider Responses SSE, only `response.completed` is semantic terminal truth;
-  Responses 协议没有 `response.done` 事件，`[DONE]` 是 Chat Completions 的终止符，
-  不得出现在 Responses 客户端边界。
-  Malformed events, premature EOF, provider stream errors, `response.failed`, and
-  post-terminal parse failures record provider failure and leave the next action gated.
-- Terminal exhaustion is not success: old waiters re-evaluate selection/Error05, and
-  the next provider action remains serialized behind a new five-second generation.
-  Terminal handling never authorizes a model-client error response; AGENTS.md's
-  mandatory all-entry no-client-error contract applies even on exhaustion. A concurrent
-  routing-group success cannot turn a stale failure into client output.
-- A fresh request reads the active exact-identity HTTP 429 lane before sending and
-  enters its typed recovery witness. It releases business capacity before waiting,
-  then reacquires it and retains the admitted action permit through the send.
-  A request residence deadline bounds gate queueing, including retry waits.
-  Unrelated identities and non-429 session-local lanes retain their isolation.
-- Client disconnect is health-neutral and does not enter this gate.
-- SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
-  business-byte commit it uses the existing retry/reselect path; after commit it only
-  closes the request-scoped action lane and fails the stream explicitly. It never writes
-  provider consecutive failures, cooldown, probes, or cross-session blacklist state.
-- FIFO waiter tickets preserve deterministic order; cancelling one waiter removes only
-  that ticket.
-- Only a typed terminal Error05 exhaustion decision may construct Error06.
-- Terminal Error06 projection records and commits its failure generation without
-  waiting for provider action admission. The commit advances the lane group so later
-  provider actions retain the storm-control delay.
-- Runtime does not pass that commit result as a typed witness into
-  `terminal_projection_for`. The machine map therefore stops at
-  `V3ProviderActionGateTerminalCommitted` and does not fabricate a
-  `TerminalCommitted -> V3Error05TerminalDecision/Error06` edge. Typed Error05-to-Error06
-  projection remains owned by `routecodex-v3-error`.
-- Responses Relay `ProviderReqCompat06ProviderCompat` and
-  `V3ProviderReqOutbound08WirePayload` failures enter
-  `handle_v3_responses_relay_provider_failure`, then
-  `run_v3_relay_provider_failure_policy`; they cannot return directly as provider-bound
-  request errors or bypass typed Error05 admission.
-- The machine gate requires the exact frozen edge set, resolves every declared symbol in
-  its declared source, verifies each caller body invokes its callee, and compares every
-  map edge endpoint/status/symbol/source field with this lifecycle manifest.
-- Traffic Governor saturation is a separate typed admission-backpressure lane. Its
-  blocking acquire runs off the Node event loop and never enters provider health,
-  Error05 retry/reselect, or provider 429 projection.
+429 episode、最短冷却和必需probe限制由既有Provider health store承担。已退役的request action lane不另存一份429真相。已提交SSE的错误恢复和已交付帧保真仍按项目Mandatory Review审计，不能因观察生命周期已解耦而豁免。
+
+## 验收边界
+
+Provider观察测试验证due、lease、恢复节奏及完整身份隔离。公开HTTP锚点 `invisible_pool_uses_default_while_probe_is_held_` 验证Direct/Relay在probe未完成时仍走default，并保持健康兄弟请求独立。`issue44cc3af_untried_tier_attempt_` 验证失败后实际使用未尝试候选及refill的当前可见性选择。原始证据与尚未闭合项见Iris的 `request-gates-removal-20261105/result.md`。
+
+call-map、manifest和专用gate已改为独立Provider观察绑定；静态gate的运行与正反fixtures仍须实际通过。当前依赖缺口和失败必须保留，不能将本文或局部行为回归冒称架构gate PASS。Mermaid已核对方向、分支和统一出口，视觉渲染未验收。

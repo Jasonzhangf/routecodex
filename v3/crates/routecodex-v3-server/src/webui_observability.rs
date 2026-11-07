@@ -73,6 +73,9 @@ pub(crate) fn record_v3_webui_error_projection(
                 routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
                     Some(witness.status())
                 }
+                routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+                    witness,
+                ) => Some(witness.status()),
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => None,
             });
     let external_error_status = typed
@@ -101,12 +104,34 @@ pub(crate) fn record_v3_webui_error_projection(
                 format!("http_{}", witness.status()),
                 format!("HTTP status {}", witness.status()),
             ),
+            (
+                _,
+                Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+                        witness,
+                    ),
+                ),
+            ) if witness.status() >= 400 => (
+                format!("http_{}", witness.status()),
+                format!("HTTP status {}", witness.status()),
+            ),
             // NoResponse (timeout, transport break, client cancel) or a 2xx
             // provider head that failed later: the typed source names the cause.
             (Some(source), _) => (source.code.clone(), source.message.clone()),
             (
                 None,
                 Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+            ) => (
+                format!("http_{}", witness.status()),
+                format!("HTTP status {}", witness.status()),
+            ),
+            (
+                None,
+                Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+                        witness,
+                    ),
+                ),
             ) => (
                 format!("http_{}", witness.status()),
                 format!("HTTP status {}", witness.status()),

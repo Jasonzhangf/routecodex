@@ -24,7 +24,6 @@ const cases = [
   ['lifecycle status loses active binding', (d) => { d.manifest.status = 'runtime_red'; }, /lifecycle status must be active/],
   ['manifest edge loses active binding', (d) => { d.manifest.edges[0].status = 'binding_pending'; }, /edge .* must be active/],
   ['call edge loses active binding', (d) => { chain(d).edges[0].status = 'runtime_red'; }, /must be active or anchored/],
-  ['request budget becomes optional', (d) => { d.manifest.budget_contract.per_request = 'optional'; }, /missing budget per_request/],
   ['disk spill becomes fallback', (d) => { d.manifest.budget_contract.disk_spill = 'allowed'; }, /initial disk spill must be forbidden/],
   ['local resource attribution disappears', (d) => { d.manifest.failure_kinds = d.manifest.failure_kinds.filter((kind) => kind !== 'LocalResourceExhausted'); }, /missing failure kind LocalResourceExhausted/],
   ['attempt budget resource disappears', (d) => { d.resources.resources = d.resources.resources.filter((row) => row.resource_id !== 'v3.execution.attempt_budget'); }, /missing manifest resource v3\.execution\.attempt_budget/],

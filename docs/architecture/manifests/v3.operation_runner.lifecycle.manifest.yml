@@ -269,9 +269,9 @@ typed_resources:
     producer: ErrorErr06ClientProjected
     readers:
     - RuntimeAttemptCleanup
-    staging_only: the error graph sink is internal diagnostic evidence only; it must never be submitted to a client body or committed by Server/SSE
+    staging_only: the error graph sink is internal diagnostic evidence only; it must never be submitted to a client body or committed by Server/SSE except the typed normal last-candidate exhaustion variant carrying a complete real upstream HTTP error, which the Server may return with its original status, body bytes, and legal end-to-end headers while no client HTTP head is committed
     retry_rule: recoverable decisions exit at Error05 without running Error06; RuntimeRetryLaunch consumes the decision and performs typed attempt_cleanup before the external new-attempt action
-    terminal_rule: only terminal_client_error runs Error06 to produce this internal evidence; Server/SSE then terminates the affected transport without a client error payload or fabricated completion
+    terminal_rule: only terminal_client_error runs Error06 to produce this internal evidence; Server/SSE then terminates the affected transport without a client error payload or fabricated completion, except the typed normal last-candidate exhaustion variant returning a complete real upstream HTTP error verbatim while no client HTTP head is committed
     release: attempt_cleanup after terminal transport termination and before RuntimeRequestFinalizer; never runtime_client_commit
 dry_run:
   owner: DebugDryRun

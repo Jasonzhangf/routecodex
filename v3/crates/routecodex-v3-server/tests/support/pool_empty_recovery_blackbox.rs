@@ -301,9 +301,32 @@ async fn issue44cc3af_first_byte_stall_keeps_sibling_requests_independent() {
         .await
         .expect("the timed-out candidate must reselect onto the healthy provider")
         .unwrap();
+    let extra_capture = stalled_requests.try_recv();
     assert!(
-        stalled_requests.try_recv().is_err(),
-        "the stalled candidate must not receive repeated concurrent attempts"
+        extra_capture.is_err(),
+        "the stalled candidate must not receive repeated concurrent attempts; extra capture: {}",
+        extra_capture
+            .as_ref()
+            .ok()
+            .map(|capture| {
+                let headers = format!(
+                    "authorization={:?} accept={:?} session-id={:?} thread-id={:?} x-session-id={:?} x-conversation-id={:?} x-codex-turn-metadata={:?}",
+                    capture.authorization,
+                    capture.accept,
+                    capture.session_id,
+                    capture.thread_id,
+                    capture.x_session_id,
+                    capture.x_conversation_id,
+                    capture.x_codex_turn_metadata,
+                );
+                let body = capture.body.to_string();
+                format!(
+                    "path=/v1/responses headers={} body={}",
+                    headers.chars().take(240).collect::<String>(),
+                    body.chars().take(400).collect::<String>(),
+                )
+            })
+            .unwrap_or_else(|| "none".to_string()),
     );
     timeout(Duration::from_secs(2), handle.shutdown())
         .await
@@ -426,13 +449,361 @@ async fn issue44cc3af_direct_all_tried_transport_failure_waits_for_recovered_pee
 }
 
 #[tokio::test]
-async fn issue44cc3af_relay_hard_attempt_cap_waits_without_sending_or_breaking_early() {
+async fn issue44cc3af_relay_all_tried_transport_failure_with_held_sibling_recovers() {
     assert_all_tried_transport_failure_recovers(false, true).await;
 }
 
 #[tokio::test]
-async fn issue44cc3af_direct_hard_attempt_cap_waits_without_sending_or_breaking_early() {
+async fn issue44cc3af_direct_all_tried_transport_failure_with_held_sibling_recovers() {
     assert_all_tried_transport_failure_recovers(true, true).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_untried_tier_attempt_relay_sends_b_before_deadline() {
+    assert_untried_tier_attempt_sends_b(false, false).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_untried_tier_attempt_direct_sends_b_before_deadline() {
+    assert_untried_tier_attempt_sends_b(true, false).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_untried_tier_attempt_direct_refill_uses_visible_provider() {
+    assert_untried_tier_attempt_sends_b(true, true).await;
+}
+
+async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    if refill {
+        routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(1));
+    }
+    let _home = TestHomeGuard::new("44cc3af-untried-tier-attempt");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+
+    // Tier A is tried first. It receives one real business request and then
+    // answers a controlled HTTP 503 with a unique provider-error sentinel.
+    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let first_url = format!("http://{}/v1", first.local_addr().unwrap());
+    let a_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (a_tx, mut a_rx) = mpsc::unbounded_channel::<()>();
+    let a_app = Router::new().fallback_service(post({
+        let a_calls = a_calls.clone();
+        move |axum::Json(body): axum::Json<Value>| {
+            if body.to_string().contains("untried tier attempt original request") {
+                a_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = a_tx.send(());
+            }
+            async move {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "untried-tier-a-503-sentinel",
+                )
+                    .into_response()
+            }
+        }
+    }));
+
+    // Tier B is the untried second/default tier. It must receive the real
+    // business request and complete with a unique, identifiable body.
+    let second = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_url = format!("http://{}/v1", second.local_addr().unwrap());
+    let b_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (b_tx, mut b_rx) = mpsc::unbounded_channel::<()>();
+    let b_app = Router::new().fallback_service(post({
+        let b_calls = b_calls.clone();
+        move |axum::Json(body): axum::Json<Value>| {
+            if body.to_string().contains("untried tier attempt original request") {
+                b_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = b_tx.send(());
+            }
+            async move {
+                if direct {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            r#"{"id":"untried-tier-b","object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"untried tier successor completed"}]}]}"#,
+                        ))
+                        .unwrap()
+                } else {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            r#"{"id":"untried-tier-b","object":"chat.completion","model":"wire-test","choices":[{"index":0,"message":{"role":"assistant","content":"untried tier successor completed"},"finish_reason":"stop"}]}"#,
+                        ))
+                        .unwrap()
+                }
+            }
+        }
+    }));
+    let a_task = tokio::spawn(async move { axum::serve(first, a_app).await.unwrap() });
+    let b_task = tokio::spawn(async move { axum::serve(second, b_app).await.unwrap() });
+
+    let mode = if direct {
+        V3EntryProtocolExecutionMode::Direct
+    } else {
+        V3EntryProtocolExecutionMode::Relay
+    };
+    let mut manifest = concurrency_switch_manifest_with_mode(&first_url, &second_url, mode);
+    if direct {
+        use_native_direct_responses(&mut manifest);
+    } else {
+        for provider in manifest.providers.values_mut() {
+            provider.provider_type = "openai_chat".into();
+            provider.responses = None;
+            for interface in provider.interfaces.values_mut() {
+                interface.provider_type = "openai_chat".into();
+                interface.responses = None;
+            }
+        }
+    }
+    for server in manifest.servers.values_mut() {
+        let attempt_store = &mut server.execution.as_mut().unwrap().attempt_store;
+        attempt_store.residence_timeout_ms = 4000;
+    }
+
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let began = tokio::time::Instant::now();
+    let request = tokio::spawn({
+        let client = client.clone();
+        let endpoint = format!("{base}/v1/responses");
+        async move {
+            client
+                .post(endpoint)
+                .json(&json!({
+                    "model": "client-test",
+                    "input": "untried tier attempt original request",
+                    "stream": false
+                }))
+                .send()
+                .await?
+                .text()
+                .await
+        }
+    });
+
+    // A must be the first selected identity and receive the real business body.
+    timeout(Duration::from_secs(2), a_rx.recv())
+        .await
+        .expect("tier A must receive the real business request first")
+        .expect("tier A channel must stay open");
+
+    // B is untried and healthy, so A's failure must not block its
+    // first real send. It has to arrive before the original residence deadline.
+    timeout(Duration::from_secs(2), b_rx.recv())
+        .await
+        .expect("untried tier B must receive the business request before the residence deadline")
+        .expect("tier B channel must stay open");
+
+    let result = timeout(Duration::from_secs(5), request)
+        .await
+        .expect("client must complete with B's business result");
+    handle.shutdown().await;
+    a_task.abort();
+    b_task.abort();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    let body = result
+        .expect("client request task must not panic")
+        .unwrap_or_else(|error| panic!(
+            "client transport must stay intact; A wire calls={}, B wire calls={}: {error}",
+            a_calls.load(std::sync::atomic::Ordering::SeqCst),
+            b_calls.load(std::sync::atomic::Ordering::SeqCst),
+        ));
+    assert!(
+        body.contains("untried tier successor completed"),
+        "client must receive B's unique business text: {body}"
+    );
+    assert!(
+        !body.contains("untried-tier-a-503-sentinel"),
+        "client must not receive A's provider error sentinel: {body}"
+    );
+    assert!(
+        !body.contains("\"error\""),
+        "client must not receive a proxy error payload: {body}"
+    );
+    assert_eq!(
+        a_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "tier A must receive exactly one business send and no same-identity retry"
+    );
+    assert_eq!(
+        b_calls.load(std::sync::atomic::Ordering::SeqCst),
+        if refill { 2 } else { 1 },
+        "tier B must receive the successor and only the configured single refill"
+    );
+    assert!(
+        began.elapsed() < Duration::from_millis(3800),
+        "B must complete before the original residence deadline"
+    );
+}
+
+#[tokio::test]
+async fn issue44cc3af_untried_tier_attempt_anthropic_relay_sends_b_before_deadline() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("44cc3af-untried-tier-attempt-anthropic");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+
+    // Tier A receives one real Anthropic business request and returns a
+    // controlled HTTP error. Its sentinel must never reach the client.
+    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let first_url = format!("http://{}/v1", first.local_addr().unwrap());
+    let a_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (a_tx, mut a_rx) = mpsc::unbounded_channel::<Value>();
+    let a_app = Router::new().fallback_service(post({
+        let a_calls = a_calls.clone();
+        move |axum::Json(body): axum::Json<Value>| {
+            if body.to_string().contains("anthropic untried tier original request") {
+                a_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = a_tx.send(body);
+            }
+            async move {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "untried-tier-a-503-sentinel",
+                )
+                    .into_response()
+            }
+        }
+    }));
+
+    // Tier B is the untried healthy successor. It must receive the same
+    // Anthropic business request and return a complete client result.
+    let second = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let second_url = format!("http://{}/v1", second.local_addr().unwrap());
+    let b_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let (b_tx, mut b_rx) = mpsc::unbounded_channel::<Value>();
+    let b_app = Router::new().fallback_service(post({
+        let b_calls = b_calls.clone();
+        move |axum::Json(body): axum::Json<Value>| {
+            if body.to_string().contains("anthropic untried tier original request") {
+                b_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = b_tx.send(body);
+            }
+            async move {
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"id":"msg-untried-tier-b","type":"message","role":"assistant","model":"wire-test","content":[{"type":"text","text":"untried anthropic tier successor completed"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#,
+                    ))
+                    .unwrap()
+            }
+        }
+    }));
+    let a_task = tokio::spawn(async move { axum::serve(first, a_app).await.unwrap() });
+    let b_task = tokio::spawn(async move { axum::serve(second, b_app).await.unwrap() });
+
+    // Keep the existing ordered fixture and force the Anthropic Relay entry.
+    let mut manifest = concurrency_switch_manifest_with_mode(
+        &first_url,
+        &second_url,
+        V3EntryProtocolExecutionMode::Relay,
+    );
+    for server in manifest.servers.values_mut() {
+        server.endpoints = vec!["anthropic".to_string()];
+        let attempt_store = &mut server.execution.as_mut().unwrap().attempt_store;
+        attempt_store.residence_timeout_ms = 4000;
+    }
+    for provider in manifest.providers.values_mut() {
+        provider.provider_type = "anthropic".into();
+        provider.responses = None;
+        for interface in provider.interfaces.values_mut() {
+            interface.provider_type = "anthropic".into();
+            interface.responses = None;
+        }
+    }
+
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let began = tokio::time::Instant::now();
+    let request = tokio::spawn({
+        let client = client.clone();
+        let endpoint = format!("{base}/v1/messages");
+        async move {
+            client
+                .post(endpoint)
+                .json(&json!({
+                    "model": "client-test",
+                    "max_tokens": 32,
+                    "messages": [{"role": "user", "content": "anthropic untried tier original request"}],
+                    "stream": false
+                }))
+                .send()
+                .await?
+                .text()
+                .await
+        }
+    });
+
+    let a_body = timeout(Duration::from_secs(2), a_rx.recv())
+        .await
+        .expect("Anthropic tier A must receive the real business request first")
+        .expect("Anthropic tier A channel must stay open");
+    assert!(
+        a_body
+            .to_string()
+            .contains("anthropic untried tier original request"),
+        "tier A must receive the untried-tier business payload: {a_body}"
+    );
+
+    let b_body = timeout(Duration::from_secs(2), b_rx.recv())
+        .await
+        .expect("untried Anthropic tier B must receive the business request before the deadline")
+        .expect("Anthropic tier B channel must stay open");
+    assert!(
+        b_body
+            .to_string()
+            .contains("anthropic untried tier original request"),
+        "tier B must receive the untried-tier business payload: {b_body}"
+    );
+
+    let result = timeout(Duration::from_secs(5), request)
+        .await
+        .expect("client must complete with Anthropic tier B's business result");
+    handle.shutdown().await;
+    a_task.abort();
+    b_task.abort();
+    std::env::remove_var("V3_P6_TEST_KEY");
+
+    let body = result
+        .expect("client request task must not panic")
+        .expect("client transport must stay intact");
+    let client_body: Value = serde_json::from_str(&body)
+        .expect("Anthropic success response must be valid JSON");
+    assert_eq!(
+        client_body["content"][0]["text"],
+        "untried anthropic tier successor completed",
+        "client must receive tier B's unique business text: {body}"
+    );
+    assert_eq!(client_body["stop_reason"], "end_turn", "{body}");
+    assert!(
+        !body.contains("untried-tier-a-503-sentinel"),
+        "client must not receive tier A's provider error sentinel: {body}"
+    );
+    assert!(
+        !body.contains("\"error\""),
+        "client must not receive a proxy error payload: {body}"
+    );
+    assert_eq!(
+        a_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "tier A must receive exactly one business send and no same-identity retry"
+    );
+    assert_eq!(
+        b_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "tier B must receive exactly one business successor with fixture refill disabled"
+    );
+    assert!(
+        began.elapsed() < Duration::from_millis(3800),
+        "tier B must complete before the original residence deadline"
+    );
 }
 
 async fn closed_transport_peer(
@@ -533,7 +904,7 @@ async fn closed_transport_peer(
     (url, task, rx)
 }
 
-async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: bool) {
+async fn assert_all_tried_transport_failure_recovers(direct: bool, held_sibling: bool) {
     let _guard = TEST_LOCK.lock().await;
     let _home = TestHomeGuard::new("44cc3af-all-tried-transport");
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
@@ -582,18 +953,10 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
             .unwrap()
             .attempt_store
             .residence_timeout_ms = 4000;
-        if hard_cap {
-            server
-                .execution
-                .as_mut()
-                .unwrap()
-                .attempt_store
-                .request_max_attempts = 2;
-        }
     }
     let first_id = format!("concurrency_first_{}", manifest.servers["a"].port);
     let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
-    if hard_cap {
+    if held_sibling {
         manifest
             .providers
             .get_mut(&first_id)
@@ -607,7 +970,7 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::new();
     let held_success =
-        if hard_cap {
+        if held_sibling {
             let client = client.clone();
             let base = base.clone();
             let task =
@@ -625,7 +988,6 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
         } else {
             None
         };
-    let began = tokio::time::Instant::now();
     let mut request = tokio::spawn({
         let client = client.clone();
         let base = base.clone();
@@ -655,7 +1017,35 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
         .2
         .to_string()
         .contains("all tried transport original request"));
-    let early = timeout(Duration::from_millis(150), &mut request).await;
+    let mut a_original_business: usize = if !first_wire.0
+        && first_wire
+            .2
+            .to_string()
+            .contains("all tried transport original request")
+    {
+        1
+    } else {
+        0
+    };
+    let b_original_business: usize = if !second_wire.0
+        && second_wire
+            .2
+            .to_string()
+            .contains("all tried transport original request")
+    {
+        1
+    } else {
+        0
+    };
+    assert_eq!(
+        a_original_business, 1,
+        "A must receive the first original-O business send"
+    );
+    assert_eq!(
+        b_original_business, 1,
+        "B must receive the second original-O business send"
+    );
+    let mut early = timeout(Duration::from_millis(150), &mut request).await;
     let ended_early = early.is_ok();
     let entries = pool_entries_for_transport_case(&client, &base).await;
     assert!(
@@ -669,6 +1059,7 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
         !entries.iter().any(|e| e["provider_id"] == first_id),
         "the earlier failed identity must remain in pre-cool observation"
     );
+    let mut spillover: Vec<(bool, String, Value)> = Vec::new();
     if let Some(held_success) = held_success {
         // Completion of an already running business request establishes actual
         // recovery before starting independent consumers on the same key.
@@ -678,6 +1069,21 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
             .unwrap()
             .unwrap()
             .contains("all tried peer recovered"));
+        // Original O reselects A after recovery. Let it finish before the
+        // independent wave so the two requests exercise the two configured
+        // upstream slots without borrowing a third slot from pending O.
+        let recovered_original = timeout(Duration::from_secs(5), &mut request)
+            .await
+            .expect("original O must complete after recovered A")
+            .expect("original O client transport must stay intact")
+            .unwrap();
+        assert!(
+            recovered_original.contains("all tried peer recovered"),
+            "{recovered_original}"
+        );
+        assert!(!recovered_original.contains("\"error\""), "{recovered_original}");
+        early = Ok(Ok(Ok(recovered_original)));
+
         let mut wave = Vec::new();
         for index in 0..2 {
             let client = client.clone();
@@ -696,10 +1102,14 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
         while arrivals < 2 && wave_started.elapsed() < Duration::from_millis(700) {
             let remaining = Duration::from_millis(700).saturating_sub(wave_started.elapsed());
             match timeout(remaining, first_rx.recv()).await {
-                Ok(Some((false, _, body))) if body.to_string().contains("independence-wave") => {
-                    arrivals += 1
+                Ok(Some(item)) => {
+                    let (probe, _, ref body) = item;
+                    if !probe && body.to_string().contains("independence-wave") {
+                        arrivals += 1;
+                    } else {
+                        spillover.push(item);
+                    }
                 }
-                Ok(Some((true, _, _))) => {}
                 _ => break,
             }
         }
@@ -718,71 +1128,80 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, hard_cap: boo
         }
         assert_eq!(arrivals, 2,
             "the waiting request must release every business lease: both same-key configured slots must remain concurrently usable");
-        assert!(
-            !request.is_finished(),
-            "only the exhausted request remains pending"
-        );
     }
     let outcome = match early {
         Ok(result) => Some(result),
         Err(_) => timeout(
-            Duration::from_secs(if hard_cap { 5 } else { 3 }),
+            Duration::from_secs(if held_sibling { 5 } else { 3 }),
             &mut request,
         )
         .await
         .ok(),
     };
     request.abort();
-    handle.shutdown().await;
-    first_task.abort();
-    second_task.abort();
     assert!(
         !ended_early,
         "all tried transport failures must wait for captured-pool recovery: {outcome:?}"
     );
-    if hard_cap {
-        assert!(began.elapsed() >= Duration::from_millis(3800),
-            "the configured cap forbids more sends but must not end transport before residence expiry");
-        assert!(
-            outcome
-                .expect("deadline must finish this request")
-                .unwrap()
-                .is_err(),
-            "exhausted configured budget cannot fabricate success"
-        );
-        while let Ok((probe, _, _)) = first_rx.try_recv() {
-            assert!(probe, "hard cap must forbid recovered-peer business sends");
-        }
-        assert!(
-            second_rx.try_recv().is_err(),
-            "last candidate remains protected"
-        );
-        return;
-    }
     let body = outcome
         .expect("recovered peer must complete original request")
         .unwrap()
         .unwrap();
     assert!(body.contains("all tried peer recovered"), "{body}");
     assert!(!body.contains("\"error\""), "{body}");
-    let mut recovered_probe = false;
-    let mut recovered_business = false;
-    while let Ok((probe, path, body)) = first_rx.try_recv() {
-        assert_eq!(path, expected_path);
-        recovered_probe |= probe;
-        recovered_business |= !probe
-            && body
-                .to_string()
-                .contains("all tried transport original request");
+    handle.shutdown().await;
+    first_task.abort();
+    second_task.abort();
+    if held_sibling {
+        let mut post_ready: Vec<(bool, String, Value)> = Vec::new();
+        post_ready.append(&mut spillover);
+        while let Ok(item) = first_rx.try_recv() {
+            post_ready.push(item);
+        }
+        let post_a_original = post_ready
+            .iter()
+            .filter(|item| {
+                !item.0
+                    && item.1.as_str() == expected_path
+                    && item
+                        .2
+                        .to_string()
+                        .contains("all tried transport original request")
+            })
+            .count();
+        a_original_business += post_a_original;
+        assert_eq!(
+            a_original_business, 2,
+            "A's cumulative original-O sends must not reset after reselect"
+        );
+        assert_eq!(
+            b_original_business, 1,
+            "B must receive exactly one original-O send and remain excluded"
+        );
+        assert!(
+            second_rx.try_recv().is_err(),
+            "last failed candidate must not be retried"
+        );
+    } else {
+        let mut recovered_probe = false;
+        let mut recovered_business = false;
+        while let Ok((probe, path, body)) = first_rx.try_recv() {
+            assert_eq!(path, expected_path);
+            recovered_probe |= probe;
+            recovered_business |= !probe
+                && body
+                    .to_string()
+                    .contains("all tried transport original request");
+        }
+        assert!(
+            recovered_probe && recovered_business,
+            "matching probe then original business must reach recovered peer"
+        );
+        assert!(
+            second_rx.try_recv().is_err(),
+            "last failed candidate must not be retried"
+        );
     }
-    assert!(
-        recovered_probe && recovered_business,
-        "matching probe then original business must reach recovered peer"
-    );
-    assert!(
-        second_rx.try_recv().is_err(),
-        "last failed candidate must not be retried"
-    );
 }
 
 async fn pool_entries_for_transport_case(client: &reqwest::Client, base: &str) -> Vec<Value> {
@@ -1506,23 +1925,9 @@ async fn assert_identity_only_rate_limit(direct: bool) {
     let first_provider_id = format!("identity_first_{}", manifest.servers["a"].port);
     let second_provider_id = format!("identity_second_{}", manifest.servers["a"].port);
     let otherkey_provider_id = format!("identity_otherkey_{}", manifest.servers["a"].port);
-    let tested_capacity_key = format!("{first_provider_id}:key");
-    let initial_capacity = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared()
-        .snapshot(&tested_capacity_key);
     if direct {
         use_native_direct_responses(&mut manifest);
     }
-    let sampled_scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: manifest.providers
-                [&format!("identity_first_{}", manifest.servers["a"].port)]
-                .interfaces
-                .keys()
-                .next()
-                .unwrap()
-                .clone(),
-            model_id: "test".into(),
-        };
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let spawn = |model: &str, input: &str| {
@@ -1547,16 +1952,6 @@ async fn assert_identity_only_rate_limit(direct: bool) {
     let started = tokio::time::Instant::now();
     let first_dispatch = timeout(Duration::from_secs(2), healthy_rx.recv()).await;
     let first_delay = started.elapsed();
-    let capacity_before_wave = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared()
-        .snapshot(&tested_capacity_key);
-    let sampled = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared()
-        .snapshot_for_scope(&tested_capacity_key, Some(&sampled_scope)).unwrap();
-    assert_eq!(
-        sampled.rate_limit_samples, 1,
-        "real business429 must retain dynamic sampling"
-    );
-    assert_eq!(sampled.budget, 1);
-    assert_eq!(sampled.hard_max_in_flight, 8);
     // Hold other-model responses so success cannot hide a lost capacity slot.
     let model_wave: Vec<_> = (0..8)
         .map(|i| {
@@ -1577,8 +1972,6 @@ async fn assert_identity_only_rate_limit(direct: bool) {
             model_capacity += 1;
         }
     }
-    let capacity_before_release = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared()
-        .snapshot(&tested_capacity_key);
     model_release.add_permits(8);
     let mut capacity_results = Vec::new();
     for mut task in model_wave {
@@ -1588,7 +1981,7 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         }
     }
     if model_capacity != 8 {
-        eprintln!("identity capacity evidence: key={tested_capacity_key}, direct={direct}, initial={initial_capacity:?}, before_wave={capacity_before_wave:?}, before_release={capacity_before_release:?}, completed={}, failed_identity_calls={}, recovery_dispatched={}",
+        eprintln!("identity capacity evidence: direct={direct}, completed={}, failed_identity_calls={}, recovery_dispatched={}",
             capacity_results.len(), failed_calls.load(std::sync::atomic::Ordering::SeqCst),
             recovery_rx.try_recv().is_ok());
         first.abort();
@@ -1690,11 +2083,8 @@ async fn assert_identity_only_rate_limit(direct: bool) {
             _ => task.abort(),
         }
     }
-    // Matching success removes A's retry gate immediately and restores one
-    // learned budget unit (1 -> 2). Hold those responses so later successes
-    // cannot hide the exact learned limit. The other two requests must use B.
-    let recovered_budget = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared()
-        .snapshot_for_scope(&tested_capacity_key, Some(&sampled_scope)).unwrap().budget;
+    // Matching success removes A's retry gate immediately. Hold those
+    // responses so later successes cannot hide the restored parallelism.
     let restored_wave: Vec<_> = (0..4)
         .map(|i| spawn("client-test", &format!("restored-{i}")))
         .collect();
@@ -1760,10 +2150,6 @@ async fn assert_identity_only_rate_limit(direct: bool) {
     assert_eq!(
         model_capacity, 8,
         "429 must preserve every configured slot of another model on the same key"
-    );
-    assert_eq!(
-        recovered_budget, 2,
-        "matching business success must restore one unit of the learned dynamic budget"
     );
     assert_eq!(restored, 2, "both learned A slots must be usable immediately, without an old retry gate or oversubscription");
     assert_eq!(
@@ -2245,23 +2631,22 @@ async fn assert_429_with_cooled_peer(direct: bool) {
     let second = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let first_url = format!("http://{}/v1", first.local_addr().unwrap());
     let second_url = format!("http://{}/v1", second.local_addr().unwrap());
-    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let a_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (first_tx, mut first_rx) = mpsc::unbounded_channel();
     let first_app = Router::new().fallback_service(post({
-        let ready = ready.clone();
         let a_calls = a_calls.clone();
         move || {
-            let ready = ready.clone();
             a_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let _ = first_tx.send(());
             async move {
-                if !ready.load(std::sync::atomic::Ordering::SeqCst) {
-                    return (StatusCode::TOO_MANY_REQUESTS, axum::Json(json!({"status":429,"title":"Too Many Requests"}))).into_response();
-                }
-                let event = json!({"type":"response.completed","response":{"id":"rate-limit-recovered","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"rate limited candidate recovered after peer probe"}]}]}});
-                Response::builder().header("content-type","text/event-stream")
-                    .body(Body::from(format!("event: response.completed\ndata: {event}\n\n"))).unwrap()
+                // The final eligible identity answered 429 once. Per the active
+                // last-provider policy it stays excluded for this request: no
+                // same-identity business retry and no new probe for it.
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    axum::Json(json!({"status":429,"title":"Too Many Requests"})),
+                )
+                    .into_response()
             }
         }
     }));
@@ -2269,14 +2654,20 @@ async fn assert_429_with_cooled_peer(direct: bool) {
     let second_app = Router::new().fallback_service(post({
         let b_business = b_business.clone();
         move |axum::Json(body): axum::Json<Value>| {
-            if body.to_string().contains("wait429 while peercooled") {
+            let text = body.to_string();
+            if text.contains("wait429 while peercooled") {
                 b_business.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             async {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "cooled peer remains unavailable",
-                )
+                // A previously failed, health-cooled identity recovers through
+                // its own real probe. Once its probe returns 2xx it is eligible
+                // again and the pending request reselects it to complete.
+                let event = json!({"type":"response.completed","response":{"id":"cooled-peer-recovered","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"rate limited candidate recovered after peer probe"}]}]}});
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "text/event-stream")
+                    .body(Body::from(format!("event: response.completed\ndata: {event}\n\n")))
+                    .unwrap()
             }
         }
     }));
@@ -2313,8 +2704,6 @@ async fn assert_429_with_cooled_peer(direct: bool) {
         .await
         .unwrap()
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
-    ready.store(true, std::sync::atomic::Ordering::SeqCst);
     let result = timeout(Duration::from_secs(5), &mut request).await;
     if result.is_err() {
         request.abort();
@@ -2331,8 +2720,16 @@ async fn assert_429_with_cooled_peer(direct: bool) {
         &body,
         "rate limited candidate recovered after peer probe",
     );
-    assert!(a_calls.load(std::sync::atomic::Ordering::SeqCst) >= 2);
-    assert_eq!(b_business.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(
+        a_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the final 429 identity must receive exactly one business send and no new probe"
+    );
+    assert_eq!(
+        b_business.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the recovered cooled peer must complete the request exactly once"
+    );
 }
 
 async fn assert_initial_all_cooled_active_probe(direct: bool, long_wait: bool) {
@@ -2492,6 +2889,20 @@ enum LateRateLimitSession {
     Cancel,
 }
 
+async fn read_blackbox_sse_outcome(response: reqwest::Response) -> (StatusCode, String, bool) {
+    let status = response.status();
+    let mut response = response;
+    let mut bytes = Vec::new();
+    let broken = loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => bytes.extend(chunk),
+            Ok(None) => break false,
+            Err(_) => break true,
+        }
+    };
+    (status, String::from_utf8_lossy(&bytes).to_string(), broken)
+}
+
 async fn assert_rate_limit_wait(
     direct: bool,
     cooled: bool,
@@ -2561,6 +2972,21 @@ async fn assert_rate_limit_wait(
     for server in manifest.servers.values_mut() {
         server.http_sse_keepalive_ms = 50;
     }
+    if !cooled {
+        // A final 429 identity stays excluded for the whole request, so the
+        // request waits to its original residence deadline before the transport
+        // is closed without a client error payload. Shorten the deadline so the
+        // deadline-fire path finishes in-test instead of the default ten
+        // minutes.
+        for server in manifest.servers.values_mut() {
+            server
+                .execution
+                .as_mut()
+                .unwrap()
+                .attempt_store
+                .residence_timeout_ms = 600;
+        }
+    }
     if parallel_success || waiter_count > 1 || late_join {
         for provider in manifest.providers.values_mut() {
             provider.concurrency.as_mut().unwrap().max_in_flight = waiter_count.max(2) as u32;
@@ -2621,7 +3047,7 @@ async fn assert_rate_limit_wait(
                     .send()
                     .await
                     .unwrap();
-                (response.status(), response.text().await.unwrap())
+                read_blackbox_sse_outcome(response).await
             })
         })
         .collect();
@@ -2642,18 +3068,20 @@ async fn assert_rate_limit_wait(
                 .send()
                 .await
                 .unwrap();
-            (response.status(), response.text().await.unwrap())
+            read_blackbox_sse_outcome(response).await
         }));
     }
     tokio::time::sleep(Duration::from_millis(250)).await;
     let closed_early = requests.iter().any(|request| request.is_finished());
     let early_calls = calls.load(std::sync::atomic::Ordering::SeqCst);
     let early_trace = call_trace.lock().unwrap().clone();
+    let mut late_calls_after_cancel = None;
     if cancel_late {
         let late = requests.pop().unwrap();
         late.abort();
         let _ = late.await;
         tokio::time::sleep(Duration::from_millis(100)).await;
+        late_calls_after_cancel = Some(late_calls.load(std::sync::atomic::Ordering::SeqCst));
     }
     ready.store(true, std::sync::atomic::Ordering::SeqCst);
     release_healthy.notify_one();
@@ -2695,29 +3123,58 @@ async fn assert_rate_limit_wait(
     };
     assert!(early_calls <= max_early_calls,
         "rate-limit wait must not hammer upstream: {early_calls}, fixture trace (elapsed, probe)={early_trace:?}");
-    for result in results {
-        let (_, body) = result
-            .expect("rate-limit recovery deadline")
-            .expect("intact client transport");
-        assert_responses_sse_delivered_business_text(&body, "recovered after wait");
-        if cooled {
+    if cooled {
+        for result in results {
+            let (_, body, _broken) = result
+                .expect("rate-limit recovery deadline")
+                .expect("intact client transport");
+            assert_responses_sse_delivered_business_text(&body, "recovered after wait");
             assert!(
                 body.contains(": keepalive"),
                 "cooled protocol planning must retain transport keepalives: {body}"
             );
         }
-    }
-    if !cooled {
+    } else {
+        // The final eligible 429 identity is excluded for the whole request: it
+        // receives exactly one business attempt, then the request waits to its
+        // original residence deadline and the transport is closed without any
+        // client error payload or fabricated completion.
+        for result in results {
+            let (_status, body, broken) = result
+                .expect("rate-limit wait must end at the residence deadline, not hang")
+                .expect("intact client transport");
+            assert!(
+                broken,
+                "deadline termination must abort the client transport, not complete it: {body:?}"
+            );
+            assert!(
+                !body.contains("error")
+                    && !body.contains("response.completed")
+                    && !body.contains("recovered after wait"),
+                "the excluded final 429 identity must not be retried and no client error/completion may appear: {body}"
+            );
+        }
+        let main_attempts = calls
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .saturating_sub(late_calls.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(
+            main_attempts, waiter_count,
+            "each waiting request must send exactly one business attempt to the excluded identity; trace={early_trace:?}"
+        );
+        assert!(
+            late_calls.load(std::sync::atomic::Ordering::SeqCst) <= usize::from(late_join),
+            "a late session may send at most one business attempt"
+        );
         assert!(
             health["entries"].as_array().unwrap().is_empty(),
             "429 must not mark healthy providers cooled: {health}"
         );
     }
-    if cancel_late {
+    if let Some(snapshot) = late_calls_after_cancel {
         assert_eq!(
             late_calls.load(std::sync::atomic::Ordering::SeqCst),
-            0,
-            "cancelled fresh-session wait must never send after recovery"
+            snapshot,
+            "cancelled wait must never send again after cancellation"
         );
     }
 }
@@ -2889,7 +3346,7 @@ async fn assert_capacity_wait(mode: &str) {
     }
     let mut admitted_after_release = true;
     if !prematurely_closed && recover {
-        admitted_after_release = timeout(
+        let admitted_capture = timeout(
             if long_recovery {
                 Duration::from_millis(600)
             } else {
@@ -2898,7 +3355,9 @@ async fn assert_capacity_wait(mode: &str) {
             first_captures.recv(),
         )
         .await
-        .is_ok_and(|capture| capture.is_some());
+        .ok()
+        .flatten();
+        admitted_after_release = admitted_capture.is_some();
         first_release.add_permits(if cancel_owners { 3 } else { 1 });
         if cancel_owners {
             second_release.add_permits(3);
@@ -3384,20 +3843,12 @@ endpoints = ["responses"]
 {providers}
 [route_groups.default.pools.alias_a]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, models = ["client-a"] }}
+match = {{ precedence = 10, required_capabilities = ["thinking"] }}
 targets = [{{ kind = "provider_model", provider = "{a}", model = "test", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "{c}", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.alias_b]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, models = ["client-b"] }}
+match = {{ precedence = 10, required_capabilities = ["tools"] }}
 targets = [{{ kind = "provider_model", provider = "{b}", model = "test", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "{d}", model = "test", key = "key", priority = 1 }}]
-[route_groups.default.pools.pinned_a]
-selection = {{ strategy = "priority" }}
-match = {{ precedence = 30, models = ["{a}.test"] }}
-targets = [{{ kind = "provider_model", provider = "{a}", model = "test", key = "key", priority = 1 }}]
-[route_groups.default.pools.pinned_b]
-selection = {{ strategy = "priority" }}
-match = {{ precedence = 30, models = ["{b}.test"] }}
-targets = [{{ kind = "provider_model", provider = "{b}", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "{c}", model = "test", key = "key", priority = 1 }}]
@@ -3468,11 +3919,51 @@ fn spawn_independence_request(
     let model = model.to_string();
     let input = input.to_string();
     tokio::spawn(async move {
+        let request = if model == "client-b" {
+            let arguments = json!({"value": input.as_str()}).to_string();
+            json!({
+                "model": model,
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": input.as_str()
+                    },
+                    {
+                        "type": "function_call",
+                        "name": "independence_fixture_echo",
+                        "call_id": "independence-b-route-call",
+                        "arguments": arguments
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "independence-b-route-call",
+                        "output": input.as_str()
+                    }
+                ],
+                "tools": [{
+                    "type": "function",
+                    "name": "independence_fixture_echo",
+                    "description": "Echo a fixture value.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "value": {"type": "string"}
+                        },
+                        "required": ["value"],
+                        "additionalProperties": false
+                    }
+                }],
+                "stream": false
+            })
+        } else {
+            json!({"model": model, "input": input, "stream": false})
+        };
         let response = reqwest::Client::new()
             .post(endpoint)
             .header("session-id", REQUEST_INDEPENDENCE_SESSION)
             .header("thread-id", REQUEST_INDEPENDENCE_SESSION)
-            .json(&json!({"model": model, "input": input, "stream": false}))
+            .json(&request)
             .send()
             .await
             .unwrap();
@@ -3571,6 +4062,74 @@ async fn request_independence_same_session_direct() {
 }
 
 #[tokio::test]
+async fn invisible_pool_uses_default_while_probe_is_held_direct_public() {
+    assert_invisible_pool_uses_default_while_probe_is_held(true).await;
+}
+
+#[tokio::test]
+async fn invisible_pool_uses_default_while_probe_is_held_relay_public() {
+    assert_invisible_pool_uses_default_while_probe_is_held(false).await;
+}
+
+async fn assert_invisible_pool_uses_default_while_probe_is_held(direct: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("44cc3af-visible-default-held-probe");
+    std::env::set_var("V3_P6_TEST_KEY", REQUEST_INDEPENDENCE_KEY);
+    let mut peer_a = start_independence_peer(
+        IndependencePeer::A, IndependencePeerMode::FailFirstBusinessThenHoldProbes, direct,
+    ).await;
+    let mut peer_b = start_independence_peer(
+        IndependencePeer::B, IndependencePeerMode::Healthy, direct,
+    ).await;
+    let mut peer_c = start_independence_peer(
+        IndependencePeer::C, IndependencePeerMode::Healthy, direct,
+    ).await;
+    let mut routing = request_independence_manifest(
+        &peer_a.url, &peer_b.url, &peer_c.url, &peer_c.url, direct,
+    );
+    // A is the entire selected pool. C can only be reached through default.
+    routing.manifest.route_groups.get_mut("default").unwrap()
+        .pools.get_mut("alias_a").unwrap().targets.truncate(1);
+    let handle = spawn_v3_server_aggregate(routing.manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners.iter()
+        .find(|listener| listener.server_id == "a").unwrap().addr);
+    let wire_path = if direct { "/v1/responses" } else { "/v1/chat/completions" };
+
+    let first = spawn_independence_request(&base, "client-a", "default-before-held-probe");
+    recv_independence_business(&mut peer_a.business, "A real failing request", wire_path,
+        "default-before-held-probe", Duration::from_secs(3)).await;
+    recv_independence_business(&mut peer_c.business, "C default recovery", wire_path,
+        "default-before-held-probe", Duration::from_secs(3)).await;
+    let (status, body) = timeout(Duration::from_secs(3), first).await.unwrap().unwrap();
+    assert_independence_client_success(status, &body, "independence-C-business-ok");
+    recv_independence_probe(&mut peer_a.probes, "A held lifecycle probe", wire_path,
+        Duration::from_secs(6)).await;
+    assert!(peer_a.holding_probe());
+
+    let default_request = spawn_independence_request(&base, "client-a", "default-during-held-probe");
+    let sibling = spawn_independence_request(&base, "client-b", "healthy-sibling-during-held-probe");
+    recv_independence_business(&mut peer_c.business, "invisible A pool uses C default", wire_path,
+        "default-during-held-probe", Duration::from_secs(3)).await;
+    recv_independence_business(&mut peer_b.business, "healthy sibling continues", wire_path,
+        "healthy-sibling-during-held-probe", Duration::from_secs(3)).await;
+    let (status, body) = timeout(Duration::from_secs(3), default_request).await.unwrap().unwrap();
+    assert_independence_client_success(status, &body, "independence-C-business-ok");
+    let (status, body) = timeout(Duration::from_secs(3), sibling).await.unwrap().unwrap();
+    assert_independence_client_success(status, &body, "independence-B-business-recovered");
+    assert!(peer_a.holding_probe(), "business requests must not wait for or release A's probe");
+    assert_eq!(peer_a.business_calls(), 1, "cooled A must not receive another business attempt");
+    assert_eq!(peer_c.business_calls(), 2);
+    assert_eq!(peer_b.business_calls(), 1);
+    peer_a.hold_probes.add_permits(8);
+    handle.shutdown().await;
+    for peer in [peer_a, peer_b, peer_c] {
+        let _ = peer.shutdown.send(());
+        peer.task.abort();
+    }
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
 async fn request_independence_same_session_relay() {
     assert_request_independence_same_session(false).await;
 }
@@ -3592,6 +4151,85 @@ async fn assert_request_independence_same_session(direct: bool) {
     } else {
         "/v1/chat/completions"
     };
+    let assert_b_tool_history =
+        |capture: &IndependenceObservation, input: &str, label: &str| {
+            let call_id = "independence-b-route-call";
+            let expected_arguments = json!({"value": input});
+            if direct {
+                let items = capture.body["input"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{label}: provider input must be an array"));
+                let message = items
+                    .iter()
+                    .find(|item| item["type"] == "message" && item["role"] == "user")
+                    .unwrap_or_else(|| panic!("{label}: provider input must retain the user turn"));
+                assert_eq!(message["content"], input, "{label}: user marker");
+                let call = items
+                    .iter()
+                    .find(|item| item["type"] == "function_call" && item["call_id"] == call_id)
+                    .unwrap_or_else(|| {
+                        panic!("{label}: provider input must retain the function call")
+                    });
+                assert_eq!(
+                    call["name"], "independence_fixture_echo",
+                    "{label}: tool name"
+                );
+                let arguments: Value = serde_json::from_str(
+                    call["arguments"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("{label}: arguments must be JSON text")),
+                )
+                .unwrap_or_else(|error| panic!("{label}: arguments must be valid JSON: {error}"));
+                assert_eq!(arguments, expected_arguments, "{label}: arguments");
+                let result = items
+                    .iter()
+                    .find(|item| {
+                        item["type"] == "function_call_output" && item["call_id"] == call_id
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("{label}: provider input must retain the paired function result")
+                    });
+                assert_eq!(result["output"], input, "{label}: paired result");
+            } else {
+                let messages = capture.body["messages"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{label}: provider messages must be an array"));
+                let message = messages
+                    .iter()
+                    .find(|message| message["role"] == "user")
+                    .unwrap_or_else(|| panic!("{label}: provider messages must retain the user turn"));
+                assert_eq!(message["content"], input, "{label}: user marker");
+                let call = messages
+                    .iter()
+                    .filter_map(|message| message["tool_calls"].as_array())
+                    .flatten()
+                    .find(|call| call["id"] == call_id)
+                    .unwrap_or_else(|| {
+                        panic!("{label}: provider messages must retain the chat tool call")
+                    });
+                assert_eq!(call["type"], "function", "{label}: chat tool call type");
+                assert_eq!(
+                    call["function"]["name"], "independence_fixture_echo",
+                    "{label}: tool name"
+                );
+                let arguments: Value = serde_json::from_str(
+                    call["function"]["arguments"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("{label}: arguments must be JSON text")),
+                )
+                .unwrap_or_else(|error| panic!("{label}: arguments must be valid JSON: {error}"));
+                assert_eq!(arguments, expected_arguments, "{label}: arguments");
+                let result = messages
+                    .iter()
+                    .find(|message| {
+                        message["role"] == "tool" && message["tool_call_id"] == call_id
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("{label}: provider messages must retain the paired tool result")
+                    });
+                assert_eq!(result["content"], input, "{label}: paired result");
+            }
+        };
     let mut peer_a = start_independence_peer(
         IndependencePeer::A,
         IndependencePeerMode::FailFirstBusinessThenHoldProbes,
@@ -3667,7 +4305,7 @@ async fn assert_request_independence_same_session(direct: bool) {
     // fallback. B's real recovery probe answers 2xx while A's is still held.
     let b_first = spawn_independence_request(&base, "client-b", "independence-B-business");
     let label = format!("{mode} peer B first business");
-    recv_independence_business(
+    let b_first_capture = recv_independence_business(
         &mut peer_b.business,
         &label,
         wire_path,
@@ -3675,8 +4313,9 @@ async fn assert_request_independence_same_session(direct: bool) {
         Duration::from_secs(3),
     )
     .await;
+    assert_b_tool_history(&b_first_capture, "independence-B-business", &label);
     let label = format!("{mode} healthy D fallback for B");
-    recv_independence_business(
+    let d_capture = recv_independence_business(
         &mut peer_d.business,
         &label,
         wire_path,
@@ -3684,6 +4323,7 @@ async fn assert_request_independence_same_session(direct: bool) {
         Duration::from_secs(3),
     )
     .await;
+    assert_b_tool_history(&d_capture, "independence-B-business", &label);
     let (status, body) = timeout(Duration::from_secs(5), b_first)
         .await
         .expect("B's healthy fallback must finish its same-session request")

@@ -633,7 +633,7 @@ async fn rate_limited_upstream(State(state): State<Arc<RateLimitState>>) -> Resp
 }
 
 #[tokio::test]
-async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
+async fn upstream_429_keeps_the_declared_concurrency_budget() {
     use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -676,8 +676,6 @@ async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
         "the declared static maxInFlight must remain only the hard ceiling"
     );
     assert_eq!(baseline.budget, 8);
-    assert_eq!(baseline.rate_limit_samples, 0);
-    assert_eq!(baseline.smoothed_budget, 8);
 
     let transport = ReqwestResponsesTransport::default();
     let mut attempts = Vec::new();
@@ -712,28 +710,19 @@ async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
         );
     }
 
-    let scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: provider_target.interface_id.clone(),
-            model_id: provider_target.canonical_model_id.clone(),
-        };
-    let snapshot = controller
-        .snapshot_for_scope(&provider_key, Some(&scope))
-        .unwrap();
+    let snapshot = controller.snapshot(&provider_key).unwrap();
     assert_eq!(
-        snapshot.rate_limit_samples, 2,
-        "each refused attempt must contribute one 429 watermark sample"
+        snapshot.budget, 8,
+        "provider 429 must not create a rate-limit-specific budget reduction"
     );
     assert_eq!(
-        snapshot.smoothed_budget, 1,
-        "two 429s at an in-flight watermark of two must cap the budget one slot below it"
+        snapshot.hard_max_in_flight, 8,
+        "provider 429 must not reduce the declared hard maximum"
     );
     assert_eq!(
-        snapshot.budget, 1,
-        "the adaptive budget must drop to the refused watermark minus one, not step down by one"
+        snapshot.in_flight, 0,
+        "completed provider attempts must leave no business lease"
     );
-    assert!(snapshot.saturated);
-    assert!(snapshot.in_flight == 0, "both leases must be released");
 
     std::env::remove_var("V3_ADAPTIVE_429_KEY");
     shutdown_tx.send(()).unwrap();

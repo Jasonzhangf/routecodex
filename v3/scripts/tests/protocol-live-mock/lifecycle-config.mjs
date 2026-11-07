@@ -22,11 +22,6 @@ const PROVIDER_BASE_SUFFIX = {
 // The Rust owner is `deny_unknown_fields` and defaults every field, so only
 // fixture-declared keys are written through.
 const ATTEMPT_STORE_KEYS = [
-  'request_max_attempts',
-  'attempt_max_bytes',
-  'attempt_max_frames',
-  'request_max_bytes',
-  'process_max_bytes',
   'residence_timeout_ms',
 ];
 const PROVIDER_CONCURRENCY_KEYS = [

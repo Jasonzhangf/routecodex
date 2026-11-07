@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
+fn classified_global_health_keeps_429_ordinary_and_auth_terminal() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -27,7 +27,9 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
     let recoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let classified =
         classified_provider_error("V3ProviderRespInbound01Raw", "provider_http_error", 429);
-    // An early 429 is capacity backpressure, not a health exclusion.
+    // A classified 429 is an ordinary recoverable failure: the global health
+    // path commits its typed threshold on the first failure, exactly like a
+    // 503. Only the retained raw upstream evidence differs.
     recoverable_health
         .record_provider_global_health_for_classified_error(
             &scope,
@@ -40,78 +42,28 @@ fn classified_global_health_keeps_429_neutral_and_auth_terminal() {
         )
         .expect("classified 429 failure should record");
     assert!(
+        !recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000,)
+            .available
+    );
+    assert!(
         recoverable_health
             .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_000)
-            .available,
-        "early 429 must leave health routable"
+            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 10_000,)
+            .available
     );
-    // Business success resets this unresolved episode.
+    // Business success releases the ordinary cooldown on the exact identity.
     recoverable_health
         .store()
         .record_provider_key_success("first", "key1", "gpt-test", 10_001)
-        .expect("business success resets the early episode");
+        .expect("business success releases the ordinary cooldown");
     assert!(
         recoverable_health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_001)
             .available,
-        "business success preserves health availability"
-    );
-    // A new episode requires another actual 429 across the full window.
-    recoverable_health
-        .record_provider_global_health_for_classified_error(
-            &scope,
-            "first",
-            "default",
-            Some("key1"),
-            Some("gpt-test"),
-            &classified,
-            20_000,
-        )
-        .expect("second classified 429 failure should record");
-    assert!(
-        recoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_000)
-            .available,
-        "a fresh early episode must remain health-neutral"
-    );
-    assert!(
-        recoverable_health
-            .store()
-            .availability_for_session(
-                &scope,
-                "first",
-                Some("key1"),
-                Some("gpt-test"),
-                20_000 + 60_001,
-            )
-            .available,
-        "time alone cannot upgrade the episode"
-    );
-    recoverable_health
-        .record_provider_global_health_for_classified_error(
-            &scope,
-            "first",
-            "default",
-            Some("key1"),
-            Some("gpt-test"),
-            &classified,
-            140_000,
-        )
-        .expect("new actual 429 across two minutes");
-    assert!(
-        !recoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 140_000,)
-            .available
-    );
-    assert!(
-        recoverable_health
-            .store()
-            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 140_000,)
-            .available
+        "business success restores the cooled identity"
     );
 
     let unrecoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);

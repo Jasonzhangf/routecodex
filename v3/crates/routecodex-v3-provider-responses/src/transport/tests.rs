@@ -29,15 +29,9 @@ fn probe_sse_fixture(
     V3ProviderTransportAttemptKey,
 ) {
     let provider_key = "probe-sse-provider:key1";
-    let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
-    let held = controller.try_acquire(provider_key, 0).unwrap();
-    controller.observe_rate_limit(provider_key, 0).unwrap();
-    let probe = controller
-        .try_acquire(
-            provider_key,
-            crate::adaptive_concurrency::V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS,
-        )
-        .unwrap();
+    let controller = V3AdaptiveConcurrencyController::new_with_limits(1, 2).unwrap();
+    let held = controller.try_acquire(provider_key).unwrap();
+    let probe = controller.try_acquire_probe(provider_key).unwrap();
     assert!(probe.is_probe());
     controller.release(held.into_permit()).unwrap();
     let guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), probe.into_permit())
@@ -72,8 +66,9 @@ fn probe_sse_fixture(
         vec![],
         stream,
     );
+    drop(guard);
     (
-        hold_sse_lease(raw, guard, broker.clone(), Some(key.clone())),
+        wrap_sse_handoff_sequence(raw, broker.clone(), Some(key.clone())),
         controller,
         broker,
         key,
@@ -88,8 +83,6 @@ fn assert_probe_sse_accepted(controller: &V3AdaptiveConcurrencyController) {
         snapshot.budget, 2,
         "accepted SSE probe must expand adaptive budget"
     );
-    assert!(!snapshot.saturated);
-    assert_eq!(snapshot.next_probe_at_ms, None);
 }
 
 #[test]
@@ -170,15 +163,11 @@ fn dropping_request_releases_pre_acquired_admission_through_its_controller() {
 }
 
 #[test]
-fn probe_sse_headers_keep_permit_and_handoff_streaming() {
+fn probe_sse_headers_release_permit_and_handoff_streaming() {
     let (raw, controller, broker, key) = probe_sse_fixture(Box::pin(stream::pending::<
         Result<Vec<u8>, V3ProviderError>,
     >()));
-    let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
-    assert_eq!(snapshot.in_flight, 1);
-    assert!(snapshot.probe_in_flight);
-    assert!(snapshot.saturated);
-    assert_eq!(snapshot.budget, 1);
+    assert_probe_sse_accepted(&controller);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Streaming)
@@ -275,7 +264,7 @@ fn wire_parts_transport_uses_the_supplied_body_and_typed_endpoint() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() {
+async fn full_provider_budget_does_not_block_business_dispatch() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -299,24 +288,21 @@ async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() 
     )
     .unwrap();
     let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
-    let started = std::time::Instant::now();
-    let result = tokio::time::timeout(
-        Duration::from_millis(500),
-        ProviderResponsesTransport::default().send(request),
-    )
-    .await
-    .expect("full concurrency must return immediately");
-    assert!(matches!(
-        result,
-        Err(V3ProviderError::ConcurrencyBusy { .. })
-    ));
-    assert!(started.elapsed() < Duration::from_millis(500));
+    // Business dispatch must not be gated by the provider concurrency budget:
+    // with the budget occupied the request still reaches the provider
+    // transport instead of returning a local ConcurrencyBusy error or waiting
+    // for a permit.
+    let dispatch = tokio::spawn(async move {
+        ProviderResponsesTransport::default().send(request).await
+    });
+    let accepted = tokio::time::timeout(Duration::from_millis(500), listener.accept())
+        .await
+        .expect("a full provider budget must not block business dispatch");
     assert!(
-        tokio::time::timeout(Duration::from_millis(50), listener.accept())
-            .await
-            .is_err(),
-        "a full provider must not receive an upstream request"
+        accepted.is_ok(),
+        "the provider must receive the dispatched request"
     );
+    dispatch.abort();
 
     controller.release(held.into_permit()).unwrap();
 }

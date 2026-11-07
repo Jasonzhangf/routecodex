@@ -13,18 +13,14 @@ edges:
     owner_feature_id: v3.responses_session_inflight_admission
     status: anchored
 return_path:
-  success: Each parsed request independently enters Runtime and owns its response; only explicit aggregate maintenance pauses new dispatch.
-  cancellation: Body EOF, error or drop releases only this request's activity ownership; successful EOF transfers ownership to front flush.
+  success: Each parsed request independently enters Runtime and owns its response; no session or conversation mutex gates dispatch.
+  cancellation: Body EOF, error or drop closes only this request's request-local transport; front lease custody remains with restart handoff.
 canonical_docs:
-  - docs/architecture/wiki/v3-responses-session-admission.md
-  - docs/goals/v3-responses-session-admission-and-sse-keepalive-test-design.md
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/v3-verification-map.yml
 verification_gates:
-  - npm run verify:v3-responses-session-admission
-  - npm run test:v3-responses-session-admission
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_same_listener_same_session_admits_independent_requests -- --exact
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_same_listener_different_session_remains_concurrent -- --exact
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server responses_client_drop_releases_same_session_before_provider_eof -- --exact

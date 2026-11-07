@@ -475,6 +475,32 @@ async fn assert_websocket_closes_without_data(
     );
 }
 
+/// A single-candidate provider failure stays pending to the request residence
+/// deadline before its transport is terminated. Tests that assert that terminal
+/// disposition bound the deadline so the pending window fits the test.
+fn set_manifest_residence_timeout(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    residence_timeout_ms: u64,
+) {
+    for server in manifest.servers.values_mut() {
+        if let Some(execution) = server.execution.as_mut() {
+            execution.attempt_store.residence_timeout_ms = residence_timeout_ms;
+        }
+    }
+}
+
+fn set_manifest_provider_request_timeout(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    provider_id: &str,
+    request_timeout_ms: u64,
+) {
+    manifest
+        .providers
+        .get_mut(provider_id)
+        .unwrap()
+        .request_timeout_ms = request_timeout_ms;
+}
+
 async fn assert_incomplete_sse_or_no_response(response: Result<reqwest::Response, reqwest::Error>) {
     if let Ok(mut response) = response {
         assert_eq!(response.status(), StatusCode::OK);
@@ -1841,6 +1867,31 @@ struct HeldProviderState {
     fail_probes: bool,
 }
 
+#[derive(Clone)]
+struct DeadlineHeldProviderState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    release: Arc<Semaphore>,
+}
+
+async fn controlled_deadline_held_responses_upstream(
+    State(state): State<Arc<DeadlineHeldProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let _permit = Arc::clone(&state.release).acquire_owned().await.unwrap();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_deadline_released\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"released after deadline\"}]}}\n\n",
+        ))
+        .unwrap()
+}
+
 async fn controlled_held_responses_upstream(
     State(state): State<Arc<HeldProviderState>>,
     headers: HeaderMap,
@@ -2340,6 +2391,42 @@ async fn start_controlled_held_upstream() -> (
             captures: captures_tx,
             release: Arc::clone(&release),
             fail_probes: false,
+        }));
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+    (
+        format!("http://{address}/v1"),
+        captures_rx,
+        release,
+        shutdown_tx,
+    )
+}
+
+async fn start_controlled_deadline_held_upstream() -> (
+    String,
+    mpsc::UnboundedReceiver<ProviderCapture>,
+    Arc<Semaphore>,
+    oneshot::Sender<()>,
+) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app = Router::new()
+        .route(
+            "/v1/responses",
+            post(controlled_deadline_held_responses_upstream),
+        )
+        .with_state(Arc::new(DeadlineHeldProviderState {
+            captures: captures_tx,
+            release: Arc::clone(&release),
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -3357,13 +3444,9 @@ async fn responses_websocket_provider_429_is_recorded_as_provider_private_eviden
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-evidence");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let port = handle.listeners[0].addr.port();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
@@ -6320,6 +6403,135 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
+async fn assert_responses_send_await_residence_deadline_public_entry(
+    expected_execution_mode: &'static str,
+) {
+    const RESIDENCE_TIMEOUT_MS: u64 = 1_200;
+    const PROVIDER_REQUEST_TIMEOUT_MS: u64 = 10_000;
+
+    let (provider_base_url, mut captures, release, upstream_shutdown) =
+        start_controlled_deadline_held_upstream().await;
+    let mut manifest = if expected_execution_mode == "direct" {
+        p6_manifest(free_port(), free_port(), &provider_base_url)
+    } else {
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url)
+    };
+    set_manifest_residence_timeout(&mut manifest, RESIDENCE_TIMEOUT_MS);
+    set_manifest_provider_request_timeout(&mut manifest, "test", PROVIDER_REQUEST_TIMEOUT_MS);
+    std::env::set_var("V3_P6_TEST_KEY", "secret-residence-deadline");
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let client = reqwest::Client::new();
+    let started = std::time::Instant::now();
+    let response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!("http://{addr}/v1/responses"))
+            .header("accept", "text/event-stream")
+            .json(&json!({
+                "model": "client-test",
+                "input": "residence deadline held responses",
+                "stream": true
+            }))
+            .send(),
+    )
+    .await
+    .expect("the Responses client SSE head must be committed while the Provider head is held")
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut body = response.bytes_stream();
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the held Responses Provider request must arrive")
+        .expect("the controlled upstream capture channel must stay open");
+    assert_eq!(capture.body["model"], "wire-test");
+    assert_eq!(capture.body["stream"], true);
+
+    let mut received = Vec::new();
+    let mut stream_error = false;
+    let mut clean_eof = false;
+    let stream_end_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout_at(stream_end_deadline, body.next()).await {
+            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
+            Ok(Some(Err(_))) => {
+                stream_error = true;
+                break;
+            }
+            Ok(None) => {
+                clean_eof = true;
+                break;
+            }
+            Err(_) => panic!(
+                "{expected_execution_mode} Responses send-await did not obey the residence deadline before the guard"
+            ),
+        }
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        stream_error,
+        "the residence deadline must interrupt the unfinished Responses SSE transport, clean_eof={clean_eof}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(1_000) && elapsed < Duration::from_secs(5),
+        "{expected_execution_mode} Responses must use the original deadline, waited {elapsed:?}"
+    );
+    let received = String::from_utf8_lossy(&received).to_string();
+    assert!(!received.contains("data:"), "{received}");
+    assert!(!received.contains("\"error\""), "{received}");
+    assert!(!received.contains("[DONE]"), "{received}");
+    assert!(!received.contains("\"choices\""), "{received}");
+    assert!(!received.contains("response.completed"), "{received}");
+    assert!(!received.contains("response.failed"), "{received}");
+    assert!(
+        captures.try_recv().is_err(),
+        "the residence deadline must not trigger another business send"
+    );
+
+    let logs: Value = client
+        .get(format!("http://{addr}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let modes = logs["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["node_id"] == "V3Server03HttpRequestRaw" && event["event"] == "received")
+        .filter_map(|event| event["details"]["execution_mode"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modes,
+        vec![expected_execution_mode],
+        "the actual Responses request must enter {expected_execution_mode}: {logs}"
+    );
+    eprintln!(
+        "responses-residence-deadline mode={expected_execution_mode} elapsed={elapsed:?} residence_ms={RESIDENCE_TIMEOUT_MS} provider_request_ms={PROVIDER_REQUEST_TIMEOUT_MS} stream_error={stream_error} clean_eof={clean_eof} provider_captures=1"
+    );
+
+    release.add_permits(1);
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_send_await_obeys_residence_deadline_public_entry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    assert_responses_send_await_residence_deadline_public_entry("direct").await;
+}
+
+#[tokio::test]
+async fn responses_relay_send_await_obeys_residence_deadline_public_entry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    assert_responses_send_await_residence_deadline_public_entry("relay").await;
+}
+
 #[tokio::test]
 async fn responses_relay_openai_chat_reasoning_content_survives_public_entry() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -7765,137 +7977,8 @@ async fn run_matching_identity_independence(second_session: &str, second_convers
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
-#[tokio::test]
-async fn responses_same_session_waiter_obeys_maintenance_after_active_body_finishes() {
-    let _test_guard = TEST_LOCK.lock().await;
-    let _home = TestHomeGuard::new("maintenance-session-waiter");
-    // This case counts upstream attempts, so the Chat Process continuation
-    // must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (base_url, mut captures, release, shutdown) = start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-session");
-    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
-        .await
-        .unwrap();
-    let client = reqwest::Client::new();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let request = json!({"model":"client-test", "input":"held", "stream":true});
-    let first_client = client.clone();
-    let first_endpoint = endpoint.clone();
-    let first_request = request.clone();
-    let first = tokio::spawn(async move {
-        let response = first_client
-            .post(first_endpoint)
-            .header("session-id", "maintenance-session")
-            .json(&first_request)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        response.text().await.unwrap()
-    });
-    timeout(Duration::from_secs(5), captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let preparation = timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
-        .await
-        .expect("exec preparation must not wait for the held business response")
-        .unwrap();
-    let mut queued = Box::pin(async {
-        let response = client
-            .post(&endpoint)
-            .header("session-id", "maintenance-session")
-            .json(&request)
-            .send()
-            .await
-            .unwrap();
-        let status = response.status();
-        (status, response.text().await.unwrap())
-    });
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
-    release.add_permits(1);
-    let first_body = timeout(Duration::from_secs(5), first)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(first_body.matches("event: response.completed").count(), 1);
-    assert_responses_sse_delivered_business_text(&first_body, "held response released");
-    // Only explicit maintenance pauses dispatch. The first response finishing
-    // must not let a new request escape that maintenance owner.
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
-    assert!(
-        captures.try_recv().is_err(),
-        "independent request escaped maintenance"
-    );
-    drop(preparation);
-    tokio::select! {
-        result = &mut queued => panic!("provider body is held: {result:?}"),
-        captured = captures.recv() => { captured.unwrap(); }
-        _ = sleep(Duration::from_secs(5)) => panic!("cancelled maintenance did not resume session waiter"),
-    }
-    release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(5), queued).await.unwrap();
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body.matches("event: response.completed").count(), 1);
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    handle.shutdown().await;
-    shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
-    let _test_guard = TEST_LOCK.lock().await;
-    let _home = TestHomeGuard::new("maintenance-keepalive");
-    // This case counts upstream attempts, so the Chat Process continuation
-    // must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (base_url, mut captures, shutdown) = start_controlled_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-maintenance-keepalive");
-    let handle = spawn_v3_server_aggregate(p6_manifest(free_port(), free_port(), &base_url))
-        .await
-        .unwrap();
-    let mut socket = TcpStream::connect(handle.listeners[0].addr).await.unwrap();
-    let body = json!({"model":"client-test", "input":"keepalive", "stream":false}).to_string();
-    let request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
-    socket.write_all(request.as_bytes()).await.unwrap();
-    let first = timeout(
-        Duration::from_secs(5),
-        read_raw_business_response(&mut socket),
-    )
-    .await
-    .unwrap();
-    assert!(first.starts_with(b"HTTP/1.1 200"));
-    assert!(String::from_utf8(first).unwrap().contains("resp_json"));
-    captures.recv().await.unwrap();
-    let preparation = handle.prepare_exec_attempt().await.unwrap();
-    socket.write_all(request.as_bytes()).await.unwrap();
-    assert!(timeout(Duration::from_millis(100), captures.recv())
-        .await
-        .is_err());
-    drop(preparation);
-    let second = timeout(
-        Duration::from_secs(5),
-        read_raw_business_response(&mut socket),
-    )
-    .await
-    .unwrap();
-    assert!(second.starts_with(b"HTTP/1.1 200"));
-    assert!(String::from_utf8(second).unwrap().contains("resp_json"));
-    captures.recv().await.unwrap();
-    drop(socket);
-    handle.shutdown().await;
-    shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
 // Read one actual HTTP response without closing the socket. Business bodies
-// can use chunked framing because their activity permit follows a body stream.
+// can use chunked framing while the client reads the real response wire.
 async fn read_raw_business_response(socket: &mut TcpStream) -> Vec<u8> {
     async fn read_line(socket: &mut TcpStream) -> Vec<u8> {
         let mut line = Vec::new();
@@ -8910,13 +8993,9 @@ async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -8946,13 +9025,9 @@ async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_even
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_terminal_upstream(StatusCode::BAD_GATEWAY).await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-502");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -8994,13 +9069,9 @@ async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_th
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-binary-error");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -12597,19 +12668,6 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
         std::task::Poll::Ready(())
     })
     .await;
-    let mut queued = Box::pin(client
-        .post(&endpoint)
-        .json(&json!({
-            "model": "client-test", "input": "queued while draining accepted jobs", "stream": false
-        }))
-        .send());
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
-    assert!(
-        captures.try_recv().is_err(),
-        "maintenance must block provider dispatch"
-    );
     drop(sample_lock);
     let preparation = preparation.await.unwrap();
     for marker in ["accepted before cutoff", "second accepted before cutoff"] {
@@ -12630,20 +12688,7 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
             }
         }
     }
-    assert!(timeout(Duration::from_millis(100), &mut queued)
-        .await
-        .is_err());
-    assert!(
-        captures.try_recv().is_err(),
-        "prepared maintenance must retain admission"
-    );
     drop(preparation);
-    let response = timeout(Duration::from_secs(5), queued)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(response.json::<Value>().await.unwrap()["id"], "resp_json");
-    assert!(captures.recv().await.is_some());
     drop(handle.prepare_exec_attempt().await.unwrap());
     let response = client
         .post(&endpoint)
@@ -12666,7 +12711,7 @@ async fn responses_direct_exec_cutoff_drains_and_resumes_original_sample_worker(
     let failures = handle.shutdown().await;
     assert!(
         failures.is_empty(),
-        "queued requests must preserve diagnostics: {failures:?}"
+        "accepted request samples must preserve diagnostics: {failures:?}"
     );
     shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
@@ -12720,7 +12765,7 @@ async fn responses_direct_historical_sample_failure_does_not_reject_exec_prepara
 }
 
 #[tokio::test]
-async fn responses_direct_exec_sample_drain_timeout_keeps_listener_and_admission() {
+async fn responses_direct_exec_sample_drain_timeout_keeps_listener_and_sampling() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("exec-sample-timeout");
     let (base_url, mut captures, shutdown) = start_controlled_upstream().await;

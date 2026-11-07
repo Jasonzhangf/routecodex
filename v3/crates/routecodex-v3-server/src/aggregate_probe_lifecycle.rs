@@ -1,4 +1,4 @@
-//! Aggregate custody of the Runtime probe tasks and reversible maintenance.
+//! Aggregate custody of the Runtime probe tasks and reversible quiescence.
 //!
 //! One aggregate supervisor owns one recovery scheduler per business listener.
 //! Each listener's scheduler is registered against its own provider-health
@@ -41,7 +41,7 @@ impl ListenerProbeOwner {
     }
 
     /// Stop and join this port's owner. Returns an unexpected join fault so the
-    /// supervisor retains maintenance instead of resuming half-closed admission.
+    /// supervisor retains terminal custody.
     async fn stop(&mut self) -> Option<String> {
         self.probe.abort();
         let join_failure = (&mut self.probe)
@@ -98,7 +98,6 @@ async fn wait_for_terminal(receiver: &mut watch::Receiver<bool>) {
 }
 
 struct Quiesce {
-    maintenance: V3ServerMaintenanceGuard,
     joined: oneshot::Sender<Result<(), String>>,
     rollback: oneshot::Receiver<()>,
 }
@@ -197,11 +196,9 @@ impl AggregateProbeLifecycle {
                         };
                         if let Some(command) = command {
                             let _ = command.joined.send(Err(
-                                "aggregate probe owner stopped unexpectedly; maintenance retained"
-                                    .into(),
+                                "aggregate probe owner stopped unexpectedly".into(),
                             ));
                             let _ = terminal_rx.wait_for(|value| *value).await;
-                            drop(command.maintenance);
                         }
                         return;
                     }
@@ -213,19 +210,12 @@ impl AggregateProbeLifecycle {
                             eprintln!("V3 aggregate probe join failed: {error}");
                         }
                         let Some(command) = command else { return };
-                        let Quiesce {
-                            maintenance,
-                            joined,
-                            mut rollback,
-                        } = command;
+                        let Quiesce { joined, mut rollback } = command;
                         if let Some(error) = join_failure {
-                            eprintln!(
-                                "V3 aggregate probe maintenance retained after owner failure"
-                            );
+                            eprintln!("V3 aggregate probe stopped after owner failure");
                             let _ =
                                 joined.send(Err(format!("aggregate probe join failed: {error}")));
                             let _ = terminal_rx.wait_for(|value| *value).await;
-                            drop(maintenance);
                             return;
                         }
                         let _ = joined.send(Ok(()));
@@ -252,17 +242,11 @@ impl AggregateProbeLifecycle {
                             None => return,
                             Some(Ok(owners)) => owners,
                             Some(Err(error)) => {
-                                eprintln!(
-                                    "V3 aggregate probe restoration failed: {error}; maintenance retained, ordinary admission unavailable"
-                                );
+                                eprintln!("V3 aggregate probe restoration failed: {error}");
                                 let _ = terminal_rx.wait_for(|value| *value).await;
-                                drop(maintenance);
                                 return;
                             }
                         };
-                        // Runtime registration is synchronous and old ownership
-                        // joined. Only now may ordinary business admission resume.
-                        drop(maintenance);
                     }
                 }
             }
@@ -275,10 +259,7 @@ impl AggregateProbeLifecycle {
         })
     }
 
-    pub(crate) async fn quiesce(
-        &self,
-        maintenance: V3ServerMaintenanceGuard,
-    ) -> Result<ProbeQuiescenceGuard, String> {
+    pub(crate) async fn quiesce(&self) -> Result<ProbeQuiescenceGuard, String> {
         let (rollback, rollback_rx) = oneshot::channel();
         let guard = ProbeQuiescenceGuard {
             _rollback: rollback,
@@ -286,12 +267,11 @@ impl AggregateProbeLifecycle {
         let (joined, joined_rx) = oneshot::channel();
         self.commands
             .send(Quiesce {
-                maintenance,
                 joined,
                 rollback: rollback_rx,
             })
             .map_err(|_| "aggregate probe lifecycle owner unavailable".to_string())?;
-        // Guard ownership and maintenance custody precede the first stop await.
+        // Guard ownership precedes the first stop await.
         joined_rx
             .await
             .map_err(|_| "aggregate probe quiescence owner stopped".to_string())??;
@@ -436,8 +416,7 @@ mod tests {
         )
         .unwrap();
         tokio::task::yield_now().await;
-        let gate = Arc::new(V3ServerRequestActivityGate::default());
-        let result = lifecycle.quiesce(gate.begin_maintenance().await).await;
+        let result = lifecycle.quiesce().await;
         assert!(
             result.is_err(),
             "the completed owner must enter the fault branch"
