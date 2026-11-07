@@ -927,10 +927,20 @@ features:
   - Hub response semantic to client projection preserves text thinking tool_use and explicit provider errors
   - RouteCodex internal control fields fail fast instead of entering provider or client payload
   - the module registers no Hub hook and does not modify Hub skeleton Server entry Provider runtime Gemini or OpenAI Chat
+  - empty, absent, and whitespace-only assistant thinking blocks survive the public Anthropic /v1/messages round trip into the provider request with exact key presence, signature, tool identity, and paired tool result, and this holds for both the same-protocol Direct binding and the explicit Relay binding
+  black_box_regression:
+    command: node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test fd77c30_anthropic_thinking_public -- --nocapture --test-threads=1
+    test_ids:
+    - fd77c30_thinking_history_roundtrip_direct
+    - fd77c30_thinking_history_roundtrip_relay
+    - fd77c30_upstream_mock_rejects_incomplete_history
+    - fd77c30_provider_first_frame_timeout_reselects_while_preserving_history
+    - fd77c30_invalid_json_preserves_request_error
   required_gates:
   - npm run test:v3-anthropic-codec-characterization
   - npm run verify:v3-anthropic-codec-characterization
   - npm run test:v3-anthropic-codec-characterization-red-fixtures
+  - npm run test:v3-anthropic-codec-thinking-public
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt

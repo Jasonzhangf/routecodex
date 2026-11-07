@@ -965,15 +965,62 @@ fn anthropic_assistant_thinking_history_normalizes_to_ordered_responses_reasonin
 }
 
 #[test]
-fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
+fn anthropic_empty_or_absent_thinking_history_is_preserved_as_reasoning() {
+    let semantic = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[
+                {"type":"thinking","thinking":"","signature":"empty-thinking-signature"},
+                {"type":"thinking"},
+                {"type":"thinking","thinking":"   "}
+            ]
+        }]
+    }))
+    .expect("empty, absent, and whitespace-only thinking must enter Hub semantics");
+
+    assert_eq!(
+        semantic["input"],
+        json!([
+            {
+                "type":"reasoning",
+                "summary":[],
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{
+                        "type":"thinking",
+                        "thinking":"",
+                        "signature":"empty-thinking-signature"
+                    }
+                }
+            },
+            {
+                "type":"reasoning",
+                "summary":[],
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{"type":"thinking"}
+                }
+            },
+            {
+                "type":"reasoning",
+                "summary":[],
+                "routecodex_chat_extension":{
+                    "anthropic_reasoning":{"type":"thinking","thinking":"   "}
+                }
+            }
+        ])
+    );
+}
+
+#[test]
+fn anthropic_thinking_history_preserves_non_string_thinking_as_explicit_failure() {
     let error = encode_v3_anthropic_request_as_responses_semantic(json!({
         "model":"claude-sonnet",
         "messages":[{
             "role":"assistant",
-            "content":[{"type":"thinking","thinking":"","signature":"sig-without-thinking"}]
+            "content":[{"type":"thinking","thinking":42}]
         }]
     }))
-    .expect_err("malformed Anthropic thinking must fail before entering Hub semantics");
+    .expect_err("non-string thinking remains an explicit local failure");
 
     assert!(matches!(
         error,
@@ -983,29 +1030,20 @@ fn anthropic_malformed_thinking_history_fails_instead_of_disappearing() {
 
 #[test]
 fn anthropic_thinking_history_rejects_missing_native_reasoning_fields() {
-    // Extra alias fields are preserved as opaque extensions, so a block is only
-    // rejected when its own native reasoning payload is absent.
-    for (content, field) in [
-        (
-            json!({"type":"thinking","text":"alias text","data":"alias signature"}),
-            "thinking",
-        ),
-        (
-            json!({"type":"redacted_thinking","signature":"alias redacted payload"}),
-            "data",
-        ),
-    ] {
-        let error = encode_v3_anthropic_request_as_responses_semantic(json!({
-            "model":"claude-sonnet",
-            "messages":[{"role":"assistant","content":[content]}]
-        }))
-        .expect_err("Anthropic history must reject a reasoning block without its native payload");
-
-        assert!(matches!(
-            error,
-            V3AnthropicCodecError::MalformedField { field: actual } if actual == field
-        ));
-    }
+    // A missing `thinking` field is now a representable empty history block. The
+    // `redacted_thinking` block still requires its own native `data` payload.
+    let error = encode_v3_anthropic_request_as_responses_semantic(json!({
+        "model":"claude-sonnet",
+        "messages":[{
+            "role":"assistant",
+            "content":[{"type":"redacted_thinking","signature":"alias redacted payload"}]
+        }]
+    }))
+    .expect_err("redacted_thinking history must reject a block without native data");
+    assert!(matches!(
+        error,
+        V3AnthropicCodecError::MalformedField { field: "data" }
+    ));
 
     // `reasoning` is not an Anthropic content block type.
     let error = encode_v3_anthropic_request_as_responses_semantic(json!({

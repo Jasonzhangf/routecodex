@@ -207,6 +207,7 @@ pub(super) fn flush_v3_anthropic_text_content_as_responses_message(
 pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
     part: &Value,
     summary_policy: Option<&str>,
+    allow_empty_or_absent_thinking: bool,
 ) -> Result<Value, V3AnthropicCodecError> {
     let object = part
         .as_object()
@@ -215,28 +216,50 @@ pub(super) fn anthropic_reasoning_part_as_responses_reasoning(
         })?;
     match object.get("type").and_then(Value::as_str) {
         Some("thinking") => {
-            let thinking = require_nonempty_reasoning_string(object.get("thinking"), "thinking")?;
-            let summary_text = match summary_policy {
-                None | Some("auto" | "concise" | "detailed") => thinking,
-                Some(_) => {
-                    return Err(V3AnthropicCodecError::MalformedField {
-                        field: "reasoning_summary_policy",
-                    })
+            match object.get("thinking") {
+                Some(Value::String(thinking)) if !thinking.trim().is_empty() => {
+                    let summary_text = match summary_policy {
+                        None | Some("auto" | "concise" | "detailed") => thinking.as_str(),
+                        Some(_) => {
+                            return Err(V3AnthropicCodecError::MalformedField {
+                                field: "reasoning_summary_policy",
+                            })
+                        }
+                    };
+                    let mut item = json!({
+                        "type":"reasoning",
+                        "summary":[{"type":"summary_text","text":summary_text}]
+                    });
+                    if let Some(signature) = optional_reasoning_string(object, "signature")? {
+                        item["encrypted_content"] = Value::String(signature.to_string());
+                    }
+                    preserve_anthropic_reasoning_extensions(
+                        object,
+                        &["type", "thinking", "signature"],
+                        &mut item,
+                    );
+                    Ok(item)
                 }
-            };
-            let mut item = json!({
-                "type":"reasoning",
-                "summary":[{"type":"summary_text","text":summary_text}]
-            });
-            if let Some(signature) = optional_reasoning_string(object, "signature")? {
-                item["encrypted_content"] = Value::String(signature.to_string());
+                Some(Value::String(_)) | None if allow_empty_or_absent_thinking => {
+                    // Empty, whitespace-only, or absent `thinking` is still a
+                    // representable Anthropic history block. Preserve the exact
+                    // native block on the reasoning extension so the inverse
+                    // projection can restore it without inventing an empty
+                    // summary_text the inverse owner would reject.
+                    let mut item = json!({"type":"reasoning","summary":[]});
+                    preserve_anthropic_thinking_block(object, &mut item);
+                    Ok(item)
+                }
+                _ => {
+                    // Non-string `thinking`, or empty/absent/whitespace in a
+                    // direction that still requires a native nonempty payload
+                    // (provider response). Preserve the original strict
+                    // admission so a reasoning block without its own payload
+                    // stays a typed codec failure there.
+                    require_nonempty_reasoning_string(object.get("thinking"), "thinking")?;
+                    unreachable!("nonempty string handled by the first arm")
+                }
             }
-            preserve_anthropic_reasoning_extensions(
-                object,
-                &["type", "thinking", "signature"],
-                &mut item,
-            );
-            Ok(item)
         }
         Some("redacted_thinking") => {
             let data = require_nonempty_reasoning_string(object.get("data"), "data")?;
@@ -284,6 +307,27 @@ fn preserve_anthropic_reasoning_extensions(
             Value::Object(carrier),
         );
     }
+}
+
+/// Carry a complete native `thinking` block on the reasoning extension. The
+/// empty and absent `thinking` shapes carry no summary_text, so unlike
+/// `preserve_anthropic_reasoning_extensions` this always emits the carrier and
+/// keeps the exact `thinking`/`signature` field presence and value.
+fn preserve_anthropic_thinking_block(object: &Map<String, Value>, item: &mut Value) {
+    let Some(target) = item.as_object_mut() else {
+        return;
+    };
+    let mut extension = object.clone();
+    extension.insert("type".to_string(), Value::String("thinking".to_string()));
+    let mut carrier = Map::new();
+    carrier.insert(
+        ANTHROPIC_REASONING_EXTENSION.to_string(),
+        Value::Object(extension),
+    );
+    target.insert(
+        "routecodex_chat_extension".to_string(),
+        Value::Object(carrier),
+    );
 }
 
 fn require_nonempty_reasoning_string<'a>(

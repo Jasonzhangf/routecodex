@@ -125,6 +125,18 @@ fn project_chat_reasoning_block(
         return Ok(vec![Value::Object(block)]);
     }
     if reasoning_content.trim().is_empty() {
+        // A preserved native thinking block carries its empty or absent
+        // `thinking` field on the association. Restore it before the generic
+        // blank-content discard so a representable Claude history block is not
+        // dropped.
+        if let Some(anthropic_reasoning) = anthropic_reasoning {
+            if anthropic_reasoning.get("type").and_then(Value::as_str) == Some("thinking") {
+                let mut block =
+                    Map::from_iter([("type".to_string(), Value::String("thinking".to_string()))]);
+                restore_anthropic_reasoning_extension(anthropic_reasoning, &mut block);
+                return Ok(vec![Value::Object(block)]);
+            }
+        }
         return Ok(Vec::new());
     }
     let mut block = Map::from_iter([
@@ -195,6 +207,19 @@ pub(crate) fn project_v3_responses_reasoning_item_as_anthropic_content(
         }
         restore_anthropic_reasoning_extensions(object, &mut block);
         return Ok(Value::Object(block));
+    }
+    if let Some(extension) = object
+        .get("routecodex_chat_extension")
+        .and_then(Value::as_object)
+        .and_then(|extension| extension.get(ANTHROPIC_REASONING_EXTENSION))
+        .and_then(Value::as_object)
+    {
+        if extension.get("type").and_then(Value::as_str) == Some("thinking") {
+            let mut block = Map::new();
+            block.insert("type".to_string(), Value::String("thinking".to_string()));
+            restore_anthropic_reasoning_extension(extension, &mut block);
+            return Ok(Value::Object(block));
+        }
     }
     if let Some(data) = encrypted_content {
         let mut block = Map::new();

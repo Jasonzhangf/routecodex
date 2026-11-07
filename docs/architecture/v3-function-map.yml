@@ -2044,10 +2044,12 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/message_encoding.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/namespace_tool_names.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/response_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
   - v3/crates/routecodex-v3-runtime/tests/hub_anthropic_codec_characterization.rs
+  - v3/crates/routecodex-v3-server/tests/fd77c30_anthropic_thinking_public.rs
   - v3/scripts/architecture/verify-v3-anthropic-codec-characterization.mjs
   - v3/scripts/tests/v3-anthropic-codec-characterization-red-fixtures.mjs
   - docs/goals/v3-anthropic-codec-characterization-test-design.md
@@ -2067,6 +2069,7 @@ features:
   - npm run test:v3-anthropic-codec-characterization
   - npm run verify:v3-anthropic-codec-characterization
   - npm run test:v3-anthropic-codec-characterization-red-fixtures
+  - npm run test:v3-anthropic-codec-thinking-public
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-resource-map
   - npm run verify:v3-cargo-fmt

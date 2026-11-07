@@ -1053,6 +1053,7 @@ pub fn project_v3_anthropic_message_as_responses_response_with_context(
                 output_items.push(anthropic_reasoning_part_as_responses_reasoning(
                     part,
                     context.reasoning_summary_policy(),
+                    false,
                 )?);
             }
             V3AnthropicResponseContentBlockKind::ToolUse => {
