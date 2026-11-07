@@ -122,6 +122,9 @@ pub struct V3AdaptiveConcurrencyPermit {
     provider_key: String,
     identity_scope: Option<V3ConcurrencyIdentityScope>,
     probe: bool,
+    /// A provider lifecycle health/recovery probe. It is admitted by its own
+    /// lane, so it neither consumes nor releases business capacity.
+    health_probe: bool,
 }
 
 pub(crate) struct V3AdaptiveConcurrencyPermitGuard {
@@ -188,6 +191,16 @@ struct V3AdaptiveConcurrencyState {
     /// not a cage: the adaptive budget can move away from it in both directions.
     initial_budget: u32,
     in_flight: u32,
+    /// Business leases only. `in_flight` also counts provider lifecycle probes
+    /// because that is the true provider concurrency, while the budget that
+    /// admits a request must never be consumed by another owner's probe: v31
+    /// keeps probe/cooldown/recovery lifecycle state independent of requests,
+    /// so a probe can neither block nor be blocked by a business send.
+    business_in_flight: u32,
+    /// Provider lifecycle health/recovery probes in flight. They raise
+    /// `in_flight` for truthful provider concurrency but are counted here
+    /// because their lane is independent of the business budget.
+    health_probe_in_flight: u32,
     saturated: bool,
     probe_in_flight: bool,
     next_probe_at_ms: Option<u64>,
@@ -208,6 +221,8 @@ impl Default for V3AdaptiveConcurrencyState {
             hard_max_in_flight: 0,
             initial_budget: 0,
             in_flight: 0,
+            business_in_flight: 0,
+            health_probe_in_flight: 0,
             saturated: false,
             probe_in_flight: false,
             next_probe_at_ms: None,
@@ -245,6 +260,18 @@ impl V3AdaptiveConcurrencyController {
             .filter(|(key, _)| key.provider_key == provider_key)
             .fold(0u32, |total, (_, state)| {
                 total.saturating_add(state.in_flight)
+            })
+    }
+
+    /// Provider-level business concurrency only. A lifecycle probe in flight is
+    /// real provider traffic, but it belongs to the provider lifecycle owner and
+    /// must never consume the budget that admits a request.
+    fn total_business_in_flight(states: &V3ConcurrencyStates, provider_key: &str) -> u32 {
+        states
+            .iter()
+            .filter(|(key, _)| key.provider_key == provider_key)
+            .fold(0u32, |total, (_, state)| {
+                total.saturating_add(state.business_in_flight)
             })
     }
 
@@ -434,8 +461,12 @@ impl V3AdaptiveConcurrencyController {
                 states
                     .get(&V3ConcurrencyBucketKey::new(provider_key, scope.as_ref()))
                     .is_none_or(|state| {
-                        Self::total_in_flight(&states, provider_key) < state.hard_max_in_flight
-                            && state.in_flight < state.budget
+                        // A capacity change means business capacity was released.
+                        // A lifecycle probe releasing its own permit is not a
+                        // business admission event.
+                        Self::total_business_in_flight(&states, provider_key)
+                            < state.hard_max_in_flight
+                            && state.business_in_flight < state.budget
                     })
             })
         };
@@ -471,6 +502,40 @@ impl V3AdaptiveConcurrencyController {
         self.try_acquire_probe_for_scope(provider_key, None, now_ms, true)
     }
 
+    /// Admission for a provider lifecycle health/recovery probe.
+    ///
+    /// v31: cooldown, probing and recovery are provider lifecycle state that
+    /// only changes which identities are visible to the request pool. A probe
+    /// must therefore never take a business capacity slot, otherwise a business
+    /// request would be refused (`ConcurrencyBusy`) only because an unrelated
+    /// task's probe is in flight, and the request would depend on that probe's
+    /// completion. The lane is independent of the business budget: the lifecycle
+    /// owner bounds its own probe concurrency, per listener and per identity.
+    pub fn try_acquire_health_probe_scoped(
+        &self,
+        provider_key: &str,
+        scope: Option<&V3ConcurrencyIdentityScope>,
+    ) -> Option<V3AdaptiveConcurrencyLease> {
+        let mut states = self
+            .inner
+            .states
+            .lock()
+            .expect("adaptive concurrency state lock should not be poisoned");
+        let state = self.state_mut(&mut states, provider_key, scope);
+        state.health_probe_in_flight = state.health_probe_in_flight.saturating_add(1);
+        state.in_flight = state.in_flight.saturating_add(1);
+        Some(V3AdaptiveConcurrencyLease {
+            admission: V3AdaptiveConcurrencyAdmission::Probe,
+            permit: V3AdaptiveConcurrencyPermit {
+                provider_key: provider_key.to_string(),
+                identity_scope: scope.cloned(),
+                probe: true,
+                health_probe: true,
+            },
+            controller: self.clone(),
+        })
+    }
+
     pub fn try_acquire_business(&self, provider_key: &str) -> Option<V3AdaptiveConcurrencyLease> {
         self.try_acquire_business_scoped(provider_key, None)
     }
@@ -485,9 +550,15 @@ impl V3AdaptiveConcurrencyController {
             .states
             .lock()
             .expect("adaptive concurrency state lock should not be poisoned");
-        let total_in_flight = Self::total_in_flight(&states, provider_key);
+        let total_business_in_flight = Self::total_business_in_flight(&states, provider_key);
         let state = self.state_mut(&mut states, provider_key, scope);
-        if state.in_flight < state.budget && total_in_flight < state.hard_max_in_flight {
+        // Business admission is decided by business holders only. A lifecycle
+        // probe raised `in_flight` for truthful provider concurrency, but it must
+        // not consume a request's budget.
+        if state.business_in_flight < state.budget
+            && total_business_in_flight < state.hard_max_in_flight
+        {
+            state.business_in_flight = state.business_in_flight.saturating_add(1);
             state.in_flight = state.in_flight.saturating_add(1);
             return Some(V3AdaptiveConcurrencyLease {
                 admission: V3AdaptiveConcurrencyAdmission::Lease,
@@ -495,6 +566,7 @@ impl V3AdaptiveConcurrencyController {
                     provider_key: provider_key.to_string(),
                     identity_scope: scope.cloned(),
                     probe: false,
+                    health_probe: false,
                 },
                 controller: self.clone(),
             });
@@ -538,6 +610,7 @@ impl V3AdaptiveConcurrencyController {
                     provider_key: provider_key.to_string(),
                     identity_scope: scope.cloned(),
                     probe: true,
+                    health_probe: false,
                 },
                 controller: self.clone(),
             });
@@ -556,6 +629,7 @@ impl V3AdaptiveConcurrencyController {
                     provider_key: provider_key.to_string(),
                     identity_scope: scope.cloned(),
                     probe: true,
+                    health_probe: false,
                 },
                 controller: self.clone(),
             });
@@ -583,6 +657,19 @@ impl V3AdaptiveConcurrencyController {
                 permit.identity_scope.as_ref(),
             ))
             .ok_or_else(|| "adaptive concurrency provider key is missing".to_string())?;
+        if permit.health_probe {
+            // A lifecycle probe is admitted outside the business budget, so its
+            // completion releases only its own lane and never adapts the budget.
+            if state.health_probe_in_flight == 0 || state.in_flight == 0 {
+                return Err("adaptive concurrency health probe is not in flight".to_string());
+            }
+            state.health_probe_in_flight -= 1;
+            state.in_flight -= 1;
+            let notify = state.notify.clone();
+            drop(states);
+            notify.notify_waiters();
+            return Ok(());
+        }
         if !state.probe_in_flight || state.in_flight == 0 {
             return Err("adaptive concurrency probe is not in flight".to_string());
         }
@@ -812,8 +899,12 @@ impl V3AdaptiveConcurrencyController {
             return Err("adaptive concurrency lease underflow".to_string());
         }
         state.in_flight -= 1;
-        if permit.probe {
+        if permit.health_probe {
+            state.health_probe_in_flight = state.health_probe_in_flight.saturating_sub(1);
+        } else if permit.probe {
             state.probe_in_flight = false;
+        } else {
+            state.business_in_flight = state.business_in_flight.saturating_sub(1);
         }
         let notify = state.notify.clone();
         drop(states);
@@ -1623,6 +1714,7 @@ mod tests {
                     provider_key: "opencode-go:key1".to_string(),
                     identity_scope: None,
                     probe: false,
+                    health_probe: false,
                 },
                 V3AdaptiveConcurrencyProbeResult::Accepted,
                 0,
@@ -1634,6 +1726,7 @@ mod tests {
                 provider_key: "opencode-go:key1".to_string(),
                 identity_scope: None,
                 probe: false,
+                health_probe: false,
             })
             .is_err());
     }
