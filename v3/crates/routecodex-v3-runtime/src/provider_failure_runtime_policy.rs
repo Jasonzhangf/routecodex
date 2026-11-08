@@ -985,13 +985,52 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // expansion failure. Provider lifecycle recovery cannot erase this fact.
     state.failed_candidates.insert(candidate_key.clone());
     let excluded_with_failed = state.failed_candidates.clone();
-    let resolution = reselect_from_captured_target_plan(
+    let mut resolution = reselect_from_captured_target_plan(
         context,
         &selected,
         &excluded_with_failed,
         v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?,
     )
     .await;
+    // An exhausted captured target whose remaining candidates are only hidden by
+    // their own cooldown still has a real alternative. Provider lifecycle owns
+    // that recovery: one bounded rescue round (the identity's own probe) runs
+    // here, and the resolution is evaluated once more with the updated
+    // visibility. The round is capped, so a stalled probe keeps the truthful
+    // exhaustion instead of extending the request.
+    if matches!(resolution, V3RelayProviderTargetResolution::Exhausted { .. })
+        && !is_request_local_compat_failure
+    {
+        if let Some(expanded) = context.captured_target_09 {
+            let now = v3_relay_provider_policy_now_epoch_ms()
+                .map_err(v3_relay_provider_policy_ordinary_error)?;
+            if v3_exhaustion_is_cooldown_only(
+                expanded,
+                &excluded_with_failed,
+                &context.failure_session_scope,
+                context.provider_health,
+                now,
+            ) && context
+                .provider_health
+                .run_v3_bounded_cooldown_rescue_round(
+                    context.manifest,
+                    expanded,
+                    now,
+                    tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET,
+                )
+                .await
+            {
+                resolution = reselect_from_captured_target_plan(
+                    context,
+                    &selected,
+                    &excluded_with_failed,
+                    v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(v3_relay_provider_policy_ordinary_error)?,
+                )
+                .await;
+            }
+        }
+    }
     let request_local_state = if is_response_processing_failure {
         "request_local_response_processing"
     } else {
@@ -1219,10 +1258,18 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     .map_err(Err)?;
     let terminal_projection =
         terminal_projection_for(decision_projection, &decision, matched_policy).map_err(Err)?;
-    // This is the only call reached after a normal captured-target Exhausted
-    // with no remaining untried eligible alternative. The failed candidate was
-    // already recorded and no health, probe, wait or resend was added here.
-    let terminal_disposition = terminal_disposition_for(&decision, state, true);
+    // This is the only call reached after a normal captured-target Exhausted.
+    // The failed candidate is the last eligible one only when every candidate
+    // of the captured target was attempted: an untried sibling the pool cannot
+    // use right now keeps the failure provider-private, so its provider HTTP
+    // error is never projected as the client's answer.
+    let last_eligible_candidate = context.captured_target_09.is_none_or(|expanded| {
+        expanded
+            .candidates
+            .iter()
+            .all(|candidate| state.failed_candidates.contains(&v3_relay_provider_candidate_key(candidate)))
+    });
+    let terminal_disposition = terminal_disposition_for(&decision, state, last_eligible_candidate);
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection,
         terminal_disposition,
