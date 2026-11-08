@@ -205,6 +205,121 @@ async fn responses_provider_sse_codex_response_metadata_extension_does_not_abort
 }
 
 #[tokio::test]
+async fn responses_provider_sse_standard_response_metadata_extension_does_not_abort_stream() {
+    // Live provider `devsail` (gpt-6.1-terra, http://devsail.site/v1,
+    // api=responses) emits the standard Responses event `response.metadata`
+    // (carrying `openai_chatgpt_moderation_metadata`) inside every stream. It is
+    // a provider-owned metadata frame with no client-visible output, so on the
+    // RELAY path it must be carried by the registered extension support list
+    // instead of aborting the attempt with `provider_response_sse_event_invalid`
+    // and projecting an internal 502. The event order below is the real devsail
+    // order captured from the live stream.
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+        Ok(b"event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_devsail\",\"status\":\"in_progress\"}}\n\n".to_vec()),
+        Ok(b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"resp_devsail\",\"status\":\"in_progress\"}}\n\n".to_vec()),
+        Ok(b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":2,\"output_index\":0,\"item\":{\"id\":\"msg_devsail\",\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n".to_vec()),
+        Ok(b"event: response.content_part.added\ndata: {\"type\":\"response.content_part.added\",\"sequence_number\":3,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n".to_vec()),
+        Ok(b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":4,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n".to_vec()),
+        Ok(b"event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":6,\"response_id\":\"resp_devsail\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{}}}}\n\n".to_vec()),
+        Ok(b"event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":7,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"text\":\"ok\"}\n\n".to_vec()),
+        Ok(b"event: response.content_part.done\ndata: {\"type\":\"response.content_part.done\",\"sequence_number\":8,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"ok\"}}\n\n".to_vec()),
+        Ok(b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":9,\"output_index\":0,\"item\":{\"id\":\"msg_devsail\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n".to_vec()),
+        Ok(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":10,\"response\":{\"id\":\"resp_devsail\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg_devsail\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n".to_vec()),
+        Ok(b"data: [DONE]\n\n".to_vec()),
+    ]));
+    let response =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect(
+                "response.metadata must not turn a valid devsail stream into a provider failure",
+            );
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["content"][0]["text"], "ok");
+    let snapshot = observation
+        .snapshot()
+        .expect("runtime stream observation snapshot must remain accessible");
+    assert!(
+        snapshot
+            .typed_object_types
+            .iter()
+            .any(|event_type| event_type == "responses:response.metadata"),
+        "registered response.metadata extension must be observed as a typed provider event: {:?}",
+        snapshot.typed_object_types
+    );
+    assert!(
+        snapshot.post_commit_error.is_none(),
+        "registered provider extension must not surface a post-commit provider failure: {:?}",
+        snapshot.post_commit_error
+    );
+}
+
+#[tokio::test]
+async fn responses_provider_sse_standard_response_metadata_only_stream_still_fails() {
+    // `response.metadata` is metadata only: it must never certify a semantic
+    // first frame or fabricate a successful terminal. A metadata-only stream
+    // must still fail with the explicit missing-terminal error, and a
+    // registered extension must never surface as an unsupported/unregistered
+    // provider event.
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![Ok(
+        b"event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":6,\"response_id\":\"resp_devsail\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{}}}}\n\n"
+            .to_vec(),
+    )]));
+    let error =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect_err("a metadata-only extension stream cannot manufacture a terminal response");
+
+    assert!(
+        error
+            .to_string()
+            .contains("provider response event stream ended before response.completed"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        !error
+            .to_string()
+            .contains("provider_response_sse_event_invalid"),
+        "a registered extension must never produce an unregistered-event failure: {error}"
+    );
+    assert!(
+        !error.to_string().contains("is unsupported"),
+        "registered response.metadata extension must not be rejected as unsupported: {error}"
+    );
+}
+
+#[tokio::test]
+async fn responses_provider_sse_unregistered_responses_event_still_fails_closed() {
+    // Fail-closed lock for RELAY: registering `response.metadata` must not open
+    // the `response.*` namespace to near-miss siblings.
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![Ok(
+        b"event: response.metadat\ndata: {\"type\":\"response.metadat\",\"sequence_number\":6,\"metadata\":{}}\n\n"
+            .to_vec(),
+    )]));
+    let error =
+        build_v3_hub_resp_inbound_02_from_responses_provider_stream_events(provider, &observation)
+            .await
+            .expect_err("unregistered response.* sibling must remain fail-closed");
+
+    // Fail-closed: this helper exercises the typed relay codec, which rejects
+    // unregistered `response.*` events with "is unsupported". The shared
+    // classifier (gate one of the full relay path) rejects them with "is not
+    // registered"; both are locked by the provider_sse_json_codec unit tests.
+    let text = error.to_string();
+    assert!(
+        text.contains("response.metadat"),
+        "unexpected error: {text}"
+    );
+    assert!(
+        text.contains("unsupported") || text.contains("is not registered"),
+        "unexpected error: {text}"
+    );
+}
+
+#[tokio::test]
 async fn responses_provider_sse_codex_extension_without_terminal_still_fails() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![Ok(

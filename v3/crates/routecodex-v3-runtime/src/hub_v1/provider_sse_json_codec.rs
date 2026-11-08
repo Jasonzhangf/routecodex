@@ -977,6 +977,51 @@ mod provider_sse_json_codec_tests {
     }
 
     #[test]
+    fn responses_accepts_standard_response_metadata_extension_without_dropping_frame() {
+        // `response.metadata` is the provider `devsail` emits on
+        // `http://devsail.site/v1` (api=responses, model `gpt-6.1-terra`). It is
+        // a standard-Responses-shaped, provider-owned metadata frame that
+        // carries no client-visible output. It must classify as a registered
+        // inbound extension (mirroring `codex.response.metadata`) instead of
+        // aborting an otherwise valid upstream stream with
+        // `provider_response_sse_event_invalid`.
+        let data = r#"{"type":"response.metadata","sequence_number":6,"response_id":"resp_x","metadata":{"openai_chatgpt_moderation_metadata":{"prompt":{}}}}"#;
+        assert_eq!(
+            classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap())
+                .expect("registered response.metadata extension must classify"),
+            V3ProviderResponsesJsonFrameOutcome::ContinueBuffering
+        );
+        // Metadata must never certify a semantic first frame: ContinueBuffering
+        // is the only accepted outcome, never StartClientStream/Terminal.
+        let normalized = normalize_v3_provider_sse_json_data_with_event_name(
+            V3HubProviderWireProtocol::Responses,
+            data,
+            Some("response.metadata"),
+        )
+        .expect("registered provider extension frame must normalize");
+        assert_eq!(normalized, data);
+    }
+
+    #[test]
+    fn responses_unknown_response_metadata_sibling_still_fails_closed() {
+        // Registering `response.metadata` must not open the `response.*`
+        // namespace: a near-miss sibling and an unregistered `responsesapi.*`
+        // style namespace both stay fail-closed.
+        for data in [
+            r#"{"type":"response.metadat","sequence_number":6}"#,
+            r#"{"type":"provider_private.websocket_timing"}"#,
+        ] {
+            let error =
+                classify_v3_provider_responses_json_event(&serde_json::from_str(data).unwrap())
+                    .expect_err("unregistered provider event must remain explicit");
+            assert!(
+                error.contains("is not registered"),
+                "unexpected error for {data}: {error}"
+            );
+        }
+    }
+
+    #[test]
     fn responses_unknown_codex_extension_namespace_still_fails_closed() {
         // Only explicitly declared provider extensions are accepted; unknown
         // namespaces remain fail-closed.
