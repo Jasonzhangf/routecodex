@@ -3967,52 +3967,82 @@ async fn assert_busy_candidate_preserves_peer_recovery(direct: bool) {
         first_captures.try_recv().is_err(),
         "full provider must receive no extra send"
     );
-    // The two peer arrivals are distinct requests: first the bounded semantic
-    // probe (a non-streaming minimal ping without the business input), then
-    // the business request itself (streaming, carrying the client input).
-    let probe = timeout(Duration::from_secs(1), second_captures.recv())
+    // The peer must serve the business request itself: streaming, carrying the
+    // client input, never a bare capacity probe. The recovered identity's own
+    // probe is an independent control-plane observation, so the request neither
+    // schedules it as a precondition nor waits for it; a probe arrival is legal
+    // but optional (a successful business request already clears the cooldown
+    // row that made the probe necessary), and it must never carry the business
+    // payload.
+    let business = timeout(Duration::from_secs(2), second_captures.recv())
         .await
-        .expect("the peer must receive a semantic probe")
+        .expect("the peer must receive the business request")
         .unwrap();
-    {
-        let is_probe = probe.body.get("stream").and_then(Value::as_bool) == Some(false)
-            && probe.body.get("input").is_some();
-        assert!(
-            is_probe,
-            "the first arrival must be the semantic probe, not the business request: {}",
-            probe.body
-        );
-    }
-    let business = timeout(Duration::from_secs(1), second_captures.recv())
-        .await
-        .expect("the peer must receive the business request after the probe")
-        .unwrap();
-    {
-        let body_text = business.body.to_string();
-        assert!(
-            body_text.contains("recover cooled peer"),
-            "the second arrival must be the business request: {body_text}"
-        );
-        assert!(
-            business.body.get("stream").and_then(Value::as_bool) == Some(true),
-            "the business request must keep its streaming mode: {body_text}"
-        );
-    }
-    let health: Value = client
-        .get(format!("{base}/_routecodex/health/cooldown-pool"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let business_text = business.body.to_string();
     assert!(
-        health["entries"]
+        business_text.contains("recover cooled peer"),
+        "the recovered peer must receive the business request: {business_text}"
+    );
+    assert_eq!(
+        business.body.get("stream").and_then(Value::as_bool),
+        Some(true),
+        "the business request must keep its streaming mode: {business_text}"
+    );
+    match timeout(Duration::from_millis(600), second_captures.recv()).await {
+        Ok(Some(arrival)) => {
+            let arrival_text = arrival.body.to_string();
+            assert!(
+                !arrival_text.contains("recover cooled peer"),
+                "the peer must never receive a second business request: {arrival_text}"
+            );
+            assert_eq!(
+                arrival.body.get("stream").and_then(Value::as_bool),
+                Some(false),
+                "a peer arrival after the business request can only be the non-streaming semantic probe: {arrival_text}"
+            );
+            assert!(
+                arrival.body.get("input").is_some(),
+                "the semantic probe must carry the minimal ping input: {arrival_text}"
+            );
+            assert!(
+                timeout(Duration::from_millis(300), second_captures.recv())
+                    .await
+                    .is_err(),
+                "the peer must receive exactly one business request and at most one probe"
+            );
+        }
+        // No probe is the lawful outcome when the business request already
+        // cleared the cooldown row: provider lifecycle holds no extra work.
+        Ok(None) | Err(_) => {}
+    }
+    // The probe is an independent lifecycle observation, so the peer's cooldown
+    // row disappears on the probe's own schedule. Observe the pool for a bounded
+    // window: eventual lifecycle convergence is the contract, an instantaneous
+    // snapshot is not.
+    let health_deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut health = Value::Null;
+    let settled = loop {
+        health = client
+            .get(format!("{base}/_routecodex/health/cooldown-pool"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let settled = health["entries"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|entry| entry["state"] != "pre_cool_observation")
-            .all(|entry| entry["provider_id"] != first_id && entry["provider_id"] != second_id),
+            .all(|entry| entry["provider_id"] != first_id && entry["provider_id"] != second_id);
+        if settled || std::time::Instant::now() >= health_deadline {
+            break settled;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert!(
+        settled,
         "capacity must remain health-neutral and a successful probe must clear peer cooldown: {health}"
     );
 

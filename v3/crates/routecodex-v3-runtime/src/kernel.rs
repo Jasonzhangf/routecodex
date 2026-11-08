@@ -442,32 +442,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             trace.push("V3CapacityAdmissionBypassGranted");
                             continue;
                         }
-                        // v31: an identity that the pool cannot see right now
-                        // is recovered by its own probe, never by a
-                        // request-side wait. Run one bounded rescue round and
-                        // let this loop plan again; a round that cannot
-                        // complete keeps the truthful exhaustion below.
-                        if !cooldown_rescue_attempted {
-                            cooldown_rescue_attempted = true;
-                            if let Ok(rescue_now) =
-                                crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                            {
-                                if provider_health
-                                    .run_v3_bounded_cooldown_rescue_round(
-                                        manifest,
-                                        &exhausted_expanded,
-                                        rescue_now,
-                                        tokio::time::Instant::from_std(
-                                            attempt_budget.residence_deadline(),
-                                        ),
-                                    )
-                                    .await
-                                {
-                                    trace.push("V3ProviderCooldownRescueProbeCompleted");
-                                    continue;
-                                }
-                            }
-                        }
+                        // v31: provider lifecycle never gates a request. The
+                        // rescue probe is scheduled as a detached control-plane
+                        // observation, so this request keeps its truthful typed
+                        // exhaustion immediately and a later selection may use
+                        // the identity once its own probe has recovered it.
+                            provider_health.spawn_v3_background_cooldown_rescue_round(
+                                manifest,
+                                &exhausted_expanded,
+                            );
                         // 2026-11-07 ruling ① diagnostic convention: capacity refusals never run
                         // the failure policy, so the request-local terminal action is stamped on
                         // the last capacity-skipped attempt instead of a policy event.
@@ -848,30 +831,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             &hook_registry,
                         );
                     }
-                    // A capacity refusal never contacted the identity, so a
-                    // cooled peer is the only identity that can still answer.
-                    // Recover it through one bounded semantic probe instead of
-                    // promoting it blindly: the probe owns the pool visibility
-                    // change and the next plan uses its real result.
+                    // A capacity refusal never contacted the identity, so the
+                    // cooled peer is the only identity that can still answer,
+                    // and the next selection promotes it immediately. The peer's
+                    // own probe is scheduled as a detached control-plane
+                    // observation: it refreshes the identity's visibility for
+                    // later selections without holding this request.
                     if !cooldown_rescue_attempted {
                         cooldown_rescue_attempted = true;
-                        if let Ok(rescue_now) = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms() {
                             if let Some(captured) = expanded.as_ref() {
-                                if provider_health
-                                    .run_v3_bounded_cooldown_rescue_round(
-                                        &manifest,
-                                        captured,
-                                        rescue_now,
-                                        tokio::time::Instant::from_std(
-                                            attempt_budget.residence_deadline(),
-                                        ),
-                                    )
-                                    .await
-                                {
-                                    trace.push("V3ProviderCooldownRescueProbeCompleted");
-                                }
+                                provider_health.spawn_v3_background_cooldown_rescue_round(
+                                    manifest,
+                                    captured,
+                                );
                             }
-                        }
                     }
                     continue;
                 }
@@ -960,7 +933,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         provider_pinned: false,
                         now_epoch_ms,
                         manifest: &manifest,
-                        rescue_deadline: tokio::time::Instant::from_std(attempt_budget.residence_deadline()),
                     },
                     &policy.target,
                     source,
@@ -1176,7 +1148,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         provider_pinned: false,
                         now_epoch_ms,
                         manifest: &manifest,
-                        rescue_deadline: tokio::time::Instant::from_std(attempt_budget.residence_deadline()),
                     },
                     &policy.target,
                     source,
@@ -1332,7 +1303,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         provider_pinned: false,
                         now_epoch_ms,
                         manifest: &manifest,
-                        rescue_deadline: tokio::time::Instant::from_std(attempt_budget.residence_deadline()),
                     },
                     &policy.target,
                     source,
@@ -1594,7 +1564,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     provider_pinned: false,
                                     now_epoch_ms,
                                     manifest: &manifest,
-                                    rescue_deadline: tokio::time::Instant::from_std(attempt_budget.residence_deadline()),
                                 },
                                 &policy.target,
                                 source,
