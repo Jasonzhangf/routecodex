@@ -157,11 +157,6 @@ pub(crate) struct DirectPolicyFailure {
 
 pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
     failed_candidates: &'state mut BTreeSet<String>,
-    /// 2026-11-07 ruling ①: complete identities this request refused at capacity
-    /// admission. They were never contacted, so the failure policy must not
-    /// treat them as tried when it decides whether the current attempt is the
-    /// last eligible candidate.
-    capacity_skipped: &'state BTreeSet<String>,
     trace: &'state mut Vec<&'static str>,
 }
 
@@ -894,18 +889,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         );
     let failed_key = candidate_key(&selected.candidate);
     state.failed_candidates.insert(failed_key.clone());
-    // 2026-11-07 ruling ①: a capacity-skipped identity never received a request,
-    // so it must not count as "tried" while this attempt decides whether it is
-    // the last eligible candidate. Hold it out of the selection basis for that
-    // decision only; the runtime's own set keeps it so a later plan still moves
-    // on to another visible candidate.
-    let capacity_skipped = state.capacity_skipped.clone();
-    let mut held_back_capacity_keys: Vec<String> = Vec::new();
-    for key in capacity_skipped.iter() {
-        if state.failed_candidates.remove(key) {
-            held_back_capacity_keys.push(key.clone());
-        }
-    }
     let next_selected = match (context.expanded, context.provider_pinned) {
         (Some(expanded), _) => match select_v3_target_with_session_then_global(
             &V3TargetInterpreter::default(),
@@ -929,9 +912,6 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             ))
         }
     };
-    for key in held_back_capacity_keys {
-        state.failed_candidates.insert(key);
-    }
     if next_selected.is_none() {
         if let Some(expanded) = context.expanded {
             // No visible candidate is left and the captured target is only

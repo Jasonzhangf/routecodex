@@ -17,11 +17,6 @@ import {
   captureRuntimeIdentity, generateRccConfig, sendHttp, startRcc, stopRcc,
 } from './protocol-live-mock/lifecycle.mjs';
 import { collectExecutionModeEvidence, REQUIRED_EXECUTION_MODES, runCase } from './protocol-live-mock/case-runner.mjs';
-import {
-  collectProviderConcurrencyEvidence,
-  isProviderConcurrencyReplay,
-  runProviderConcurrencyReplay,
-} from './protocol-live-mock/provider-concurrency.mjs';
 import { CODEX_REAL_EXEC_CONSUMER } from './protocol-live-mock/codex-exec-consumer.mjs';
 import { finalizeReport, renderMarkdown } from './protocol-live-mock/report.mjs';
 
@@ -240,18 +235,12 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         phase = 'rcc_start';
         rcc = await startRcc(binary, generated, rccPort, setup, {
           startupTimeoutMs: options.startupTimeoutMs,
-          snapshotAll: isProviderConcurrencyReplay(fixture)
-            || fixture.tool_followup?.consumer === CODEX_REAL_EXEC_CONSUMER,
+          snapshotAll: fixture.tool_followup?.consumer === CODEX_REAL_EXEC_CONSUMER,
         });
         if (!rcc.ready) throw new Error(setup.infra_failure?.diagnostic ?? 'RCC did not become ready');
         setup.health = rcc.health;
         phase = 'run_case';
-        entry = isProviderConcurrencyReplay(fixture)
-          ? await runProviderConcurrencyReplay({
-            fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
-            evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
-          })
-          : await runCase({
+        entry = await runCase({
             fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
             evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
             sampleRoot: join(generated.home, '.rcc', 'codex-samples'),
@@ -300,18 +289,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
             cleanup.sample_copy_error = error.message;
           }
         }
-        entry.execution_mode = isProviderConcurrencyReplay(fixture)
-          ? collectProviderConcurrencyEvidence({
-            fixture,
-            caseRoot,
-            storePath,
-            sampleRoot: retainedSampleRoot ?? sourceSampleRoot,
-            listenerPort: generated?.rcc_port ?? null,
-            exhaustedWindow: entry.observations?.provider_concurrency?.exhausted_window ?? {},
-            collectionPhase,
-            stopReceipt: cleanup.rcc ?? null,
-          })
-          : collectCaseExecutionModeEvidence({
+        entry.execution_mode = collectCaseExecutionModeEvidence({
             caseId: fixture.case_id,
             caseRoot,
             storePath,

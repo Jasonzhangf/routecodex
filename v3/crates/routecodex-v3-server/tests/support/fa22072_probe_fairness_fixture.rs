@@ -115,7 +115,6 @@ base_url = "{base}/{index}/v1"
 default_model = "recovery"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_FAIRNESS_KEY" }}] }}
 health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 [providers.{id}.models.recovery]
 wire_name = "recovery"
 capabilities = ["text", "tools"]

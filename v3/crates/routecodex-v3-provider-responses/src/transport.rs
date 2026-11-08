@@ -1,7 +1,3 @@
-use crate::adaptive_concurrency::{
-    V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease, V3AdaptiveConcurrencyPermitGuard,
-    V3AdaptiveConcurrencyProbeResult, V3ConcurrencyIdentityScope,
-};
 use crate::provider_auth::{
     discovery_models_url, extract_discovered_models, resolve_secret, V3DiscoveredModel,
 };
@@ -9,11 +5,6 @@ use crate::raw_response::{V3ProviderResp14Raw, V3ProviderResponseBody, V3Provide
 use crate::shared::{
     collect_response_headers, content_type, remaining_timeout, send_http_await,
     validated_sse_stream,
-};
-pub use crate::transport_admission::build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency;
-use crate::transport_admission::{
-    provider_admission_error, take_or_acquire_provider_admission_scoped,
-    V3PreAcquiredProviderAdmission,
 };
 use crate::transport_handoff::{
     V3ProviderTransportAttemptControl, V3ProviderTransportAttemptState,
@@ -89,8 +80,6 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         provider_headers: Vec<V3ProviderRequestHeader>,
         timeout: Option<Duration>,
         sse_first_frame_timeout_ms: Option<u64>,
-        initial_concurrency_budget: u32,
-        concurrency_acquire_timeout_ms: u64,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
@@ -102,7 +91,6 @@ pub(crate) enum V3Transport13ResponsesRequestKind {
         auth: V3ProviderAuthHandle,
         stream_intent: V3ResponsesStreamIntent,
         event: Value,
-        initial_concurrency_budget: u32,
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     },
@@ -131,13 +119,7 @@ pub struct V3Transport13ResponsesRequest {
     pub(crate) kind: V3Transport13ResponsesRequestKind,
     handoff_scope: Option<crate::transport_handoff::V3ProviderTransportHandoffScope>,
     transport_attempt_control: Option<V3ProviderTransportAttemptControl>,
-    pre_acquired_admission: V3PreAcquiredProviderAdmission,
     auth_carrier: V3ProviderHttpAuthCarrier,
-    identity_scope: Option<V3ConcurrencyIdentityScope>,
-    /// 2026-11-07 ruling ①: this send is exempt from adaptive capacity
-    /// admission because it is the single/last eligible candidate. It rides on
-    /// the transport request so no provider-target initializer changes.
-    pub(crate) capacity_admission_bypass: bool,
 }
 
 pub type V3Transport13ResponsesHttpRequest = V3Transport13ResponsesRequest;
@@ -164,38 +146,6 @@ impl V3Transport13ResponsesRequest {
     ) -> Self {
         self.transport_attempt_control = Some(control);
         self
-    }
-
-    pub fn with_pre_acquired_admission(mut self, admission: V3AdaptiveConcurrencyLease) -> Self {
-        if self.identity_scope.is_none() {
-            self.identity_scope = admission.identity_scope().cloned();
-        }
-        self.pre_acquired_admission.set(admission);
-        self
-    }
-
-    pub fn with_identity_scope(mut self, scope: V3ConcurrencyIdentityScope) -> Self {
-        self.identity_scope = Some(scope);
-        self
-    }
-
-    /// 2026-11-07 ruling ①: the single/last eligible candidate is exempt from
-    /// capacity admission as well as from health blocks, so the request reaches
-    /// the provider over the adaptive budget and its real answer is passed
-    /// through instead of a proxy admission decision.
-    pub fn with_capacity_admission_bypass(mut self) -> Self {
-        self.capacity_admission_bypass = true;
-        self
-    }
-
-    /// Read-only view of the ruling ① capacity bypass stamp. A request may only
-    /// re-send an identity that is capacity-busy when it carries this stamp.
-    pub fn capacity_admission_bypass(&self) -> bool {
-        self.capacity_admission_bypass
-    }
-
-    pub fn release_pre_acquired_admission(&mut self) {
-        self.pre_acquired_admission.release();
     }
 
     pub fn transport_kind(&self) -> crate::transport_handoff::V3ProviderTransportKind {
@@ -231,19 +181,6 @@ impl V3Transport13ResponsesRequest {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { provider_id, .. }
             | V3Transport13ResponsesRequestKind::WebSocketV2 { provider_id, .. } => provider_id,
-        }
-    }
-
-    fn initial_concurrency_budget(&self) -> u32 {
-        match &self.kind {
-            V3Transport13ResponsesRequestKind::Http {
-                initial_concurrency_budget,
-                ..
-            }
-            | V3Transport13ResponsesRequestKind::WebSocketV2 {
-                initial_concurrency_budget,
-                ..
-            } => *initial_concurrency_budget,
         }
     }
 
@@ -424,10 +361,7 @@ pub(crate) fn v3_transport_13_request(
         kind,
         handoff_scope: None,
         transport_attempt_control: None,
-        pre_acquired_admission: V3PreAcquiredProviderAdmission::empty(),
         auth_carrier: V3ProviderHttpAuthCarrier::ExistingBearer,
-        identity_scope: None,
-        capacity_admission_bypass: false,
     }
 }
 
@@ -453,15 +387,9 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
     endpoint: crate::V3ResponsesRequestEndpoint,
     body: Value,
 ) -> Result<V3Transport13ResponsesRequest, V3ProviderError> {
-    let identity_scope = V3ConcurrencyIdentityScope {
-        interface_id: target.interface_id.clone(),
-        model_id: target.canonical_model_id.clone(),
-    };
     let provider_id = target.provider_id;
     let request_timeout_ms = target.request_timeout_ms;
     let sse_first_frame_timeout_ms = target.sse_first_frame_timeout_ms;
-    let initial_concurrency_budget = target.initial_concurrency_budget;
-    let concurrency_acquire_timeout_ms = target.concurrency_acquire_timeout_ms;
     let compatibility_profile = target.compatibility_profile.clone();
     match target.responses_transport {
         V3ResponsesTransportKind::Http => {
@@ -480,33 +408,28 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                 )?;
             }
             let mut request =
-                build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-                request_id,
-                provider_id,
-                url_text,
-                target.auth,
-                stream_intent,
-                body,
-                target.headers
-                    .iter()
-                    .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
-                    .collect(),
-                Some(Duration::from_millis(request_timeout_ms)),
-                concurrency_acquire_timeout_ms,
-                sse_first_frame_timeout_ms,
-            )?;
+                build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+                    request_id,
+                    provider_id,
+                    url_text,
+                    target.auth,
+                    stream_intent,
+                    body,
+                    target.headers
+                        .iter()
+                        .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+                        .collect(),
+                    Some(Duration::from_millis(request_timeout_ms)),
+                    sse_first_frame_timeout_ms,
+                )?;
             if let V3Transport13ResponsesRequestKind::Http {
-                initial_concurrency_budget: budget,
-                concurrency_acquire_timeout_ms: timeout_ms,
                 compatibility_profile: request_compatibility_profile,
                 ..
             } = &mut request.kind
             {
-                *budget = initial_concurrency_budget;
-                *timeout_ms = concurrency_acquire_timeout_ms;
                 *request_compatibility_profile = compatibility_profile;
             }
-            Ok(request.with_identity_scope(identity_scope))
+            Ok(request)
         }
         V3ResponsesTransportKind::WebsocketV2 => {
             if endpoint == crate::V3ResponsesRequestEndpoint::Compact {
@@ -545,11 +468,9 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                     auth: target.auth,
                     stream_intent,
                     event: body,
-                    initial_concurrency_budget,
                     cancellation: None,
                     compatibility_profile,
-                })
-                .with_identity_scope(identity_scope),
+                }),
             )
         }
     }
@@ -616,6 +537,7 @@ pub fn build_v3_transport_13_responses_http_request_from_parts(
         body,
         Vec::new(),
         None,
+        None,
     )
 }
 
@@ -637,10 +559,17 @@ pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_p
         body,
         provider_headers,
         None,
+        None,
     )
 }
 
-/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，仅由 client 级 `read_timeout` 兜底）的 transport request 构建。
+/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，仅由 client 级 `read_timeout` 兜底）
+/// 与 SSE 首帧超时的 transport request 构建。
+///
+/// 2026-11-08 r5: building a transport request carries no capacity state. The
+/// retired adaptive-concurrency admission used to inject a per-send budget and
+/// an acquire deadline here; a request now simply proceeds to the provider, so
+/// this builder never waits and never fails for capacity.
 #[allow(clippy::too_many_arguments)]
 pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     request_id: impl Into<String>,
@@ -651,19 +580,44 @@ pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     body: Value,
     provider_headers: Vec<V3ProviderRequestHeader>,
     timeout: Option<Duration>,
+    sse_first_frame_timeout_ms: Option<u64>,
 ) -> Result<V3Transport13ResponsesHttpRequest, V3ProviderError> {
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-        request_id,
-        provider_id,
-        url_text,
-        auth,
-        stream_intent,
-        body,
-        provider_headers,
-        timeout,
-        60_000,
-        None,
-    )
+    let request_id = request_id.into();
+    let provider_id = provider_id.into();
+    let url = reqwest::Url::parse(url_text.as_ref()).map_err(|error| {
+        V3ProviderError::InvalidBaseUrl {
+            request_id: request_id.clone(),
+            provider_id: provider_id.clone(),
+            reason: error.to_string(),
+        }
+    })?;
+    Ok(v3_transport_13_request(
+        V3Transport13ResponsesRequestKind::Http {
+            request_id,
+            provider_id,
+            url,
+            auth,
+            stream_intent,
+            body,
+            provider_headers,
+            timeout,
+            sse_first_frame_timeout_ms,
+            cancellation: None,
+            compatibility_profile: None,
+        },
+    ))
+}
+
+impl V3Transport13ResponsesRequest {
+    pub fn sse_first_frame_timeout_ms(&self) -> Option<u64> {
+        match &self.kind {
+            V3Transport13ResponsesRequestKind::Http {
+                sse_first_frame_timeout_ms,
+                ..
+            } => *sse_first_frame_timeout_ms,
+            V3Transport13ResponsesRequestKind::WebSocketV2 { .. } => None,
+        }
+    }
 }
 
 pub fn build_v3_transport_13_responses_http_request_from_v3_provider_12(
@@ -822,7 +776,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
         &self,
         mut request: V3Transport13ResponsesRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        let provider_key = request.provider_key();
         let request_id = request.request_id().to_string();
         let provider_id = request.provider_id().to_string();
         let attempt_control = match request.transport_attempt_control.take() {
@@ -863,32 +816,13 @@ impl ResponsesTransport for ProviderResponsesTransport {
         let attempt_key = attempt_control
             .as_ref()
             .map(|attempt_control| attempt_control.key().clone());
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        if let Err(reason) =
-            controller.ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
-        {
-            if let Some(attempt_key) = &attempt_key {
-                let _ = self
-                    .handoff
-                    .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
-            }
-            return Err(V3ProviderError::InternalTransport {
-                request_id: request_id.clone(),
-                provider_id: provider_id.clone(),
-                lane: V3ProviderInternalTransportLane::Request,
-                reason,
-            });
-        }
-        let (permit_guard, was_probe, websocket_connection) =
-            websocket::acquire_admission_and_connection_slot(
-                &self.websocket_sessions,
-                &mut request,
-                &self.handoff,
-                attempt_key.as_ref(),
-                controller.clone(),
-                provider_key.clone(),
-            )
-            .await?;
+        let websocket_connection = websocket::acquire_connection_slot(
+            &self.websocket_sessions,
+            &mut request,
+            &self.handoff,
+            attempt_key.as_ref(),
+        )
+        .await?;
         let auth_carrier = request.auth_carrier;
         let result = match request.kind {
             V3Transport13ResponsesRequestKind::Http {
@@ -901,8 +835,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 provider_headers,
                 timeout,
                 sse_first_frame_timeout_ms,
-                initial_concurrency_budget: _,
-                concurrency_acquire_timeout_ms: _,
                 cancellation,
                 compatibility_profile,
             } => {
@@ -931,7 +863,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                 auth,
                 stream_intent,
                 event,
-                initial_concurrency_budget: _,
                 cancellation,
                 compatibility_profile,
             } => {
@@ -966,17 +897,7 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 reason,
                             })?;
                     }
-                    let permit_guard = if was_probe {
-                        permit_guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted)
-                    } else {
-                        permit_guard
-                    };
-                    return Ok(hold_sse_lease(
-                        raw,
-                        permit_guard,
-                        self.handoff.clone(),
-                        attempt_key,
-                    ));
+                    return Ok(hold_sse_attempt(raw, self.handoff.clone(), attempt_key));
                 } else {
                     if let Some(attempt_key) = &attempt_key {
                         self.handoff
@@ -987,14 +908,6 @@ impl ResponsesTransport for ProviderResponsesTransport {
                                 lane: V3ProviderInternalTransportLane::Response,
                                 reason,
                             })?;
-                    }
-                    if was_probe {
-                        drop(
-                            permit_guard
-                                .with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted),
-                        );
-                    } else {
-                        drop(permit_guard);
                     }
                 }
                 Ok(raw)
@@ -1010,19 +923,17 @@ impl ResponsesTransport for ProviderResponsesTransport {
                             reason,
                         })?;
                 }
-                // HTTP 429 is an ordinary typed provider failure: the lease is
-                // released like any other attempt and no capacity-specific
-                // admission state is derived from the upstream status here.
-                drop(permit_guard);
+                // HTTP 429 is an ordinary typed provider failure: nothing about
+                // the upstream status becomes capacity state or a request-path
+                // admission decision.
                 Err(error)
             }
         }
     }
 }
 
-fn hold_sse_lease(
+fn hold_sse_attempt(
     raw: V3ProviderResp14Raw,
-    guard: V3AdaptiveConcurrencyPermitGuard,
     handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker,
     attempt_key: Option<crate::transport_handoff::V3ProviderTransportAttemptKey>,
 ) -> V3ProviderResp14Raw {
@@ -1033,8 +944,8 @@ fn hold_sse_lease(
         unreachable!("SSE lease must only wrap an SSE response");
     };
     let stream = Box::pin(stream::unfold(
-        (stream, Some(guard), 0_u64, false),
-        move |(mut stream, mut guard, provider_sequence, terminal)| {
+        (stream, 0_u64, false),
+        move |(mut stream, provider_sequence, terminal)| {
             let handoff = handoff.clone();
             let attempt_key = attempt_key.clone();
             async move {
@@ -1052,7 +963,7 @@ fn hold_sse_lease(
                         match observed {
                             Ok(true) => Some((
                                 Ok(bytes),
-                                (stream, guard, provider_sequence.saturating_add(1), false),
+                                (stream, provider_sequence.saturating_add(1), false),
                             )),
                             Ok(false) | Err(_) => {
                                 if let Some(attempt_key) = &attempt_key {
@@ -1061,7 +972,6 @@ fn hold_sse_lease(
                                         V3ProviderTransportAttemptState::Failed,
                                     );
                                 }
-                                drop(guard.take());
                                 Some((
                                     Err(V3ProviderError::InternalTransport {
                                         request_id: attempt_key
@@ -1078,7 +988,7 @@ fn hold_sse_lease(
                                             provider_sequence
                                         ),
                                     }),
-                                    (stream, guard, provider_sequence, true),
+                                    (stream, provider_sequence, true),
                                 ))
                             }
                         }
@@ -1088,8 +998,7 @@ fn hold_sse_lease(
                             let _ = handoff
                                 .transition(attempt_key, V3ProviderTransportAttemptState::Failed);
                         }
-                        drop(guard.take());
-                        Some((Err(error), (stream, guard, provider_sequence, true)))
+                        Some((Err(error), (stream, provider_sequence, true)))
                     }
                     None => {
                         if let Some(attempt_key) = &attempt_key {

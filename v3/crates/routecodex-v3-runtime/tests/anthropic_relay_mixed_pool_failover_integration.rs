@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_provider_responses::{
-    adaptive_concurrency::V3AdaptiveConcurrencyController, ResponsesTransport, V3ProviderError,
+    ResponsesTransport, V3ProviderError,
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{execute_v3_anthropic_relay_runtime, V3AnthropicRelayRuntimeInput};
@@ -200,7 +200,6 @@ type = "openai_chat"
 base_url = "http://controlled.invalid/kdns"
 default_model = "gpt-5.5"
 auth = {{ type = "api_key", entries = [{{ alias = "kdns", env = "KDNS_TEST_KEY" }}, {{ alias = "concurrency-test", env = "KDNS_CONCURRENCY_TEST_KEY" }}] }}
-concurrency = {{ max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }}
 
 [providers.kdns.models."gpt-5.5"]
 wire_name = "gpt-5.5"
@@ -303,112 +302,6 @@ async fn anthropic_relay_mixed_openai_chat_pool_is_served_without_abort() {
         json!({"input_tokens":7,"output_tokens":3})
     );
     assert_eq!(output.client_response["model"], json!("gpt-5.5"));
-}
-
-#[tokio::test]
-async fn anthropic_relay_provider_concurrency_full_switches_without_waiting() {
-    let server_id = "mixed_pool_concurrency_failover";
-    let mut manifest = manifest(
-        server_id,
-        r#"  { kind = "provider_model", provider = "kdns", model = "gpt-5.5", key = "concurrency-test", priority = 20 },
-  { kind = "provider_model", provider = "idle", model = "gpt-5.5", key = "idle", priority = 10 },"#,
-    );
-    manifest
-        .providers
-        .get_mut("kdns")
-        .unwrap()
-        .concurrency
-        .as_mut()
-        .unwrap()
-        .max_in_flight = 1;
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: "default".into(),
-            model_id: "gpt-5.5".into(),
-        };
-    controller
-        .ensure_initial_budget(
-            "kdns:concurrency-test",
-            manifest.providers["kdns"]
-                .concurrency
-                .as_ref()
-                .unwrap()
-                .max_in_flight,
-        )
-        .expect("test provider budget must be valid");
-    struct HeldCapacity {
-        controller: V3AdaptiveConcurrencyController,
-        lease: Option<
-            routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyLease,
-        >,
-    }
-    impl Drop for HeldCapacity {
-        fn drop(&mut self) {
-            if let Some(lease) = self.lease.take() {
-                self.controller
-                    .release(lease.into_permit())
-                    .expect("release held test capacity");
-            }
-        }
-    }
-    let held = HeldCapacity {
-        controller: controller.clone(),
-        lease: Some(
-            controller
-                .try_acquire_business_scoped("kdns:concurrency-test", Some(&scope))
-                .expect("test provider capacity must be saturated before request"),
-        ),
-    };
-    let full = controller
-        .snapshot_for_scope("kdns:concurrency-test", Some(&scope))
-        .unwrap();
-    assert_eq!(
-        full.hard_max_in_flight, 1,
-        "this fixture must fill the declared hard ceiling"
-    );
-    assert_eq!(full.in_flight, 1);
-    assert_eq!(full.total_provider_in_flight, 1);
-    assert_eq!(
-        full.rate_limit_samples, 0,
-        "capacity is held by a real lease, not synthetic429"
-    );
-    assert!(controller
-        .try_acquire_business_scoped("kdns:concurrency-test", Some(&scope))
-        .is_none());
-    let transport = JsonChatCompletionTransport::new();
-
-    let output = execute_v3_anthropic_relay_runtime(
-        &manifest,
-        mixed_pool_input(server_id, "req-anthropic-mixed-pool", false),
-        &transport,
-    )
-    .await;
-    drop(held);
-    let released = controller
-        .snapshot_for_scope("kdns:concurrency-test", Some(&scope))
-        .unwrap();
-    assert_eq!(released.in_flight, 0);
-    assert_eq!(released.total_provider_in_flight, 0);
-    let available = controller
-        .try_acquire_business_scoped("kdns:concurrency-test", Some(&scope))
-        .expect("capacity must be reusable after release");
-    controller
-        .release(available.into_permit())
-        .expect("release reacquired capacity");
-    let output = output.expect("the available provider must be selected immediately");
-
-    assert_eq!(output.status, 200, "{output:?}");
-    assert_eq!(transport.provider_ids(), vec!["idle"]);
-    assert_eq!(
-        transport.url().as_deref(),
-        Some("http://controlled.invalid/idle/chat/completions")
-    );
-    assert_eq!(
-        output.client_response["content"][0]["text"],
-        json!("RCC_V3_MIXED_POOL_OK")
-    );
-    assert_eq!(output.client_response["stop_reason"], json!("end_turn"));
 }
 
 #[tokio::test]

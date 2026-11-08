@@ -311,7 +311,6 @@ base_url = "{upstream_base}/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_ROLLBACK_KEY" }}, {{ alias = "spare", env = "FA22072_ROLLBACK_SPARE" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 [providers.{provider}.models.test]
 wire_name = "test"
 capabilities = ["text"]

@@ -2,7 +2,6 @@ use super::*;
 use async_trait::async_trait;
 use routecodex_v3_config::*;
 use routecodex_v3_provider_responses::{
-    adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
     V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureCooldownScope,
     V3ProviderFailurePolicy, V3ProviderHttpFailure, V3ProviderResp14Raw, V3ProviderResponseHeader,
     V3Transport13ResponsesHttpRequest,
@@ -323,40 +322,21 @@ fn test_protocol_plan(
 fn provider_concurrency_two_provider_manifest(
     first_provider: &str,
     second_provider: &str,
-    acquire_timeout_ms: u64,
 ) -> V3Config05ManifestPublished {
     provider_concurrency_two_provider_manifest_with_modes(
         first_provider,
         second_provider,
-        acquire_timeout_ms,
         r#""direct""#,
-    )
-}
-
-fn provider_concurrency_two_provider_manifest_with_max_in_flight(
-    first_provider: &str,
-    second_provider: &str,
-    acquire_timeout_ms: u64,
-    max_in_flight: u32,
-) -> V3Config05ManifestPublished {
-    provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
-        first_provider,
-        second_provider,
-        acquire_timeout_ms,
-        r#""direct""#,
-        max_in_flight,
     )
 }
 
 fn provider_concurrency_two_provider_relay_manifest(
     first_provider: &str,
     second_provider: &str,
-    acquire_timeout_ms: u64,
 ) -> V3Config05ManifestPublished {
     provider_concurrency_two_provider_manifest_with_modes(
         first_provider,
         second_provider,
-        acquire_timeout_ms,
         r#""relay""#,
     )
 }
@@ -364,24 +344,7 @@ fn provider_concurrency_two_provider_relay_manifest(
 fn provider_concurrency_two_provider_manifest_with_modes(
     first_provider: &str,
     second_provider: &str,
-    acquire_timeout_ms: u64,
     allowed_modes: &str,
-) -> V3Config05ManifestPublished {
-    provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
-        first_provider,
-        second_provider,
-        acquire_timeout_ms,
-        allowed_modes,
-        1,
-    )
-}
-
-fn provider_concurrency_two_provider_manifest_with_modes_and_max_in_flight(
-    first_provider: &str,
-    second_provider: &str,
-    acquire_timeout_ms: u64,
-    allowed_modes: &str,
-    max_in_flight: u32,
 ) -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(&format!(
         r#"
@@ -401,7 +364,6 @@ type = "responses"
 base_url = "http://{first_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FIRST_KEY" }}] }}
-concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{first_provider}.models.test]
 wire_name = "wire-first"
 
@@ -410,7 +372,6 @@ type = "responses"
 base_url = "http://{second_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
-concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{second_provider}.models.test]
 wire_name = "wire-second"
 
@@ -435,7 +396,6 @@ fn provider_concurrency_three_provider_manifest(
     first_provider: &str,
     second_provider: &str,
     third_provider: &str,
-    acquire_timeout_ms: u64,
 ) -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(&format!(
         r#"
@@ -455,7 +415,6 @@ type = "responses"
 base_url = "http://{first_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FIRST_KEY" }}] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{first_provider}.models.test]
 wire_name = "wire-first"
 
@@ -464,7 +423,6 @@ type = "responses"
 base_url = "http://{second_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{second_provider}.models.test]
 wire_name = "wire-second"
 
@@ -473,7 +431,6 @@ type = "responses"
 base_url = "http://{third_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "THIRD_KEY" }}] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{third_provider}.models.test]
 wire_name = "wire-third"
 
@@ -497,21 +454,18 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
 
 fn provider_concurrency_two_key_manifest(
     provider: &str,
-    acquire_timeout_ms: u64,
 ) -> V3Config05ManifestPublished {
-    provider_concurrency_two_key_manifest_with_modes(provider, acquire_timeout_ms, r#""direct""#)
+    provider_concurrency_two_key_manifest_with_modes(provider, r#""direct""#)
 }
 
 fn provider_concurrency_two_key_relay_manifest(
     provider: &str,
-    acquire_timeout_ms: u64,
 ) -> V3Config05ManifestPublished {
-    provider_concurrency_two_key_manifest_with_modes(provider, acquire_timeout_ms, r#""relay""#)
+    provider_concurrency_two_key_manifest_with_modes(provider, r#""relay""#)
 }
 
 fn provider_concurrency_two_key_manifest_with_modes(
     provider: &str,
-    acquire_timeout_ms: u64,
     allowed_modes: &str,
 ) -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(&format!(
@@ -535,7 +489,6 @@ auth = {{ type = "api_key", entries = [
   {{ alias = "key1", env = "KEY_ONE" }},
   {{ alias = "key2", env = "KEY_TWO" }}
 ] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{provider}.models.test]
 wire_name = "wire-test"
 
@@ -559,7 +512,6 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
 fn provider_concurrency_two_key_then_other_provider_manifest(
     first_provider: &str,
     second_provider: &str,
-    acquire_timeout_ms: u64,
 ) -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(&format!(
         r#"
@@ -582,7 +534,6 @@ auth = {{ type = "api_key", entries = [
   {{ alias = "key1", env = "FIRST_KEY_ONE" }},
   {{ alias = "key2", env = "FIRST_KEY_TWO" }}
 ] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{first_provider}.models.test]
 wire_name = "wire-first"
 
@@ -591,7 +542,6 @@ type = "responses"
 base_url = "http://{second_provider}.invalid/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "SECOND_KEY" }}] }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = {acquire_timeout_ms}, stale_lease_ms = 300000 }}
 [providers.{second_provider}.models.test]
 wire_name = "wire-second"
 
@@ -613,163 +563,32 @@ targets = [{{ kind = "forwarder", id = "responses", priority = 1 }}]
     compile_v3_config_05_manifest(authoring).unwrap()
 }
 
-fn saturate_capacity_key(provider_key: &str, declared_max: u32) -> Vec<V3AdaptiveConcurrencyLease> {
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let scope = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-        interface_id: "default".into(), model_id: "test".into(),
-    };
-    controller.ensure_initial_budget(provider_key, declared_max).unwrap();
-    let held: Vec<_> = (0..declared_max).map(|_| controller
-        .try_acquire_business_scoped(provider_key, Some(&scope))
-        .expect("real scoped business leases fill the declared hard ceiling")).collect();
-    assert!(
-        controller.try_acquire_business_scoped(provider_key, Some(&scope)).is_none(),
-        "the declared shared hard ceiling must reject another business admission"
-    );
-    assert_eq!(controller.snapshot_for_scope(provider_key, Some(&scope)).unwrap().total_provider_in_flight, declared_max);
-    held
-}
-
-fn release_capacity_leases(leases: Vec<V3AdaptiveConcurrencyLease>) {
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    for lease in leases {
-        controller.release(lease.into_permit()).unwrap();
-    }
-}
-
-fn provider_concurrency_relay_input(request_id: &str) -> V3ResponsesRelayRuntimeInput {
-    V3ResponsesRelayRuntimeInput {
-        server_id: "test".to_string(),
-        failure_session_scope: test_failure_session_scope("default"),
-        request_id: request_id.to_string(),
-        payload: json!({"model":"client-model","input":"hello"}),
-    }
-}
-
-#[derive(Default)]
-struct ProviderConcurrencyRecordingTransport {
-    sends: Arc<Mutex<Vec<String>>>,
-}
-
-struct ProviderActionRecoveryConcurrencyTransport {
-    first_provider: String,
-    first_send: tokio::sync::Notify,
+struct PostTransportHttp400Transport {
     sends: Mutex<Vec<String>>,
 }
 
-#[async_trait]
-impl ResponsesTransport for ProviderActionRecoveryConcurrencyTransport {
-    async fn send(
-        &self,
-        request: V3Transport13ResponsesHttpRequest,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        self.sends
-            .lock()
-            .unwrap()
-            .push(request.provider_key().to_string());
-        if request.provider_id() == self.first_provider {
-            self.first_send.notify_one();
-            return Err(V3ProviderError::HttpStatus {
-                response: Box::new(V3ProviderHttpFailure {
-                    request_id: request.request_id().to_string(),
-                    provider_id: request.provider_id().to_string(),
-                    headers: vec![V3ProviderResponseHeader {
-                        name: "content-type".to_string(),
-                        value: b"application/json".to_vec(),
-                    }],
-                    status: 429,
-                    body: br#"{"error":{"message":"rate limited"}}"#.to_vec(),
-                    body_read_failure: None,
-                }),
-            });
-        }
-        Ok(V3ProviderResp14Raw::from_json(
-            request.request_id(),
-            request.provider_id(),
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            br#"{"id":"resp_concurrency_recovery","object":"response","status":"completed","output":[{"id":"msg_concurrency_recovery","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
-        ))
-    }
-}
-
-#[async_trait]
-impl ResponsesTransport for ProviderConcurrencyRecordingTransport {
-    async fn send(
-        &self,
-        request: V3Transport13ResponsesHttpRequest,
-    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        self.sends.lock().unwrap().push(format!(
-            "{}:{}",
-            request.provider_key(),
-            request.body()["model"]
-                .as_str()
-                .unwrap_or("<missing-model>")
-        ));
-        Ok(V3ProviderResp14Raw::from_json(
-            request.request_id(),
-            request.provider_id(),
-            200,
-            vec![V3ProviderResponseHeader {
-                name: "content-type".to_string(),
-                value: b"application/json".to_vec(),
-            }],
-            br#"{"id":"resp_capacity","object":"response","status":"completed","output":[{"id":"msg_capacity","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#.to_vec(),
-        ))
-    }
-}
-
-struct PostTransportConcurrencyTransport {
-    busy_providers: BTreeSet<String>,
-    sends: Mutex<Vec<String>>,
-    busy_resends: Mutex<BTreeSet<String>>,
-}
-
-impl PostTransportConcurrencyTransport {
-    fn new(busy_providers: &[&str]) -> Self {
+impl PostTransportHttp400Transport {
+    fn new() -> Self {
         Self {
-            busy_providers: busy_providers.iter().map(|id| (*id).to_string()).collect(),
             sends: Mutex::new(Vec::new()),
-            busy_resends: Mutex::new(BTreeSet::new()),
         }
     }
 }
 
 #[async_trait]
-impl ResponsesTransport for PostTransportConcurrencyTransport {
+impl ResponsesTransport for PostTransportHttp400Transport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
         let provider_id = request.provider_id().to_string();
-        if self.busy_providers.contains(&provider_id) {
-            // 2026-11-07 ruling ①: the retired lane waited about one second for
-            // capacity and then retried the same identity. v31 never waits for
-            // capacity, so a capacity-busy identity may be re-sent only when the
-            // request carries the single/last-eligible-candidate capacity bypass.
-            let mut busy_resends = self.busy_resends.lock().unwrap();
-            let already_sent = !busy_resends.insert(provider_id.clone());
-            assert!(
-                !already_sent || request.capacity_admission_bypass(),
-                "a capacity-busy identity may be re-sent only on the request's capacity bypass"
-            );
-        }
         {
             let mut calls = self.sends.lock().unwrap();
             calls.push(provider_id.clone());
             assert!(
                 calls.len() <= 32,
-                "capacity rejection must back off, not spin"
+                "the request must not re-send the same identity"
             );
-        }
-        if self.busy_providers.contains(&provider_id) {
-            return Err(V3ProviderError::ConcurrencyBusy {
-                request_id: request.request_id().to_string(),
-                provider_id,
-            });
         }
         Err(V3ProviderError::HttpStatus {
             response: Box::new(V3ProviderHttpFailure {
@@ -2734,11 +2553,11 @@ async fn responses_direct_debug_entrypoint_retries_post_frame_failure_before_fro
 async fn post_transport_real_http_400_does_not_retry_same_identity() {
     let first = "conc_post_busy_first";
     let second = "conc_post_busy_second";
-    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
+    let mut manifest = provider_concurrency_two_provider_manifest(first, second);
     manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
         .attempt_store.residence_timeout_ms = 1500;
     let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = PostTransportConcurrencyTransport::new(&[]);
+    let transport = PostTransportHttp400Transport::new();
     let raw = test_responses_raw(
         "default",
         "req-post-busy",
@@ -2769,265 +2588,6 @@ async fn post_transport_real_http_400_does_not_retry_same_identity() {
         matches!(output.terminal_disposition,
             Some(V3ProviderTerminalDisposition::LastCandidateExternalHttp(ref witness)) if witness.status() == 400),
         "the last candidate's real provider HTTP 400 must stay in the typed terminal witness: {output:?}"
-    );
-}
-
-#[tokio::test]
-async fn provider_concurrency_post_transport_mixed_exhaustion_stays_generic() {
-    let first = "conc_post_mixed_first";
-    let second = "conc_post_mixed_second";
-    let mut manifest = provider_concurrency_two_provider_manifest(first, second, 5_000);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 1500;
-    let provider_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let transport = PostTransportConcurrencyTransport::new(&[]);
-    provider_health
-        .store()
-        .record_provider_cooldown_failure(
-            second,
-            Some("key"),
-            Some("test"),
-            "mixed non-busy exclusion",
-            0,
-            60_000,
-        )
-        .expect("mixed cooldown setup");
-    let raw = test_responses_raw(
-        "default",
-        "req-post-mixed",
-        "exec-post-mixed",
-        json!({"model":"client-model","input":"hello"}),
-    );
-
-    let output = execute_v3_responses_direct_runtime_kernel_core(
-        V3ResponsesDirectRuntimeCoreState::new()
-            .with_provider_health(provider_health.clone())
-            .with_now_epoch_ms(10),
-        &manifest,
-        raw,
-        crate::register_responses_direct_hooks(),
-        &transport,
-    )
-    .await;
-
-    assert_eq!(output.client_payload.status, 502, "{output:?}");
-    assert!(
-        matches!(output.terminal_disposition,
-            Some(V3ProviderTerminalDisposition::LastCandidateExternalHttp(ref witness))
-                if witness.status() == 400
-                    && String::from_utf8_lossy(witness.body()).contains("mixed provider failure")),
-        "the last candidate's real mixed provider HTTP 400 stays in the typed terminal witness: {output:?}"
-    );
-    let calls = transport.sends.lock().unwrap();
-    // v31: once the visible pool is empty, the cooled candidate is promoted by
-    // the target's cooldown fallback and becomes the request's last eligible
-    // candidate, so it is attempted exactly once. No identity is retried.
-    assert!(
-        calls.as_slice() == [first.to_string(), second.to_string()],
-        "the failed first identity is sent once, then the promoted cooled candidate exactly once: {calls:?}"
-    );
-    drop(calls);
-}
-
-
-
-
-
-
-#[tokio::test]
-async fn held_business_capacity_does_not_wait_for_relay_request_residence() {
-    let first = "conc_relay_all_busy_timeout_first";
-    let second = "conc_relay_all_busy_timeout_second";
-    let held_first = saturate_capacity_key(&format!("{first}:key"), 1);
-    let held_second = saturate_capacity_key(&format!("{second}:key"), 1);
-    let mut manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 300;
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let transport = ProviderConcurrencyRecordingTransport::default();
-
-    let output = execute_v3_responses_relay_runtime_with_transport_health(
-        &manifest,
-        provider_concurrency_relay_input("req-conc-relay-timeout"),
-        &transport,
-        &provider_health,
-    )
-    .await;
-    release_capacity_leases(held_first);
-    release_capacity_leases(held_second);
-    let output = output.expect("held business capacity must not wait for the relay request residence");
-    assert_eq!(output.status, 200, "{output:?}");
-    assert_eq!(
-        transport.sends.lock().unwrap().as_slice(),
-        &[format!("{first}:key:wire-first")],
-        "the relay captured provider is sent even while every business capacity ceiling is held"
-    );
-    for provider in [first, second] {
-        assert!(
-            provider_health
-                .runtime_health()
-                .availability(provider, Some("key"), Some("test"), 40)
-                .available,
-            "held relay business capacity must stay independent of provider health for {provider}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn provider_concurrency_relay_post_transport_busy_exhausts_with_typed_source() {
-    let first = "conc_relay_post_busy_first";
-    let second = "conc_relay_post_busy_second";
-    let mut manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 1500;
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let transport = PostTransportConcurrencyTransport::new(&[first, second]);
-
-    let output = execute_v3_responses_relay_runtime_with_transport_health(
-        &manifest,
-        provider_concurrency_relay_input("req-conc-relay-post-busy"),
-        &transport,
-        &provider_health,
-    )
-    .await
-    .expect("Relay must project typed pool exhaustion");
-
-    assert_eq!(output.status, 502, "{output:?}");
-    assert_eq!(
-        transport
-            .sends
-            .lock()
-            .unwrap()
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>(),
-        BTreeSet::from([first.to_string(), second.to_string()]),
-        "each capacity-busy relay candidate must be attempted exactly once"
-    );
-    for provider in [first, second] {
-        assert!(
-            provider_health
-                .runtime_health()
-                .availability(provider, Some("key"), Some("test"), 40)
-                .available,
-            "relay post-transport capacity busy must stay health-neutral for {provider}"
-        );
-    }
-    let source = output
-        .diagnostic_source
-        .as_ref()
-        .expect("relay post-transport all-busy exhaustion must retain its typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-        "the unified provider-failure path carries the capacity category code"
-    );
-    assert_eq!(source.code, "provider_concurrency_busy");
-}
-
-#[tokio::test]
-async fn provider_concurrency_relay_post_transport_mixed_exhaustion_stays_generic() {
-    let first = "conc_relay_post_mixed_first";
-    let second = "conc_relay_post_mixed_second";
-    let mut manifest = provider_concurrency_two_provider_relay_manifest(first, second, 5_000);
-    manifest.servers.get_mut("test").unwrap().execution.as_mut().unwrap()
-        .attempt_store.residence_timeout_ms = 1500;
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let transport = PostTransportConcurrencyTransport::new(&[first]);
-    provider_health
-        .runtime_health()
-        .store()
-        .record_provider_cooldown_failure(
-            second,
-            Some("key"),
-            Some("test"),
-            "mixed non-busy relay exclusion",
-            0,
-            60_000,
-        )
-        .expect("mixed relay cooldown setup");
-
-    let output = execute_v3_responses_relay_runtime_with_transport_health(
-        &manifest,
-        provider_concurrency_relay_input("req-conc-relay-post-mixed"),
-        &transport,
-        &provider_health,
-    )
-    .await
-    .expect("Relay must project mixed exhaustion");
-
-    assert_eq!(output.status, 502, "{output:?}");
-    let calls = transport.sends.lock().unwrap();
-    // 2026-11-07 ruling ①: the capacity-busy identity is skipped (not failed),
-    // the cooled candidate is promoted by the target's cooldown fallback and
-    // answers its real typed failure, and only then is the still-busy identity
-    // restored once as the request's last eligible candidate and re-sent over
-    // the occupied budget with the capacity bypass. No other resend happens,
-    // and the fixture send guard proves that resend carries the bypass.
-    assert_eq!(
-        calls.as_slice(),
-        &[first.to_string(), second.to_string(), first.to_string()],
-        "busy identity skipped, promoted cooled candidate attempted, then the busy identity re-sent once on the capacity bypass: {calls:?}"
-    );
-    drop(calls);
-    assert!(
-        provider_health
-            .runtime_health()
-            .availability(first, Some("key"), Some("test"), 40)
-            .available,
-        "the relay capacity-busy candidate must stay health-neutral"
-    );
-    // The terminal is now the promoted cooled candidate's own typed failure: it
-    // is the request's last eligible candidate, so its real provider error is
-    // the typed source. The capacity-busy category of the earlier attempt stays
-    // in the typed Error chain instead of being projected to the client.
-    let source = output
-        .diagnostic_source
-        .as_ref()
-        .expect("relay mixed exhaustion must keep a typed source");
-    assert_eq!(
-        source.source_kind,
-        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
-    );
-    assert_eq!(
-        source.code, "provider_concurrency_busy",
-        "the terminal is the exempted last-eligible attempt's real capacity category"
-    );
-    let events = &output
-        .observability
-        .as_ref()
-        .expect("relay mixed exhaustion must keep provider failure observations")
-        .provider_failure_events;
-    assert_eq!(
-        events.len(),
-        3,
-        "one observation per attempt: capacity skip, real failure, exempted last-candidate attempt"
-    );
-    assert_eq!(
-        events[0].external_error_code.as_deref(),
-        Some("provider_concurrency_busy"),
-        "the busy identity's capacity category is preserved through the unified path"
-    );
-    assert_eq!(
-        events[1].provider_id, second,
-        "the promoted cooled candidate is the second, last-eligible attempt"
-    );
-    assert_eq!(
-        events[1].external_error_code.as_deref(),
-        Some("invalid_request_error"),
-        "the promoted cooled candidate keeps its own real provider error category"
-    );
-    assert_eq!(
-        events[2].provider_id, first,
-        "the exempted send is the busy identity again, as the last eligible candidate"
-    );
-    assert_eq!(
-        events[2].external_error_code.as_deref(),
-        Some("provider_concurrency_busy"),
-        "the exempted last-candidate attempt keeps its real capacity category"
     );
 }
 

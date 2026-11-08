@@ -52,11 +52,6 @@ compatibilityProfile = "chat:test"
 type = "apikey"
 entries = [{{ alias = "key1", tokenFile = "{}" }}]
 
-[provider.concurrency]
-maxInFlight = 3
-acquireTimeoutMs = 60000
-staleLeaseMs = 300000
-
 [provider.models."{model}"]
 wireName = "{model}"
 aliases = ["{model}-alias"]

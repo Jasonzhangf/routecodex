@@ -215,8 +215,6 @@ fn target(base_url: &str, declaration: V3OAuthDeclaration) -> V3ResponsesProvide
         provider_request_cleanup: Default::default(),
         request_timeout_ms: 300_000,
         sse_first_frame_timeout_ms: None,
-        initial_concurrency_budget: 8,
-        concurrency_acquire_timeout_ms: 60_000,
     }
 }
 

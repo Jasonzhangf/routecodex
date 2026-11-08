@@ -52,13 +52,6 @@ pub struct V3ProviderQuotaState {
     pub reset_at_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct V3ProviderConcurrencyState {
-    pub provider_id: String,
-    pub in_flight: u32,
-    pub limit: u32,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum V3ProviderFailureCooldownScope {
     Session,
@@ -321,7 +314,6 @@ pub(super) struct V3ProviderHealthState {
         BTreeMap<V3ProviderCooldownProbeKey, crate::key_health::V3ProbeAcquisitionId>,
     adaptive_history: BTreeMap<V3ProviderCooldownProbeKey, V3ProviderAdaptiveHistory>,
     quotas: BTreeMap<String, V3ProviderQuotaState>,
-    concurrency: BTreeMap<String, V3ProviderConcurrencyState>,
 }
 
 #[derive(Debug, Clone)]
@@ -1915,26 +1907,6 @@ impl V3ProviderHealthStore {
         Ok(quota)
     }
 
-    pub(crate) fn update_concurrency_state(
-        &self,
-        provider_id: impl Into<String>,
-        in_flight: u32,
-        limit: u32,
-    ) -> Result<V3ProviderConcurrencyState, V3ProviderHealthError> {
-        let provider_id = provider_id.into();
-        let concurrency = V3ProviderConcurrencyState {
-            provider_id: provider_id.clone(),
-            in_flight,
-            limit,
-        };
-        self.state
-            .write()
-            .map_err(|error| V3ProviderHealthError::Poisoned(error.to_string()))?
-            .concurrency
-            .insert(provider_id, concurrency.clone());
-        Ok(concurrency)
-    }
-
     pub fn availability_for_session(
         &self,
         failure_session_scope: &V3ProviderFailureSessionScope,
@@ -2318,20 +2290,6 @@ pub(crate) fn explain_provider_health_reasons(
                     .is_none_or(|reset_at_ms| reset_at_ms > now_ms)
         })
         .map(|quota| format!("quota:{}:exhausted", quota.scope_label))
-        .chain(
-            state
-                .concurrency
-                .get(provider_id)
-                .filter(|concurrency| {
-                    concurrency.limit > 0 && concurrency.in_flight >= concurrency.limit
-                })
-                .map(|concurrency| {
-                    format!(
-                        "concurrency:provider_instance:{}:{}/{}",
-                        provider_id, concurrency.in_flight, concurrency.limit
-                    )
-                }),
-        )
         .collect()
 }
 
@@ -2366,15 +2324,6 @@ fn global_availability_projection(
             })
             .map(|key| format!("quota:{key}")),
     );
-    if state
-        .concurrency
-        .get(provider_id)
-        .is_some_and(|concurrency| {
-            concurrency.limit > 0 && concurrency.in_flight >= concurrency.limit
-        })
-    {
-        blocked_scopes.push(format!("concurrency:provider_instance:{provider_id}"));
-    }
     if key_blocks_availability(
         state,
         &provider_cooldown_probe_key_for_interface(provider_id, interface_id, auth_alias, model_id),

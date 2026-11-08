@@ -3207,7 +3207,6 @@ type = "responses"
 base_url = "http://limited.invalid/v1"
 default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.limited.models."gpt-5.5"]
 wire_name = "gpt-5.5"
 supports_streaming = true
@@ -3219,7 +3218,6 @@ type = "responses"
 base_url = "http://minimax.invalid/v1"
 default_model = "MiniMax-M3"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.minimax.models."MiniMax-M3"]
 wire_name = "MiniMax-M3"
 supports_streaming = true
@@ -3267,7 +3265,6 @@ type = "anthropic"
 base_url = "http://limited.invalid/v1"
 default_model = "claude-fable-5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.limited.models."claude-fable-5"]
 wire_name = "claude-fable-5"
 supports_streaming = true
@@ -3279,7 +3276,6 @@ type = "responses"
 base_url = "http://minimax.invalid/v1"
 default_model = "MiniMax-M3"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.minimax.models."MiniMax-M3"]
 wire_name = "MiniMax-M3"
 supports_streaming = true
@@ -3387,7 +3383,6 @@ type = "responses"
 base_url = "http://limited.invalid/v1"
 default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.limited.models."gpt-5.5"]
 wire_name = "gpt-5.5"
 supports_streaming = true
@@ -3460,7 +3455,6 @@ responses = { process = "chat", streaming = "client" }
 base_url = "http://controlled.invalid/v1"
 default_model = "responses-wire-model"
 auth = { type = "api_key", entries = [{ alias = "controlled", env = "CONTROLLED_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.controlled.models.responses-wire-model]
 wire_name = "responses-wire-model"
 supports_streaming = true
