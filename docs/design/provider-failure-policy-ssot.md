@@ -16,7 +16,6 @@
 - `request-executor`
 - `provider-error-classifier`
 - `provider-error-reporter`
-- `provider-traffic-governor`
 - `Virtual Router policy` 消费链
 
 不适用范围：
@@ -108,9 +107,8 @@ provider transport / converter / reporter 不得再根据自己看到的局部�
 4. **等待/阻塞分裂**
 - recoverable backoff gate
 - provider transport backoff gate
-- provider traffic governor concurrency wait
 
-其中流量并发闸门可独立存在，但“错误后的阻塞等待策略”必须统一进入 error action queue，而不是多个调用点各自算。
+错误后的阻塞等待策略统一进入 error action queue，不由多个调用点各自计算；并发/准入不再构成一个独立闸门。
 
 ## 目标架构
 

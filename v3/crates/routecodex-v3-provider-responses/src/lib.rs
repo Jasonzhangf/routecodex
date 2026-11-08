@@ -1,4 +1,3 @@
-pub mod adaptive_concurrency;
 mod error;
 pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]

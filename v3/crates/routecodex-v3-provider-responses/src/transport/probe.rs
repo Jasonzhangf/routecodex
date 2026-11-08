@@ -1,12 +1,5 @@
 use super::*;
 
-pub(super) fn is_rate_limited(error: &V3ProviderError) -> bool {
-    matches!(
-        error,
-        V3ProviderError::HttpStatus { response } if response.status == 429
-    )
-}
-
 impl ProviderResponsesTransport {
     /// A health probe succeeds at HTTP 2xx headers; business parsing stays in send_http.
     pub async fn send_probe(
@@ -21,23 +14,11 @@ impl ProviderResponsesTransport {
                 reason: "HTTP health probe requires HTTP transport".into(),
             });
         }
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let provider_key = request.provider_key();
-        controller
-            .ensure_initial_budget(&provider_key, request.initial_concurrency_budget())
-            .map_err(|reason| V3ProviderError::InternalTransport {
-                request_id: request.request_id().into(),
-                provider_id: request.provider_id().into(),
-                lane: V3ProviderInternalTransportLane::Request,
-                reason,
-            })?;
-        let (guard, was_probe, _) = websocket::acquire_admission_and_connection_slot(
+        let _ = websocket::acquire_connection_slot(
             &self.websocket_sessions,
             &mut request,
             &self.handoff,
             None,
-            controller,
-            provider_key,
         )
         .await?;
         let V3Transport13ResponsesRequestKind::Http {
@@ -94,13 +75,6 @@ impl ProviderResponsesTransport {
             })
         }
         .await;
-        if was_probe && result.is_ok() {
-            drop(guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted));
-        } else if was_probe && result.as_ref().err().is_some_and(is_rate_limited) {
-            drop(guard.with_probe_result(V3AdaptiveConcurrencyProbeResult::RateLimited));
-        } else {
-            drop(guard);
-        }
         result
     }
 }

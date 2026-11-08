@@ -44,7 +44,7 @@ fn unpolled_probe_cancellation_releases_exact_generation() {
 }
 
 #[tokio::test]
-async fn managed_probe_shutdown_releases_health_transport_and_capacity() {
+async fn managed_probe_shutdown_releases_health_and_transport() {
     managed_probe_lifecycle_witness(None, false).await;
 }
 
@@ -166,9 +166,6 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
             .unwrap(),
         V3ProbeInitiation::AlreadyOwned
     ));
-    let capacity_key = format!("{provider_id}:key1");
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    assert_eq!(controller.snapshot(&capacity_key).unwrap().in_flight, 1);
     if newer_generation {
         health
             .store
@@ -200,9 +197,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
                     while owner.capacity.available_permits() != V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY {
                         tokio::task::yield_now().await;
                     }
-                } => {
-                    assert_eq!(controller.snapshot(&capacity_key).unwrap().in_flight, 0);
-                }
+                } => {}
                 accepted = listener.accept(), if newer_generation => {
                     let (mut replacement, _) = accepted.unwrap();
                     let mut headers = Vec::new();
@@ -224,9 +219,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
                     // A real successor proves the old health acquisition ended.
                     // One occupied slot/transport proves the old resources ended,
                     // even when the aggregate's all-free state was transient.
-                    while owner.capacity.available_permits() != V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY - 1
-                        || controller.snapshot(&capacity_key).unwrap().in_flight != 1
-                    {
+                    while owner.capacity.available_permits() != V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY - 1 {
                         tokio::task::yield_now().await;
                     }
                     let entries = health.store.cooldown_entries(now_ms + 1);
@@ -236,7 +229,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
                     assert_eq!(probe.until_ms, newer_probe.until_ms);
                     assert_eq!(probe.remaining_ms, newer_probe.remaining_ms);
                     assert_eq!(health.store.scheduling_projection_for_key(&provider_id, "key1", "gpt-test", 1, 1, now_ms + 1).unwrap().score_generation, newer_score_generation);
-                    eprintln!("completed old probe; authenticated successor owns one manager slot and one transport: {capacity_key}");
+                    eprintln!("completed old probe; authenticated successor owns one manager slot and one transport");
                     replacement_socket = Some(replacement);
                 }
             }
@@ -250,7 +243,6 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
         .expect("shutdown must not wait for held socket release")
         .unwrap();
     drop(replacement_socket);
-    assert_eq!(controller.snapshot(&capacity_key).unwrap().in_flight, 0);
     assert_eq!(
         owner.capacity.available_permits(),
         V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY

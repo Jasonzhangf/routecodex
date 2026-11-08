@@ -14,7 +14,6 @@ use routecodex_v3_error::{
     V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
-    adaptive_concurrency::{V3AdaptiveConcurrencyController, V3AdaptiveConcurrencyLease},
     V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
     V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
     V3ProviderFailureRecord, V3ProviderHealthListenerScope, V3ProviderHealthStore,
@@ -22,8 +21,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
-    V3StickySelectionScope, V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected,
-    V3TargetCandidate, V3TargetExhaustion, V3TargetInterpreter,
+    V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetCandidate,
+    V3TargetExhaustion, V3TargetInterpreter,
 };
 use routecodex_v3_virtual_router::{V3Router07OpaqueTargetHitOnce, V3VirtualRouter};
 use serde_json::Value;
@@ -56,7 +55,6 @@ const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
 pub enum V3ProviderHealthProbeFailure {
     Provider(V3ProviderError),
     Internal(String),
-    ConcurrencyBusy,
 }
 
 fn execute_provider_health_probe<F, Fut>(
@@ -503,37 +501,7 @@ pub(crate) fn select_v3_target_with_session_then_global(
         global: global_availability,
         excluded: request_local_excluded_candidates,
     };
-    // Sticky selection needs a session that outlives one request. A request
-    // without a client session header keeps its existing pool strategy.
-    let Some(sticky) = sticky_scope_for(failure_session_scope) else {
-        return target.select_available_with_health(
-            expanded,
-            &reader,
-            now_ms,
-            deterministic_sample,
-        );
-    };
-    target.select_available_with_health_sticky(
-        expanded,
-        &reader,
-        now_ms,
-        deterministic_sample,
-        &sticky,
-    )
-}
-
-/// Builds the sticky scope for a session that genuinely spans requests.
-fn sticky_scope_for(
-    failure_session_scope: &V3ProviderFailureSessionScope,
-) -> Option<V3StickySelectionScope> {
-    if !failure_session_scope.is_client_session() {
-        return None;
-    }
-    Some(V3StickySelectionScope::new(
-        failure_session_scope.server_id(),
-        failure_session_scope.routing_group(),
-        failure_session_scope.session_id(),
-    ))
+    target.select_available_with_health(expanded, &reader, now_ms, deterministic_sample)
 }
 
 struct V3SessionGlobalSchedulingReader<'health> {

@@ -292,21 +292,6 @@ fn upsert_provider_cooldown_probe(
     );
 }
 
-fn record_adaptive_failure(
-    state: &mut V3ProviderHealthState,
-    key: &V3ProviderCooldownProbeKey,
-) -> u64 {
-    let history = state.adaptive_history.entry(key.clone()).or_default();
-    history.attempts = history.attempts.saturating_add(1);
-    history.failures = history.failures.saturating_add(1);
-    adaptive_probe_interval_ms(
-        history.attempts,
-        history.failures,
-        history.recovery_ewma_ms,
-        history.probe_failure_count,
-    )
-}
-
 fn record_adaptive_success(
     state: &mut V3ProviderHealthState,
     key: &V3ProviderCooldownProbeKey,

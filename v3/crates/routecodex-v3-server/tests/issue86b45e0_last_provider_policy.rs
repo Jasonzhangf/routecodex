@@ -140,6 +140,51 @@ targets = {targets}
             tasks: vec![a_task, b_task],
         }
     }
+    async fn start_single_healthy_with_concurrency(max_in_flight: u32) -> Self {
+        let (a_port, a, a_task) = peer(false, "BUSINESS_A").await;
+        std::env::set_var("I86_KEY", "isolated-test-key");
+        let port = test_ports::free_port();
+        let source = format!(
+            r#"
+version = 3
+{declaration}
+[servers.policy]
+bind = "127.0.0.1"
+port = {port}
+routing_group = "policy"
+endpoints = ["responses", "anthropic"]
+{execution}
+[providers.a]
+type = "responses"
+base_url = "http://127.0.0.1:{a_port}/v1"
+default_model = "wire-a"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "I86_KEY" }}] }}
+concurrency = {{ max_in_flight = {max_in_flight}, acquire_timeout_ms = 1500, stale_lease_ms = 120000 }}
+[providers.a.models.wire-a]
+wire_name = "wire-a"
+capabilities = ["text", "tools"]
+[route_groups.policy.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "provider_model", provider = "a", model = "wire-a", key = "key", priority = 10 }}]
+"#,
+            declaration = hub_v1_fixture::hub_v1_test_declaration(),
+            execution = hub_v1_fixture::hub_v1_server_execution("policy")
+        );
+        let manifest =
+            compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        Self {
+            base: format!("http://{}", handle.listeners[0].addr),
+            handle,
+            a,
+            b: Arc::new(Upstream {
+                calls: AtomicUsize::new(0),
+                fail: false,
+                label: "unused",
+            }),
+            tasks: vec![a_task],
+        }
+    }
     async fn request(&self) -> Result<String, reqwest::Error> {
         self.request_stream(true).await
     }
@@ -331,5 +376,52 @@ async fn i86_relay_switch_and_last_terminal() {
     assert!(
         pool["entries"].as_array().unwrap().is_empty(),
         "Relay last candidate cannot cool: {pool}"
+    );
+}
+
+#[tokio::test]
+async fn i86_single_provider_concurrency_lease_does_not_block() {
+    let _home = LOCK.lock().await;
+    let entry = Entry::start_single_healthy_with_concurrency(1).await;
+    let base = entry.base.clone();
+    let started = std::time::Instant::now();
+    let mut requests = Vec::new();
+    for _ in 0..3 {
+        let base = base.clone();
+        requests.push(tokio::spawn(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(12))
+                .build()
+                .unwrap();
+            client
+                .post(format!("{}/v1/responses", base))
+                .json(&json!({"model":"client","input":"controlled request","stream":false}))
+                .send()
+                .await?
+                .text()
+                .await
+        }));
+    }
+    let mut completed = 0;
+    for request in requests {
+        match tokio::time::timeout(Duration::from_secs(12), request).await {
+            Ok(Ok(Ok(body))) if body.contains("BUSINESS_A") => completed += 1,
+            _ => {}
+        }
+    }
+    let elapsed = started.elapsed();
+    let calls = entry.a.calls.load(Ordering::SeqCst);
+    entry.stop().await;
+    assert_eq!(
+        calls, 3,
+        "a sole provider must still receive every real request despite max_in_flight=1"
+    );
+    assert_eq!(
+        completed, 3,
+        "every request must complete with business payload"
+    );
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "requests must not wait on concurrency admission: {elapsed:?}"
     );
 }

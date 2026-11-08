@@ -897,22 +897,7 @@ fn oauth_credential_error_branch_preserves_internal_runtime_identity() {
 }
 
 #[test]
-fn concurrency_and_client_disconnect_branches_preserve_source_kind() {
-    let concurrency = provider_error_source_for_test(
-        "V3Target10ConcreteProviderSelected",
-        V3ProviderError::ConcurrencyBusy {
-            request_id: "req-concurrency".to_string(),
-            provider_id: "provider-a".to_string(),
-        },
-    );
-    assert_eq!(
-        concurrency.source_kind,
-        V3ErrorSourceKind::TargetPoolExhausted
-    );
-    assert_eq!(concurrency.code, "provider_concurrency_busy");
-    assert!(concurrency.internal_error.is_none());
-    assert!(concurrency.external_error.is_none());
-
+fn client_disconnect_branch_preserves_source_kind() {
     let disconnect = provider_error_source_for_test(
         "V3Transport13ResponsesHttpRequest",
         V3ProviderError::ClientDisconnect {

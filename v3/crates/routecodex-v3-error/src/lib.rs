@@ -376,10 +376,7 @@ pub struct V3ProviderFailureSessionScope {
     server_id: String,
     routing_group: String,
     session_id: String,
-    /// True when the session id came from a client control header and can
-    /// therefore carry cross-request sticky selection. The request-local
-    /// fallback (a synthesized `request-local-*` id) must not feed sticky
-    /// state, because it is a fresh key per request.
+    /// True when the session id came from a client control header.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     client_session: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -418,7 +415,7 @@ impl V3ProviderFailureSessionScope {
     }
 
     /// Marks this scope as a synthesized per-request fallback rather than a
-    /// client session. Such a scope must not participate in sticky selection.
+    /// client session.
     pub fn as_request_local(mut self) -> Self {
         self.client_session = false;
         self
@@ -452,8 +449,7 @@ impl V3ProviderFailureSessionScope {
         &self.session_id
     }
 
-    /// True when the session id came from a client control header. Only such a
-    /// scope can carry sticky provider selection across requests.
+    /// True when the session id came from a client control header.
     pub fn is_client_session(&self) -> bool {
         self.client_session
     }

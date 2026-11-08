@@ -413,7 +413,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         };
                         let source = match source {
                             Some(source) => Some(source),
-                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            None => match crate::provider_failure_runtime_policy::v3_pure_pool_exhaustion_source(
                                 &exhausted_expanded,
                                 &failed_candidates,
                                 &request_local_busy_candidates,
@@ -897,12 +897,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     )
                 }
             };
-        let transport_request = match selected_admission.take() {
-            Some(admission) => {
-                transport_request.with_pre_acquired_admission(admission.into_lease())
-            }
-            None => transport_request,
-        };
         if let Err(error) = runtime_timing.start_external() {
             return direct_runtime_helpers_stream::source_failure_output(
                 runtime_source("V3RuntimeTimingExternal", error),
@@ -930,24 +924,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
             })
         }) {
             Ok(raw) => raw,
-            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                attempt_budget.release_unsent_transport_attempt();
-                send_attempts = attempt_budget.transport_attempts();
-                if let Err(error) = runtime_timing.finish_external() {
-                    return direct_runtime_helpers_stream::source_failure_output(
-                        runtime_source("V3RuntimeTimingExternal", error),
-                        last_external_http.clone(),
-                        trace,
-                        &hook_registry,
-                    );
-                }
-                let busy_key = v3_relay_provider_candidate_key(&policy.target.candidate);
-                failed_candidates.insert(busy_key.clone());
-                request_local_busy_candidates.insert(busy_key);
-                drop(provider_action_permit.take());
-                provider_action_permit_target = None;
-                continue;
-            }
             Err(error) => {
                 let failed_attempt_evidence = {
                     if matches!(&error, V3ProviderError::HttpStatus { response } if response.status == 429)

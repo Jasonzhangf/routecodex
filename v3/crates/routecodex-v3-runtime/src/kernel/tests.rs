@@ -7,11 +7,7 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
     use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
     use routecodex_v3_error::V3Error05ExecutionAction;
 
-    let manifest = provider_concurrency_two_key_then_other_provider_manifest(
-        "hang_sibling_a",
-        "hang_sibling_b",
-        80,
-    );
+    let manifest = two_key_then_other_provider_manifest("hang_sibling_a", "hang_sibling_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -144,8 +140,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
         V3RelayProviderFailureRetryPolicy,
     };
-    let manifest =
-        provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b", 50);
+    let manifest = two_provider_manifest("relay_markup_a", "relay_markup_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -253,7 +248,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
 
 #[tokio::test]
 async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
-    let manifest = provider_concurrency_two_provider_manifest("markup_a", "markup_b", 50);
+    let manifest = two_provider_manifest("markup_a", "markup_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -838,8 +833,7 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
 
 #[test]
 fn responses_direct_transport_header_timeout_keeps_120_second_budget() {
-    let manifest =
-        provider_concurrency_two_key_then_other_provider_manifest("remote_a", "remote_b", 80);
+    let manifest = two_key_then_other_provider_manifest("remote_a", "remote_b");
     assert_eq!(
         super::default_transport::responses_direct_transport_response_timeout(
             &manifest, "remote_a"

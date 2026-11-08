@@ -24,25 +24,9 @@ fn probe_sse_fixture(
     stream: V3ProviderSseStream,
 ) -> (
     V3ProviderResp14Raw,
-    V3AdaptiveConcurrencyController,
     V3ProviderTransportAttemptBroker,
     V3ProviderTransportAttemptKey,
 ) {
-    let provider_key = "probe-sse-provider:key1";
-    let controller = V3AdaptiveConcurrencyController::new(2).unwrap();
-    let held = controller.try_acquire(provider_key, 0).unwrap();
-    controller.observe_rate_limit(provider_key, 0).unwrap();
-    let probe = controller
-        .try_acquire(
-            provider_key,
-            crate::adaptive_concurrency::V3_PROVIDER_CONCURRENCY_PROBE_INTERVAL_MS,
-        )
-        .unwrap();
-    assert!(probe.is_probe());
-    controller.release(held.into_permit()).unwrap();
-    let guard = V3AdaptiveConcurrencyPermitGuard::new(controller.clone(), probe.into_permit())
-        .with_probe_result(V3AdaptiveConcurrencyProbeResult::Accepted);
-
     let broker = V3ProviderTransportAttemptBroker::default();
     let key = V3ProviderTransportAttemptKey {
         request_id: "req-probe-sse".into(),
@@ -73,157 +57,56 @@ fn probe_sse_fixture(
         stream,
     );
     (
-        hold_sse_lease(raw, guard, broker.clone(), Some(key.clone())),
-        controller,
+        hold_sse_handoff(raw, broker.clone(), Some(key.clone())),
         broker,
         key,
     )
 }
 
-fn assert_probe_sse_accepted(controller: &V3AdaptiveConcurrencyController) {
-    let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
-    assert_eq!(snapshot.in_flight, 0);
-    assert!(!snapshot.probe_in_flight);
-    assert_eq!(
-        snapshot.budget, 2,
-        "accepted SSE probe must expand adaptive budget"
-    );
-    assert!(!snapshot.saturated);
-    assert_eq!(snapshot.next_probe_at_ms, None);
-}
-
 #[test]
-fn dropping_request_with_pre_acquired_admission_releases_provider_capacity() {
-    let provider_id = "drop-pre-acquired-provider";
-    let auth_alias = "key1";
-    let provider_key = format!("{provider_id}:{auth_alias}");
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(&provider_key, 1).unwrap();
-    let lease = controller
-        .try_acquire_business(&provider_key)
-        .expect("pre-acquired lease must fill provider capacity");
-    assert_eq!(controller.snapshot(&provider_key).unwrap().in_flight, 1);
-
-    let request =
-        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-            "req-drop-pre-acquired",
-            provider_id,
-            "https://provider.example/v1/responses",
-            V3ProviderAuthHandle {
-                alias: auth_alias.into(),
-                secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
-            },
-            V3ResponsesStreamIntent::Json,
-            json!({"model":"wire-model","input":"hello"}),
-            vec![],
-            None,
-            100,
-            None,
-        )
-        .unwrap()
-        .with_pre_acquired_admission(lease);
-
-    drop(request);
-    assert_eq!(
-        controller.snapshot(&provider_key).unwrap().in_flight,
-        0,
-        "dropping a request with pre-acquired admission must release capacity"
-    );
-}
-
-#[test]
-fn dropping_request_releases_pre_acquired_admission_through_its_controller() {
-    let provider_id = "drop-local-controller-provider";
-    let auth_alias = "key1";
-    let provider_key = format!("{provider_id}:{auth_alias}");
-    let controller = V3AdaptiveConcurrencyController::new(1).unwrap();
-    let lease = controller
-        .try_acquire_business(&provider_key)
-        .expect("local controller lease must be acquired");
-    assert_eq!(controller.snapshot(&provider_key).unwrap().in_flight, 1);
-
-    let request =
-        build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency(
-            "req-drop-local-controller-pre-acquired",
-            provider_id,
-            "https://provider.example/v1/responses",
-            V3ProviderAuthHandle {
-                alias: auth_alias.into(),
-                secret: V3ProviderAuthSecretHandle::ApiKey("secret-value".into()),
-            },
-            V3ResponsesStreamIntent::Json,
-            json!({"model":"wire-model","input":"hello"}),
-            vec![],
-            None,
-            100,
-            None,
-        )
-        .unwrap()
-        .with_pre_acquired_admission(lease);
-
-    drop(request);
-    assert_eq!(
-        controller.snapshot(&provider_key).unwrap().in_flight,
-        0,
-        "pre-acquired lease must release through the controller that issued it"
-    );
-}
-
-#[test]
-fn probe_sse_headers_keep_permit_and_handoff_streaming() {
-    let (raw, controller, broker, key) = probe_sse_fixture(Box::pin(stream::pending::<
+fn probe_sse_headers_keep_handoff_streaming() {
+    let (raw, broker, key) = probe_sse_fixture(Box::pin(stream::pending::<
         Result<Vec<u8>, V3ProviderError>,
     >()));
-    let snapshot = controller.snapshot("probe-sse-provider:key1").unwrap();
-    assert_eq!(snapshot.in_flight, 1);
-    assert!(snapshot.probe_in_flight);
-    assert!(snapshot.saturated);
-    assert_eq!(snapshot.budget, 1);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Streaming)
     );
     drop(raw);
-    assert_probe_sse_accepted(&controller);
 }
 
 #[tokio::test]
-async fn probe_sse_eof_releases_once_and_marks_handoff_terminal() {
-    let (raw, controller, broker, key) =
+async fn probe_sse_eof_marks_handoff_terminal() {
+    let (raw, broker, key) =
         probe_sse_fixture(Box::pin(stream::empty::<Result<Vec<u8>, V3ProviderError>>()));
     let V3ProviderResponseBody::Sse(mut body) = raw.into_body() else {
         panic!("probe response must remain SSE");
     };
     assert!(body.next().await.is_none());
-    assert_probe_sse_accepted(&controller);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Terminal)
     );
     drop(body);
-    assert_probe_sse_accepted(&controller);
 }
 
 #[tokio::test]
-async fn probe_sse_error_releases_immediately_and_marks_handoff_failed() {
+async fn probe_sse_error_marks_handoff_failed() {
     let error = V3ProviderError::ResponseBody {
         request_id: "req-probe-sse".into(),
         provider_id: "probe-sse-provider".into(),
         reason: "injected stream failure".into(),
     };
-    let (raw, controller, broker, key) =
-        probe_sse_fixture(Box::pin(stream::once(async move { Err(error) })));
+    let (raw, broker, key) = probe_sse_fixture(Box::pin(stream::once(async move { Err(error) })));
     let V3ProviderResponseBody::Sse(mut body) = raw.into_body() else {
         panic!("probe response must remain SSE");
     };
     assert!(body.next().await.unwrap().is_err());
-    assert_probe_sse_accepted(&controller);
     assert_eq!(
         broker.state(&key),
         Some(V3ProviderTransportAttemptState::Failed)
     );
     assert!(body.next().await.is_none());
-    assert_probe_sse_accepted(&controller);
 }
 
 fn responses_http_target() -> V3ResponsesProviderTarget {
@@ -275,50 +158,38 @@ fn wire_parts_transport_uses_the_supplied_body_and_typed_endpoint() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn saturated_provider_admission_without_preacquired_lease_does_not_wait() {
+async fn declared_provider_concurrency_does_not_block_upstream_dispatch() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let provider_key = "admission-no-wait-provider:key1";
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller.ensure_initial_budget(provider_key, 1).unwrap();
-    let held = controller
-        .try_acquire_business(provider_key)
-        .expect("the configured provider budget must be occupied");
-
     let mut target = responses_http_target();
-    target.provider_id = "admission-no-wait-provider".into();
+    target.provider_id = "concurrency-no-block-provider".into();
     target.base_url = format!("http://{addr}/v1");
     target.auth.alias = "key1".into();
     target.auth.secret = V3ProviderAuthSecretHandle::ApiKey("test-secret".into());
     target.initial_concurrency_budget = 1;
     let wire = build_v3_provider_12_responses_wire_payload(
-        "req-admission-no-wait",
+        "req-concurrency-no-block",
         target,
         json!({"model":"glm-5.2","input":"hello"}),
     )
     .unwrap();
     let request = build_v3_transport_13_responses_request_from_v3_provider_12(wire).unwrap();
-    let started = std::time::Instant::now();
-    let result = tokio::time::timeout(
-        Duration::from_millis(500),
-        ProviderResponsesTransport::default().send(request),
-    )
+    let transport = ProviderResponsesTransport::default();
+    let send = transport.send(request);
+    tokio::pin!(send);
+    // A declared provider concurrency budget must not gate dispatch: the sole
+    // candidate reaches upstream transport immediately, with no capacity wait.
+    let accepted = tokio::time::timeout(Duration::from_millis(500), async {
+        tokio::select! {
+            biased;
+            result = &mut send => panic!("transport resolved before upstream accepted: {result:?}"),
+            connection = listener.accept() => connection,
+        }
+    })
     .await
-    .expect("full concurrency must return immediately");
-    assert!(matches!(
-        result,
-        Err(V3ProviderError::ConcurrencyBusy { .. })
-    ));
-    assert!(started.elapsed() < Duration::from_millis(500));
-    assert!(
-        tokio::time::timeout(Duration::from_millis(50), listener.accept())
-            .await
-            .is_err(),
-        "a full provider must not receive an upstream request"
-    );
-
-    controller.release(held.into_permit()).unwrap();
+    .expect("provider transport must dispatch immediately");
+    assert!(accepted.is_ok());
 }
 
 #[test]

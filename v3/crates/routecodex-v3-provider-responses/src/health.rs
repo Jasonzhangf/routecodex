@@ -11,8 +11,7 @@ use crate::key_health::{
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 use crate::probe_backoff::{
-    adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms,
-    provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
+    long_probe_backoff_ms, probe_backoff_ms, provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
 };
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
