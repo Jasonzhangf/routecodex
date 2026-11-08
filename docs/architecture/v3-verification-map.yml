@@ -3378,10 +3378,12 @@ features:
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_sse_provider_outcome.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   required_symbols:
-  - run_v3_plan_execution_operator_with_probes
+  - run_v3_plan_execution
+  - run_v3_plan_execution_operator
+  - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
-  - step_v3_target_planning_with_admission_sync
-  - try_admit_v3_selected_target
+  - select_v3_target_with_session_then_global
+  - take_or_acquire_provider_admission_scoped
   required_positive:
   - ordinary_429_exact_identity_direct_public_http and ordinary_429_exact_identity_relay_public_http prove a real429 uses the healthy fallback immediately, exposes only the exact failed identity after its failed probe, and keeps other listeners and healthy identities usable without resending the failed identity.
   - ordinary_429_probe_failure_visibility_direct_public_http and ordinary_429_probe_failure_visibility_relay_public_http prove a real429 remains excluded after a real503 probe while healthy business and the other listener continue; a qualified HTTP202 probe restores only the exact identity.
@@ -3417,12 +3419,12 @@ features:
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
   - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
   - Public `/v1/responses` switches to a spare provider while the first remains held; all-full pools wait for capacity without extra upstream requests and terminate only after their declared wait budget
-  - provider_concurrency_saturated_candidates_wait_then_exhaust_without_send and provider_concurrency_relay_saturated_candidates_exhaust_without_send prove bounded waiting without wire sends and retain TargetPoolExhausted/provider_concurrency_busy
+  - responses_provider_concurrency_full_switches_without_queueing and responses_provider_concurrency_all_full_exhausts_after_wait_budget prove capacity admission never queues a request behind a busy identity: a full preferred candidate switches immediately, and a completely full captured target ends its own request with a typed capacity-busy outcome instead of queueing or sending extra upstream work
   - The async admission and WebSocket readmission paths preserve exact capacity-busy keys until the final direct or relay terminal source is built
-  - all_busy_async_admission_preserves_provider_concurrency_busy_source proves final budget-exhausted admission retains TargetPoolExhausted/provider_concurrency_busy after waiting
-  - mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted proves a non-busy request-local exclusion prevents all-busy source relabeling and leaves generic selected_target_exhausted
+  - responses_provider_concurrency_direct_all_busy_preserves_typed_source and responses_provider_concurrency_relay_all_busy_preserves_typed_source prove the final terminal keeps the exact capacity-busy source on the public entry: every recorded attempt carries error_type=provider_concurrency_busy with wait_ms=null, and the terminal request-local exhaustion source still reports provider_concurrency_busy
+  - responses_provider_concurrency_direct_mixed_exclusion_stays_generic and responses_provider_concurrency_relay_mixed_exclusion_stays_generic prove a non-busy request-local exclusion prevents all-busy source relabeling, so the terminal keeps the generic request-local provider failure instead of claiming capacity-busy
   - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
-  - Mixed prior-failure and temporary-busy exhaustion carries both exact typed sets and waits within the acquisition budget; a source label never reconstructs busy identities
+  - Mixed prior-failure and temporary-busy exhaustion carries both exact typed sets without any capacity-admission wait; only the captured-target recovery budget bounds genuine provider recovery, and a source label never reconstructs busy identities
   - Successful admission removes scan-local busy exclusions before callers adopt the returned exclusion state; a busy candidate freed while its selected peer fails remains eligible for Direct and Relay recovery
   - An exhausted scan retains transport-busy identities until the original request recovery due; level-triggered capacity availability or unrelated health notifications cannot clear them early. Healthy non-busy alternatives remain immediately eligible, and waits own no business lease.
   - Actual probe work permits a fresh admission check only for busy identities discovered within the current planning call. Inherited transport-busy and permanent failures remain masked; metadata-only or no-permit probe rounds cannot reopen them, and failed admission rechecks retain busy provenance without repeating the probe phase.
@@ -3471,8 +3473,8 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::all_busy_async_admission_preserves_provider_concurrency_busy_source -- --exact --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_failure_runtime_policy::tests::cooldown_exhaustion::mixed_busy_and_excluded_async_exhaustion_stays_selected_target_exhausted -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib adaptive_concurrency::tests::saturated_admission_expires_without_leaking_a_lease -- --exact --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib transport::tests::saturated_provider_admission_without_preacquired_lease_does_not_wait -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
@@ -4134,7 +4136,7 @@ features:
   - request and response operator instance fields carry typed context outside business JSON; declared side outputs are consumed, and original typed errors remain errors
   - the thirteen scoped accepted candidate nodes are request capture_client_json, normalize_request_losslessly, resolve_target, plan_execution, govern_chat_request, project_standard_provider_request, adjust_provider_private_request, encode_provider_wire, construct_transport_request; and response adjust_provider_private_response, normalize_provider_response, govern_chat_response, frame_committed_client_response
   - frame acceptance covers only the existing Responses JSON caller; identity, Direct, and hosted frame paths remain pending, so no addressable global frame node is claimed
-  - resolve_target and plan_execution are SDK-wired through actual Direct kernel, four-protocol Relay, and Server non-admitting preplan callers; initial execution and reselection both use run_v3_plan_execution_operator_with_probes, the actual typed V3PlanExecutionModePolicy is consumed, and control does not mirror into payload
+  - resolve_target and plan_execution are SDK-wired through actual Direct kernel, four-protocol Relay, and Server non-admitting preplan callers; initial execution and reselection both go through run_v3_plan_execution, which drives the registered routecodex.v3.operation.plan_execution@1 operator through run_v3_plan_execution_operator, the actual typed V3PlanExecutionModePolicy is consumed, and control does not mirror into payload
   - resolve_target and plan_execution passed the final combined58/58 matrix, Server127/127, and Runtime1358/0fail/1existingignored; no pending-node acceptance is inferred from those results
   - pre-dispatch protocol-plan failure projects through SDK02..06; kernel::tests::protocol_plan_failure_preserves_source_status_and_pool_exhausted preserves the real failure source and status, while multi_listener_server::responses_selection_exhaustion_never_reaches_the_client locks public exhaustion behavior
   - tests::protocol_plan_operator_fault_consumer_preserves_sources_without_error06 tests the private Server typed-fault consumer for persisted policy source and original cause, zero attempts and detectable transport termination; real SDK rejection is separately covered by canonical_sdk_failure_is_returned_without_typed_reconstruction, without claiming a public HTTP fault injection path
