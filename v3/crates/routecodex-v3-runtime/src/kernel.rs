@@ -89,24 +89,6 @@ pub(crate) fn v3_provider_send_deadline(
     }
 }
 
-/// Remove one pre-registered provider transport attempt from the default broker
-/// after Runtime drops the send future at the request deadline. The attempt is
-/// started by `begin_transport_attempt` before Runtime enters its outer wait.
-/// Custom injected transports that do not own the default broker return no
-/// control from `begin_transport_attempt` and are not covered by this cleanup.
-pub(crate) fn v3_discard_provider_transport_attempt(
-    attempt_control: Option<&routecodex_v3_provider_responses::V3ProviderTransportAttemptControl>,
-) {
-    let Some(control) = attempt_control else {
-        return;
-    };
-    if let Some(fact) = control.send_fact() {
-        default_responses_transport()
-            .transport_handoff_broker()
-            .remove(&fact.key);
-    }
-}
-
 include!("kernel/direct_kernel_entrypoints.rs");
 include!("kernel/direct_state.rs");
 async fn execute_v3_responses_direct_runtime_kernel_core<T: ResponsesTransport + ?Sized>(
@@ -704,17 +686,23 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         let provider_raw = match {
             match send_attempt_control {
                 Ok(attempt_control) => {
-                    let cleanup_control = attempt_control.clone();
+                    let mut cleanup = attempt_control.as_ref().map(
+                        routecodex_v3_provider_responses::V3ProviderTransportAttemptCleanup::new,
+                    );
                     match tokio::time::timeout_at(
                         send_deadline,
                         transport.send_observed(transport_request, attempt_control),
                     )
                     .await
                     {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if let Some(cleanup) = cleanup.as_mut() {
+                                cleanup.disarm();
+                            }
+                            result
+                        }
                         Err(_elapsed) => {
                             if residence_is_binding {
-                                v3_discard_provider_transport_attempt(cleanup_control.as_ref());
                                 request_deadline_expired = true;
                                 Err(V3ProviderError::Transport {
                                     request_id: standardized.request_id.clone(),

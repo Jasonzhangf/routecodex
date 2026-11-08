@@ -959,19 +959,23 @@ where
         let provider_raw = match {
             match send_attempt_control {
                 Ok(attempt_control) => {
-                    let cleanup_control = attempt_control.clone();
+                    let mut cleanup = attempt_control.as_ref().map(
+                        routecodex_v3_provider_responses::V3ProviderTransportAttemptCleanup::new,
+                    );
                     match tokio::time::timeout_at(
                         attempt_deadline,
                         transport.send_observed(transport_request, attempt_control),
                     )
                     .await
                     {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if let Some(cleanup) = cleanup.as_mut() {
+                                cleanup.disarm();
+                            }
+                            result
+                        }
                         Err(_elapsed) => {
                             if residence_is_binding {
-                                crate::kernel::v3_discard_provider_transport_attempt(
-                                    cleanup_control.as_ref(),
-                                );
                                 let failure = C::request_failure_builder(
                                     "V3ExecutionAttemptBudget",
                                     "request_residence_deadline_expired",
