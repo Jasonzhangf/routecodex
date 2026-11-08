@@ -4568,7 +4568,7 @@ chains:
     to_node: V3RelayCapturedPlanAdmission
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.relay_runtime_shared
@@ -4582,8 +4582,8 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_plan
     caller_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
-    callee_symbol: step_v3_target_planning_with_admission_sync
-    callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    callee_symbol: select_v3_target_with_session_then_global
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
     status: anchored
     owner_feature_id: v3.relay_runtime_shared
     resource_flow:
@@ -7482,15 +7482,15 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
-      - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
+      - Direct runtime selects from the captured Target09 candidate set through the surviving direct plan-execution entry (run_v3_plan_execution) before provider transport; the retired admission-sync rescue wrapper no longer exists.
+      - Direct does not gate selection on capacity: a full provider is skipped for this request and the next eligible candidate is selected immediately.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - All-full candidates wait with increasing backoff inside the declared acquisition budget without extra provider sends or health mutation; final eligibility is checked before exhaustion.
+      - A completely full captured target ends this request immediately with the typed capacity-busy source (capacity_bypass_granted skip, never a capacity wait) without extra provider sends or health mutation; final eligibility is checked before exhaustion.
       - Exact candidate keys proven capacity-busy survive sync and async reselection; only full captured-set coverage carries provider_concurrency_busy, while mixed exhaustion stays selected_target_exhausted.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7502,13 +7502,13 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
     caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
-      - Responses Direct skips full candidates when a spare exists; an all-full target waits for capacity within the declared budget without mutating health.
+      - Responses Direct runtime uses the same surviving plan-execution selection entry for initial selection and request-local reselection.
+      - Responses Direct skips full candidates when a spare exists; an all-full target returns the typed capacity-busy outcome immediately - the single/last eligible candidate takes the capacity_bypass_granted skip instead of waiting - without mutating health.
       - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
       - Exact capacity-busy candidate keys survive every direct reselection and are projected through the existing target-exhaustion terminal helper when the captured Target09 set is fully covered.
     resource_flow:
@@ -7521,12 +7521,12 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
+      - Generic Relay runtime resolves Target09 through the surviving relay plan-execution entry (run_v3_plan_execution) before provider transport.
       - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Full capacity can exhaust the captured Relay pool without entering provider-failure health recovery; pure all-busy exhaustion preserves provider_concurrency_busy and mixed exhaustion remains selected_target_exhausted.
@@ -7538,14 +7538,14 @@ chains:
   - step_id: v3-rd-target-select-responses-relay-admission-rescue
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
-    caller_symbol: execute_v3_responses_relay_runtime_inner
+    caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
+      - Responses Relay runtime uses the surviving relay plan-execution entry for selected Target10 resolution after its route facts are captured, carried by its refill owner execute_v3_responses_relay_runtime_inner_with_refill.
       - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
       - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
       - Pure capacity exhaustion carries the existing TargetPoolExhausted/provider_concurrency_busy source through terminal projection, while mixed exhaustion retains selected_target_exhausted.
@@ -7559,12 +7559,12 @@ chains:
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
+      - Anthropic Relay resolves Target09 through the surviving plan-execution selection entry before Provider transport.
       - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
       - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
       - Full capacity can exhaust the captured Anthropic Relay pool without entering provider-failure health recovery; pure all-busy exhaustion preserves provider_concurrency_busy and mixed exhaustion remains selected_target_exhausted.
@@ -7581,8 +7581,8 @@ chains:
   - step_id: v3-provider-admission-lease-acquire
     from_node: V3Target10ConcreteProviderSelected
     to_node: V3RuntimeProviderAdmission
-    caller_symbol: try_admit_v3_selected_target
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    caller_symbol: take_or_acquire_provider_admission_scoped
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
     callee_symbol: V3AdaptiveConcurrencyController::try_acquire_business_scoped
     callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
     status: anchored
@@ -7683,8 +7683,8 @@ chains:
   - step_id: v3-provider-admission-lease-runtime-early-release
     from_node: V3RuntimeProviderAdmission
     to_node: V3AdaptiveConcurrencyPermitReleased
-    caller_symbol: V3RuntimeProviderAdmission::drop
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
+    caller_symbol: V3AdaptiveConcurrencyPermitGuard::drop
+    caller_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
     callee_symbol: V3AdaptiveConcurrencyController::release
     callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
     status: anchored
@@ -7902,18 +7902,19 @@ chains:
     to_node: V3ProviderHealthStore
     caller_symbol: complete_v3_provider_health_probe
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
+    callee_symbol: classify_provider_probe_failure
+    callee_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
-      consumes: [v3.error.source, v3.provider.global_subscription_health]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health]
-      side_channel_writes: [v3.provider.global_subscription_health]
+      consumes: []
+      produces: [v3.error.source]
+      side_channel_reads: []
+      side_channel_writes: []
     semantic_contract:
-      - Real probe HTTP failures pass Error01 and Error02 before the exact current acquisition updates the existing429 episode; transport without an HTTP head cannot qualify as non429.
-      - Non429 HTTP failure atomically releases only429 restriction while retaining failure exclusion; no intermediate healthy projection is published.
+      - A real probe HTTP failure, including HTTP 429, is classified by classify_provider_probe_failure as one ordinary typed recoverable provider failure; HTTP 429 keeps no dedicated lane, episode writer, minimum or required probe. Transport without an HTTP head cannot qualify as a classified status failure.
+      - The classifier raises the typed Error01 provider source (raise_v3_source_via_err01, a registered writer of v3.error.source) and the classified outcome then completes through the exact-current-identity store path bound by v3-provider-global-probe-02-failure, so this step publishes no intermediate healthy projection.
+      - The retired rate-limit probe-status writer is deleted with the 429-specific mechanism; classification is the surviving step on this caller's failure branch.
 
   - step_id: v3-provider-precool-join-existing-cooldown
     from_node: V3ProviderGlobalProbeExecution
@@ -7937,8 +7938,8 @@ chains:
     to_node: V3ProviderHealthStore
     caller_symbol: V3ProviderFailureRuntimeHealth::complete_precool_observation
     caller_file: v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
+    callee_symbol: V3ProviderHealthStore::complete_provider_precool_observation_with_permit
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7948,6 +7949,7 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
     semantic_contract:
       - A recoverable failure observation, including real429, joins the shared per-identity consecutive-failure count; when the unified ladder cools the identity, the existing cooldown owner takes over the same physical identity.
+      - Completion is gated by V3ProviderHealthStore::provider_precool_observation_permit_is_current on the same listener identity, then committed by complete_provider_precool_observation_with_permit and published by V3ProviderHealthStore::publish_availability_change; the retired rate-limit probe-status writer no longer exists.
 
   - step_id: v3-provider-global-probe-02-failure
     from_node: V3ProviderGlobalProbeExecution
@@ -9227,7 +9229,7 @@ chains:
         acceptance: accepted_fresh_full_chain_matrix
       - node: plan_execution
         operator: routecodex.v3.operation.plan_execution@1
-        consumer_symbol: run_v3_plan_execution_operator_with_probes
+        consumer_symbol: run_v3_plan_execution_operator
         consumer_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
         initial_and_reselect: true
         actual_callers:
@@ -9303,7 +9305,7 @@ chains:
     to_node: V3OperationRunnerPlanExecution
     caller_symbol: execute_v3_relay_runtime_core
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: runtime_bound
     owner_feature_id: v3.unified_operation_runner_design
@@ -9331,7 +9333,7 @@ chains:
     to_node: V3OperationRunnerPlanExecution
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
     caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: run_v3_plan_execution_operator_with_probes
+    callee_symbol: run_v3_plan_execution
     callee_file: v3/crates/routecodex-v3-runtime/src/operation_runner/plan_execution.rs
     status: runtime_bound
     owner_feature_id: v3.unified_operation_runner_design
