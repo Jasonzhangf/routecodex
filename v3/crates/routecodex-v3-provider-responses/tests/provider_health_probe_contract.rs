@@ -165,7 +165,10 @@ fn business_success_resets_early_429_cooldown_without_window() {
     let failed = store
         .scheduling_projection("p", "a", "m", 1, 1, 102)
         .unwrap();
-    assert!(!failed.available, "429 uses the ordinary recoverable control path");
+    assert!(
+        !failed.available,
+        "429 uses the ordinary recoverable control path"
+    );
     assert!(
         store
             .scheduling_projection("p", "sibling", "m", 1, 1, 101)
@@ -218,7 +221,11 @@ fn consecutive_429_fingerprints_each_start_their_own_streak() {
     let store = V3ProviderHealthStore::default();
     let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
     action.failure_threshold = 3;
-    for (time, code) in [(100, "rate_limit"), (101, "insufficient_quota"), (102, "other")] {
+    for (time, code) in [
+        (100, "rate_limit"),
+        (101, "insufficient_quota"),
+        (102, "other"),
+    ] {
         action.failure_fingerprint = Some(
             routecodex_v3_error::V3ProviderErrorFingerprint::new(
                 "recoverable_upstream",
@@ -235,7 +242,10 @@ fn consecutive_429_fingerprints_each_start_their_own_streak() {
             projection.failure_streak, 1,
             "each typed 429 fingerprint starts its own streak"
         );
-        assert!(!projection.cooldown, "failure_threshold is 3 and these fingerprints do not add up");
+        assert!(
+            !projection.cooldown,
+            "failure_threshold is 3 and these fingerprints do not add up"
+        );
         for (key, model) in [("a", "other-model"), ("sibling", "m")] {
             assert!(
                 store

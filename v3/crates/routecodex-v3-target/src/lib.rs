@@ -653,9 +653,8 @@ impl V3TargetInterpreter {
                     .any(|scope| scope == "request_local_provider_failure")
                 {
                     let order = (route_tier_rank, candidate.priority);
-                    attempted_order_ceiling = Some(
-                        attempted_order_ceiling.map_or(order, |current| current.max(order)),
-                    );
+                    attempted_order_ceiling =
+                        Some(attempted_order_ceiling.map_or(order, |current| current.max(order)));
                 }
                 let note = format_candidate_scheduling_unavailable(candidate, &projection);
                 if Self::blocked_only_by_automatic_cooldown(&projection.blocked_scopes) {
@@ -674,9 +673,9 @@ impl V3TargetInterpreter {
                 }
             }
         }
-        let selected_pool_visible = eligible.iter().any(|(_, candidate, ..)| {
-            candidate.pool_ids.contains(&expanded.route.pool_id)
-        });
+        let selected_pool_visible = eligible
+            .iter()
+            .any(|(_, candidate, ..)| candidate.pool_ids.contains(&expanded.route.pool_id));
         eligible.retain(|(_, candidate, ..)| {
             if selected_pool_visible {
                 candidate.pool_ids.contains(&expanded.route.pool_id)
@@ -692,11 +691,9 @@ impl V3TargetInterpreter {
             // a typed pre-candidate-terminal Error and the last eligible
             // candidate passes its original provider response through.
             if let Some(ceiling) = attempted_order_ceiling {
-                cooldown_fallback.retain(
-                    |(_, candidate, _, route_tier_rank, _, _)| {
-                        (*route_tier_rank, candidate.priority) <= ceiling
-                    },
-                );
+                cooldown_fallback.retain(|(_, candidate, _, route_tier_rank, _, _)| {
+                    (*route_tier_rank, candidate.priority) <= ceiling
+                });
             }
             let fallback_pool_visible = cooldown_fallback
                 .iter()

@@ -240,7 +240,8 @@ fn exhausted_unharvestable_tool_markup_runtime_failure_is_502_terminal() {
 }
 
 #[test]
-fn exhausted_recoverable_response_processing_runtime_failure_is_terminal_without_same_identity_retry() {
+fn exhausted_recoverable_response_processing_runtime_failure_is_terminal_without_same_identity_retry(
+) {
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source: unharvestable_tool_markup_response_source(),

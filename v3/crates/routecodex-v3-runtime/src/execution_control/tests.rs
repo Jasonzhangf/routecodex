@@ -23,9 +23,9 @@ fn direct_dsml_complete_rewrite_preserves_frames_and_terminal() {
     assert_eq!(builder.frames(), &[vec![3, 4], vec![5, 6]]);
     assert_eq!(builder.byte_len, 4);
     assert_eq!(builder.terminal_frame_index, Some(1));
-    builder.rewrite_complete_attempt(|_| Ok::<_, V3AttemptStoreError>(Some((
-        vec![vec![0; 9]], 0
-    )))).unwrap();
+    builder
+        .rewrite_complete_attempt(|_| Ok::<_, V3AttemptStoreError>(Some((vec![vec![0; 9]], 0))))
+        .unwrap();
     assert_eq!(builder.frames(), &[vec![0; 9]]);
     assert_eq!(builder.byte_len, 9);
     builder
@@ -190,7 +190,9 @@ fn attempt_store_preserves_complete_frames() {
     let budget = V3AttemptBudget::new(test_limits());
     let mut builder = V3CommittedClientSseBuilder::with_budget(budget).unwrap();
     builder.push(vec![1, 2, 3, 4]).unwrap();
-    builder.push(vec![5]).expect("the former byte limit must not reject a frame");
+    builder
+        .push(vec![5])
+        .expect("the former byte limit must not reject a frame");
     assert_eq!(builder.frames, vec![vec![1, 2, 3, 4], vec![5]]);
     assert_eq!(builder.byte_len, 5);
 }
@@ -202,7 +204,9 @@ fn attempt_store_does_not_block_other_requests() {
     let mut first = V3CommittedClientSseBuilder::with_budget(first_budget).unwrap();
     first.push(vec![1, 2, 3, 4]).unwrap();
     let mut second = V3CommittedClientSseBuilder::with_budget(second_budget).unwrap();
-    second.push(vec![5, 6, 7]).expect("another request must not hold business capacity");
+    second
+        .push(vec![5, 6, 7])
+        .expect("another request must not hold business capacity");
     assert_eq!(second.frames, vec![vec![5, 6, 7]]);
     assert_eq!(first.frames, vec![vec![1, 2, 3, 4]]);
     drop(first);
@@ -215,7 +219,9 @@ fn retained_attempt_does_not_gate_another_attempt() {
     let mut first = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
     first.push(vec![1, 2, 3, 4]).unwrap();
     let mut second = V3CommittedClientSseBuilder::with_budget(budget.clone()).unwrap();
-    second.push(vec![5, 6, 7]).expect("a retained attempt must not block another attempt");
+    second
+        .push(vec![5, 6, 7])
+        .expect("a retained attempt must not block another attempt");
     assert_eq!(second.frames, vec![vec![5, 6, 7]]);
     assert_eq!(first.frames, vec![vec![1, 2, 3, 4]]);
     drop(first);
@@ -253,7 +259,8 @@ async fn execution_control_payload_architecture_anthropic_replay_with_retained_a
     let replay = crate::hub_v1::project_v3_anthropic_client_sse_stream_with_budget(
         response.clone(),
         budget.clone(),
-    ).expect("a retained provider attempt must not block client replay");
+    )
+    .expect("a retained provider attempt must not block client replay");
     let frames = replay.collect::<Vec<_>>().await;
     let wire = String::from_utf8(frames.concat()).unwrap();
     assert!(wire.contains("message_stop"), "{wire}");

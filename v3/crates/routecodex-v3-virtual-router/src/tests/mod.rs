@@ -648,12 +648,7 @@ fn disabled_server_is_routable_but_absent_server_fails() {
     assert_eq!(plan.tiers[0].pool_id, "tools");
 
     assert_eq!(
-        router.classify_request_with_facts(
-            &manifest,
-            "absent",
-            "/v1/responses",
-            matching_facts()
-        ),
+        router.classify_request_with_facts(&manifest, "absent", "/v1/responses", matching_facts()),
         Err(V3VirtualRouterError::ServerUnavailable("absent".into()))
     );
 }

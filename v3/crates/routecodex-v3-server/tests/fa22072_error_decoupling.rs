@@ -740,7 +740,8 @@ async fn v27_last_http_error_preserves_raw_body_and_filters_transport_headers() 
             "{process}: raw-body status lost: {text}"
         );
         assert!(
-            wire.windows(raw_body.len()).any(|window| window == raw_body),
+            wire.windows(raw_body.len())
+                .any(|window| window == raw_body),
             "{process}: original non-UTF8 body was not byte-preserved"
         );
         assert!(

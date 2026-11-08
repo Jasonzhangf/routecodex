@@ -129,10 +129,7 @@ async fn wait_for_exact_quota_entry(
     .expect("the failed exact identity must become visible after its real probe")
 }
 
-async fn wait_for_probe_after(
-    probes: &std::sync::atomic::AtomicUsize,
-    before: usize,
-) -> usize {
+async fn wait_for_probe_after(probes: &std::sync::atomic::AtomicUsize, before: usize) -> usize {
     timeout(Duration::from_secs(4), async {
         loop {
             let current = probes.load(std::sync::atomic::Ordering::SeqCst);
@@ -246,7 +243,11 @@ async fn assert_ordinary_429_lifecycle(direct: bool, failed_probe_first: bool) {
         if entry["until_ms"].is_null() {
             continue;
         }
-        assert_eq!(entry["provider_id"], first_id.as_str(), "only the failed identity may cool: {entry:?}");
+        assert_eq!(
+            entry["provider_id"],
+            first_id.as_str(),
+            "only the failed identity may cool: {entry:?}"
+        );
         assert_eq!(entry["auth_alias"], "key");
         let remaining = entry["remaining_ms"].as_i64().unwrap_or(-1);
         assert!(
@@ -272,9 +273,11 @@ async fn assert_ordinary_429_lifecycle(direct: bool, failed_probe_first: bool) {
             .unwrap();
         wait_for_probe_after(&probes, before).await;
         wait_for_exact_quota_entry(&client, &base, &first_id).await;
-        assert!(quota_business(&client, &base, "quota-probe-failure-fallback")
-            .await
-            .contains("quota-window-fallback"));
+        assert!(
+            quota_business(&client, &base, "quota-probe-failure-fallback")
+                .await
+                .contains("quota-window-fallback")
+        );
         assert_eq!(
             business.load(std::sync::atomic::Ordering::SeqCst),
             business_before_probe

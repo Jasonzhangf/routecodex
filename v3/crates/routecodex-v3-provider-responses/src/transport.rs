@@ -407,21 +407,21 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                     &response_id,
                 )?;
             }
-            let mut request =
-                build_v3_transport_13_responses_http_request_from_parts_with_timeout(
-                    request_id,
-                    provider_id,
-                    url_text,
-                    target.auth,
-                    stream_intent,
-                    body,
-                    target.headers
-                        .iter()
-                        .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
-                        .collect(),
-                    Some(Duration::from_millis(request_timeout_ms)),
-                    sse_first_frame_timeout_ms,
-                )?;
+            let mut request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+                request_id,
+                provider_id,
+                url_text,
+                target.auth,
+                stream_intent,
+                body,
+                target
+                    .headers
+                    .iter()
+                    .map(|(name, value)| V3ProviderRequestHeader::new(name, value))
+                    .collect(),
+                Some(Duration::from_millis(request_timeout_ms)),
+                sse_first_frame_timeout_ms,
+            )?;
             if let V3Transport13ResponsesRequestKind::Http {
                 compatibility_profile: request_compatibility_profile,
                 ..
@@ -459,8 +459,8 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                 "type".to_string(),
                 Value::String("response.create".to_string()),
             );
-            Ok(
-                v3_transport_13_request(V3Transport13ResponsesRequestKind::WebSocketV2 {
+            Ok(v3_transport_13_request(
+                V3Transport13ResponsesRequestKind::WebSocketV2 {
                     request_id,
                     provider_id,
                     canonical_model_id: target.canonical_model_id,
@@ -470,8 +470,8 @@ pub fn build_v3_transport_13_responses_request_from_wire_parts(
                     event: body,
                     cancellation: None,
                     compatibility_profile,
-                }),
-            )
+                },
+            ))
         }
     }
 }

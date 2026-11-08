@@ -9,18 +9,17 @@ use crate::operation_runner::plan_execution::{
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 mod response_closeout;
 use crate::provider_failure_runtime_policy::{
-    project_v3_client_disconnect,
-    provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
-    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
-    V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyState,
+    project_v3_client_disconnect, provider_runtime_failure_stage,
+    run_v3_relay_provider_failure_policy, v3_relay_provider_policy_now_epoch_ms,
+    v3_relay_provider_target_selection_sample, V3ProviderFailureRuntimeHealth,
+    V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
 };
 use futures_util::StreamExt;
 use response_closeout::{closeout_anthropic_relay_response, closeout_anthropic_relay_sse_response};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::V3ResponsesStreamIntent;
@@ -581,11 +580,8 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     let mut req02 = run_v3_anthropic_relay_runtime_req_inbound(req01)?;
     trace.push("V3HubReqInbound02Normalized");
     let deterministic_sample = v3_relay_provider_target_selection_sample(&input.request_id);
-    let (
-        runtime_timing,
-        mut failed_candidates,
-        mut retry_selected,
-    ) = super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
+    let (runtime_timing, mut failed_candidates, mut retry_selected) =
+        super::relay_runtime_shared::relay_handoff_entry_state(initial_handoff.as_ref());
     let mut provider_failure_events: Vec<V3RuntimeProviderFailureObservation> = initial_handoff
         .as_ref()
         .map(|handoff| handoff.provider_failure_events.clone())
@@ -718,9 +714,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     // observability，不进入 payload。
     loop {
         let preferred_selected = retry_selected.take();
-        let selected = if let Some(selected) =
-            initial_selected.take()
-        {
+        let selected = if let Some(selected) = initial_selected.take() {
             selected
         } else {
             let target_resolution =
@@ -924,7 +918,9 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             return Err(V3AnthropicRelayRuntimeError::Target(timing_error));
         }
         let transport_attempt = attempt_budget
-            .admit_transport_attempt_for_identity(Some(&v3_relay_provider_candidate_key(&selected.candidate)))
+            .admit_transport_attempt_for_identity(Some(&v3_relay_provider_candidate_key(
+                &selected.candidate,
+            )))
             .map_err(|error| {
                 V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
             })?;

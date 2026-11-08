@@ -692,7 +692,9 @@ async fn provider_action_gate_03_public_entry_types_failure_and_isolates_sibling
     let second_body: Value = second.json().await.unwrap();
     assert_eq!(second_body["output_text"], "direct-interface");
     assert!(
-        !second_body.to_string().contains("controlled sibling failure"),
+        !second_body
+            .to_string()
+            .contains("controlled sibling failure"),
         "provider failure must stay out of the client body: {second_body}"
     );
     let second_failure = tokio::time::timeout(Duration::from_secs(2), failure_rx.recv())
@@ -819,12 +821,18 @@ async fn provider_action_gate_03_public_entry_types_failure_and_isolates_sibling
         assert_eq!(attempt["auth_alias"], "key");
         assert_eq!(attempt["model_id"], "wire-model");
         assert_eq!(attempt["status"], 500);
-        assert_eq!(attempt["diagnostic_source"]["source_kind"], "provider_failure");
+        assert_eq!(
+            attempt["diagnostic_source"]["source_kind"],
+            "provider_failure"
+        );
         assert_eq!(
             attempt["diagnostic_source"]["source_stage"],
             "V3ProviderReqOutbound09TransportRequest"
         );
-        assert_eq!(attempt["failed_attempt_evidence"]["provider_response"]["status"], 500);
+        assert_eq!(
+            attempt["failed_attempt_evidence"]["provider_response"]["status"],
+            500
+        );
     }
 
     handle.shutdown().await;

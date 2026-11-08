@@ -6,8 +6,8 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::{
     V3ProviderAvailabilityReader, V3ProviderFailureAction, V3ProviderFailureCooldownScope,
     V3ProviderFailurePolicy, V3ProviderHealthStore, V3ProviderKeyHealthStore,
-    V3ProviderPrecoolObservationOutcome,
-    V3ProviderProbePurpose, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose, V3ProviderRecoveryKind,
+    V3ProviderSchedulingProjection,
 };
 
 fn real_http_provider_action(status: u16, code: &str) -> V3ProviderFailureAction {
@@ -39,10 +39,7 @@ fn real_http_429_action() -> V3ProviderFailureAction {
 fn early_429_uses_the_ordinary_recoverable_health_path() {
     let store = V3ProviderKeyHealthStore::default();
     let action = real_http_429_action();
-    assert_eq!(
-        action.recovery,
-        V3ProviderRecoveryKind::RecoverableCounted
-    );
+    assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
     assert_eq!(
         action.failure_threshold,
         routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
@@ -368,12 +365,18 @@ fn recoverable_failure_cools_after_repeat_without_changing_score_contract() {
         .expect("third failure");
     assert_eq!(third.score_milli, 85);
     assert!(!third.available);
-    assert!(third.cooldown, "the third consecutive failure must cool the key down");
+    assert!(
+        third.cooldown,
+        "the third consecutive failure must cool the key down"
+    );
     assert_eq!(third.cooldown_until_ms, Some(10_102));
     let first_probe = store
         .provider_cooldown_probe_keys_due(10_101)
         .expect("probe due query");
-    assert!(first_probe.is_empty(), "the probe respects the 10s cooldown minimum");
+    assert!(
+        first_probe.is_empty(),
+        "the probe respects the 10s cooldown minimum"
+    );
     assert_eq!(
         store
             .provider_cooldown_probe_keys_due(10_102)
@@ -713,7 +716,10 @@ fn three_502_failures_enter_cooldown() {
     let second = store
         .record_provider_failure_action("p", "k", "m", &action, 102)
         .expect("second 502 failure");
-    assert!(!second.cooldown, "two consecutive failures stay below the threshold");
+    assert!(
+        !second.cooldown,
+        "two consecutive failures stay below the threshold"
+    );
     let third = store
         .record_provider_failure_action("p", "k", "m", &action, 103)
         .expect("third 502 failure");
@@ -1698,12 +1704,10 @@ fn stream_failure_consecutive_ladder_steps_are_ten_thirty_and_one_hour() {
     }
     // Streak 3 -> 10s, 5 -> 30s, 10 -> 1h: the one-hour step is the floor for
     // the recovery probe.
-    assert!(
-        store
-            .provider_cooldown_probe_keys_due(3_600_108)
-            .expect("probe due query")
-            .is_empty()
-    );
+    assert!(store
+        .provider_cooldown_probe_keys_due(3_600_108)
+        .expect("probe due query")
+        .is_empty());
     assert_eq!(
         store
             .provider_cooldown_probe_keys_due(3_600_109)
@@ -1992,7 +1996,12 @@ fn declared_policy_duration_neither_undercuts_nor_extends_the_fixed_ladder() {
 fn manual_cooldown_hides_only_the_exact_identity_it_was_added_for() {
     let store = V3ProviderKeyHealthStore::default();
     let add_until = store
-        .add_cooldown_entry_for_interface("a", "default", Some("key"), Some("wire-a"), "probe",
+        .add_cooldown_entry_for_interface(
+            "a",
+            "default",
+            Some("key"),
+            Some("wire-a"),
+            "probe",
             60_000,
             1_000,
         )
@@ -2018,7 +2027,9 @@ fn manual_cooldown_hides_only_the_exact_identity_it_was_added_for() {
         "the exact identity the operator cooled must be unavailable: {wire:?}"
     );
     assert!(
-        wire.blocked_scopes.iter().any(|scope| scope.contains("cooldown")),
+        wire.blocked_scopes
+            .iter()
+            .any(|scope| scope.contains("cooldown")),
         "the manual block must be visible as a cooldown scope: {wire:?}"
     );
 
@@ -2032,17 +2043,9 @@ fn manual_cooldown_hides_only_the_exact_identity_it_was_added_for() {
     );
 
     // (3) Sibling auth keys and other providers stay visible too.
-    for (provider, alias, model) in [
-        ("a", "other-key", "wire-a"),
-        ("b", "key", "wire-a"),
-    ] {
-        let sibling = store.availability_for_interface(
-            provider,
-            "default",
-            Some(alias),
-            Some(model),
-            1_000,
-        );
+    for (provider, alias, model) in [("a", "other-key", "wire-a"), ("b", "key", "wire-a")] {
+        let sibling =
+            store.availability_for_interface(provider, "default", Some(alias), Some(model), 1_000);
         assert!(
             sibling.available,
             "manual cooldown must not leak to {provider}/{alias}/{model}: {sibling:?}"

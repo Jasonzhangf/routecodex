@@ -26,8 +26,11 @@ pub(crate) async fn complete_due_precool_failures(
     for (identity, ticket) in tickets {
         let due = health.action_gate.observation_due_at(ticket.key()).unwrap();
         tokio::time::sleep_until(due).await;
-        let observation_lease = health.action_gate.try_admit_observation(ticket.key())
-            .unwrap().expect("isolated Provider observation must be due");
+        let observation_lease = health
+            .action_gate
+            .try_admit_observation(ticket.key())
+            .unwrap()
+            .expect("isolated Provider observation must be due");
         let permit = health
             .store
             .acquire_provider_precool_probe_for_interface(
@@ -556,26 +559,14 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
         assert!(
             !health
                 .store()
-                .availability_for_session(
-                    &scope,
-                    "first",
-                    Some("key1"),
-                    Some("gpt-test"),
-                    10_010
-                )
+                .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_010)
                 .available,
             "status {status} must commit its declared cooldown after the failed observation streak"
         );
         assert!(
             health
                 .store()
-                .availability_for_session(
-                    &scope,
-                    "second",
-                    Some("key1"),
-                    Some("gpt-test"),
-                    10_010
-                )
+                .availability_for_session(&scope, "second", Some("key1"), Some("gpt-test"), 10_010)
                 .available,
             "status {status} cooldown must remain exact to the failed identity"
         );
@@ -671,8 +662,9 @@ async fn http_429_takes_the_same_typed_health_path_as_a_recoverable_503() {
     normalize_global_pool_priorities(&mut manifest);
     for (label, status) in [("rate-limited-429", 429_u16), ("recoverable-503", 503_u16)] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let scope = test_provider_failure_scope("global_status_policy", "global_status_policy", label)
-            .expect("failure session scope");
+        let scope =
+            test_provider_failure_scope("global_status_policy", "global_status_policy", label)
+                .expect("failure session scope");
         let record = health
             .record_provider_failure_record_with_policy(
                 None,

@@ -8,9 +8,8 @@ use routecodex_v3_error::{
     V3ProviderFailureSessionScope,
 };
 use routecodex_v3_provider_responses::{
-    build_v3_provider_global_probe_request,
-    v3_provider_auth_handle_from_manifest_entry, ReqwestResponsesTransport, V3ProviderAuthHandle,
-    V3ProviderError, V3ResponsesProviderTarget,
+    build_v3_provider_global_probe_request, v3_provider_auth_handle_from_manifest_entry,
+    ReqwestResponsesTransport, V3ProviderAuthHandle, V3ProviderError, V3ResponsesProviderTarget,
 };
 
 use crate::provider_failure_runtime_policy::{

@@ -28,8 +28,8 @@ pub use health::{
 };
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
-    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
-    V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose, V3ProviderSchedulingProjection,
+    V3ProviderSchedulingReader,
 };
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
 pub use probe::{build_v3_provider_global_probe_request, build_v3_provider_global_request};
@@ -57,8 +57,8 @@ pub use transport::{
 };
 pub use transport_handoff::{
     V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptCleanup,
-    V3ProviderTransportAttemptControl,
-    V3ProviderTransportAttemptKey, V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
+    V3ProviderTransportAttemptControl, V3ProviderTransportAttemptKey,
+    V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
     V3ProviderTransportHandoffScope, V3ProviderTransportKind, V3ProviderTransportSendFact,
     V3ProviderTransportSendPhase,
 };

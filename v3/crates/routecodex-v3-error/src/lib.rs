@@ -566,9 +566,7 @@ impl V3Error05ExecutionAction {
 
     pub fn recovery_witness(&self) -> Option<&V3Error05RecoveryAdmissionWitness> {
         match self {
-            Self::WaitThenReselect { recovery } => {
-                Some(recovery)
-            }
+            Self::WaitThenReselect { recovery } => Some(recovery),
             Self::ReevaluateTarget
             | Self::ProjectTerminal
             | Self::ClientDisconnected

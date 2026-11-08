@@ -14,12 +14,11 @@ use routecodex_v3_error::{
     V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
-    V3ProviderAvailabilityProjection,
-    V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureAction,
-    V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderFailureRecord,
-    V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderKeyHealthProjection,
-    V3ProviderRecoveryKind, V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
-    V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
+    V3ProviderAvailabilityProjection, V3ProviderAvailabilityReader, V3ProviderError,
+    V3ProviderFailureAction, V3ProviderFailureCooldownScope, V3ProviderFailurePolicy,
+    V3ProviderFailureRecord, V3ProviderHealthListenerScope, V3ProviderHealthStore,
+    V3ProviderKeyHealthProjection, V3ProviderRecoveryKind, V3ProviderSchedulingProjection,
+    V3ProviderSchedulingReader, V3ProviderSessionAvailabilityReader, V3ResponsesProviderTarget,
 };
 use routecodex_v3_target::{
     V3StickySelectionScope, V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected,
@@ -38,8 +37,7 @@ use crate::operation_runner::{
     run_v3_error_06_terminal_projection_operator, V3Err01SourceInput,
 };
 use crate::provider_action_gate::{
-    V3ProviderActionGate,
-    V3ProviderActionGateKey, V3ProviderActionProviderScope,
+    V3ProviderActionGate, V3ProviderActionGateKey, V3ProviderActionProviderScope,
 };
 use crate::provider_error_policy_matching::provider_error_policy_matches_source_failure;
 pub use crate::provider_failure_global_probe::build_v3_provider_global_probe_target;
@@ -993,8 +991,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // is scheduled as a detached control-plane observation and the request keeps
     // the resolution it already has, so a stalled probe can neither extend nor
     // reroute this attempt.
-    if matches!(resolution, V3RelayProviderTargetResolution::Exhausted { .. })
-        && !is_request_local_compat_failure
+    if matches!(
+        resolution,
+        V3RelayProviderTargetResolution::Exhausted { .. }
+    ) && !is_request_local_compat_failure
     {
         if let Some(expanded) = context.captured_target_09 {
             let now = v3_relay_provider_policy_now_epoch_ms()

@@ -517,7 +517,9 @@ impl ResponsesTransport for MalformedErrorTransport {
 async fn provider_error_enters_error01_06_without_success_projection() {
     let server_id = "gemini_provider_error_projection";
     let manifest = manifest_for_action_gate_scope(server_id);
-    let transport = ErrorTransport { sends: Mutex::new(0) };
+    let transport = ErrorTransport {
+        sends: Mutex::new(0),
+    };
     let output = execute_v3_gemini_relay_runtime(
         &manifest,
         V3GeminiRelayRuntimeInput {
@@ -541,7 +543,11 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     .expect("a 429-only Gemini pool must terminal immediately, never wait on lifecycle");
 
     // 失败身份不得重发：完整身份只发送一次，不等待、不重试。
-    assert_eq!(*transport.sends.lock().unwrap(), 1, "failed identity must not be re-sent");
+    assert_eq!(
+        *transport.sends.lock().unwrap(),
+        1,
+        "failed identity must not be re-sent"
+    );
 
     // 不伪造成功：client 只得到 transport break。
     assert_eq!(output.status, 502);
@@ -1084,9 +1090,12 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
                 .is_empty(),
             "{case} the committed cooldown owns its own recovery probe cadence"
         );
-        let cooled = provider_health
-            .store()
-            .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX);
+        let cooled = provider_health.store().availability(
+            server_id,
+            Some(server_id),
+            Some("gemini-wire"),
+            u64::MAX,
+        );
         assert!(
             !cooled.available
                 && cooled.blocked_scopes.iter().any(|scope| {
@@ -1235,7 +1244,10 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     .expect("terminal provider action");
     let successful_stream = match successful.client_body {
         V3GeminiRelayClientBody::Sse(stream) => stream,
-        V3GeminiRelayClientBody::Json(body) => panic!("expected SSE, got json body {body} with status {}", successful.status),
+        V3GeminiRelayClientBody::Json(body) => panic!(
+            "expected SSE, got json body {body} with status {}",
+            successful.status
+        ),
     };
 
     let waiting_manifest = failure_manifest.clone();
@@ -1378,7 +1390,9 @@ async fn broker_terminal_validation_holds_while_healthy_alternative_completes_in
     // the alternative is not serialized behind another request's recovery lane.
     let released = tokio::time::timeout(Duration::from_secs(2), waiter)
         .await
-        .expect("healthy-alternative request must not be blocked by another request's recovery lane")
+        .expect(
+            "healthy-alternative request must not be blocked by another request's recovery lane",
+        )
         .expect("queued Gemini recovery task panicked")
         .expect("queued Gemini recovery action failed");
     assert!(
@@ -1683,7 +1697,9 @@ async fn run_json_client_with_chat_sse(
 
 #[tokio::test]
 async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
-    let output = run_json_client_with_chat_sse("complete JSON").await.unwrap();
+    let output = run_json_client_with_chat_sse("complete JSON")
+        .await
+        .unwrap();
     let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
         panic!("JSON client must receive projected JSON")
     };
@@ -1702,7 +1718,10 @@ async fn gemini_json_client_preserves_large_chat_sse_as_json() {
     let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
         panic!("JSON client must receive projected JSON");
     };
-    assert_eq!(payload["candidates"][0]["content"]["parts"][0]["text"], text);
+    assert_eq!(
+        payload["candidates"][0]["content"]["parts"][0]["text"],
+        text
+    );
     assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
 }
 

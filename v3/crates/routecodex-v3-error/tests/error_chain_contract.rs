@@ -591,8 +591,9 @@ fn already_terminal_target_exhaustion_and_success_control_never_become_success()
             V3ErrorActionScope::None,
             0,
         );
-        let exhaustion =
-            build_v3_error_04_target_exhaustion_decision_with_provider_availability(action, 0, false);
+        let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+            action, 0, false,
+        );
         let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
         assert_eq!(
             execution.action,

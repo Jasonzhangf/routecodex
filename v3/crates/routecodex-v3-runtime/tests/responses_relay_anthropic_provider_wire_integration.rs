@@ -5,8 +5,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime,
-    V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;

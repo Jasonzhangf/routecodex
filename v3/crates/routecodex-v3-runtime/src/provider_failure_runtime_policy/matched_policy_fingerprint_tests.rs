@@ -95,7 +95,9 @@ public_code = "E_MATCHED_CLASS"
                     "matched class failure",
                     100 + step,
                 )
-                .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
+                .expect(
+                    "ordinary provider policy failure must remain distinct from a Source01 fault",
+                );
             // v31: the record is counted immediately, but each distinct
             // no-status class is its own fingerprint, so alternating classes
             // always restart the consecutive series at one.
@@ -117,7 +119,13 @@ public_code = "E_MATCHED_CLASS"
     assert!(
         health
             .store()
-            .availability_for_session(&scope_handle, "first", Some("key1"), Some("gpt-test"), 20_000)
+            .availability_for_session(
+                &scope_handle,
+                "first",
+                Some("key1"),
+                Some("gpt-test"),
+                20_000
+            )
             .available,
         "below the shared threshold the identity must stay routable"
     );

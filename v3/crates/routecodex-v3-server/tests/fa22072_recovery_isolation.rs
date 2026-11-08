@@ -640,7 +640,8 @@ async fn public_recovery_witness_with_generation(
                 "the provider's own 403 body must pass through verbatim: {forbidden_text}"
             );
             assert!(
-                !forbidden_text.contains("step5 complete") && !forbidden_text.contains("routecodex"),
+                !forbidden_text.contains("step5 complete")
+                    && !forbidden_text.contains("routecodex"),
                 "no fabricated success and no proxy envelope: {forbidden_text}"
             );
         }

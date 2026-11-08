@@ -345,8 +345,7 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
     // commits HTTP 200 and a keepalive before the provider is released, so this
     // is deliberately the post-head case. It records the current transport
     // termination without claiming that post-head error delivery is closed.
-    let mut entry =
-        start_controlled_entry_with_timeout_and_budget(Some(10_000), Some(1800)).await;
+    let mut entry = start_controlled_entry_with_timeout_and_budget(Some(10_000), Some(1800)).await;
     let started = std::time::Instant::now();
     let client = reqwest::Client::new();
 
@@ -393,9 +392,7 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
                 clean_eof = true;
                 break;
             }
-            Err(_) => panic!(
-                "waiting for the actual last-candidate Provider failure timed out"
-            ),
+            Err(_) => panic!("waiting for the actual last-candidate Provider failure timed out"),
         }
     }
     let received = String::from_utf8_lossy(&received).to_string();

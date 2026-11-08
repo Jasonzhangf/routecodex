@@ -576,9 +576,9 @@ fn model_transport_break_response(
         // unchanged. Once a keepalive or business frame has committed the SSE channel,
         // the client transport owner closes that body without a second head or error
         // frame, so requested_stream itself is not a commit fact.
-        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
-            witness,
-        ) if witness.is_complete_http_error() => {
+        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness)
+            if witness.is_complete_http_error() =>
+        {
             return last_candidate_http_error_response(&witness);
         }
         // Intermediate provider HTTP errors remain provider-private. Their status,
@@ -649,7 +649,11 @@ fn last_candidate_http_error_response(
         let Ok(value) = value.to_str() else {
             continue;
         };
-        for token in value.split(',').map(str::trim).filter(|token| !token.is_empty()) {
+        for token in value
+            .split(',')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+        {
             if let Ok(token) = HeaderName::from_bytes(token.as_bytes()) {
                 excluded.push(token);
             }
