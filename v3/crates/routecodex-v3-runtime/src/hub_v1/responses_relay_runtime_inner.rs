@@ -516,25 +516,14 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         } else {
                             None
                         };
-                        if !cooldown_rescue_attempted {
-                            cooldown_rescue_attempted = true;
-                            let rescue_now = v3_relay_provider_policy_now_epoch_ms()
-                                .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                            if provider_health
-                                .run_v3_bounded_cooldown_rescue_round(
-                                    manifest,
-                                    &exhausted_expanded,
-                                    rescue_now,
-                                    tokio::time::Instant::from_std(
-                                        attempt_budget.residence_deadline(),
-                                    ),
-                                )
-                                .await
-                            {
-                                trace.push("V3ProviderCooldownRescueProbeCompleted");
-                                continue;
-                            }
-                        }
+                        // v31: provider lifecycle never gates a request. The
+                        // rescue probe is scheduled as a detached control-plane
+                        // observation; this request keeps its truthful typed
+                        // exhaustion immediately.
+                            provider_health.spawn_v3_background_cooldown_rescue_round(
+                                manifest,
+                                &exhausted_expanded,
+                            );
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,
@@ -947,29 +936,17 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &selected.candidate,
                             ),
                         );
-                        // A capacity refusal never contacted the identity, so a
-                        // cooled peer is the only identity that can still
-                        // answer. Recover it through one bounded semantic probe
-                        // instead of promoting it blindly: the probe owns the
-                        // pool visibility change and the next plan uses its real
-                        // result.
+                        // A capacity refusal never contacted the identity, so
+                        // the cooled peer is the only identity that can still
+                        // answer, and the next selection promotes it
+                        // immediately. Its own probe is scheduled as a detached
+                        // control-plane observation, never awaited here.
                         if !cooldown_rescue_attempted {
                             cooldown_rescue_attempted = true;
-                            let rescue_now = v3_relay_provider_policy_now_epoch_ms()
-                                .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                            if provider_health
-                                .run_v3_bounded_cooldown_rescue_round(
+                                provider_health.spawn_v3_background_cooldown_rescue_round(
                                     manifest,
                                     &retained_expanded,
-                                    rescue_now,
-                                    tokio::time::Instant::from_std(
-                                        attempt_budget.residence_deadline(),
-                                    ),
-                                )
-                                .await
-                            {
-                                trace.push("V3ProviderCooldownRescueProbeCompleted");
-                            }
+                                );
                         }
                         continue;
                     }

@@ -4,16 +4,27 @@ pub(crate) struct V3CooldownRescueProbeOutcome {
     pub(crate) did_work: bool,
 }
 
-/// Upper bound for the single rescue round a request may run at exhaustion.
+/// Upper bound for one background rescue round (control plane only).
 ///
 /// v31 keeps requests independent of provider lifecycle: a request never waits
-/// for a probe's cadence, a cooldown window or a recovery schedule. The one
-/// bounded probe round below exists because a captured target can exhaust while
-/// a cooled identity is the only candidate that can answer; it changes pool
-/// visibility only, never reruns transport selection, and the caller keeps its
-/// own typed failure when the round cannot complete inside this budget.
+/// for a probe's cadence, a cooldown window or a recovery schedule, and the
+/// rescue round is therefore never awaited by a request path. The round exists
+/// because a captured target can exhaust while a cooled identity is the only
+/// candidate that can answer: it changes pool visibility only, so a later
+/// selection (or a later request) can use the identity again.
 pub(crate) const V3_COOLDOWN_RESCUE_ROUND_BUDGET: std::time::Duration =
     std::time::Duration::from_millis(750);
+
+/// Delay before a spawned rescue round starts probing.
+///
+/// A probe and a business request of the same complete
+/// provider/interface/model/auth-key identity share one concurrency lease. The
+/// request that scheduled the round may itself send business to that identity
+/// in the very next steps, so the control-plane observation waits out a short
+/// grace period instead of contending for the lease its own request needs. The
+/// grace is a scheduling detail of the observation; no request waits on it.
+pub(crate) const V3_COOLDOWN_RESCUE_BACKGROUND_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(250);
 
 pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &str) -> String {
     format!("{provider_id}:{auth_alias}")
@@ -180,6 +191,43 @@ impl V3ProviderFailureRuntimeHealth {
             .await,
             Ok(Ok(V3CooldownRescueProbeOutcome { did_work: true, .. }))
         )
+    }
+
+    /// Schedule the bounded rescue round as a detached control-plane
+    /// observation.
+    ///
+    /// The caller never awaits it: the round cannot gate target selection, delay
+    /// or replace a business send, retry an attempt or suppress a typed
+    /// failure. Its only effect is the ordinary provider-health state that a
+    /// later selection observes, so a request that scheduled it keeps its own
+    /// immediate outcome.
+    pub(crate) fn spawn_v3_background_cooldown_rescue_round(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        expanded: &V3Target09CandidateSetExpanded,
+    ) {
+        let health = self.clone();
+        let manifest = manifest.clone();
+        let expanded = expanded.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(V3_COOLDOWN_RESCUE_BACKGROUND_DELAY).await;
+            // The observation reads the clock when it actually runs: a decision
+            // made against the pre-grace timestamp could already be stale for a
+            // cooldown that expired inside the grace.
+            let Ok(now_ms) =
+                v3_relay_provider_policy_now_epoch_ms()
+            else {
+                return;
+            };
+            let _ = health
+                .run_v3_bounded_cooldown_rescue_round(
+                    &manifest,
+                    &expanded,
+                    now_ms,
+                    tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET,
+                )
+                .await;
+        });
     }
 
     pub(crate) async fn run_exhaustion_rescue_probes(

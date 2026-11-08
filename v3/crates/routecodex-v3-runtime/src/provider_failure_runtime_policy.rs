@@ -985,7 +985,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // expansion failure. Provider lifecycle recovery cannot erase this fact.
     state.failed_candidates.insert(candidate_key.clone());
     let excluded_with_failed = state.failed_candidates.clone();
-    let mut resolution = reselect_from_captured_target_plan(
+    let resolution = reselect_from_captured_target_plan(
         context,
         &selected,
         &excluded_with_failed,
@@ -993,11 +993,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     )
     .await;
     // An exhausted captured target whose remaining candidates are only hidden by
-    // their own cooldown still has a real alternative. Provider lifecycle owns
-    // that recovery: one bounded rescue round (the identity's own probe) runs
-    // here, and the resolution is evaluated once more with the updated
-    // visibility. The round is capped, so a stalled probe keeps the truthful
-    // exhaustion instead of extending the request.
+    // their own cooldown still has a real alternative, and provider lifecycle
+    // owns that recovery. v31 keeps the request off that path: the rescue probe
+    // is scheduled as a detached control-plane observation and the request keeps
+    // the resolution it already has, so a stalled probe can neither extend nor
+    // reroute this attempt.
     if matches!(resolution, V3RelayProviderTargetResolution::Exhausted { .. })
         && !is_request_local_compat_failure
     {
@@ -1010,24 +1010,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 &context.failure_session_scope,
                 context.provider_health,
                 now,
-            ) && context
-                .provider_health
-                .run_v3_bounded_cooldown_rescue_round(
-                    context.manifest,
-                    expanded,
-                    now,
-                    tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET,
-                )
-                .await
-            {
-                resolution = reselect_from_captured_target_plan(
-                    context,
-                    &selected,
-                    &excluded_with_failed,
-                    v3_relay_provider_policy_now_epoch_ms()
-                        .map_err(v3_relay_provider_policy_ordinary_error)?,
-                )
-                .await;
+            ) {
+                context
+                    .provider_health
+                    .spawn_v3_background_cooldown_rescue_round(context.manifest, expanded);
             }
         }
     }
@@ -1259,15 +1245,32 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let terminal_projection =
         terminal_projection_for(decision_projection, &decision, matched_policy).map_err(Err)?;
     // This is the only call reached after a normal captured-target Exhausted.
-    // The failed candidate is the last eligible one only when every candidate
-    // of the captured target was attempted: an untried sibling the pool cannot
-    // use right now keeps the failure provider-private, so its provider HTTP
-    // error is never projected as the client's answer.
+    // The failed candidate is the last eligible one when no untried sibling is
+    // still visible to the pool. The visibility half uses the same availability
+    // projection target selection uses, so a sibling hidden by its own cooldown,
+    // a pending probe, an auth-key cooldown or a declared availability window is
+    // not an alternative and cannot keep the failed attempt's real provider
+    // status/body from passing through to the client.
+    let eligibility_now_ms =
+        v3_relay_provider_policy_now_epoch_ms().map_err(v3_relay_provider_policy_ordinary_error)?;
+    let availability = context
+        .provider_health
+        .session_bound_availability(&context.failure_session_scope);
     let last_eligible_candidate = context.captured_target_09.is_none_or(|expanded| {
-        expanded
-            .candidates
-            .iter()
-            .all(|candidate| state.failed_candidates.contains(&v3_relay_provider_candidate_key(candidate)))
+        expanded.candidates.iter().all(|candidate| {
+            state
+                .failed_candidates
+                .contains(&v3_relay_provider_candidate_key(candidate))
+                || !availability
+                    .availability_for_interface(
+                        &candidate.provider_id,
+                        &candidate.interface_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        eligibility_now_ms,
+                    )
+                    .available
+        })
     });
     let terminal_disposition = terminal_disposition_for(&decision, state, last_eligible_candidate);
     Ok(V3RelayProviderFailurePolicyResult {
