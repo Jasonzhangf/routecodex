@@ -3967,14 +3967,37 @@ async fn assert_busy_candidate_preserves_peer_recovery(direct: bool) {
         first_captures.try_recv().is_err(),
         "full provider must receive no extra send"
     );
-    timeout(Duration::from_secs(1), second_captures.recv())
+    // The two peer arrivals are distinct requests: first the bounded semantic
+    // probe (a non-streaming minimal ping without the business input), then
+    // the business request itself (streaming, carrying the client input).
+    let probe = timeout(Duration::from_secs(1), second_captures.recv())
         .await
-        .unwrap()
+        .expect("the peer must receive a semantic probe")
         .unwrap();
-    timeout(Duration::from_secs(1), second_captures.recv())
+    {
+        let is_probe = probe.body.get("stream").and_then(Value::as_bool) == Some(false)
+            && probe.body.get("input").is_some();
+        assert!(
+            is_probe,
+            "the first arrival must be the semantic probe, not the business request: {}",
+            probe.body
+        );
+    }
+    let business = timeout(Duration::from_secs(1), second_captures.recv())
         .await
-        .expect("the peer must receive both a semantic probe and the business request")
+        .expect("the peer must receive the business request after the probe")
         .unwrap();
+    {
+        let body_text = business.body.to_string();
+        assert!(
+            body_text.contains("recover cooled peer"),
+            "the second arrival must be the business request: {body_text}"
+        );
+        assert!(
+            business.body.get("stream").and_then(Value::as_bool) == Some(true),
+            "the business request must keep its streaming mode: {body_text}"
+        );
+    }
     let health: Value = client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
