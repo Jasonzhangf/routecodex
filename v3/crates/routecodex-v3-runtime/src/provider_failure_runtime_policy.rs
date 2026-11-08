@@ -1151,7 +1151,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         V3RelayProviderFailurePolicyEventInput {
                             candidate: selected.candidate,
                             status,
-                            error_type: external_error_type.clone(),
+                            error_type: error_type.clone(),
                             message,
                             health_record,
                             action: "switch_provider",
@@ -1252,7 +1252,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             build_v3_relay_provider_failure_policy_event(V3RelayProviderFailurePolicyEventInput {
                 candidate: selected.candidate.clone(),
                 status,
-                error_type: external_error_type.clone(),
+                error_type: error_type.clone(),
                 message,
                 health_record,
                 action: "wait_rate_limit_capacity",
@@ -1312,7 +1312,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 V3RelayProviderFailurePolicyEventInput {
                     candidate: selected.candidate,
                     status,
-                    error_type: external_error_type.clone(),
+                    error_type: error_type.clone(),
                     message,
                     health_record,
                     action: "wait_target_recovery",
@@ -1350,7 +1350,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 V3RelayProviderFailurePolicyEventInput {
                     candidate: selected.candidate,
                     status,
-                    error_type: external_error_type.clone(),
+                    error_type: error_type.clone(),
                     message,
                     health_record,
                     action: "terminal_request_local_provider_compat_exhausted",
@@ -1391,7 +1391,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             V3RelayProviderFailurePolicyEventInput {
                 candidate: selected.candidate,
                 status,
-                error_type: external_error_type.clone(),
+                error_type: error_type.clone(),
                 message,
                 health_record,
                 action: "terminal_route_and_default_exhausted",
