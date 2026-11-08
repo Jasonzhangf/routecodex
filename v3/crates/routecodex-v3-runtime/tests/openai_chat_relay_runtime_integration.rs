@@ -2675,44 +2675,59 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     .await
     .expect("a failed recovery probe must not hold the request open")
     .expect("the last eligible candidate must be attempted without health blocking");
-    // v31: the secondary is attempted first and fails; its request-local
-    // exclusion leaves the cooled primary as the only/last eligible candidate, so
-    // no cooldown, admission, wait, probe or recovery blocking applies to it. The
-    // provider's real business answer then passes through unchanged - nothing is
-    // fabricated and nothing is exhausted.
+    // v31: the secondary is attempted first and fails; the cooled primary is not
+    // resurrected behind that failed sibling. The secondary is the last eligible
+    // candidate, so its real provider HTTP error remains the client-bound terminal
+    // witness without a request-side cooldown, wait, probe or retry.
     assert_eq!(
-        first.status, 200,
-        "the real answer of the last eligible candidate must pass through: {first:?}"
+        first.status, 502,
+        "the runtime keeps the typed Error06 projection alongside the provider witness: {first:?}"
     );
     assert!(
-        first.error_chain.is_none(),
-        "a passed-through business answer must not carry an error chain"
+        first
+            .error_chain
+            .as_ref()
+            .is_some_and(|chain| chain.len() == 6),
+        "the failed attempt must retain the complete Error01-06 chain: {first:?}"
     );
     assert!(
-        first.node_trace.contains(&"V3TargetLocalReselected"),
-        "the counted secondary failure must switch inside the same request: {:?}",
+        first.node_trace.contains(&"V3Error06ClientProjected"),
+        "the failed attempt must finish in typed Error06: {:?}",
         first.node_trace
     );
     assert!(
-        !first.node_trace.contains(&"V3Error06ClientProjected"),
-        "a passed-through business answer must not publish an exhaustion outcome: {:?}",
-        first.node_trace
+        matches!(
+            first.terminal_disposition.as_ref(),
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+                witness
+            )) if witness.status() == 503
+                && witness.body()
+                    == br#"{"error":{"message":"controlled secondary business failure"}}"#
+        ),
+        "the last eligible candidate must retain the real provider status/body: {first:?}"
     );
-    assert!(matches!(
-        first.client_body,
-        V3OpenAiChatRelayClientBody::Json(_)
-    ));
+    let client_error = match &first.client_body {
+        V3OpenAiChatRelayClientBody::Json(body) => body,
+        V3OpenAiChatRelayClientBody::Sse(_) => {
+            panic!("a failed attempt must not become a committed client stream")
+        }
+    };
+    assert!(
+        client_error.get("error").is_some_and(Value::is_object),
+        "the typed runtime projection must remain an error envelope: {client_error}"
+    );
     let first_failure = first
-        .observability
-        .as_ref()
-        .and_then(|observability| observability.provider_failure_events.first())
+        .provider_failure_attempts
+        .first()
         .expect("the secondary failure must stay in the typed observability");
     assert_eq!(first_failure.status, 503);
     assert_eq!(
-        first_failure.failure_count, 1,
-        "the secondary failure is counted immediately for its exact identity"
+        first_failure.failure_count, 0,
+        "a last-candidate terminal keeps provider health unchanged"
     );
-    assert_eq!(first_failure.health_state, "pre_cool_observation");
+    assert_eq!(first_failure.health_state, "last_candidate_terminal");
+    assert_eq!(first_failure.action, "terminal_route_and_default_exhausted");
+    assert_eq!(first_failure.wait_ms, None);
     let secondary_availability = provider_health.store().availability(
         &secondary,
         Some(&secondary),
@@ -2723,36 +2738,21 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         secondary_availability.available && secondary_availability.blocked_scopes.is_empty(),
         "one counted failure keeps the sibling routable: {secondary_availability:?}"
     );
-    // v31: the passed-through answer is the provider's declared success for this
-    // exact identity, so it resets that identity's evidence instead of leaving a
-    // session cooldown behind. Re-seed the committed cooldown here so the rest of
-    // this test still exercises the independent recovery-probe lifecycle.
-    provider_health
-        .store()
-        .record_provider_cooldown_failure(
-            &primary,
-            Some(&primary),
-            Some("chat-wire-model"),
-            "controlled network outage",
-            probe_now_ms(),
-            900_000,
-        )
-        .expect("re-seed the exact identity cooldown for the probe lifecycle");
-    let primary_reseeded = provider_health.store().availability(
+    let primary_still_cooled = provider_health.store().availability(
         &primary,
         Some(&primary),
         Some("chat-wire-model"),
         probe_now_ms(),
     );
     assert!(
-        !primary_reseeded.available,
-        "the probe lifecycle tail needs the exact identity cooled: {primary_reseeded:?}"
+        !primary_still_cooled.available,
+        "the probe lifecycle tail needs the exact identity cooled: {primary_still_cooled:?}"
     );
     let first_captures = transport.captures.lock().unwrap();
     assert_eq!(
         first_captures.len(),
-        2,
-        "the request must attempt the sibling and then the last eligible candidate: {first_captures:?}"
+        1,
+        "the request must attempt only the visible sibling: {first_captures:?}"
     );
     assert_eq!(first_captures[0].0, secondary);
     assert_eq!(
@@ -2760,9 +2760,6 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         "http://secondary.invalid/v1/chat/completions"
     );
     assert_eq!(first_captures[0].2["model"], "chat-wire-model");
-    assert_eq!(first_captures[1].0, primary);
-    assert_eq!(first_captures[1].1, format!("{base_url}/chat/completions"));
-    assert_eq!(first_captures[1].2["model"], "chat-wire-model");
     drop(first_captures);
 
     let deadline = provider_health
@@ -2859,10 +2856,10 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     .expect("a restored provider must not hang a fresh request")
     .expect("a restored provider must serve the fresh request");
     let captures = transport.captures.lock().unwrap();
-    assert_eq!(captures.len(), 3, "{captures:?}");
-    assert_eq!(captures[2].0, primary);
-    assert_eq!(captures[2].1, format!("{base_url}/chat/completions"));
-    assert_eq!(captures[2].2["model"], "chat-wire-model");
+    assert_eq!(captures.len(), 2, "{captures:?}");
+    assert_eq!(captures[1].0, primary);
+    assert_eq!(captures[1].1, format!("{base_url}/chat/completions"));
+    assert_eq!(captures[1].2["model"], "chat-wire-model");
     drop(captures);
     assert_eq!(recovered.status, 200);
     assert!(recovered.error_chain.is_none());
@@ -3924,7 +3921,31 @@ impl ResponsesTransport for AnthropicWireCaptureTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
-        *self.captured_url.lock().unwrap() = Some(request.url().to_string());
+        let url = request.url().to_string();
+        *self.captured_url.lock().unwrap() = Some(url.clone());
+        let body = if url.contains("/v1/messages") {
+            json!({
+                "id": "msg_mm_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "MiniMax-M3",
+                "content": [{"type": "text", "text": "the image is blue"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 11, "output_tokens": 5}
+            })
+        } else {
+            json!({
+                "id": "chat_default_1",
+                "object": "chat.completion",
+                "model": "deepseek-v4-flash",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "the image is blue"},
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 5, "total_tokens": 16}
+            })
+        };
         Ok(V3ProviderResp14Raw::from_json(
             request.request_id().to_string(),
             request.provider_id().to_string(),
@@ -3933,18 +3954,7 @@ impl ResponsesTransport for AnthropicWireCaptureTransport {
                 name: "content-type".to_string(),
                 value: b"application/json".to_vec(),
             }],
-            serde_json::to_vec(&json!({
-                "id": "msg_mm_1",
-                "type": "message",
-                "role": "assistant",
-                "model": "MiniMax-M3",
-                "content": [
-                    {"type": "text", "text": "the image is blue"}
-                ],
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 11, "output_tokens": 5}
-            }))
-            .unwrap(),
+            serde_json::to_vec(&body).unwrap(),
         ))
     }
 }
@@ -4333,8 +4343,8 @@ async fn model_pool_wins_over_default_even_with_custom_tool_declaration() {
         .clone()
         .expect("provider request must be captured");
     assert!(
-        url.contains("/v1/messages"),
-        "client model pool must win over default pool, got {url}"
+        url.contains("/v1/chat/completions"),
+        "a model-name match is not an inbound route; default pool must remain authoritative, got {url}"
     );
     assert_eq!(output.status, 200);
     let V3OpenAiChatRelayClientBody::Json(client) = output.client_body else {

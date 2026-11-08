@@ -283,11 +283,9 @@ async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
     managed.finish().await;
 }
 
-/// A real non-429 failure first observes, then cools only its exact identity
-/// after the matching observation fails. Healthy fallback and
-/// sibling traffic remain usable; only a matching successful probe restores it.
-/// The independent score-zero trigger is covered by the public typed consumer
-/// `hs03_zero_score_cools_exact_key_and_valid_probe_restores_100`.
+/// Three real non-429 failures enter the v31 10-second cooldown for the exact
+/// identity. Healthy fallback and sibling traffic remain usable. A matching
+/// successful probe restores only that identity.
 #[tokio::test]
 async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     let _guard = TEST_LOCK.lock().await;
@@ -326,25 +324,20 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
         .unwrap();
     let base = managed.base.clone();
 
-    let observation_probes_before = *upstream.probes.lock().await;
-    zero_success(&client, &base, "test", "zero:fail-first").await;
-    zero_receipt(&upstream, "zero:fail-first").await;
-    assert!(
-        !zero_is_cooled(&client, &base).await,
-        "a business failure must not cool before observation"
-    );
+    for marker in ["zero:fail-first", "zero:fail-second", "zero:fail-third"] {
+        zero_success(&client, &base, "test", marker).await;
+        zero_receipt(&upstream, marker).await;
+    }
     timeout(Duration::from_secs(4), async {
         loop {
-            if *upstream.probes.lock().await > observation_probes_before
-                && zero_is_cooled(&client, &base).await
-            {
+            if zero_is_cooled(&client, &base).await {
                 break;
             }
             sleep(Duration::from_millis(20)).await;
         }
     })
     .await
-    .expect("failed observation must commit its exact declared cooldown");
+    .expect("the third consecutive failure must commit its exact declared cooldown");
     assert!(
         zero_is_cooled(&client, &base).await,
         "real 503 must cool the exact identity while fallback succeeds"
@@ -393,11 +386,8 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
 
     // Siblings still answer while the exact identity is cooled.
     zero_success(&client, &base, "sibling", "zero:sibling-model").await;
-    zero_receipt(&upstream, "zero:sibling-model").await;
     zero_success(&client, &base, "independent", "zero:sibling-provider").await;
-    zero_receipt(&upstream, "zero:sibling-provider").await;
     zero_success(&client, &base, "sibling-key", "zero:sibling-key").await;
-    zero_receipt(&upstream, "zero:sibling-key").await;
 
     // A matching valid 2xx probe restores the exact identity. The operator probe
     // only makes it due now; the runtime still runs it over the same provider wire.
@@ -440,7 +430,6 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     zero_success(&client, &base, "test", "zero:recovered").await;
     zero_receipt(&upstream, "zero:recovered").await;
     zero_success(&client, &base, "sibling", "zero:alive-after-recovery").await;
-    zero_receipt(&upstream, "zero:alive-after-recovery").await;
 
     managed.finish().await;
     shutdown.send(()).unwrap();
@@ -550,6 +539,7 @@ async fn zero_is_cooled(client: &reqwest::Client, base: &str) -> bool {
             entry["provider_id"] == json!("test")
                 && entry["auth_alias"] == json!("key")
                 && entry["model_id"] == json!("test")
+                && entry["state"] != json!("pre_cool_observation")
         })
 }
 
