@@ -7,20 +7,34 @@ async fn provider_health_observes_failure_without_request_alternative() {
         V3RelayProviderFailurePolicyState,
     };
     for direct in [true, false] {
-        let manifest = provider_concurrency_two_provider_manifest(if direct { "isolated_health_direct" } else { "isolated_health_relay" }, "unused_health_peer");
+        let manifest = provider_concurrency_two_provider_manifest(
+            if direct {
+                "isolated_health_direct"
+            } else {
+                "isolated_health_relay"
+            },
+            "unused_health_peer",
+        );
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
         let scope = test_failure_session_scope("default");
         let raw = crate::nodes::build_v3_server_03_http_request_raw(
-            "test".into(), scope.clone(), "independent-health".into(),
-            "independent-health-exec".into(), "POST".into(), "/v1/responses".into(),
+            "test".into(),
+            scope.clone(),
+            "independent-health".into(),
+            "independent-health-exec".into(),
+            "POST".into(),
+            "/v1/responses".into(),
             json!({"model":"client-model","input":"hello"}),
         );
         let plan = test_protocol_plan(&manifest, raw, health.clone(), 0);
         let mut expanded = plan.expanded;
         expanded.candidates.truncate(1);
         let selected = routecodex_v3_target::V3Target10ConcreteProviderSelected {
-            route: expanded.route.clone(), candidate: expanded.candidates[0].clone(),
-            candidate_count: 1, unavailable_candidates: vec![], attempts: 1,
+            route: expanded.route.clone(),
+            candidate: expanded.candidates[0].clone(),
+            candidate_count: 1,
+            unavailable_candidates: vec![],
+            attempts: 1,
             default_floor_protected: false,
         };
         let selected_key = candidate_key(&selected.candidate);
@@ -28,47 +42,78 @@ async fn provider_health_observes_failure_without_request_alternative() {
         let mut trace = vec![];
         let record = if direct {
             let source = build_v3_error_01_source_raised_external(
-                V3ErrorSourceKind::ProviderFailure, "V3ProviderRespInbound01Raw",
-                "provider_http_503", "real provider failure without an alternative",
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderRespInbound01Raw",
+                "provider_http_503",
+                "real provider failure without an alternative",
                 V3ExternalErrorLink {
-                    kind: V3ExternalErrorKind::Provider, status: Some(503),
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(503),
                     code: Some("HTTP_503".into()),
                     provider_id: Some(selected.candidate.provider_id.clone()),
-                    upstream_request_id: None, message: Some("provider unavailable".into()),
+                    upstream_request_id: None,
+                    message: Some("provider unavailable".into()),
                 },
             );
             run_v3_direct_provider_failure_policy(
                 &V3DirectProviderFailurePolicyContext {
-                    failure_session_scope: &scope, provider_health: &health,
+                    failure_session_scope: &scope,
+                    provider_health: &health,
                     availability: &health.session_bound_availability(&scope),
-                    expanded: Some(&expanded), provider_pinned: false, now_epoch_ms: 0,
+                    expanded: Some(&expanded),
+                    provider_pinned: false,
+                    now_epoch_ms: 0,
                     manifest: &manifest,
                 },
-                &selected, source, 503,
+                &selected,
+                source,
+                503,
                 &mut V3DirectProviderFailurePolicyState {
-                    failed_candidates: &mut failed, trace: &mut trace,
+                    failed_candidates: &mut failed,
+                    trace: &mut trace,
                 },
                 None,
-            ).await.expect("Direct failure policy").event.unwrap().health_state
+            )
+            .await
+            .expect("Direct failure policy")
+            .event
+            .unwrap()
+            .health_state
         } else {
             run_v3_relay_provider_failure_policy(
                 &V3RelayProviderFailurePolicyContext {
-                    manifest: &manifest, captured_target_09: Some(&expanded),
-                    failure_session_scope: scope, provider_health: &health,
+                    manifest: &manifest,
+                    captured_target_09: Some(&expanded),
+                    failure_session_scope: scope,
+                    provider_health: &health,
                     deterministic_sample: 0,
                 },
-                selected, "V3ProviderRespInbound01Raw", 503, Some("HTTP_503".into()),
-                "real provider failure without an alternative".into(), None,
+                selected,
+                "V3ProviderRespInbound01Raw",
+                503,
+                Some("HTTP_503".into()),
+                "real provider failure without an alternative".into(),
+                None,
                 &mut V3RelayProviderFailurePolicyState {
-                    failed_candidates: &mut failed, trace: &mut trace,
+                    failed_candidates: &mut failed,
+                    trace: &mut trace,
                     last_external_http: &mut None,
                 },
-            ).await.expect("Relay failure policy").event.health_record.state
+            )
+            .await
+            .expect("Relay failure policy")
+            .event
+            .health_record
+            .state
         };
-        assert_eq!(record, "last_candidate_terminal",
-            "a proven last candidate must terminate without a health mutation; direct={direct}");
-        assert!(failed.contains(&selected_key),
-            "the real failed identity must stay excluded from this request; direct={direct}");
+        assert_eq!(
+            record, "last_candidate_terminal",
+            "a proven last candidate must terminate without a health mutation; direct={direct}"
+        );
+        assert!(
+            failed.contains(&selected_key),
+            "the real failed identity must stay excluded from this request; direct={direct}"
+        );
     }
 }
 
@@ -187,7 +232,10 @@ async fn assert_first_byte_timeout_preserves_untried_siblings(
     use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
     use routecodex_v3_error::V3Error05ExecutionAction;
 
-    let manifest = provider_concurrency_two_key_then_other_provider_manifest("hang_sibling_a", "hang_sibling_b");
+    let manifest = provider_concurrency_two_key_then_other_provider_manifest(
+        "hang_sibling_a",
+        "hang_sibling_b",
+    );
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -319,8 +367,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         run_v3_relay_provider_failure_policy_with_response_source,
         V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     };
-    let manifest =
-        provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b");
+    let manifest = provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -389,7 +436,10 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         result.decision.action.recovery_witness().is_none(),
         "Relay reselection must not carry a Provider lifecycle witness"
     );
-    assert_eq!(result.decision.action, V3Error05ExecutionAction::ReevaluateTarget);
+    assert_eq!(
+        result.decision.action,
+        V3Error05ExecutionAction::ReevaluateTarget
+    );
     assert_eq!(failed, BTreeSet::from([key]));
     assert_eq!(
         result.event.diagnostic_source.source_kind,

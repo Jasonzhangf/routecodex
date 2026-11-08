@@ -6511,7 +6511,9 @@ async fn assert_responses_send_await_residence_deadline_public_entry(
         .as_array()
         .unwrap()
         .iter()
-        .filter(|event| event["node_id"] == "V3Server03HttpRequestRaw" && event["event"] == "received")
+        .filter(|event| {
+            event["node_id"] == "V3Server03HttpRequestRaw" && event["event"] == "received"
+        })
         .filter_map(|event| event["details"]["execution_mode"].as_str())
         .collect::<Vec<_>>();
     assert_eq!(
@@ -14922,7 +14924,10 @@ async fn responses_request_reaches_provider_transport_immediately_without_capaci
     first_release.add_permits(4);
     second_release.add_permits(4);
     for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(3), task).await.unwrap().unwrap();
+        let (status, body) = timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(status, StatusCode::OK, "{body}");
         assert!(body.contains("response.completed"), "{body}");
         assert_responses_sse_delivered_business_text(&body, "held response released");
@@ -14962,7 +14967,10 @@ async fn responses_negative_control_fails_if_a_capacity_wait_or_busy_source_retu
         started.elapsed()
     );
     let logs: Value = reqwest::Client::new()
-        .get(format!("http://{}/_routecodex/debug/logs", handle.listeners[0].addr))
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
         .send()
         .await
         .unwrap()
@@ -14977,7 +14985,10 @@ async fn responses_negative_control_fails_if_a_capacity_wait_or_busy_source_retu
 
     first_release.add_permits(4);
     second_release.add_permits(4);
-    let (status, body) = timeout(Duration::from_secs(3), request).await.unwrap().unwrap();
+    let (status, body) = timeout(Duration::from_secs(3), request)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_responses_sse_delivered_business_text(&body, "held response released");
     handle.shutdown().await;

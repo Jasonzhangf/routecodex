@@ -85,8 +85,7 @@ async fn probe_sse_error_marks_handoff_failed() {
         provider_id: "probe-sse-provider".into(),
         reason: "injected stream failure".into(),
     };
-    let (raw, broker, key) =
-        probe_sse_fixture(Box::pin(stream::once(async move { Err(error) })));
+    let (raw, broker, key) = probe_sse_fixture(Box::pin(stream::once(async move { Err(error) })));
     let V3ProviderResponseBody::Sse(mut body) = raw.into_body() else {
         panic!("probe response must remain SSE");
     };

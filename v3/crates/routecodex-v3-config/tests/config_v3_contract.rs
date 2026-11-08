@@ -880,9 +880,7 @@ fn server_execution_attempt_store_compiles_explicit_policy() {
 
 #[test]
 fn server_execution_attempt_store_rejects_zero_residence() {
-    let invalid_policies = [
-        "attempt_store = { residence_timeout_ms = 0 }",
-    ];
+    let invalid_policies = ["attempt_store = { residence_timeout_ms = 0 }"];
 
     for invalid_policy in invalid_policies {
         let execution = HUB_V1_SERVER_EXECUTION.replacen(

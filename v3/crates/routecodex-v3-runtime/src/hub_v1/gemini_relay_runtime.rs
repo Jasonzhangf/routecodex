@@ -190,14 +190,7 @@ pub async fn execute_v3_gemini_relay_runtime_with_provider_health<T: ResponsesTr
     transport: &T,
     provider_health: V3ProviderFailureRuntimeHealth,
 ) -> Result<V3GeminiRelayRuntimeOutput, V3GeminiRelayRuntimeError> {
-    execute_v3_gemini_relay_runtime_inner(
-        manifest,
-        input,
-        transport,
-        provider_health,
-        None,
-    )
-    .await
+    execute_v3_gemini_relay_runtime_inner(manifest, input, transport, provider_health, None).await
 }
 
 async fn execute_v3_gemini_relay_runtime_inner<T: ResponsesTransport>(

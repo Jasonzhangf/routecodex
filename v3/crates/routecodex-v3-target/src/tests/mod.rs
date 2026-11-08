@@ -1807,10 +1807,19 @@ fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_misma
 #[test]
 fn invisible_selected_pool_uses_default_without_another_optional_pool() {
     let mut candidates = expanded_tools();
-    let first = candidates.candidates.iter_mut().find(|c| c.provider_id == "a").unwrap();
+    let first = candidates
+        .candidates
+        .iter_mut()
+        .find(|c| c.provider_id == "a")
+        .unwrap();
     first.pool_ids = vec!["tools".into()];
     first.default_pool_member = false;
-    let mut other = candidates.candidates.iter().find(|c| c.provider_id == "b").unwrap().clone();
+    let mut other = candidates
+        .candidates
+        .iter()
+        .find(|c| c.provider_id == "b")
+        .unwrap()
+        .clone();
     other.provider_id = "optional".into();
     other.pool_ids = vec!["coding".into()];
     other.default_pool_member = false;
@@ -1825,18 +1834,32 @@ fn invisible_selected_pool_uses_default_without_another_optional_pool() {
     }
     candidates.route.target_plan.push(coding);
     let target = V3TargetInterpreter::default();
-    let initial = target.select_available(
-        candidates.clone(),
-        &Availability { blocked: BTreeSet::new() },
-        0,
-    ).unwrap();
-    assert_eq!(initial.candidate.provider_id, "a", "the selected pool keeps its visible provider");
-    let selected = target.select_available(
-        candidates,
-        &Availability { blocked: BTreeSet::from(["a:default:ka:m".into()]) },
-        0,
-    ).unwrap();
-    assert_eq!(selected.candidate.provider_id, "b", "an invisible selected pool must immediately use default");
+    let initial = target
+        .select_available(
+            candidates.clone(),
+            &Availability {
+                blocked: BTreeSet::new(),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(
+        initial.candidate.provider_id, "a",
+        "the selected pool keeps its visible provider"
+    );
+    let selected = target
+        .select_available(
+            candidates,
+            &Availability {
+                blocked: BTreeSet::from(["a:default:ka:m".into()]),
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(
+        selected.candidate.provider_id, "b",
+        "an invisible selected pool must immediately use default"
+    );
 }
 
 #[test]

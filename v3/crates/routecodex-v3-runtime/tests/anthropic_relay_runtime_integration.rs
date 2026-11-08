@@ -761,7 +761,9 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 async fn provider_error_enters_error01_06_without_success_projection() {
     let scope = "anthropic_provider_terminal";
     let manifest = manifest(scope);
-    let transport = ErrorTransport { sends: Mutex::new(0) };
+    let transport = ErrorTransport {
+        sends: Mutex::new(0),
+    };
     let output = execute_v3_anthropic_relay_runtime(
         &manifest,
         V3AnthropicRelayRuntimeInput {
@@ -782,7 +784,11 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     .expect("a 429-only pool must terminal immediately, never wait on lifecycle");
 
     // 失败身份不得重发：同一个完整provider身份只发送一次，不等待、不重试。
-    assert_eq!(*transport.sends.lock().unwrap(), 1, "failed identity must not be re-sent");
+    assert_eq!(
+        *transport.sends.lock().unwrap(),
+        1,
+        "failed identity must not be re-sent"
+    );
 
     // 不伪造成功：client只得到transport break，没有业务content投射。
     assert_eq!(output.status, 502);
@@ -793,18 +799,25 @@ async fn provider_error_enters_error01_06_without_success_projection() {
     // disposition carries the original typed external HTTP error verbatim.
     assert_eq!(
         output.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
-            routecodex_v3_error::V3ExternalHttpWitness::new(
-                429,
-                vec![],
-                br#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#.to_vec(),
+        Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+                routecodex_v3_error::V3ExternalHttpWitness::new(
+                    429,
+                    vec![],
+                    br#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#
+                        .to_vec(),
+                )
             )
-        ))
+        )
     );
 
     // 失败走typed Error链，不写health/precool/probe/wait。
     assert!(
-        output.error_chain.as_deref().unwrap_or(&[]).contains(&"V3Error06ClientProjected"),
+        output
+            .error_chain
+            .as_deref()
+            .unwrap_or(&[])
+            .contains(&"V3Error06ClientProjected"),
         "error chain must show typed client projection, not a wait: {:?}",
         output.error_chain
     );

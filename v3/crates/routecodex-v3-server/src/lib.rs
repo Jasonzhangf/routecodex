@@ -1625,7 +1625,6 @@ pub(crate) fn persist_v3_responses_relay_failure_sources(
 #[cfg(test)]
 mod tests;
 
-
 #[cfg(test)]
 mod listener_teardown_join_tests {
     use super::*;

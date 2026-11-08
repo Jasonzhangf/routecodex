@@ -22,8 +22,7 @@ use crate::operation_runner::plan_execution::{
 };
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
 use crate::provider_failure_runtime_policy::{
-    v3_relay_provider_policy_now_epoch_ms,
-    v3_relay_provider_target_selection_sample,
+    v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState,
 };
@@ -510,11 +509,8 @@ where
     let mut trace = Vec::with_capacity(17);
     // 统一 relay timing：internal = RouteCodex 处理，external = provider 等待；
     // 只写入 typed observability，不进入 payload。
-    let (
-        runtime_timing,
-        mut failed_candidates,
-        mut retry_selected,
-    ) = relay_handoff_entry_state(initial_handoff.as_ref());
+    let (runtime_timing, mut failed_candidates, mut retry_selected) =
+        relay_handoff_entry_state(initial_handoff.as_ref());
     let transport_intent = if payload.get("stream").and_then(Value::as_bool) == Some(true)
         || (C::ENTRY_PROTOCOL == V3HubEntryProtocol::Gemini
             && endpoint_path.ends_with(":streamGenerateContent"))
@@ -951,11 +947,10 @@ where
         let send_attempt_control = transport.begin_transport_attempt(&transport_request);
         let attempt_timeout =
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
-        let (attempt_deadline, residence_is_binding) =
-            crate::kernel::v3_provider_send_deadline(
-                attempt_timeout,
-                attempt_budget.residence_deadline(),
-            );
+        let (attempt_deadline, residence_is_binding) = crate::kernel::v3_provider_send_deadline(
+            attempt_timeout,
+            attempt_budget.residence_deadline(),
+        );
         let provider_raw = match {
             match send_attempt_control {
                 Ok(attempt_control) => {
@@ -1012,96 +1007,96 @@ where
                 Err(error) => Err(error),
             }
         } {
-                Ok(raw) => raw,
-                Err(V3ProviderError::HttpStatus { response }) => {
-                    last_external_http = Some(
-                        crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
-                    );
-                    let mut failure = if response.body_read_failure.is_some() {
-                        crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
-                            &response,
-                            &selected_target_provider_id,
-                        )
-                    } else {
-                        C::provider_http_failure(
-                            response.status,
-                            &response.body,
-                            &selected_target_provider_id,
-                        )
-                    };
-                    failure.failed_attempt_evidence = Some(
-                        build_v3_runtime_provider_failed_attempt_evidence_from_response(
-                            transport_attempt,
-                            Some(provider_request_snapshot.clone()),
-                            response.status,
-                            &response.headers,
-                            &response.body,
-                            response.body_read_failure.as_deref(),
-                        ),
-                    );
-                    let _ = runtime_timing.finish_external();
-                    if let Some(failure) = handle_provider_failure(
-                        &failure_context,
-                        selected,
-                        failure,
-                        &mut V3RelayProviderFailurePolicyState {
-                            failed_candidates: &mut failed_candidates,
-                            trace: &mut trace,
-                            last_external_http: &mut last_external_http,
-                        },
-                        &mut retry_selected,
-                        failure_events,
+            Ok(raw) => raw,
+            Err(V3ProviderError::HttpStatus { response }) => {
+                last_external_http = Some(
+                    crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
+                );
+                let mut failure = if response.body_read_failure.is_some() {
+                    crate::hub_v1::relay_runtime_shared::provider_http_body_read_failure(
+                        &response,
+                        &selected_target_provider_id,
                     )
-                    .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
-                        return Ok(C::assemble_failure_output(
-                            failure,
-                            trace,
-                            std::mem::take(failure_events),
-                        ));
-                    }
-                    continue;
-                }
-                Err(error) => {
-                    if let Some(witness) =
-                        crate::hub_v1::external_http_witness_from_provider_error(&error)
-                    {
-                        last_external_http = Some(witness);
-                    }
-                    let failed_attempt_evidence =
-                        build_v3_runtime_provider_failed_attempt_evidence_from_error(
-                            transport_attempt,
-                            Some(provider_request_snapshot.clone()),
-                            &error,
-                        );
-                    let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
-                    failure.failed_attempt_evidence = failed_attempt_evidence;
-                    let _ = runtime_timing.finish_external();
-                    if let Some(failure) = handle_provider_failure(
-                        &failure_context,
-                        selected,
-                        failure,
-                        &mut V3RelayProviderFailurePolicyState {
-                            failed_candidates: &mut failed_candidates,
-                            trace: &mut trace,
-                            last_external_http: &mut last_external_http,
-                        },
-                        &mut retry_selected,
-                        failure_events,
+                } else {
+                    C::provider_http_failure(
+                        response.status,
+                        &response.body,
+                        &selected_target_provider_id,
                     )
-                    .await
-                    .map_err(V3RelayCoreError::Target)?
-                    {
-                        return Ok(C::assemble_failure_output(
-                            failure,
-                            trace,
-                            std::mem::take(failure_events),
-                        ));
-                    }
-                    continue;
+                };
+                failure.failed_attempt_evidence = Some(
+                    build_v3_runtime_provider_failed_attempt_evidence_from_response(
+                        transport_attempt,
+                        Some(provider_request_snapshot.clone()),
+                        response.status,
+                        &response.headers,
+                        &response.body,
+                        response.body_read_failure.as_deref(),
+                    ),
+                );
+                let _ = runtime_timing.finish_external();
+                if let Some(failure) = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        trace: &mut trace,
+                        last_external_http: &mut last_external_http,
+                    },
+                    &mut retry_selected,
+                    failure_events,
+                )
+                .await
+                .map_err(V3RelayCoreError::Target)?
+                {
+                    return Ok(C::assemble_failure_output(
+                        failure,
+                        trace,
+                        std::mem::take(failure_events),
+                    ));
                 }
-            };
+                continue;
+            }
+            Err(error) => {
+                if let Some(witness) =
+                    crate::hub_v1::external_http_witness_from_provider_error(&error)
+                {
+                    last_external_http = Some(witness);
+                }
+                let failed_attempt_evidence =
+                    build_v3_runtime_provider_failed_attempt_evidence_from_error(
+                        transport_attempt,
+                        Some(provider_request_snapshot.clone()),
+                        &error,
+                    );
+                let mut failure = provider_runtime_failure(error, &selected_target_provider_id);
+                failure.failed_attempt_evidence = failed_attempt_evidence;
+                let _ = runtime_timing.finish_external();
+                if let Some(failure) = handle_provider_failure(
+                    &failure_context,
+                    selected,
+                    failure,
+                    &mut V3RelayProviderFailurePolicyState {
+                        failed_candidates: &mut failed_candidates,
+                        trace: &mut trace,
+                        last_external_http: &mut last_external_http,
+                    },
+                    &mut retry_selected,
+                    failure_events,
+                )
+                .await
+                .map_err(V3RelayCoreError::Target)?
+                {
+                    return Ok(C::assemble_failure_output(
+                        failure,
+                        trace,
+                        std::mem::take(failure_events),
+                    ));
+                }
+                continue;
+            }
+        };
         // The upstream answered: from this instant its head is real evidence,
         // whatever the body turns out to be. Recorded before the body is
         // interpreted so a stream whose payload never decodes is never reported

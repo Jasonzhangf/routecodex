@@ -352,13 +352,16 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
     .await
     .expect("captured identity handoff is admitted without resetting the sequence");
     assert_eq!(
-        transport.provider_ids.lock().expect("provider ids").as_slice(),
+        transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .as_slice(),
         &["openai_second".to_string()],
         "the handoff must reach the captured provider exactly once"
     );
     assert_eq!(
-        output.status,
-        200,
+        output.status, 200,
         "the captured provider business response must complete"
     );
     assert_eq!(
@@ -370,8 +373,13 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
     let rejection = request_execution_control
         .attempt_budget()
         .admit_transport_attempt();
-    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
-        "the original residence deadline remains authoritative: {rejection:?}");
+    assert!(
+        matches!(
+            &rejection,
+            Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))
+        ),
+        "the original residence deadline remains authoritative: {rejection:?}"
+    );
 }
 
 #[tokio::test]
@@ -389,13 +397,17 @@ async fn execution_control_payload_architecture_responses_replay_preserves_compl
         ]}),
         false,
         request_execution_control.attempt_budget(),
-    ).expect("complete client replay has no storage admission");
+    )
+    .expect("complete client replay has no storage admission");
     let V3ResponsesRelayClientBody::Sse(stream) = body else {
         panic!("SSE client replay expected");
     };
     let frames = stream.collect::<Vec<_>>().await;
     let wire = String::from_utf8(frames.concat()).unwrap();
-    assert!(wire.contains(&text), "complete business content must survive replay");
+    assert!(
+        wire.contains(&text),
+        "complete business content must survive replay"
+    );
     assert!(wire.contains("response.completed"));
 }
 

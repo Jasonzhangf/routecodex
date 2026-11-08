@@ -2,8 +2,7 @@ use super::{run_v3_single_node_operator, OperationRunnerError, V3OperationGraph}
 use crate::hub_v1::{V3HubEntryProtocol, V3HubExecutionMode};
 use crate::nodes::V3Execution11ProtocolDecisionMode;
 use crate::provider_failure_runtime_policy::{
-    expand_v3_relay_target_candidates_from_opaque_hit,
-    select_v3_target_with_session_then_global,
+    expand_v3_relay_target_candidates_from_opaque_hit, select_v3_target_with_session_then_global,
     V3ProviderFailureRuntimeHealth,
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
@@ -216,20 +215,22 @@ impl PlanExecutionOperator {
             }
         };
         match self.decide_execution_mode(selected) {
-                Ok(decision) if matches!(self.phase, V3PlanExecutionPhase::PreplanWithoutAdmission) => PlanExecutionOperatorOutput::Preplanned {
+            Ok(decision) if matches!(self.phase, V3PlanExecutionPhase::PreplanWithoutAdmission) => {
+                PlanExecutionOperatorOutput::Preplanned {
                     expanded,
                     decision,
                     request_local_excluded_candidates: self
                         .request_local_excluded_candidates
                         .clone(),
-                },
-                Ok(decision) => PlanExecutionOperatorOutput::Selected {
-                    expanded,
-                    decision,
-                    request_local_excluded_candidates: self.request_local_excluded_candidates.clone(),
-                },
-                Err(Ok(source)) => PlanExecutionOperatorOutput::Failed(source),
-                Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
+                }
+            }
+            Ok(decision) => PlanExecutionOperatorOutput::Selected {
+                expanded,
+                decision,
+                request_local_excluded_candidates: self.request_local_excluded_candidates.clone(),
+            },
+            Err(Ok(source)) => PlanExecutionOperatorOutput::Failed(source),
+            Err(Err(fault)) => PlanExecutionOperatorOutput::OperatorFault(fault),
         }
     }
 }
@@ -466,9 +467,7 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
         Some(PlanExecutionOperatorOutput::OperatorFault(fault)) => {
             Err(V3PlanExecutionStop::OperatorFault(fault))
         }
-        Some(
-            PlanExecutionOperatorOutput::Selected { .. },
-        ) => Err(V3PlanExecutionStop::Failed(
+        Some(PlanExecutionOperatorOutput::Selected { .. }) => Err(V3PlanExecutionStop::Failed(
             build_v3_error_01_source_raised(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3OperationRunnerPlanExecution",
@@ -565,21 +564,33 @@ async fn run_v3_plan_execution_unboxed(
         preferred_selected,
         mode_policy,
     )
-    .map_err(|error| V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
-        V3ErrorSourceKind::RuntimeFailure,
-        "V3OperationRunnerPlanExecution",
-        "plan_execution_operator_failed",
-        error.message,
-    )))?;
+    .map_err(|error| {
+        V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3OperationRunnerPlanExecution",
+            "plan_execution_operator_failed",
+            error.message,
+        ))
+    })?;
     match outcome {
-        V3PlanExecutionOutcome::Selected { execution_planned_request, plan } => {
-            Ok((execution_planned_request, plan))
-        }
-        V3PlanExecutionOutcome::Exhausted { expanded, exhaustion, source, .. } => {
-            Err(V3PlanExecutionStop::Exhausted { expanded, exhaustion, source })
-        }
+        V3PlanExecutionOutcome::Selected {
+            execution_planned_request,
+            plan,
+        } => Ok((execution_planned_request, plan)),
+        V3PlanExecutionOutcome::Exhausted {
+            expanded,
+            exhaustion,
+            source,
+            ..
+        } => Err(V3PlanExecutionStop::Exhausted {
+            expanded,
+            exhaustion,
+            source,
+        }),
         V3PlanExecutionOutcome::Failed(source) => Err(V3PlanExecutionStop::Failed(source)),
-        V3PlanExecutionOutcome::OperatorFault(fault) => Err(V3PlanExecutionStop::OperatorFault(fault)),
+        V3PlanExecutionOutcome::OperatorFault(fault) => {
+            Err(V3PlanExecutionStop::OperatorFault(fault))
+        }
     }
 }
 
@@ -712,11 +723,18 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         };
         let preferred = plan.selected.clone();
         drop(plan);
-        health.store().record_provider_cooldown_failure_for_interface(
-            &preferred.candidate.provider_id, &preferred.candidate.interface_id,
-            Some(&preferred.candidate.auth_alias), Some(&preferred.candidate.model_id),
-            "lifecycle changed after this request selected", 0, 5000,
-        ).unwrap();
+        health
+            .store()
+            .record_provider_cooldown_failure_for_interface(
+                &preferred.candidate.provider_id,
+                &preferred.candidate.interface_id,
+                Some(&preferred.candidate.auth_alias),
+                Some(&preferred.candidate.model_id),
+                "lifecycle changed after this request selected",
+                0,
+                5000,
+            )
+            .unwrap();
         let selected = run_v3_plan_execution_operator(
             request,
             manifest,
@@ -741,12 +759,9 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         let provider_id = "r05_shape_excluded_recovery";
         let manifest = test_manifest(provider_id);
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let scope = V3ProviderFailureSessionScope::new(
-            "test",
-            "default",
-            "shape-excluded-recovery",
-        )
-        .unwrap();
+        let scope =
+            V3ProviderFailureSessionScope::new("test", "default", "shape-excluded-recovery")
+                .unwrap();
         let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
             &manifest,
             "test",
@@ -794,15 +809,32 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             )
             .unwrap()
             .unwrap();
-        store.complete_provider_cooldown_probe_success_with_permit(&permit, now_ms).unwrap();
+        store
+            .complete_provider_cooldown_probe_success_with_permit(&permit, now_ms)
+            .unwrap();
         let availability = health.session_bound_availability(&scope);
-        assert!(availability.availability_for_interface(
-            provider_id, "default", Some("key1"), Some("gpt-test"), now_ms,
-        ).available, "matching typed probe success must restore the same identity");
+        assert!(
+            availability
+                .availability_for_interface(
+                    provider_id,
+                    "default",
+                    Some("key1"),
+                    Some("gpt-test"),
+                    now_ms,
+                )
+                .available,
+            "matching typed probe success must restore the same identity"
+        );
         let excluded = BTreeSet::from([key]);
         let result = select_v3_target_with_session_then_global(
-            &V3TargetInterpreter::default(), expanded, &scope, &availability,
-            &health, &excluded, now_ms, 0,
+            &V3TargetInterpreter::default(),
+            expanded,
+            &scope,
+            &availability,
+            &health,
+            &excluded,
+            now_ms,
+            0,
         );
         assert!(
             result.is_err(),
@@ -1097,5 +1129,4 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         );
         assert_ne!(plan.selected.candidate.provider_id, zero);
     }
-
 }

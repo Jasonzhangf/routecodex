@@ -1134,7 +1134,10 @@ async fn last_candidate_external_http_terminal_records_real_provider_status() {
 
     let rows = state.webui_observability.rows().unwrap();
     let row = rows
-        .get(&build_v3_obs_request_key(5555, "req-last-candidate-http-ledger"))
+        .get(&build_v3_obs_request_key(
+            5555,
+            "req-last-candidate-http-ledger",
+        ))
         .expect("last candidate terminal must record a ledger row");
     assert_eq!(
         row.meta.provider_status,
@@ -5312,7 +5315,10 @@ async fn provider_terminal_last_candidate_http_projects_complete_response_withou
     let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
         429,
         vec![
-            ("content-type".to_string(), b"application/octet-stream".to_vec()),
+            (
+                "content-type".to_string(),
+                b"application/octet-stream".to_vec(),
+            ),
             ("x-end-to-end".to_string(), b"first".to_vec()),
             ("x-end-to-end".to_string(), b"second".to_vec()),
             (
@@ -5340,7 +5346,10 @@ async fn provider_terminal_last_candidate_http_projects_complete_response_withou
     sample_worker.wait_until_idle().await.unwrap();
 
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(response.headers()["content-type"], "application/octet-stream");
+    assert_eq!(
+        response.headers()["content-type"],
+        "application/octet-stream"
+    );
     assert_eq!(
         response
             .headers()
@@ -5358,16 +5367,13 @@ async fn provider_terminal_last_candidate_http_projects_complete_response_withou
     ] {
         assert!(!response.headers().contains_key(name), "{name} crossed");
     }
-    let framed_length = response
-        .headers()
-        .get("content-length")
-        .map(|value| {
-            value
-                .to_str()
-                .expect("content-length is ASCII")
-                .parse::<usize>()
-                .expect("content-length is numeric")
-        });
+    let framed_length = response.headers().get("content-length").map(|value| {
+        value
+            .to_str()
+            .expect("content-length is ASCII")
+            .parse::<usize>()
+            .expect("content-length is numeric")
+    });
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     // v27 framing (supersedes the blanket "content-length must never cross" ban):
     // the provider's own content-length VALUE never crosses, because it can be stale
@@ -5379,7 +5385,10 @@ async fn provider_terminal_last_candidate_http_projects_complete_response_withou
             body.len(),
             "framed content-length must describe the forwarded body"
         );
-        assert_ne!(length, 17, "the provider's own content-length value must not cross");
+        assert_ne!(
+            length, 17,
+            "the provider's own content-length value must not cross"
+        );
     }
     assert_eq!(body.as_ref(), raw_body.as_slice());
 

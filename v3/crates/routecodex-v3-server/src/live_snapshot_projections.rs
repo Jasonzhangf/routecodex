@@ -171,16 +171,16 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
             "body": witness.body(),
             "body_read_failure": witness.body_read_failure(),
         }),
-        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
-            witness,
-        ) => json!({
-            "object": "routecodex.v3.provider_terminal_evidence",
-            "kind": "external_http",
-            "status": witness.status(),
-            "headers": witness.headers(),
-            "body": witness.body(),
-            "body_read_failure": witness.body_read_failure(),
-        }),
+        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness) => {
+            json!({
+                "object": "routecodex.v3.provider_terminal_evidence",
+                "kind": "external_http",
+                "status": witness.status(),
+                "headers": witness.headers(),
+                "body": witness.body(),
+                "body_read_failure": witness.body_read_failure(),
+            })
+        }
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => json!({
             "object": "routecodex.v3.provider_terminal_evidence",
             "kind": "no_response",

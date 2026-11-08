@@ -128,7 +128,8 @@ async fn sustained_request_failures_cross_the_shared_ladder_and_failed_probes_do
     normalize_global_pool_priorities(&mut manifest);
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope =
-        test_provider_failure_scope("sustained_request_failures", "sustained_requests", "s").unwrap();
+        test_provider_failure_scope("sustained_request_failures", "sustained_requests", "s")
+            .unwrap();
     let failure = source(V3ErrorSourceKind::ProviderFailure, "provider_http_429", 429);
     let first = health
         .record_provider_failure_record_from_source(

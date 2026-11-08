@@ -250,11 +250,7 @@ impl V3AttemptBudget {
         // may be sent and whether a recovered identity may rejoin. Request
         // admission must not add a transport-attempt ceiling.
         let _ = identity;
-        Ok(self
-            .inner
-            .transport_attempts
-            .fetch_add(1, Ordering::AcqRel)
-            + 1)
+        Ok(self.inner.transport_attempts.fetch_add(1, Ordering::AcqRel) + 1)
     }
 
     /// Settle the pending admission when transport reports no wire send.
@@ -267,7 +263,6 @@ impl V3AttemptBudget {
     pub(crate) fn transport_attempts(&self) -> usize {
         self.inner.transport_attempts.load(Ordering::Acquire)
     }
-
 }
 
 /// Runtime-sealed replay of one completely validated provider attempt.

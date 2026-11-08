@@ -127,10 +127,7 @@ impl V3ProviderHealthPersistenceWriter {
         Ok(Self { sender, alarm })
     }
 
-    fn enqueue(
-        &self,
-        entries: V3ProviderCooldownPersistenceEntries,
-    ) {
+    fn enqueue(&self, entries: V3ProviderCooldownPersistenceEntries) {
         if let Err(error) = self
             .sender
             .try_send(V3ProviderHealthPersistenceCommand::Replace(entries))
@@ -142,10 +139,7 @@ impl V3ProviderHealthPersistenceWriter {
         }
     }
 
-    fn flush_snapshot(
-        &self,
-        entries: V3ProviderCooldownPersistenceEntries,
-    ) -> Result<(), String> {
+    fn flush_snapshot(&self, entries: V3ProviderCooldownPersistenceEntries) -> Result<(), String> {
         self.sender
             .send(V3ProviderHealthPersistenceCommand::Replace(entries))
             .map_err(|error| format!("provider health persistence writer unavailable: {error}"))?;

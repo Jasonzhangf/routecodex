@@ -614,7 +614,6 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
     shutdown.send(()).unwrap();
 }
 
-
 fn handoff_scope(request_id: &str) -> V3ProviderTransportHandoffScope {
     V3ProviderTransportHandoffScope {
         pipeline_id: "general-provider".to_string(),

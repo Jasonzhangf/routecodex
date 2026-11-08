@@ -10,8 +10,7 @@ use routecodex_v3_provider_responses::{
 };
 use routecodex_v3_runtime::{
     execute_v3_responses_relay_runtime_with_transport_health, V3ResponsesRelayClientBody,
-    V3ResponsesRelayProviderHealthHandle,
-    V3ResponsesRelayRuntimeInput,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::json;
 use std::sync::{
@@ -266,7 +265,9 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
                 && observation.model_id.as_deref() == Some("gpt-5.5")
         })
         .unwrap_or_else(|| {
-            panic!("the exact failed identity must be held in pre-cool observation: {observations:?}")
+            panic!(
+                "the exact failed identity must be held in pre-cool observation: {observations:?}"
+            )
         });
     assert_eq!(
         exact.consecutive_failures, 1,

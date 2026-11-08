@@ -361,12 +361,14 @@ async fn wait_for_identity_commits(
         loop {
             last_pool = pool(client, base).await;
             for entry in committed_only(last_pool.clone()) {
-                let provider = entry["provider_id"].as_str().unwrap_or_default().to_string();
+                let provider = entry["provider_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
                 let model = entry["model_id"].as_str().unwrap_or_default().to_string();
-                if expected
-                    .iter()
-                    .any(|(want_provider, want_model)| *want_provider == provider && *want_model == model)
-                    && !seen.contains(&(provider.clone(), model.clone()))
+                if expected.iter().any(|(want_provider, want_model)| {
+                    *want_provider == provider && *want_model == model
+                }) && !seen.contains(&(provider.clone(), model.clone()))
                 {
                     seen.push((provider, model));
                     rows.push(entry.clone());
@@ -461,7 +463,6 @@ fn assert_identities(raw: Vec<Value>, expected: &[(&str, &str, &str, &str)]) {
         actual, expected,
         "cooldown must contain only the exact failed identities"
     );
-
 }
 
 async fn fallback(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
@@ -564,10 +565,22 @@ async fn no_first_failure_cooldown_public_http() {
         json!({"input":"*** Begin Patch\n*** End Patch"}),
     )
     .await;
-    request_with_current_turn_tool(&client, &base, "main", "route-case:sibling-key", "cargo test")
-        .await;
-    request_with_current_turn_tool(&client, &base, "main", "route-case:independent", "rg -n route src")
-        .await;
+    request_with_current_turn_tool(
+        &client,
+        &base,
+        "main",
+        "route-case:sibling-key",
+        "cargo test",
+    )
+    .await;
+    request_with_current_turn_tool(
+        &client,
+        &base,
+        "main",
+        "route-case:independent",
+        "rg -n route src",
+    )
+    .await;
     assert_eq!(
         identity_count(&state, "route-case:other-model", "other").await,
         1
@@ -618,12 +631,9 @@ async fn no_first_failure_cooldown_public_http() {
         .await;
         receipt_at(&state, marker, "other").await;
     }
-    let terminal_rows = wait_for_identity_commits(
-        &client,
-        &base,
-        &[("primary", "main"), ("primary", "other")],
-    )
-    .await;
+    let terminal_rows =
+        wait_for_identity_commits(&client, &base, &[("primary", "main"), ("primary", "other")])
+            .await;
     assert_eq!(
         terminal_rows.len(),
         2,
@@ -901,7 +911,9 @@ async fn v29_arbitration_multi_candidate_sustained_429_cooldown_is_visibility_on
             .await;
         })
     };
-    skipped_task.await.expect("the skipped-session request must finish");
+    skipped_task
+        .await
+        .expect("the skipped-session request must finish");
     concurrent_task
         .await
         .expect("the concurrent healthy request must not be blocked");
@@ -935,8 +947,14 @@ async fn v29_arbitration_multi_candidate_sustained_429_cooldown_is_visibility_on
 *** End Patch"}),
     )
     .await;
-    request_with_current_turn_tool(&client, &base, "main", "route-case:healthy-sibling-key", "cargo test")
-        .await;
+    request_with_current_turn_tool(
+        &client,
+        &base,
+        "main",
+        "route-case:healthy-sibling-key",
+        "cargo test",
+    )
+    .await;
 
     handle.shutdown().await;
     shutdown.send(()).unwrap();

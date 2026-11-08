@@ -359,7 +359,9 @@ async fn i86_untried_cooled_sibling_is_not_an_alternative() {
             "{lane}: the last eligible candidate's real provider status must pass through: {body}"
         );
         let parsed = serde_json::from_str::<Value>(&body).unwrap_or_else(|error| {
-            panic!("{lane}: the provider's own error body must pass through verbatim: {error}: {body}")
+            panic!(
+                "{lane}: the provider's own error body must pass through verbatim: {error}: {body}"
+            )
         });
         assert_eq!(
             parsed,
@@ -447,9 +449,9 @@ async fn i86_relay_switch_and_last_terminal() {
         "Relay must send each new request once without terminal retry"
     );
     for reply in [&one, &two] {
-        let body = reply
-            .as_ref()
-            .unwrap_or_else(|error| panic!("the relay last candidate must answer the client: {error}"));
+        let body = reply.as_ref().unwrap_or_else(|error| {
+            panic!("the relay last candidate must answer the client: {error}")
+        });
         Entry::assert_passthrough(body);
     }
     assert!(

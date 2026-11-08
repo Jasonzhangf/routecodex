@@ -2334,15 +2334,8 @@ mod target_exhaustion_disposition_tests {
             None,
         );
         assert_eq!(decision.action, V3Error05ExecutionAction::ProjectTerminal);
-        let no_response = provider_terminal_output(
-            decision.clone(),
-            None,
-            None,
-            Vec::new(),
-            None,
-            None,
-            None,
-        );
+        let no_response =
+            provider_terminal_output(decision.clone(), None, None, Vec::new(), None, None, None);
         assert_eq!(
             no_response.terminal_disposition,
             Some(V3ProviderTerminalDisposition::NoResponse)
@@ -2434,25 +2427,27 @@ mod target_exhaustion_disposition_tests {
         let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
             nonterminal_source.clone(),
         );
-        let local_action = routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
-            classified,
-            V3ErrorActionScope::ProviderKeyModel {
+        let local_action =
+            routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
+                classified,
+                V3ErrorActionScope::ProviderKeyModel {
                     provider_id: "provider-a".to_string(),
                     auth_alias: "key-a".to_string(),
                     model_id: "model-a".to_string(),
-            },
-            1,
-        );
-        let exhaustion = routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_target_recovery(
-            local_action,
-            1,
-            false,
-            true,
-        );
-        let nonterminal_decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
-            exhaustion,
-            None,
-        );
+                },
+                1,
+            );
+        let exhaustion =
+            routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+                local_action,
+                1,
+                false,
+                true,
+            );
+        let nonterminal_decision =
+            routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
+                exhaustion, None,
+            );
         assert_eq!(
             nonterminal_decision.action,
             V3Error05ExecutionAction::ReevaluateTarget

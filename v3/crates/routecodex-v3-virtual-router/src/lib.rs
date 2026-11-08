@@ -253,9 +253,7 @@ impl V3VirtualRouter {
                 // into an immediate terminal before the declared fallback chain
                 // has been attempted.
                 let default_pool = group.pools.get(DEFAULT_ROUTE).ok_or_else(|| {
-                    V3VirtualRouterError::DefaultPoolMissing(
-                        classified.routing_group_id.clone(),
-                    )
+                    V3VirtualRouterError::DefaultPoolMissing(classified.routing_group_id.clone())
                 })?;
                 if default_pool.targets.is_empty() {
                     return Err(V3VirtualRouterError::DefaultPoolEmpty(

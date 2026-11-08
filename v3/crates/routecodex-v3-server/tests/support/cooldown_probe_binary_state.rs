@@ -504,8 +504,9 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
             .filter(|entry| entry["state"] != "pre_cool_observation")
             .collect();
         assert!(
-            committed.iter().all(|entry| entry["provider_id"] != provider_id
-                || entry["auth_alias"] != "key"),
+            committed
+                .iter()
+                .all(|entry| entry["provider_id"] != provider_id || entry["auth_alias"] != "key"),
             "a failed observation must not commit a business cooldown: {committed:?}"
         );
         probe_failure.store(false, std::sync::atomic::Ordering::SeqCst);

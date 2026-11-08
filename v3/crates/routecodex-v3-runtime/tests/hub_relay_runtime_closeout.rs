@@ -10,9 +10,8 @@ use routecodex_v3_provider_responses::{
 use routecodex_v3_runtime::{
     execute_v3_anthropic_relay_runtime,
     execute_v3_anthropic_relay_runtime_with_client_headers_provider_health,
-    execute_v3_responses_relay_runtime,
-    execute_v3_responses_relay_runtime_with_transport_health, V3AnthropicRelayRuntimeInput,
-    V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle,
+    execute_v3_responses_relay_runtime, execute_v3_responses_relay_runtime_with_transport_health,
+    V3AnthropicRelayRuntimeInput, V3ResponsesRelayClientBody, V3ResponsesRelayProviderHealthHandle,
     V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
@@ -1879,7 +1878,7 @@ async fn responses_relay_provider_context_error_reselects_next_candidate_before_
         vec!["limited:default:key1:gpt-5.5:availability(\
 provider_pre_cool_observation|request_local_provider_failure\
 )"
-            .to_string()]
+        .to_string()]
     );
     assert_eq!(
         observability
@@ -2580,9 +2579,7 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .collect();
     assert_eq!(
         provider_sequence,
-        vec![
-            "limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax"
-        ]
+        vec!["limited", "minimax", "limited", "minimax", "limited", "minimax", "minimax"]
     );
 }
 
@@ -3082,7 +3079,10 @@ fn provider_key_failure_uses_the_consecutive_ladder_and_recovers() {
                 "consecutive failure {attempt} is below the ladder and must not cool"
             );
             assert!(
-                store.provider_cooldown_probe_keys_due(9_999).unwrap().is_empty(),
+                store
+                    .provider_cooldown_probe_keys_due(9_999)
+                    .unwrap()
+                    .is_empty(),
                 "no probe may be due before the ten-second floor"
             );
         }
@@ -3106,7 +3106,10 @@ fn provider_key_failure_uses_the_consecutive_ladder_and_recovers() {
         "the ladder must not cool a sibling model of the same key"
     );
     assert!(
-        store.provider_cooldown_probe_keys_due(9_999).unwrap().is_empty(),
+        store
+            .provider_cooldown_probe_keys_due(9_999)
+            .unwrap()
+            .is_empty(),
         "the v31 cooldown floor is ten seconds"
     );
     assert!(store

@@ -53,8 +53,7 @@ impl V3ProviderActionGateKey {
         provider_runtime_identity: impl Into<String>,
         normalized_error_family: impl Into<String>,
     ) -> Result<Self, String> {
-        let provider_scope =
-            V3ProviderActionProviderScope::new(scope, provider_runtime_identity)?;
+        let provider_scope = V3ProviderActionProviderScope::new(scope, provider_runtime_identity)?;
         let error_family =
             required_scope_part(normalized_error_family.into(), "normalized_error_family")?;
         Ok(Self {

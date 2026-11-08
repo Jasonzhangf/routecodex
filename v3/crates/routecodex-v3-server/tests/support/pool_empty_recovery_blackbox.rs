@@ -1,9 +1,6 @@
 use super::*;
 use axum::response::IntoResponse;
 
-
-
-
 #[derive(Clone)]
 struct FirstByteStallState {
     captures: tokio::sync::mpsc::UnboundedSender<ProviderCapture>,
@@ -244,9 +241,9 @@ async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
     // client until the window opens; the retired expectation here was the removed
     // "inactive route must wait before retry" hold.
     for request in &mut waiting {
-        let resolved = timeout(Duration::from_secs(3), &mut *request)
-            .await
-            .expect("an inactive declared route must resolve inside the request, never park the client");
+        let resolved = timeout(Duration::from_secs(3), &mut *request).await.expect(
+            "an inactive declared route must resolve inside the request, never park the client",
+        );
         match resolved {
             Ok(Ok(body)) => assert!(
                 !body.contains("response.completed"),
@@ -315,9 +312,11 @@ async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
     // is the only site in the file that needs a refill round, and leaving `Some(1)`
     // behind would hand a refill budget to whichever test runs next under
     // `TEST_LOCK`, making that test's call counts depend on execution order.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(
-        if refill { Some(1) } else { Some(0) },
-    );
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(if refill {
+        Some(1)
+    } else {
+        Some(0)
+    });
     let _home = TestHomeGuard::new("44cc3af-untried-tier-attempt");
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
 
@@ -330,7 +329,10 @@ async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
     let a_app = Router::new().fallback_service(post({
         let a_calls = a_calls.clone();
         move |axum::Json(body): axum::Json<Value>| {
-            if body.to_string().contains("untried tier attempt original request") {
+            if body
+                .to_string()
+                .contains("untried tier attempt original request")
+            {
                 a_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let _ = a_tx.send(());
             }
@@ -386,7 +388,8 @@ async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
     } else {
         V3EntryProtocolExecutionMode::Relay
     };
-    let mut manifest = two_provider_failover_manifest_with_execution_mode(&first_url, &second_url, mode);
+    let mut manifest =
+        two_provider_failover_manifest_with_execution_mode(&first_url, &second_url, mode);
     if direct {
         use_native_direct_responses(&mut manifest);
     } else {
@@ -449,11 +452,13 @@ async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
 
     let body = result
         .expect("client request task must not panic")
-        .unwrap_or_else(|error| panic!(
-            "client transport must stay intact; A wire calls={}, B wire calls={}: {error}",
-            a_calls.load(std::sync::atomic::Ordering::SeqCst),
-            b_calls.load(std::sync::atomic::Ordering::SeqCst),
-        ));
+        .unwrap_or_else(|error| {
+            panic!(
+                "client transport must stay intact; A wire calls={}, B wire calls={}: {error}",
+                a_calls.load(std::sync::atomic::Ordering::SeqCst),
+                b_calls.load(std::sync::atomic::Ordering::SeqCst),
+            )
+        });
     assert!(
         body.contains("untried tier successor completed"),
         "client must receive B's unique business text: {body}"
@@ -508,7 +513,10 @@ async fn issue44cc3af_untried_tier_attempt_anthropic_relay_sends_b_before_deadli
     let a_app = Router::new().fallback_service(post({
         let a_calls = a_calls.clone();
         move |axum::Json(body): axum::Json<Value>| {
-            if body.to_string().contains("anthropic untried tier original request") {
+            if body
+                .to_string()
+                .contains("anthropic untried tier original request")
+            {
                 a_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let _ = a_tx.send(body);
             }
@@ -625,11 +633,10 @@ async fn issue44cc3af_untried_tier_attempt_anthropic_relay_sends_b_before_deadli
     let body = result
         .expect("client request task must not panic")
         .expect("client transport must stay intact");
-    let client_body: Value = serde_json::from_str(&body)
-        .expect("Anthropic success response must be valid JSON");
+    let client_body: Value =
+        serde_json::from_str(&body).expect("Anthropic success response must be valid JSON");
     assert_eq!(
-        client_body["content"][0]["text"],
-        "untried anthropic tier successor completed",
+        client_body["content"][0]["text"], "untried anthropic tier successor completed",
         "client must receive tier B's unique business text: {body}"
     );
     assert_eq!(client_body["stop_reason"], "end_turn", "{body}");
@@ -957,8 +964,7 @@ async fn assert_review_preplan_deadline(recover: bool) {
             .attempt_store
             .residence_timeout_ms = if recover { 1000 } else { 300 };
     }
-    for p in manifest.providers.values_mut() {
-    }
+    for p in manifest.providers.values_mut() {}
     let ids: Vec<_> = manifest.providers.keys().cloned().collect();
     let business_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let probe_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1071,8 +1077,8 @@ async fn assert_review_preplan_deadline(recover: bool) {
     // no provider answer it gets the detectable transport break the preplan
     // residence budget produces (the `recover = true` twin measures 200 SSE head +
     // ":\n\n" and dies without a terminating chunk).
-    let passed_through = status == Some(StatusCode::SERVICE_UNAVAILABLE)
-        && body.contains("still cooled");
+    let passed_through =
+        status == Some(StatusCode::SERVICE_UNAVAILABLE) && body.contains("still cooled");
     if passed_through {
         // v31 last-candidate passthrough, measured at 7b5850661: status 503,
         // body "still cooled", clean EOF (disposition=LastCandidateExternalHttp).
@@ -1170,8 +1176,7 @@ async fn assert_failed_attempt_waits_for_cooled_peer(direct: bool, mode: &str) {
     });
     let mut manifest = two_provider_failover_manifest(&first_url, &second_url);
     if mode != "recover" {
-        for provider in manifest.providers.values_mut() {
-        }
+        for provider in manifest.providers.values_mut() {}
     }
     if mode == "residence" || mode == "exhaust" {
         for server in manifest.servers.values_mut() {
@@ -1430,7 +1435,10 @@ async fn assert_identity_only_rate_limit(direct: bool) {
                 let tick = std::time::Instant::now();
                 tokio::time::sleep(Duration::from_millis(10)).await;
                 let overshoot = tick.elapsed().saturating_sub(Duration::from_millis(10));
-                stall_ms.fetch_max(overshoot.as_millis() as u64, std::sync::atomic::Ordering::SeqCst);
+                stall_ms.fetch_max(
+                    overshoot.as_millis() as u64,
+                    std::sync::atomic::Ordering::SeqCst,
+                );
             }
         })
     };
@@ -1653,7 +1661,8 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         let at = wave_started.elapsed().as_millis();
         for index in 0..4 {
             let marker = format!("fresh-{index}");
-            if arrival.contains(&marker) && !fresh_arrivals.iter().any(|(seen, _)| seen == &marker) {
+            if arrival.contains(&marker) && !fresh_arrivals.iter().any(|(seen, _)| seen == &marker)
+            {
                 fresh_arrivals.push((marker, at));
             }
         }
@@ -1799,12 +1808,8 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         fresh_wave_dispatch_ms < WAVE_DISPATCH_BUDGET_MS,
         "the four fresh dispatches must land on the visible identity immediately, not queue: {fresh_wave_dispatch_ms}ms"
     );
-    let fresh_spread = fresh_wave_dispatch_ms
-        - fresh_arrivals
-            .iter()
-            .map(|(_, at)| *at)
-            .min()
-            .unwrap_or(0);
+    let fresh_spread =
+        fresh_wave_dispatch_ms - fresh_arrivals.iter().map(|(_, at)| *at).min().unwrap_or(0);
     assert!(
         fresh_spread <= 100,
         "the fresh wave must be dispatched as one concurrent burst, not serialized request by request: spread {fresh_spread}ms of {fresh_arrivals:?}"
@@ -1817,7 +1822,10 @@ async fn assert_identity_only_rate_limit(direct: bool) {
     for index in 0..3 {
         let marker = format!("due-{index}");
         assert_eq!(
-            due_arrivals.iter().filter(|(seen, _)| seen == &marker).count(),
+            due_arrivals
+                .iter()
+                .filter(|(seen, _)| seen == &marker)
+                .count(),
             1,
             "each due request must reach the identity exactly once: {due_arrivals:?}"
         );
@@ -1831,12 +1839,8 @@ async fn assert_identity_only_rate_limit(direct: bool) {
         due_wave_dispatch_ms < WAVE_DISPATCH_BUDGET_MS,
         "the due wave must be served immediately by the visible identity, not by waiting for its recovery: {due_wave_dispatch_ms}ms"
     );
-    let due_spread = due_wave_dispatch_ms
-        - due_arrivals
-            .iter()
-            .map(|(_, at)| *at)
-            .min()
-            .unwrap_or(0);
+    let due_spread =
+        due_wave_dispatch_ms - due_arrivals.iter().map(|(_, at)| *at).min().unwrap_or(0);
     assert!(
         due_spread <= 100,
         "the due wave must be dispatched as one concurrent burst, not serialized request by request: spread {due_spread}ms of {due_arrivals:?}"
@@ -2143,8 +2147,7 @@ async fn assert_rate_limit_wait(
         }
     }
     if parallel_success || waiter_count > 1 || late_join {
-        for provider in manifest.providers.values_mut() {
-        }
+        for provider in manifest.providers.values_mut() {}
     }
     let first_id = format!("failover_first_{}", manifest.servers["a"].port);
     let second_id = format!("failover_second_{}", manifest.servers["a"].port);
@@ -2429,8 +2432,7 @@ async fn assert_capacity_wait(mode: &str) {
         use_native_direct_responses(&mut manifest);
     }
     if budget {
-        for provider in manifest.providers.values_mut() {
-        }
+        for provider in manifest.providers.values_mut() {}
         // Capacity owners keep their original long deadline on listener a.
         // Only requests on listener b receive the short terminal deadline.
         manifest
@@ -2595,11 +2597,9 @@ async fn assert_capacity_wait(mode: &str) {
     // attempt/store budget. An all-busy target resolves inside the request, so
     // the waiting request is already finished and no identity is re-sent.
     stall_task.abort();
-    let waiting_latency = Duration::from_millis(
-        waiting_latency_ms.load(std::sync::atomic::Ordering::SeqCst),
-    );
-    let measured_stall =
-        Duration::from_millis(stall_ms.load(std::sync::atomic::Ordering::SeqCst));
+    let waiting_latency =
+        Duration::from_millis(waiting_latency_ms.load(std::sync::atomic::Ordering::SeqCst));
+    let measured_stall = Duration::from_millis(stall_ms.load(std::sync::atomic::Ordering::SeqCst));
     // Base bound plus measured starvation, and a ceiling that keeps its meaning:
     // consuming `acquire_timeout_ms`/`residence_timeout_ms` lands at ~300 ms, which is
     // what this bound exists to detect. The ceiling carries the same measured-stall
@@ -2618,7 +2618,12 @@ client latency {waiting_latency:?}, measured scheduler stall {measured_stall:?},
 effective bound {effective_bound:?}, effective ceiling {effective_ceiling:?} \
 (300 ms base = the acquire/residence budget this bound detects, plus the stall this window measured)"
     );
-    let _ = (admitted_after_release, sent_while_waiting, budget, long_recovery);
+    let _ = (
+        admitted_after_release,
+        sent_while_waiting,
+        budget,
+        long_recovery,
+    );
     assert!(
         !extra_first && !extra_second,
         "an occupied target must not be oversubscribed"
@@ -3339,9 +3344,6 @@ async fn request_independence_same_session_direct() {
     assert_request_independence_same_session(true).await;
 }
 
-
-
-
 #[tokio::test]
 async fn request_independence_same_session_relay() {
     assert_request_independence_same_session(false).await;
@@ -3364,85 +3366,78 @@ async fn assert_request_independence_same_session(direct: bool) {
     } else {
         "/v1/chat/completions"
     };
-    let assert_b_tool_history =
-        |capture: &IndependenceObservation, input: &str, label: &str| {
-            let call_id = "independence-b-route-call";
-            let expected_arguments = json!({"value": input});
-            if direct {
-                let items = capture.body["input"]
-                    .as_array()
-                    .unwrap_or_else(|| panic!("{label}: provider input must be an array"));
-                let message = items
-                    .iter()
-                    .find(|item| item["type"] == "message" && item["role"] == "user")
-                    .unwrap_or_else(|| panic!("{label}: provider input must retain the user turn"));
-                assert_eq!(message["content"], input, "{label}: user marker");
-                let call = items
-                    .iter()
-                    .find(|item| item["type"] == "function_call" && item["call_id"] == call_id)
-                    .unwrap_or_else(|| {
-                        panic!("{label}: provider input must retain the function call")
-                    });
-                assert_eq!(
-                    call["name"], "independence_fixture_echo",
-                    "{label}: tool name"
-                );
-                let arguments: Value = serde_json::from_str(
-                    call["arguments"]
-                        .as_str()
-                        .unwrap_or_else(|| panic!("{label}: arguments must be JSON text")),
-                )
-                .unwrap_or_else(|error| panic!("{label}: arguments must be valid JSON: {error}"));
-                assert_eq!(arguments, expected_arguments, "{label}: arguments");
-                let result = items
-                    .iter()
-                    .find(|item| {
-                        item["type"] == "function_call_output" && item["call_id"] == call_id
-                    })
-                    .unwrap_or_else(|| {
-                        panic!("{label}: provider input must retain the paired function result")
-                    });
-                assert_eq!(result["output"], input, "{label}: paired result");
-            } else {
-                let messages = capture.body["messages"]
-                    .as_array()
-                    .unwrap_or_else(|| panic!("{label}: provider messages must be an array"));
-                let message = messages
-                    .iter()
-                    .find(|message| message["role"] == "user")
-                    .unwrap_or_else(|| panic!("{label}: provider messages must retain the user turn"));
-                assert_eq!(message["content"], input, "{label}: user marker");
-                let call = messages
-                    .iter()
-                    .filter_map(|message| message["tool_calls"].as_array())
-                    .flatten()
-                    .find(|call| call["id"] == call_id)
-                    .unwrap_or_else(|| {
-                        panic!("{label}: provider messages must retain the chat tool call")
-                    });
-                assert_eq!(call["type"], "function", "{label}: chat tool call type");
-                assert_eq!(
-                    call["function"]["name"], "independence_fixture_echo",
-                    "{label}: tool name"
-                );
-                let arguments: Value = serde_json::from_str(
-                    call["function"]["arguments"]
-                        .as_str()
-                        .unwrap_or_else(|| panic!("{label}: arguments must be JSON text")),
-                )
-                .unwrap_or_else(|error| panic!("{label}: arguments must be valid JSON: {error}"));
-                assert_eq!(arguments, expected_arguments, "{label}: arguments");
-                let result = messages
-                    .iter()
-                    .find(|message| {
-                        message["role"] == "tool" && message["tool_call_id"] == call_id
-                    })
-                    .unwrap_or_else(|| {
-                        panic!("{label}: provider messages must retain the paired tool result")
-                    });
-                assert_eq!(result["content"], input, "{label}: paired result");
-            }
-        };
+    let assert_b_tool_history = |capture: &IndependenceObservation, input: &str, label: &str| {
+        let call_id = "independence-b-route-call";
+        let expected_arguments = json!({"value": input});
+        if direct {
+            let items = capture.body["input"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{label}: provider input must be an array"));
+            let message = items
+                .iter()
+                .find(|item| item["type"] == "message" && item["role"] == "user")
+                .unwrap_or_else(|| panic!("{label}: provider input must retain the user turn"));
+            assert_eq!(message["content"], input, "{label}: user marker");
+            let call = items
+                .iter()
+                .find(|item| item["type"] == "function_call" && item["call_id"] == call_id)
+                .unwrap_or_else(|| panic!("{label}: provider input must retain the function call"));
+            assert_eq!(
+                call["name"], "independence_fixture_echo",
+                "{label}: tool name"
+            );
+            let arguments: Value = serde_json::from_str(
+                call["arguments"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{label}: arguments must be JSON text")),
+            )
+            .unwrap_or_else(|error| panic!("{label}: arguments must be valid JSON: {error}"));
+            assert_eq!(arguments, expected_arguments, "{label}: arguments");
+            let result = items
+                .iter()
+                .find(|item| item["type"] == "function_call_output" && item["call_id"] == call_id)
+                .unwrap_or_else(|| {
+                    panic!("{label}: provider input must retain the paired function result")
+                });
+            assert_eq!(result["output"], input, "{label}: paired result");
+        } else {
+            let messages = capture.body["messages"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{label}: provider messages must be an array"));
+            let message = messages
+                .iter()
+                .find(|message| message["role"] == "user")
+                .unwrap_or_else(|| panic!("{label}: provider messages must retain the user turn"));
+            assert_eq!(message["content"], input, "{label}: user marker");
+            let call = messages
+                .iter()
+                .filter_map(|message| message["tool_calls"].as_array())
+                .flatten()
+                .find(|call| call["id"] == call_id)
+                .unwrap_or_else(|| {
+                    panic!("{label}: provider messages must retain the chat tool call")
+                });
+            assert_eq!(call["type"], "function", "{label}: chat tool call type");
+            assert_eq!(
+                call["function"]["name"], "independence_fixture_echo",
+                "{label}: tool name"
+            );
+            let arguments: Value = serde_json::from_str(
+                call["function"]["arguments"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{label}: arguments must be JSON text")),
+            )
+            .unwrap_or_else(|error| panic!("{label}: arguments must be valid JSON: {error}"));
+            assert_eq!(arguments, expected_arguments, "{label}: arguments");
+            let result = messages
+                .iter()
+                .find(|message| message["role"] == "tool" && message["tool_call_id"] == call_id)
+                .unwrap_or_else(|| {
+                    panic!("{label}: provider messages must retain the paired tool result")
+                });
+            assert_eq!(result["content"], input, "{label}: paired result");
+        }
+    };
     let mut peer_a = start_independence_peer(
         IndependencePeer::A,
         IndependencePeerMode::FailFirstBusinessThenHoldProbes,
@@ -3734,7 +3729,10 @@ async fn assert_request_independence_same_session(direct: bool) {
 // ---------------------------------------------------------------------------
 
 /// Read whatever the Server writes to a raw client socket, bounded.
-async fn read_client_wire_until_close(socket: &mut tokio::net::TcpStream, bound: Duration) -> Vec<u8> {
+async fn read_client_wire_until_close(
+    socket: &mut tokio::net::TcpStream,
+    bound: Duration,
+) -> Vec<u8> {
     let mut wire = Vec::new();
     let mut buffer = [0u8; 4096];
     let _ = timeout(bound, async {
@@ -3790,7 +3788,8 @@ async fn assert_cancelled_client_wire(direct: bool) {
     } else {
         V3EntryProtocolExecutionMode::Relay
     };
-    let mut manifest = two_provider_failover_manifest_with_execution_mode(&upstream_url, &upstream_url, mode);
+    let mut manifest =
+        two_provider_failover_manifest_with_execution_mode(&upstream_url, &upstream_url, mode);
     if direct {
         use_native_direct_responses(&mut manifest);
     }
@@ -4183,11 +4182,13 @@ async fn assert_all_tried_transport_failure_recovers(direct: bool, held_sibling:
     }
     let terminal = match early {
         Ok(result) => Ok(result),
-        Err(_) => timeout(
-            Duration::from_secs(if held_sibling { 5 } else { 3 }),
-            &mut request,
-        )
-        .await,
+        Err(_) => {
+            timeout(
+                Duration::from_secs(if held_sibling { 5 } else { 3 }),
+                &mut request,
+            )
+            .await
+        }
     };
     request.abort();
     // v31: a request never waits on provider lifecycle state for captured-pool

@@ -478,12 +478,12 @@ mod tests {
         assert_eq!(rate_limited.scope, ordinary.scope);
         assert_eq!(rate_limited.failure_threshold, ordinary.failure_threshold);
         assert_eq!(rate_limited.cooldown_ms, ordinary.cooldown_ms);
+        assert_eq!(rate_limited.long_probe_backoff, ordinary.long_probe_backoff);
         assert_eq!(
-            rate_limited.long_probe_backoff,
-            ordinary.long_probe_backoff
-        );
-        assert_eq!(
-            rate_limited.failure_fingerprint.as_ref().map(|fp| fp.http_status),
+            rate_limited
+                .failure_fingerprint
+                .as_ref()
+                .map(|fp| fp.http_status),
             Some(429),
             "the raw upstream 429 stays in the typed failure identity"
         );

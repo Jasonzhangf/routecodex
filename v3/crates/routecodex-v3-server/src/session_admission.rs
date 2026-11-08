@@ -237,16 +237,13 @@ mod tests {
         let gate = Arc::new(V3ServerRequestActivityGate::default());
         let permit = gate.admit().await;
         assert_eq!(gate.state.lock().unwrap().active, 1);
-        let body = Body::from_stream(
-            futures_util::stream::pending::<Result<axum::body::Bytes, std::io::Error>>(),
-        );
-        let mut data = hold_response_body_request_activity_permit(
-            Response::new(body),
-            permit,
-            None,
-        )
-        .into_body()
-        .into_data_stream();
+        let body = Body::from_stream(futures_util::stream::pending::<
+            Result<axum::body::Bytes, std::io::Error>,
+        >());
+        let mut data =
+            hold_response_body_request_activity_permit(Response::new(body), permit, None)
+                .into_body()
+                .into_data_stream();
         assert!(
             timeout(Duration::from_millis(25), data.next())
                 .await

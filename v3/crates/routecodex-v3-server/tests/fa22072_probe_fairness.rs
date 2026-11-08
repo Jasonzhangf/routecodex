@@ -39,8 +39,7 @@ async fn fail(port: u16, id: &str) {
     let status = response.status();
     let body: Value = response.json().await.unwrap();
     assert_eq!(
-        status,
-        200,
+        status, 200,
         "a genuine first-candidate failure must recover through its declared spare: {body}"
     );
     assert_eq!(

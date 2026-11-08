@@ -5,8 +5,7 @@ use crate::provider_failure_runtime_policy::{
     provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyState,
-    V3RelayProviderTargetResolutionInput,
+    V3RelayProviderFailurePolicyState, V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
@@ -17,8 +16,8 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_debug::V3DebugError;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
@@ -160,8 +159,15 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health = V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
-    execute_v3_responses_relay_runtime_with_transport_health(manifest, input, transport, &provider_health).await
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
+    execute_v3_responses_relay_runtime_with_transport_health(
+        manifest,
+        input,
+        transport,
+        &provider_health,
+    )
+    .await
 }
 
 pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: ResponsesTransport>(

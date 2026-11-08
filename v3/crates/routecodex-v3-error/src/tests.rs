@@ -116,10 +116,7 @@ fn post_commit_sse_recovery_only_allows_declared_transient_sources() {
     );
 }
 
-fn provider_error_05(
-    code: &str,
-    stage: &'static str,
-) -> V3Error05ExecutionDecision {
+fn provider_error_05(code: &str, stage: &'static str) -> V3Error05ExecutionDecision {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,
         stage,
@@ -134,9 +131,8 @@ fn provider_error_05(
         },
         1,
     );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 1, false,
-    );
+    let exhaustion =
+        build_v3_error_04_target_exhaustion_decision_with_provider_availability(action, 1, false);
     let witness = V3Error05RecoveryAdmissionWitness::new(
         V3ProviderFailureSessionScope::new("server", "group", "session").expect("scope"),
         "minimax:key1:model",
@@ -198,9 +194,8 @@ fn exhausted_provider_error_05(code: &str) -> V3Error05TerminalDecision {
         V3ErrorActionScope::None,
         0,
     );
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 0, false,
-    );
+    let exhaustion =
+        build_v3_error_04_target_exhaustion_decision_with_provider_availability(action, 0, false);
     build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None)
         .try_into_terminal()
         .expect("terminal provider failure")

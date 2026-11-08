@@ -353,10 +353,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let initial_execution_mode = initial_plan.execution_mode;
         let retained_expanded = initial_plan.expanded;
         failed_candidates = initial_plan.request_local_excluded_candidates;
-        let mut initial_selected = Some((
-            initial_plan.selected,
-            initial_plan.protocol_decision,
-        ));
+        let mut initial_selected = Some((initial_plan.selected, initial_plan.protocol_decision));
         let mut req02 = req02;
         req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
         let request_outcome = {
@@ -693,13 +690,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
-            provider_send_attempts = handle_error_before_resp03!(
-                attempt_budget
-                    .admit_transport_attempt_for_identity(Some(&v3_relay_provider_candidate_key(
-                        &selected.candidate,
-                    )))
-                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))
-            );
+            provider_send_attempts = handle_error_before_resp03!(attempt_budget
+                .admit_transport_attempt_for_identity(Some(&v3_relay_provider_candidate_key(
+                    &selected.candidate,
+                )))
+                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(
+                    error.to_string()
+                )));
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
@@ -712,14 +709,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             // deadline is the binding edge, and only the residence deadline is
             // request-local.
             let send_attempt_control = transport.begin_transport_attempt(&transport_request);
-            let (send_deadline, residence_is_binding) =
-                crate::kernel::v3_provider_send_deadline(
-                    v3_relay_transport_response_timeout(
-                        manifest,
-                        &selected_target_provider_id,
-                    ),
-                    attempt_budget.residence_deadline(),
-                );
+            let (send_deadline, residence_is_binding) = crate::kernel::v3_provider_send_deadline(
+                v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
+                attempt_budget.residence_deadline(),
+            );
             let transport_result = match send_attempt_control {
                 Ok(attempt_control) => {
                     let mut cleanup = attempt_control.as_ref().map(
@@ -924,7 +917,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     failure,
                                     &mut V3ResponsesRelayProviderRetryState {
                                         failed_candidates: &mut failed_candidates,
-                                                retry_selected: &mut retry_selected,
+                                        retry_selected: &mut retry_selected,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
                                             .as_ref(),
@@ -987,7 +980,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failure,
                                 &mut V3ResponsesRelayProviderRetryState {
                                     failed_candidates: &mut failed_candidates,
-                                        retry_selected: &mut retry_selected,
+                                    retry_selected: &mut retry_selected,
                                     provider_failure_events: &mut provider_failure_events,
                                     provider_failure_event_sink: provider_failure_event_sink
                                         .as_ref(),
@@ -1049,7 +1042,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
-                                                        retry_selected: &mut retry_selected,
+                                            retry_selected: &mut retry_selected,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
                                                 provider_failure_event_sink.as_ref(),
@@ -1257,7 +1250,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     failure.clone(),
                                     &mut V3ResponsesRelayProviderRetryState {
                                         failed_candidates: &mut failed_candidates,
-                                                retry_selected: &mut retry_selected,
+                                        retry_selected: &mut retry_selected,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
                                             .as_ref(),
@@ -1366,7 +1359,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failure.clone(),
                                         &mut V3ResponsesRelayProviderRetryState {
                                             failed_candidates: &mut failed_candidates,
-                                                        retry_selected: &mut retry_selected,
+                                            retry_selected: &mut retry_selected,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
                                                 provider_failure_event_sink.as_ref(),

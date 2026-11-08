@@ -551,7 +551,10 @@ mod tests {
         let control = V3ProviderTransportAttemptControl::new(broker.clone(), key.clone());
         {
             let _cleanup = V3ProviderTransportAttemptCleanup::new(&control);
-            assert_eq!(broker.state(&key), Some(V3ProviderTransportAttemptState::Connecting));
+            assert_eq!(
+                broker.state(&key),
+                Some(V3ProviderTransportAttemptState::Connecting)
+            );
         }
         assert_eq!(broker.state(&key), None);
 
