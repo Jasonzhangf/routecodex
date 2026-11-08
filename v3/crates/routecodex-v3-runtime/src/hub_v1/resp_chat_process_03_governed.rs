@@ -2523,7 +2523,18 @@ fn govern_v3_relay_control_markers_at_resp03(
 ) -> Result<(), V3HubRelayResponseError> {
     let declarations = ToolMarkupDeclarations::default();
     let mut next = input.provider_payload().as_ref().clone();
-    let changed = match input.semantic_protocol() {
+    let mut changed = false;
+    // Proven whole-item Anthropic DSML control frame: when a separate native
+    // tool call already makes the attempt semantically valid, drop only that
+    // text frame so the native call survives. Without a native call the frame
+    // stays and the shared scan below raises the reselectable
+    // unharvestable-markup failure that the control-only paths rely on.
+    if input.provider_raw().source_provider_protocol == V3HubProviderWireProtocol::Anthropic
+        && v3_resp03_payload_has_native_tool_call(&next)
+    {
+        changed |= drop_v3_resp03_whole_item_dsml_control_frame_text(&mut next);
+    }
+    changed |= match input.semantic_protocol() {
         V3HubProviderWireProtocol::Responses => {
             strip_v3_responses_control_markers(&mut next, &declarations)?
         }
@@ -2563,6 +2574,96 @@ fn strip_v3_relay_control_marker_text(
         }
     }
     Ok(Some(visible))
+}
+
+const V3_RESP03_DSML_CLOSING_BLOCK: &str = concat!(
+    "</\u{ff5c}DSML\u{ff5c}parameter>\n",
+    "</\u{ff5c}DSML\u{ff5c}invoke>\n",
+    "</\u{ff5c}DSML\u{ff5c}tool_calls>"
+);
+
+/// The proven whole-item Anthropic DSML control frame: a text item that starts
+/// exactly with `<thinking>` and ends with the three-line DSML closing block.
+/// It carries no opening invocation, tool name, call ID or arguments, so it
+/// cannot authorize a synthesized call. Text that merely resembles the frame is
+/// not matched and stays representable provider text.
+fn is_v3_resp03_whole_item_dsml_control_frame(text: &str) -> bool {
+    text.starts_with("<thinking>") && text.trim_end().ends_with(V3_RESP03_DSML_CLOSING_BLOCK)
+}
+
+fn v3_resp03_payload_has_native_tool_call(payload: &Value) -> bool {
+    payload
+        .get("output")
+        .and_then(Value::as_array)
+        .is_some_and(|output| {
+            output.iter().any(|item| {
+                matches!(
+                    item.get("type").and_then(Value::as_str),
+                    Some("function_call" | "custom_tool_call")
+                )
+            })
+        })
+}
+
+fn drop_v3_resp03_whole_item_dsml_control_frame_text(payload: &mut Value) -> bool {
+    let mut changed = false;
+    if let Some(Value::String(text)) = payload.get_mut("output_text") {
+        if is_v3_resp03_whole_item_dsml_control_frame(text) {
+            text.clear();
+            changed = true;
+        }
+    }
+    let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
+        return changed;
+    };
+    for item in output {
+        match item {
+            Value::String(text) => {
+                if is_v3_resp03_whole_item_dsml_control_frame(text) {
+                    text.clear();
+                    changed = true;
+                }
+            }
+            Value::Object(object) => match object.get("type").and_then(Value::as_str) {
+                Some("output_text") => {
+                    if let Some(Value::String(text)) = object.get_mut("text") {
+                        if is_v3_resp03_whole_item_dsml_control_frame(text) {
+                            text.clear();
+                            changed = true;
+                        }
+                    }
+                }
+                Some("message") => {
+                    if let Some(parts) = object.get_mut("content").and_then(Value::as_array_mut) {
+                        for part in parts {
+                            if let Some(part_object) = part.as_object_mut() {
+                                if !matches!(
+                                    part_object.get("type").and_then(Value::as_str),
+                                    Some("text" | "output_text")
+                                ) {
+                                    continue;
+                                }
+                                if let Some(Value::String(text)) = part_object.get_mut("text") {
+                                    if is_v3_resp03_whole_item_dsml_control_frame(text) {
+                                        text.clear();
+                                        changed = true;
+                                    }
+                                }
+                            } else if let Value::String(text) = part {
+                                if is_v3_resp03_whole_item_dsml_control_frame(text) {
+                                    text.clear();
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    changed
 }
 
 fn strip_v3_relay_control_marker_string(
