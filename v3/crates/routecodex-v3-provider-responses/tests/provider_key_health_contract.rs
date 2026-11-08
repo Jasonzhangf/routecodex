@@ -2061,7 +2061,18 @@ fn manual_cooldown_hides_only_the_exact_identity_it_was_added_for() {
         .into_iter()
         .find(|entry| entry.model_id.as_deref() == Some("wire-a"))
         .expect("the expired manual row remains a cooldown substate");
-    assert_eq!(due_row.until_ms, Some(61_000));
+    // The pool reports the real hold window: once the deadline is reached the
+    // row no longer advertises a hold deadline, but it remains projected as a
+    // due-probe substate (state "waiting") until a successful probe removes it,
+    // so expiry alone still never restores routing.
+    assert_eq!(
+        due_row.state, "waiting",
+        "the expired manual row must surface as a due-probe substate: {due_row:?}"
+    );
+    assert_eq!(
+        due_row.until_ms, None,
+        "an expired manual row advertises no active hold deadline: {due_row:?}"
+    );
     assert!(
         due_row.remaining_ms.is_none_or(|remaining| remaining <= 0),
         "the expired row reports no positive remaining time: {due_row:?}"

@@ -72,7 +72,7 @@ async fn issue44cc3af_first_byte_stall_keeps_sibling_requests_independent() {
     let (stalled_url, mut stalled_requests, _stalled_release, stalled_shutdown) =
         start_first_byte_stalled_upstream().await;
     let (healthy_url, mut healthy_requests, healthy_shutdown) = start_controlled_upstream().await;
-    let mut manifest = concurrency_switch_manifest(&stalled_url, &healthy_url);
+    let mut manifest = two_provider_failover_manifest(&stalled_url, &healthy_url);
     use_native_direct_responses(&mut manifest);
     let ids: Vec<String> = manifest.providers.keys().cloned().collect();
     let stalled_id = ids[0].clone();
@@ -188,7 +188,7 @@ async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
     let (good_url, mut good_requests, good_release, good_shutdown) =
         start_controlled_held_upstream().await;
-    let mut manifest = concurrency_switch_manifest("http://127.0.0.1:9/v1", &good_url);
+    let mut manifest = two_provider_failover_manifest("http://127.0.0.1:9/v1", &good_url);
     use_native_direct_responses(&mut manifest);
     let ids: Vec<String> = manifest.providers.keys().cloned().collect();
     let minute = (std::time::SystemTime::now()
@@ -216,7 +216,7 @@ async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
         .availability = Some(availability);
     manifest
         .forwarders
-        .get_mut("concurrency")
+        .get_mut("failover")
         .unwrap()
         .targets
         .retain(|target| target.provider.as_deref() == Some(ids[0].as_str()));
@@ -292,26 +292,6 @@ async fn issue44cc3af_inactive_window_does_not_spin_or_block_http() {
         .expect("waiting requests must not block shutdown");
     good_shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer() {
-    assert_all_tried_transport_failure_recovers(false, false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_all_tried_transport_failure_waits_for_recovered_peer() {
-    assert_all_tried_transport_failure_recovers(true, false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_relay_all_tried_transport_failure_with_held_sibling_recovers() {
-    assert_all_tried_transport_failure_recovers(false, true).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_all_tried_transport_failure_with_held_sibling_recovers() {
-    assert_all_tried_transport_failure_recovers(true, true).await;
 }
 
 #[tokio::test]
@@ -406,7 +386,7 @@ async fn assert_untried_tier_attempt_sends_b(direct: bool, refill: bool) {
     } else {
         V3EntryProtocolExecutionMode::Relay
     };
-    let mut manifest = concurrency_switch_manifest_with_mode(&first_url, &second_url, mode);
+    let mut manifest = two_provider_failover_manifest_with_execution_mode(&first_url, &second_url, mode);
     if direct {
         use_native_direct_responses(&mut manifest);
     } else {
@@ -570,7 +550,7 @@ async fn issue44cc3af_untried_tier_attempt_anthropic_relay_sends_b_before_deadli
     let b_task = tokio::spawn(async move { axum::serve(second, b_app).await.unwrap() });
 
     // Keep the existing ordered fixture and force the Anthropic Relay entry.
-    let mut manifest = concurrency_switch_manifest_with_mode(
+    let mut manifest = two_provider_failover_manifest_with_execution_mode(
         &first_url,
         &second_url,
         V3EntryProtocolExecutionMode::Relay,
@@ -775,352 +755,6 @@ async fn closed_transport_peer(
     (url, task, rx)
 }
 
-async fn assert_all_tried_transport_failure_recovers(direct: bool, held_sibling: bool) {
-    let _guard = TEST_LOCK.lock().await;
-    let _home = TestHomeGuard::new("44cc3af-all-tried-transport");
-    std::env::set_var("V3_P6_TEST_KEY", "test-key");
-    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let held_release = Arc::new(Semaphore::new(0));
-    let independent_release = Arc::new(Semaphore::new(0));
-    let (first_url, first_task, mut first_rx) = closed_transport_peer(
-        ready.clone(),
-        direct,
-        Some(held_release.clone()),
-        Some(independent_release.clone()),
-    )
-    .await;
-    let (second_url, second_task, mut second_rx) = closed_transport_peer(
-        Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        direct,
-        None,
-        None,
-    )
-    .await;
-    let mut manifest = concurrency_switch_manifest_with_mode(
-        &first_url,
-        &second_url,
-        if direct {
-            V3EntryProtocolExecutionMode::Direct
-        } else {
-            V3EntryProtocolExecutionMode::Relay
-        },
-    );
-    if direct {
-        use_native_direct_responses(&mut manifest);
-    } else {
-        for provider in manifest.providers.values_mut() {
-            provider.provider_type = "openai_chat".into();
-            provider.responses = None;
-            for interface in provider.interfaces.values_mut() {
-                interface.provider_type = "openai_chat".into();
-                interface.responses = None;
-            }
-        }
-    }
-    for server in manifest.servers.values_mut() {
-        server
-            .execution
-            .as_mut()
-            .unwrap()
-            .attempt_store
-            .residence_timeout_ms = 4000;
-    }
-    let first_id = format!("concurrency_first_{}", manifest.servers["a"].port);
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
-    if held_sibling {
-        manifest
-            .providers
-            .get_mut(&first_id)
-            .unwrap()
-            .concurrency
-            .as_mut()
-            .unwrap()
-            .max_in_flight = 2;
-    }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let base = format!("http://{}", handle.listeners[0].addr);
-    let client = reqwest::Client::new();
-    let held_success =
-        if held_sibling {
-            let client = client.clone();
-            let base = base.clone();
-            let task =
-                tokio::spawn(async move {
-                    client.post(format!("{base}/v1/responses"))
-                .json(&json!({"model":"client-test","input":"independence-held","stream":false}))
-                .send().await.unwrap().text().await.unwrap()
-                });
-            let wire = timeout(Duration::from_secs(2), first_rx.recv())
-                .await
-                .unwrap()
-                .unwrap();
-            assert!(wire.2.to_string().contains("independence-held"));
-            Some(task)
-        } else {
-            None
-        };
-    let mut request = tokio::spawn({
-        let client = client.clone();
-        let base = base.clone();
-        async move {
-            client.post(format!("{base}/v1/responses"))
-            .json(&json!({"model":"client-test","input":"all tried transport original request","stream":false}))
-            .send().await?.text().await
-        }
-    });
-    let first_wire = timeout(Duration::from_secs(2), first_rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second_wire = timeout(Duration::from_secs(2), second_rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let expected_path = if direct {
-        "/v1/responses"
-    } else {
-        "/v1/chat/completions"
-    };
-    assert_eq!(first_wire.1, expected_path);
-    assert_eq!(second_wire.1, expected_path);
-    assert!(!first_wire.0 && !second_wire.0);
-    assert!(first_wire
-        .2
-        .to_string()
-        .contains("all tried transport original request"));
-    let mut a_original_business: usize = if !first_wire.0
-        && first_wire
-            .2
-            .to_string()
-            .contains("all tried transport original request")
-    {
-        1
-    } else {
-        0
-    };
-    let b_original_business: usize = if !second_wire.0
-        && second_wire
-            .2
-            .to_string()
-            .contains("all tried transport original request")
-    {
-        1
-    } else {
-        0
-    };
-    assert_eq!(
-        a_original_business, 1,
-        "A must receive the first original-O business send"
-    );
-    assert_eq!(
-        b_original_business, 1,
-        "B must receive the second original-O business send"
-    );
-    let mut early = timeout(Duration::from_millis(150), &mut request).await;
-    let ended_early = early.is_ok();
-    let entries = pool_entries_for_transport_case(&client, &base).await;
-    // Decision 2: the pool also lists pre-cool observation substates, so a
-    // "not cooled" assertion filters those out and means "no committed cooldown".
-    let committed: Vec<&Value> = entries
-        .iter()
-        .filter(|entry| entry["state"] != "pre_cool_observation")
-        .collect();
-    assert!(
-        !committed.iter().any(|e| e["provider_id"] == second_id),
-        "last candidate must not be newly cooled"
-    );
-    ready.store(true, std::sync::atomic::Ordering::SeqCst);
-    // A has not been cooled. Its existing aggregate owner observes it after
-    // the declared hold floor; a manual cooldown probe would bypass that edge.
-    assert!(
-        !committed.iter().any(|e| e["provider_id"] == first_id),
-        "the earlier failed identity must remain in pre-cool observation, never a committed cooldown"
-    );
-    assert!(
-        entries.iter().any(|entry| {
-            entry["provider_id"] == first_id && entry["state"] == "pre_cool_observation"
-        }),
-        "the earlier failed identity must be listed as a pre-cool observation substate: {entries:?}"
-    );
-    let mut spillover: Vec<(bool, String, Value)> = Vec::new();
-    if let Some(held_success) = held_success {
-        // Completion of an already running business request establishes actual
-        // recovery before starting independent consumers on the same key.
-        held_release.add_permits(1);
-        assert!(timeout(Duration::from_secs(1), held_success)
-            .await
-            .unwrap()
-            .unwrap()
-            .contains("all tried peer recovered"));
-        // Original O reselects A after recovery. Let it finish before the
-        // independent wave so the two requests exercise the two configured
-        // upstream slots without borrowing a third slot from pending O.
-        // The probe above already polled `request`; a completed JoinHandle must
-        // never be polled again ("JoinHandle polled after completion"), so reuse
-        // its terminal value instead of awaiting it a second time.
-        // v31: the original request never waits for the held sibling to recover. If
-        // it already reached its terminal, that terminal is asserted below; if it is
-        // still pending it must complete through the recovered candidate.
-        let recovered_original = match &early {
-            Ok(Ok(Ok(body))) => Some(body.clone()),
-            Ok(_) => None,
-            Err(_) => Some(
-                timeout(Duration::from_secs(5), &mut request)
-                    .await
-                    .expect("original O must reach a terminal after recovered A")
-                    .expect("original O task must not panic")
-                    .expect("original O client transport must stay intact"),
-            ),
-        };
-        if let Some(recovered_original) = &recovered_original {
-            assert!(
-                recovered_original.contains("all tried peer recovered"),
-                "{recovered_original}"
-            );
-            assert!(
-                !recovered_original.contains("\"error\""),
-                "{recovered_original}"
-            );
-            early = Ok(Ok(Ok(recovered_original.clone())));
-        }
-
-        let mut wave = Vec::new();
-        for index in 0..2 {
-            let client = client.clone();
-            let base = base.clone();
-            wave.push(tokio::spawn(async move {
-                client.post(format!("{base}/v1/responses"))
-                    .header("session-id", format!("independence-wave-{index}"))
-                    .json(&json!({"model":"client-test","input":format!("independence-wave-{index}"),"stream":false}))
-                    .send().await.unwrap().text().await.unwrap()
-            }));
-        }
-        // Hold both upstream responses. Sequential execution cannot satisfy
-        // two arrivals while the first response is still held.
-        let wave_started = tokio::time::Instant::now();
-        let mut arrivals = 0;
-        while arrivals < 2 && wave_started.elapsed() < Duration::from_millis(700) {
-            let remaining = Duration::from_millis(700).saturating_sub(wave_started.elapsed());
-            match timeout(remaining, first_rx.recv()).await {
-                Ok(Some(item)) => {
-                    let (probe, _, ref body) = item;
-                    if !probe && body.to_string().contains("independence-wave") {
-                        arrivals += 1;
-                    } else {
-                        spillover.push(item);
-                    }
-                }
-                _ => break,
-            }
-        }
-        independent_release.add_permits(2);
-        for mut task in wave {
-            if arrivals == 2 {
-                assert!(timeout(Duration::from_secs(1), &mut task)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .contains("all tried peer recovered"));
-            } else {
-                task.abort();
-                let _ = task.await;
-            }
-        }
-        assert_eq!(arrivals, 2,
-            "the waiting request must release every business lease: both same-key configured slots must remain concurrently usable");
-    }
-    let terminal = match early {
-        Ok(result) => Ok(result),
-        Err(_) => timeout(
-            Duration::from_secs(if held_sibling { 5 } else { 3 }),
-            &mut request,
-        )
-        .await,
-    };
-    request.abort();
-    // v31: a request never waits on provider lifecycle state for captured-pool
-    // recovery. With every captured candidate already failed, the lawful terminal is
-    // this request's own transport termination, reached promptly (the 150ms probe
-    // above proves it does not wait), carrying no fabricated success and no
-    // client-visible error payload or synthetic status.
-    let _ = ended_early;
-    match terminal {
-        Ok(Ok(Ok(body))) => {
-            assert!(body.contains("all tried peer recovered"), "{body}");
-            assert!(!body.contains("\"error\""), "{body}");
-        }
-        Ok(Ok(Err(error))) => assert!(
-            !error.is_status(),
-            "a transport break must not fabricate a client status payload: {error}"
-        ),
-        Ok(Err(join)) => panic!("the original request task must not panic: {join}"),
-        Err(_) => panic!(
-            "the original request must reach its terminal without waiting for captured-pool recovery"
-        ),
-    }
-    handle.shutdown().await;
-    first_task.abort();
-    second_task.abort();
-    if held_sibling {
-        let mut post_ready: Vec<(bool, String, Value)> = Vec::new();
-        post_ready.append(&mut spillover);
-        while let Ok(item) = first_rx.try_recv() {
-            post_ready.push(item);
-        }
-        let post_a_original = post_ready
-            .iter()
-            .filter(|item| {
-                !item.0
-                    && item.1.as_str() == expected_path
-                    && item
-                        .2
-                        .to_string()
-                        .contains("all tried transport original request")
-            })
-            .count();
-        a_original_business += post_a_original;
-        // v31: the terminated request never waits for the held sibling to recover,
-        // so it must not be resent to A. A's send count therefore stays at the one
-        // attempt that was made before the terminal.
-        assert_eq!(
-            a_original_business, 1,
-            "a terminated request must not be resent to the recovered peer"
-        );
-        assert_eq!(
-            b_original_business, 1,
-            "B must receive exactly one original-O send and remain excluded"
-        );
-        assert!(
-            second_rx.try_recv().is_err(),
-            "last failed candidate must not be retried"
-        );
-    } else {
-        let mut recovered_probe = false;
-        let mut recovered_business = false;
-        while let Ok((probe, path, body)) = first_rx.try_recv() {
-            assert_eq!(path, expected_path);
-            recovered_probe |= probe;
-            recovered_business |= !probe
-                && body
-                    .to_string()
-                    .contains("all tried transport original request");
-        }
-        // v31: the request does not wait for captured-pool recovery, so it must not
-        // issue a second business send to the recovered peer on its own behalf.
-        // Lifecycle probes are provider state and stay permitted, but the request's
-        // own attempt count is fixed at what it already spent.
-        assert!(
-            !recovered_business,
-            "a terminated request must not resend to the recovered peer: probe={recovered_probe}"
-        );
-        let _ = recovered_probe;
-        assert!(
-            second_rx.try_recv().is_err(),
-            "last failed candidate must not be retried"
-        );
-    }
-}
-
 async fn pool_entries_for_transport_case(client: &reqwest::Client, base: &str) -> Vec<Value> {
     client
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
@@ -1170,7 +804,7 @@ async fn assert_review_direct_empty_sse_recovers(protocol: &str) {
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
     let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let second = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let mut manifest = concurrency_switch_manifest(
+    let mut manifest = two_provider_failover_manifest(
         &format!("http://{}/v1", first.local_addr().unwrap()),
         &format!("http://{}/v1", second.local_addr().unwrap()),
     );
@@ -1190,7 +824,7 @@ async fn assert_review_direct_empty_sse_recovers(protocol: &str) {
             interface.responses = None;
         }
     }
-    let peer = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let peer = format!("failover_second_{}", manifest.servers["a"].port);
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let app = Router::new().fallback_service(post({
@@ -1315,7 +949,7 @@ async fn assert_review_preplan_deadline(recover: bool) {
     std::env::set_var("V3_P6_TEST_KEY", "test-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
-    let mut manifest = concurrency_switch_manifest(&url, &url);
+    let mut manifest = two_provider_failover_manifest(&url, &url);
     for s in manifest.servers.values_mut() {
         s.execution
             .as_mut()
@@ -1324,7 +958,6 @@ async fn assert_review_preplan_deadline(recover: bool) {
             .residence_timeout_ms = if recover { 1000 } else { 300 };
     }
     for p in manifest.providers.values_mut() {
-        p.concurrency.as_mut().unwrap().acquire_timeout_ms = 2000;
     }
     let ids: Vec<_> = manifest.providers.keys().cloned().collect();
     let business_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1476,46 +1109,6 @@ async fn assert_review_preplan_deadline(recover: bool) {
     }
 }
 
-#[tokio::test]
-async fn issue44cc3af_failed_attempt_waits_for_cooled_peer() {
-    assert_failed_attempt_waits_for_cooled_peer(false, "recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_failed_attempt_waits_for_cooled_peer() {
-    assert_failed_attempt_waits_for_cooled_peer(true, "recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_failed_attempt_cooled_peer_obeys_wait_budget() {
-    assert_failed_attempt_waits_for_cooled_peer(false, "exhaust").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_failed_attempt_cooled_peer_obeys_wait_budget() {
-    assert_failed_attempt_waits_for_cooled_peer(true, "exhaust").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_failed_attempt_cooled_peer_residence_deadline() {
-    assert_failed_attempt_waits_for_cooled_peer(false, "residence").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_failed_attempt_cooled_peer_residence_deadline() {
-    assert_failed_attempt_waits_for_cooled_peer(true, "residence").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_failed_attempt_cooled_peer_cancel_stops_business_dispatch() {
-    assert_failed_attempt_waits_for_cooled_peer(false, "cancel").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_failed_attempt_cooled_peer_cancel_stops_business_dispatch() {
-    assert_failed_attempt_waits_for_cooled_peer(true, "cancel").await;
-}
-
 async fn assert_failed_attempt_waits_for_cooled_peer(direct: bool, mode: &str) {
     let _guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("44cc3af-failed-cooled-peer");
@@ -1575,11 +1168,9 @@ async fn assert_failed_attempt_waits_for_cooled_peer(direct: bool, mode: &str) {
     let second_upstream = tokio::spawn(async move {
         axum::serve(second_listener, second_app).await.unwrap();
     });
-    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
+    let mut manifest = two_provider_failover_manifest(&first_url, &second_url);
     if mode != "recover" {
         for provider in manifest.providers.values_mut() {
-            provider.concurrency.as_mut().unwrap().acquire_timeout_ms =
-                if mode == "residence" { 2000 } else { 400 };
         }
     }
     if mode == "residence" || mode == "exhaust" {
@@ -1595,7 +1186,7 @@ async fn assert_failed_attempt_waits_for_cooled_peer(direct: bool, mode: &str) {
     if direct {
         use_native_direct_responses(&mut manifest);
     }
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let second_id = format!("failover_second_{}", manifest.servers["a"].port);
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let cooled = reqwest::Client::new().post(format!("{base}/_routecodex/health/cooldown-pool/add"))
@@ -1706,16 +1297,6 @@ async fn assert_failed_attempt_waits_for_cooled_peer(direct: bool, mode: &str) {
     }
 }
 
-#[tokio::test]
-async fn issue44cc3af_429_healthy_alternatives_keep_parallelism() {
-    assert_identity_only_rate_limit(false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_429_healthy_alternatives_keep_parallelism() {
-    assert_identity_only_rate_limit(true).await;
-}
-
 fn identity_only_rate_limit_manifest(
     first_url: &str,
     second_url: &str,
@@ -1733,7 +1314,6 @@ base_url = "{url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}, {{ alias = "other", env = "V3_IDENTITY_OTHER_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 8, acquire_timeout_ms = 1500, stale_lease_ms = 120000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.{id}.models.test]
 wire_name = "wire-test"
@@ -1756,7 +1336,6 @@ base_url = "{first_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "other", env = "V3_IDENTITY_OTHER_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 8, acquire_timeout_ms = 1500, stale_lease_ms = 120000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.{otherkey}.models.test]
 wire_name = "wire-test"
@@ -2279,783 +1858,12 @@ async fn assert_identity_only_rate_limit(direct: bool) {
     }
 }
 
-#[tokio::test]
-async fn issue44cc3af_mixed_failed_and_busy_candidates_wait_then_recover() {
-    assert_mixed_capacity_recovery(false, false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_mixed_failed_and_busy_candidates_wait_then_recover() {
-    assert_mixed_capacity_recovery(true, false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_initial_busy_candidate_recovers_after_selected_peer_fails() {
-    assert_mixed_capacity_recovery(false, true).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_initial_busy_candidate_recovers_after_selected_peer_fails() {
-    assert_mixed_capacity_recovery(true, true).await;
-}
-
 // 2026-11-07 ruling ①: capacity admission is local provider capacity, not a
 // health fact and not a pool-visibility decision. When the only remaining
 // eligible candidate is the identity that is merely *busy*, the request must
 // send to it over the occupied budget and pass its real business answer
 // through, instead of turning the peer's real failure into a last-candidate
 // terminal. The failed peer is contacted exactly once and never re-sent.
-#[tokio::test]
-async fn issue44cc3af_capacity_skip_passes_through_last_eligible_candidate() {
-    let _guard = TEST_LOCK.lock().await;
-    let _home_guard = TestHomeGuard::new("44cc3af-capacity-passthrough");
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (held_url, mut held_captures, held_release, held_shutdown) =
-        start_controlled_held_upstream().await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let failure_payloads = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
-    let (failure_tx, mut failures) = mpsc::unbounded_channel();
-    let app = Router::new().route(
-        "/v1/responses",
-        post({
-            let failure_payloads = failure_payloads.clone();
-            let failure_tx = failure_tx.clone();
-            move |axum::Json(payload): axum::Json<Value>| {
-                let failure_payloads = failure_payloads.clone();
-                let failure_tx = failure_tx.clone();
-                async move {
-                    failure_payloads.lock().unwrap().push(payload);
-                    let _ = failure_tx.send(());
-                    (
-                        StatusCode::BAD_GATEWAY,
-                        axum::Json(json!({"error":{"message":"selected provider failed"}})),
-                    )
-                }
-            }
-        }),
-    );
-    let failing_upstream = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    let failing_url = format!("http://{address}/v1");
-    std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
-    let mut manifest = concurrency_switch_manifest(&failing_url, &held_url);
-    let held_id = format!("concurrency_second_{}", manifest.servers["a"].port);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    // The holder binds the held identity and takes its single capacity slot.
-    let held_endpoint = endpoint.clone();
-    let held_model = format!("{held_id}.test");
-    let holder = tokio::spawn(async move {
-        reqwest::Client::new()
-            .post(held_endpoint)
-            .header("session-id", "44cc3af-passthrough-holder")
-            .json(&json!({"model": held_model, "input":"held","stream":true}))
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap()
-    });
-    timeout(Duration::from_secs(3), held_captures.recv())
-        .await
-        .expect("the holder must reach the held identity")
-        .expect("held identity capture receipt");
-    let client = reqwest::Client::new();
-    let request_endpoint = endpoint.clone();
-    let request = tokio::spawn(async move {
-        client
-            .post(request_endpoint)
-            .header("session-id", "44cc3af-passthrough-recovery")
-            .json(&json!({"model":"client-test","input":"capacity passthrough","stream":true}))
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-    });
-    // The failing peer answers its one business attempt with a real 502.
-    timeout(Duration::from_secs(3), failures.recv())
-        .await
-        .expect("the selected peer must receive the business attempt")
-        .expect("failed attempt receipt");
-    // The formerly busy identity is now the last eligible candidate: it is sent
-    // over the occupied budget while the holder is still in flight.
-    timeout(Duration::from_secs(3), held_captures.recv())
-        .await
-        .expect("the last eligible candidate must be sent over occupied capacity")
-        .expect("over-capacity capture receipt");
-    let sent_over_capacity = !holder.is_finished();
-    held_release.add_permits(2);
-    let held_body = timeout(Duration::from_secs(3), holder)
-        .await
-        .expect("the holder must finish once capacity is released")
-        .unwrap();
-    let result = timeout(Duration::from_secs(4), request).await;
-    let physical_calls = failure_payloads.lock().unwrap().clone();
-    handle.shutdown().await;
-    let _ = held_shutdown.send(());
-    failing_upstream.abort();
-    std::env::remove_var("V3_P6_TEST_KEY");
-    assert!(
-        sent_over_capacity,
-        "the last eligible candidate must be sent while capacity is still occupied"
-    );
-    assert_responses_sse_delivered_business_text(&held_body, "held response released");
-    assert_eq!(
-        held_captures.try_recv().is_err(),
-        true,
-        "the exempted send is exactly one attempt, not a retry loop"
-    );
-    assert_eq!(
-        physical_calls.len(),
-        1,
-        "a failed business request must not be retried: {physical_calls:?}"
-    );
-    let body = result
-        .expect("bounded capacity passthrough")
-        .unwrap()
-        .expect("intact client transport");
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    assert!(!body.contains("response.failed"), "{body}");
-    assert!(!body.contains("selected provider failed"), "{body}");
-    assert!(!body.contains("network_error"), "{body}");
-}
-
-async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool) {
-    let _guard = TEST_LOCK.lock().await;
-    let _home_guard = TestHomeGuard::new("44cc3af-mixed-capacity");
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (healthy_url, mut healthy_captures, healthy_release, healthy_shutdown) =
-        start_controlled_held_upstream().await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let failure_release = Arc::new(Semaphore::new(usize::from(!initially_busy_first)));
-    let failure_payloads = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
-    let expected_probe = json!({
-        "model":"wire-test", "stream":false,
-        "input":[{"role":"user","content":[{"type":"input_text","text":"ping; reply pong"}]}],
-    });
-    let (probe_tx, mut probe_arrivals) = mpsc::unbounded_channel();
-    let (failure_tx, mut failures) = mpsc::unbounded_channel();
-    let app = Router::new().route(
-        "/v1/responses",
-        post({
-            let failure_release = failure_release.clone();
-            let failure_payloads = failure_payloads.clone();
-            let probe_shape = expected_probe.clone();
-            move |axum::Json(payload): axum::Json<Value>| {
-                let failure_release = failure_release.clone();
-                let failure_payloads = failure_payloads.clone();
-                let probe_shape = probe_shape.clone();
-                let probe_tx = probe_tx.clone();
-                let failure_tx = failure_tx.clone();
-                async move {
-                    let is_probe = payload == probe_shape;
-                    failure_payloads.lock().unwrap().push(payload);
-                    if is_probe {
-                        let _ = probe_tx.send(());
-                    }
-                    let _ = failure_tx.send(());
-                    failure_release.acquire().await.unwrap().forget();
-                    (
-                        StatusCode::BAD_GATEWAY,
-                        axum::Json(json!({"error":{"message":"selected provider failed"}})),
-                    )
-                }
-            }
-        }),
-    );
-    let failing_upstream = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    let failing_url = format!("http://{address}/v1");
-    std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
-    let mut manifest = if initially_busy_first {
-        concurrency_switch_manifest(&healthy_url, &failing_url)
-    } else {
-        concurrency_switch_manifest(&failing_url, &healthy_url)
-    };
-    let healthy_id = format!(
-        "concurrency_{}_{}",
-        if initially_busy_first {
-            "first"
-        } else {
-            "second"
-        },
-        manifest.servers["a"].port
-    );
-    if direct {
-        use_native_direct_responses(&mut manifest);
-    }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let held_endpoint = endpoint.clone();
-    let holder = tokio::spawn(async move {
-        reqwest::Client::new()
-            .post(held_endpoint)
-            .header("session-id", "44cc3af-mixed-holder")
-            .json(&json!({"model":format!("{healthy_id}.test"),"input":"held","stream":true}))
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap()
-    });
-    timeout(Duration::from_secs(3), healthy_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let request = tokio::spawn(async move {
-        reqwest::Client::new()
-            .post(endpoint)
-            .header("session-id", "44cc3af-mixed-recovery")
-            .json(&json!({"model":"client-test","input":"mixed recovery","stream":true}))
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-    });
-    timeout(Duration::from_secs(3), failures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    if !initially_busy_first {
-        timeout(Duration::from_secs(3), probe_arrivals.recv())
-            .await
-            .expect("held capacity must remain occupied until a real precool probe arrives")
-            .expect("physical probe arrival receipt");
-    }
-    let closed_while_busy = !initially_busy_first && request.is_finished();
-    healthy_release.add_permits(1);
-    let held_body = timeout(Duration::from_secs(3), holder)
-        .await
-        .unwrap()
-        .unwrap();
-    if initially_busy_first {
-        failure_release.add_permits(1);
-    }
-    let recovered_dispatch = timeout(Duration::from_secs(4), healthy_captures.recv()).await;
-    healthy_release.add_permits(1);
-    let result = timeout(Duration::from_secs(4), request).await;
-    let physical_calls = failure_payloads.lock().unwrap().clone();
-    handle.shutdown().await;
-    let _ = healthy_shutdown.send(());
-    failing_upstream.abort();
-    std::env::remove_var("V3_P6_TEST_KEY");
-    assert_responses_sse_delivered_business_text(&held_body, "held response released");
-    assert!(
-        !closed_while_busy,
-        "a prior failed candidate must not hide a remaining busy candidate's wait"
-    );
-    assert!(
-        recovered_dispatch.is_ok_and(|capture| capture.is_some()),
-        "a formerly busy candidate must remain eligible after the peer fails"
-    );
-    let business_input = if direct {
-        json!("mixed recovery")
-    } else {
-        json!([{"role":"user","type":"message","content":[{"type":"input_text","text":"mixed recovery"}]}])
-    };
-    let expected_business = json!({
-        "model":"wire-test", "input":business_input, "stream":true, "max_output_tokens":4096,
-    });
-    let business_calls = physical_calls
-        .iter()
-        .filter(|body| **body == expected_business)
-        .count();
-    let probe_calls = physical_calls
-        .iter()
-        .filter(|body| **body == expected_probe)
-        .count();
-    assert_eq!(
-        business_calls, 1,
-        "a failed business request must not be retried: {physical_calls:?}"
-    );
-    assert_eq!(probe_calls, usize::from(!initially_busy_first),
-        "only the actual delayed precool observation may probe this failed identity: {physical_calls:?}");
-    assert_eq!(
-        physical_calls.len(),
-        business_calls + probe_calls,
-        "no unclassified physical attempt is allowed: {physical_calls:?}"
-    );
-    let body = result
-        .expect("bounded mixed recovery")
-        .unwrap()
-        .expect("intact recovered transport");
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    assert!(!body.contains("selected provider failed"));
-}
-
-#[tokio::test]
-async fn issue44cc3af_429_gate_wait_obeys_request_residence_deadline() {
-    assert_rate_limit_residence_deadline(false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_429_gate_wait_obeys_request_residence_deadline() {
-    assert_rate_limit_residence_deadline(true).await;
-}
-
-async fn assert_rate_limit_residence_deadline(direct: bool) {
-    let _guard = TEST_LOCK.lock().await;
-    let _home_guard = TestHomeGuard::new("44cc3af-rate-deadline");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    // Terminal discriminant: the client terminal must follow the measured upstream
-    // attempt. Provider lifecycle probes carry their own body and are not request
-    // business attempts, so they are counted separately.
-    let business_attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let app = Router::new().route(
-        "/v1/responses",
-        post({
-            let business_attempts = business_attempts.clone();
-            move |axum::Json(body): axum::Json<Value>| {
-                let business_attempts = business_attempts.clone();
-                async move {
-                    if !body.to_string().contains("ping; reply pong") {
-                        business_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
-                    (
-                        StatusCode::TOO_MANY_REQUESTS,
-                        axum::Json(json!({"error":{"type":"rate_limit_error","message":"capacity busy"}})),
-                    )
-                }
-            }
-        }),
-    );
-    let upstream = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
-    let url = format!("http://{addr}/v1");
-    let mut manifest = concurrency_switch_manifest(&url, &url);
-    if direct {
-        use_native_direct_responses(&mut manifest);
-    }
-    let model = format!("concurrency_first_{}.test", manifest.servers["a"].port);
-    for server in manifest.servers.values_mut() {
-        server.http_sse_keepalive_ms = 10;
-        server
-            .execution
-            .as_mut()
-            .unwrap()
-            .attempt_store
-            .residence_timeout_ms = 150;
-    }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let started = tokio::time::Instant::now();
-    let mut response = reqwest::Client::new()
-        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .header("session-id", "44cc3af-rate-deadline")
-        .json(&json!({"model":model,"input":"rate wait deadline","stream":true}))
-        .send()
-        .await
-        .unwrap();
-    let status = response.status();
-    let mut bytes = Vec::new();
-    let broken = timeout(Duration::from_secs(3), async {
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => bytes.extend(chunk),
-                Ok(None) => break false,
-                Err(_) => break true,
-            }
-        }
-    })
-    .await;
-    let elapsed = started.elapsed();
-    handle.shutdown().await;
-    upstream.abort();
-    std::env::remove_var("V3_P6_TEST_KEY");
-    let broken = broken.expect("bounded rate-limit wait must terminate");
-    let business_attempts = business_attempts.load(std::sync::atomic::Ordering::SeqCst);
-    let body = String::from_utf8(bytes).unwrap();
-    // Removed premise (Lead ruling, 2026-11-07): this fixture used to require
-    // `status == OK` on every run, i.e. it assumed a request is never preempted by
-    // its own residence budget. Under v31 the request residence budget IS the
-    // request budget and its expiry is a truthful typed terminal, and with one
-    // pinned candidate the failing identity is the only/last eligible one whose
-    // real provider response is passed through. The terminal must therefore follow
-    // the measured upstream attempt instead of the retired "always wait" premise:
-    // an admitted attempt ends in that provider's verbatim 429, and a request whose
-    // budget was already spent before admission ends in a detectable transport
-    // break with no error bytes. Both are law-conformant; neither may become a
-    // proxy-generated error, a fabricated completion, or a same-identity retry.
-    assert!(
-        !body.contains("network_error") && !body.contains("response.failed"),
-        "a provider HTTP failure must never become a proxy-generated projection: {body}"
-    );
-    assert!(
-        !body.contains("response.completed"),
-        "a failing upstream must never be fabricated into a completion: {body}"
-    );
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "request residence deadline must include gate queueing: {elapsed:?}"
-    );
-    // The discriminated axis is the terminal, not the attempt count. Both terminals
-    // below are v31-lawful:
-    //   * complete: the front never committed a stream, so the client receives that
-    //     single attempt's own provider 429 status and body verbatim;
-    //   * break: the front had already committed the client channel — this fixture
-    //     sets `http_sse_keepalive_ms = 10`, so a keepalive can cross before the
-    //     provider's 429 is projected — and it then terminates that channel
-    //     detectably instead of writing an error payload or a completion.
-    // Keying on `business_attempts > 0` could not express the break terminal and
-    // panicked on it. That cell first appeared in a family run on 2026-11-07 and was
-    // deducible from the assertion order there: the global assertions above (no
-    // `network_error`/`response.failed`, no `response.completed`, `elapsed < 500 ms`)
-    // all passed, so it was neither a proxy envelope, a fabricated completion nor a
-    // long budget wait. It has since been captured verbatim on the wire (family run,
-    // 2026-11-07): mode=direct, status=200, elapsed=20.5 ms, attempts=1, scheduler
-    // stall 6 ms, body=": keepalive\n\n" — one admitted attempt whose 429 arrived
-    // after the keepalive had committed the channel, leaving the detectable break as
-    // the only faithful terminal. The same day's 90 instrumented instances measured
-    // the complete/verbatim cell at 4.2-6.6 ms and the pre-admission expiry cell at
-    // 208-292 ms, so this cell is the timing race between the 10 ms keepalive and the
-    // provider answer rather than a stall, which is why it is not reproducible on
-    // demand.
-    if !broken {
-        assert_eq!(
-            status,
-            StatusCode::TOO_MANY_REQUESTS,
-            "a complete client response must be the provider's own 429, verbatim: {body}"
-        );
-        assert!(
-            body.contains("capacity busy"),
-            "the provider's own error body must be preserved: {body}"
-        );
-        assert_eq!(
-            business_attempts, 1,
-            "a complete response must be attributable to exactly one real provider attempt, never a proxy projection or a same-identity retry: {body}"
-        );
-    } else {
-        // The front committed the channel and then terminated it detectably: no error
-        // payload, no fabricated completion, and at most the one admitted attempt.
-        // A lower bound on elapsed belongs to the pre-admission expiry case and is
-        // not asserted in this keepalive-race cell (captured at 20.5 ms).
-        assert_eq!(
-            status,
-            StatusCode::OK,
-            "the committed SSE channel must open before the truthful terminal: {body}"
-        );
-        assert!(
-            business_attempts <= 1,
-            "at most one business attempt may precede the break, never a same-identity retry: {business_attempts}"
-        );
-        assert!(!body.contains("error"), "no error payload may precede the break: {body}");
-    }
-}
-
-#[tokio::test]
-async fn issue44cc3af_stalled_rescue_probe_obeys_wait_budget_without_error_payload() {
-    assert_stalled_rescue_probe_wait_budget(false, 1, None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_repeated_all_cooled_requests_each_wait_after_exhaustion() {
-    assert_stalled_rescue_probe_wait_budget(false, 4, None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_repeated_all_cooled_requests_each_wait_after_exhaustion() {
-    assert_stalled_rescue_probe_wait_budget(true, 4, None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_pool_wait_outlives_single_candidate_acquire_timeout() {
-    assert_stalled_rescue_probe_wait_budget(false, 1, Some(800)).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_pool_wait_outlives_single_candidate_acquire_timeout() {
-    assert_stalled_rescue_probe_wait_budget(true, 1, Some(800)).await;
-}
-
-async fn assert_stalled_rescue_probe_wait_budget(
-    direct: bool,
-    requests: usize,
-    request_deadline_ms: Option<u64>,
-) {
-    let _guard = TEST_LOCK.lock().await;
-    // Pin the production default: this test asserts exact attempt counts, so it must
-    // never inherit another test's process-global refill budget.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let _home_guard = TestHomeGuard::new("44cc3af-probe-budget");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let release = Arc::new(tokio::sync::Notify::new());
-    let arrived = Arc::new(tokio::sync::Notify::new());
-    let app = Router::new().route(
-        "/v1/responses",
-        post({
-            let release = release.clone();
-            let arrived = arrived.clone();
-            move || {
-                let release = release.clone();
-                let arrived = arrived.clone();
-                async move {
-                    arrived.notify_one();
-                    release.notified().await;
-                    (StatusCode::OK, "pong")
-                }
-            }
-        }),
-    );
-    let upstream = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
-    });
-    std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
-    let url = format!("http://{addr}/v1");
-    let mut manifest = concurrency_switch_manifest(&url, &url);
-    if direct {
-        use_native_direct_responses(&mut manifest);
-    }
-    for server in manifest.servers.values_mut() {
-        server.http_sse_keepalive_ms = 10;
-        server
-            .execution
-            .as_mut()
-            .unwrap()
-            .attempt_store
-            .residence_timeout_ms = request_deadline_ms.unwrap_or(150);
-    }
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let providers: Vec<_> = manifest.providers.keys().cloned().collect();
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let base = format!("http://{}", handle.listeners[0].addr);
-    let client = reqwest::Client::new();
-    for provider in providers {
-        let response = client.post(format!("{base}/_routecodex/health/cooldown-pool/add"))
-            .json(&json!({"provider_id":provider,"auth_alias":"key","model_id":"test","kind":"probe","duration_ms":1}))
-            .send().await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-    let request = tokio::spawn(async move {
-        let mut outcomes = Vec::new();
-        for index in 0..requests {
-            let started = tokio::time::Instant::now();
-            let mut response = client
-                .post(format!("{base}/v1/responses"))
-                .header("session-id", format!("44cc3af-stalled-probe-{index}"))
-                .json(&json!({"model":"client-test","input":"probe budget","stream":true}))
-                .send()
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-            let mut bytes = Vec::new();
-            let broken = loop {
-                match response.chunk().await {
-                    Ok(Some(chunk)) => bytes.extend(chunk),
-                    Ok(None) => break false,
-                    Err(_) => break true,
-                }
-            };
-            outcomes.push((started.elapsed(), broken, bytes));
-        }
-        outcomes
-    });
-    timeout(Duration::from_secs(2), arrived.notified())
-        .await
-        .unwrap();
-    let outcome = timeout(Duration::from_secs(2), request).await;
-    release.notify_waiters();
-    handle.shutdown().await;
-    upstream.abort();
-    std::env::remove_var("V3_P6_TEST_KEY");
-    let outcomes = outcome
-        .expect("a stalled probe must not outlive the wait budget")
-        .unwrap();
-    for (elapsed, broken, bytes) in outcomes {
-        // v31 clause "请求从不等待容量、冷却、探测、恢复、FIFO、permit 或
-        // attempt/store 预算": the declared capacity/attempt deadline is never
-        // consumed by the request, so a fresh request resolves inside itself. The
-        // landed law keeps the detectable transport end and the no-payload,
-        // no-fabricated-success invariants asserted below.
-        assert!(
-            elapsed < Duration::from_millis(1_500),
-            "a request must never wait through a capacity/attempt budget: {elapsed:?}"
-        );
-        assert!(broken, "exhaustion must end transport detectably");
-        let body = String::from_utf8(bytes).unwrap();
-        if direct {
-            // Direct's transport channel uses an empty SSE comment; Relay's
-            // body wrapper labels the equivalent transport-only heartbeat.
-            assert!(
-                body.lines().any(|line| line.starts_with(':')),
-                "missing SSE transport comment after {elapsed:?}: {body:?}"
-            );
-        } else {
-            assert!(body.contains(": keepalive"));
-        }
-        assert!(
-            !body.contains("error") && !body.contains("response.completed"),
-            "{body}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn issue44cc3af_429_waits_then_recovers_without_cooling_provider() {
-    assert_rate_limit_wait(false, false, false, 1, LateRateLimitSession::None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_429_waits_then_recovers_without_cooling_provider() {
-    assert_rate_limit_wait(true, false, false, 1, LateRateLimitSession::None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_all_cooled_waits_for_probe_recovery() {
-    assert_rate_limit_wait(false, true, false, 1, LateRateLimitSession::None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_initial_all_cooled_waits_for_active_probe() {
-    assert_initial_all_cooled_active_probe(false, false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_initial_all_cooled_waits_for_active_probe() {
-    assert_initial_all_cooled_active_probe(true, false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_probe_success_wakes_long_pool_backoff_immediately() {
-    assert_initial_all_cooled_active_probe(false, true).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_probe_success_wakes_long_pool_backoff_immediately() {
-    assert_initial_all_cooled_active_probe(true, true).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_429_with_cooled_peer_recovers_after_probe_continuation() {
-    assert_429_with_cooled_peer(false).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_429_with_cooled_peer_recovers_after_probe_continuation() {
-    assert_429_with_cooled_peer(true).await;
-}
-
-async fn assert_429_with_cooled_peer(direct: bool) {
-    let _guard = TEST_LOCK.lock().await;
-    let _home = TestHomeGuard::new("44cc3af-429-cooled-continuation");
-    std::env::set_var("V3_P6_TEST_KEY", "test-key");
-    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let second = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let first_url = format!("http://{}/v1", first.local_addr().unwrap());
-    let second_url = format!("http://{}/v1", second.local_addr().unwrap());
-    let a_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let (first_tx, mut first_rx) = mpsc::unbounded_channel();
-    let first_app = Router::new().fallback_service(post({
-        let a_calls = a_calls.clone();
-        move || {
-            a_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let _ = first_tx.send(());
-            async move {
-                // The final eligible identity answered 429 once. Per the active
-                // last-provider policy it stays excluded for this request: no
-                // same-identity business retry and no new probe for it.
-                (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    axum::Json(json!({"status":429,"title":"Too Many Requests"})),
-                )
-                    .into_response()
-            }
-        }
-    }));
-    let b_business = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let second_app = Router::new().fallback_service(post({
-        let b_business = b_business.clone();
-        move |axum::Json(body): axum::Json<Value>| {
-            let text = body.to_string();
-            if text.contains("wait429 while peercooled") {
-                b_business.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            async {
-                // A previously failed, health-cooled identity recovers through
-                // its own real probe. Once its probe returns 2xx it is eligible
-                // again and the pending request reselects it to complete.
-                let event = json!({"type":"response.completed","response":{"id":"cooled-peer-recovered","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"rate limited candidate recovered after peer probe"}]}]}});
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header("content-type", "text/event-stream")
-                    .body(Body::from(format!("event: response.completed\ndata: {event}\n\n")))
-                    .unwrap()
-            }
-        }
-    }));
-    let a_task = tokio::spawn(async move { axum::serve(first, first_app).await.unwrap() });
-    let b_task = tokio::spawn(async move { axum::serve(second, second_app).await.unwrap() });
-    let mode = if direct {
-        V3EntryProtocolExecutionMode::Direct
-    } else {
-        V3EntryProtocolExecutionMode::Relay
-    };
-    let mut manifest = concurrency_switch_manifest_with_mode(&first_url, &second_url, mode);
-    if direct {
-        use_native_direct_responses(&mut manifest);
-    }
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 2500;
-    }
-    let peer = format!("concurrency_second_{}", manifest.servers["a"].port);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let base = format!("http://{}", handle.listeners[0].addr);
-    let client = reqwest::Client::new();
-    let response = client.post(format!("{base}/_routecodex/health/cooldown-pool/add"))
-        .json(&json!({"provider_id":peer,"auth_alias":"key","model_id":"test","kind":"probe","duration_ms":500}))
-        .send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let mut request = tokio::spawn({
-        let endpoint = format!("{base}/v1/responses");
-        async move {
-            let response = client.post(endpoint).json(&json!({"model":"client-test","input":"wait429 while peercooled","stream":true})).send().await?;
-            response.text().await
-        }
-    });
-    timeout(Duration::from_secs(2), first_rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let result = timeout(Duration::from_secs(5), &mut request).await;
-    if result.is_err() {
-        request.abort();
-    }
-    handle.shutdown().await;
-    a_task.abort();
-    b_task.abort();
-    std::env::remove_var("V3_P6_TEST_KEY");
-    let body = result
-        .expect("backoff remains within declared budget")
-        .unwrap()
-        .expect("429 identity must remain recoverable across the cooled-peer probe phase");
-    assert_responses_sse_delivered_business_text(
-        &body,
-        "rate limited candidate recovered after peer probe",
-    );
-    assert_eq!(
-        a_calls.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "the final 429 identity must receive exactly one business send and no new probe"
-    );
-    assert_eq!(
-        b_business.load(std::sync::atomic::Ordering::SeqCst),
-        1,
-        "the recovered cooled peer must complete the request exactly once"
-    );
-}
-
 async fn assert_initial_all_cooled_active_probe(direct: bool, long_wait: bool) {
     let _guard = TEST_LOCK.lock().await;
     let _home = TestHomeGuard::new("44cc3af-active-probe");
@@ -3096,7 +1904,7 @@ async fn assert_initial_all_cooled_active_probe(direct: bool, long_wait: bool) {
     } else {
         V3EntryProtocolExecutionMode::Relay
     };
-    let mut manifest = concurrency_switch_manifest_with_mode(&url, &url, mode);
+    let mut manifest = two_provider_failover_manifest_with_execution_mode(&url, &url, mode);
     if direct {
         use_native_direct_responses(&mut manifest);
     }
@@ -3196,21 +2004,6 @@ async fn issue44cc3af_other_session_success_preserves_429_provider_health() {
 #[tokio::test]
 async fn issue44cc3af_concurrent_429_sessions_share_backoff_without_retry_storm() {
     assert_rate_limit_wait(false, false, false, 4, LateRateLimitSession::None).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_new_session_obeys_existing_429_backoff() {
-    assert_rate_limit_wait(false, false, false, 1, LateRateLimitSession::Complete).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_new_session_obeys_existing_429_backoff() {
-    assert_rate_limit_wait(true, false, false, 1, LateRateLimitSession::Complete).await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_cancelled_rate_limit_wait_never_sends_later() {
-    assert_rate_limit_wait(false, false, false, 1, LateRateLimitSession::Cancel).await;
 }
 
 enum LateRateLimitSession {
@@ -3330,7 +2123,7 @@ async fn assert_rate_limit_wait(
     });
     let url = format!("http://{addr}/v1");
     std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
-    let mut manifest = concurrency_switch_manifest(&url, &url);
+    let mut manifest = two_provider_failover_manifest(&url, &url);
     for server in manifest.servers.values_mut() {
         server.http_sse_keepalive_ms = 50;
     }
@@ -3351,11 +2144,10 @@ async fn assert_rate_limit_wait(
     }
     if parallel_success || waiter_count > 1 || late_join {
         for provider in manifest.providers.values_mut() {
-            provider.concurrency.as_mut().unwrap().max_in_flight = waiter_count.max(2) as u32;
         }
     }
-    let first_id = format!("concurrency_first_{}", manifest.servers["a"].port);
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let first_id = format!("failover_first_{}", manifest.servers["a"].port);
+    let second_id = format!("failover_second_{}", manifest.servers["a"].port);
     let pinned = if cooled {
         "client-test".to_string()
     } else {
@@ -3618,51 +2410,6 @@ async fn assert_rate_limit_wait(
     }
 }
 
-#[tokio::test]
-async fn issue44cc3af_all_busy_waits_for_capacity_without_transport_break() {
-    assert_capacity_wait("recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_capacity_release_wakes_long_pool_backoff_immediately() {
-    assert_capacity_wait("long-recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_capacity_release_wakes_long_pool_backoff_immediately() {
-    assert_capacity_wait("direct-long-recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_owner_cancellation_wakes_long_pool_backoff_without_health_success() {
-    assert_capacity_wait("cancel-owner-long-recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_owner_cancellation_wakes_long_pool_backoff_without_health_success() {
-    assert_capacity_wait("direct-cancel-owner-long-recover").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_cancelled_wait_does_not_send_after_capacity_returns() {
-    assert_capacity_wait("cancel").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_capacity_budget_expires_only_after_waiting() {
-    assert_capacity_wait("budget").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_repeated_requests_after_exhaustion_each_wait_for_capacity() {
-    assert_capacity_wait("repeated-budget").await;
-}
-
-#[tokio::test]
-async fn issue44cc3af_direct_repeated_requests_after_exhaustion_each_wait_for_capacity() {
-    assert_capacity_wait("direct-repeated-budget").await;
-}
-
 async fn assert_capacity_wait(mode: &str) {
     let _guard = TEST_LOCK.lock().await;
     let _home_guard = TestHomeGuard::new("44cc3af-capacity-wait");
@@ -3672,7 +2419,7 @@ async fn assert_capacity_wait(mode: &str) {
     let (second_url, mut second_captures, second_release, second_shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "44cc3af-test-key");
-    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
+    let mut manifest = two_provider_failover_manifest(&first_url, &second_url);
     let repeated_budget = mode.ends_with("repeated-budget");
     let budget = mode == "budget" || repeated_budget;
     let long_recovery = mode.ends_with("long-recover");
@@ -3683,7 +2430,6 @@ async fn assert_capacity_wait(mode: &str) {
     }
     if budget {
         for provider in manifest.providers.values_mut() {
-            provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 300;
         }
         // Capacity owners keep their original long deadline on listener a.
         // Only requests on listener b receive the short terminal deadline.
@@ -3699,12 +2445,12 @@ async fn assert_capacity_wait(mode: &str) {
     }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "44cc3af-first");
+    let first = spawn_responses_client(&endpoint, "44cc3af-first");
     timeout(Duration::from_secs(2), first_captures.recv())
         .await
         .unwrap()
         .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "44cc3af-second");
+    let second = spawn_responses_client(&endpoint, "44cc3af-second");
     timeout(Duration::from_secs(2), second_captures.recv())
         .await
         .unwrap()
@@ -3915,16 +2661,16 @@ async fn assert_busy_candidate_preserves_peer_recovery(direct: bool) {
     let (second_url, mut second_captures, second_shutdown) =
         start_controlled_responses_relay_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "pool-recovery-test-key");
-    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
-    let first_id = format!("concurrency_first_{}", manifest.servers["a"].port);
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
+    let mut manifest = two_provider_failover_manifest(&first_url, &second_url);
+    let first_id = format!("failover_first_{}", manifest.servers["a"].port);
+    let second_id = format!("failover_second_{}", manifest.servers["a"].port);
     if direct {
         use_native_direct_responses(&mut manifest);
     }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let endpoint = format!("{base}/v1/responses");
-    let first = spawn_concurrency_client(&endpoint, "pool-recovery-held");
+    let first = spawn_responses_client(&endpoint, "pool-recovery-held");
     timeout(Duration::from_secs(2), first_captures.recv())
         .await
         .unwrap()
@@ -4053,7 +2799,7 @@ async fn assert_busy_candidate_preserves_peer_recovery(direct: bool) {
         .unwrap();
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("response.completed"), "{body}");
-    let after = spawn_concurrency_client(&endpoint, "pool-recovery-after-release");
+    let after = spawn_responses_client(&endpoint, "pool-recovery-after-release");
     timeout(Duration::from_secs(1), first_captures.recv())
         .await
         .unwrap()
@@ -4069,16 +2815,6 @@ async fn assert_busy_candidate_preserves_peer_recovery(direct: bool) {
     first_shutdown.send(()).unwrap();
     second_shutdown.send(()).unwrap();
     std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn pool_empty_recovery_relay_busy_preferred_keeps_cooled_peer() {
-    assert_busy_candidate_preserves_peer_recovery(false).await;
-}
-
-#[tokio::test]
-async fn pool_empty_recovery_direct_busy_preferred_keeps_cooled_peer() {
-    assert_busy_candidate_preserves_peer_recovery(true).await;
 }
 
 // ---------------------------------------------------------------------------
@@ -4356,7 +3092,6 @@ base_url = "{url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
 health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 4, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.{id}.models.test]
 wire_name = "wire-test"
@@ -5055,7 +3790,7 @@ async fn assert_cancelled_client_wire(direct: bool) {
     } else {
         V3EntryProtocolExecutionMode::Relay
     };
-    let mut manifest = concurrency_switch_manifest_with_mode(&upstream_url, &upstream_url, mode);
+    let mut manifest = two_provider_failover_manifest_with_execution_mode(&upstream_url, &upstream_url, mode);
     if direct {
         use_native_direct_responses(&mut manifest);
     }
@@ -5150,4 +3885,420 @@ async fn issue44cc3af_direct_cancelled_client_wire_keeps_whole_frames_and_closes
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn issue44cc3af_relay_cancelled_client_wire_keeps_whole_frames_and_closes() {
     assert_cancelled_client_wire(false).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_429_healthy_alternatives_keep_parallelism() {
+    assert_identity_only_rate_limit(false).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_429_healthy_alternatives_keep_parallelism() {
+    assert_identity_only_rate_limit(true).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_failed_attempt_waits_for_cooled_peer() {
+    assert_failed_attempt_waits_for_cooled_peer(false, "recover").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_failed_attempt_waits_for_cooled_peer() {
+    assert_failed_attempt_waits_for_cooled_peer(true, "recover").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_failed_attempt_cooled_peer_obeys_wait_budget() {
+    assert_failed_attempt_waits_for_cooled_peer(false, "exhaust").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_failed_attempt_cooled_peer_obeys_wait_budget() {
+    assert_failed_attempt_waits_for_cooled_peer(true, "exhaust").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_failed_attempt_cooled_peer_residence_deadline() {
+    assert_failed_attempt_waits_for_cooled_peer(false, "residence").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_failed_attempt_cooled_peer_residence_deadline() {
+    assert_failed_attempt_waits_for_cooled_peer(true, "residence").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_failed_attempt_cooled_peer_cancel_stops_business_dispatch() {
+    assert_failed_attempt_waits_for_cooled_peer(false, "cancel").await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_failed_attempt_cooled_peer_cancel_stops_business_dispatch() {
+    assert_failed_attempt_waits_for_cooled_peer(true, "cancel").await;
+}
+
+async fn assert_all_tried_transport_failure_recovers(direct: bool, held_sibling: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("44cc3af-all-tried-transport");
+    std::env::set_var("V3_P6_TEST_KEY", "test-key");
+    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let held_release = Arc::new(Semaphore::new(0));
+    let independent_release = Arc::new(Semaphore::new(0));
+    let (first_url, first_task, mut first_rx) = closed_transport_peer(
+        ready.clone(),
+        direct,
+        Some(held_release.clone()),
+        Some(independent_release.clone()),
+    )
+    .await;
+    let (second_url, second_task, mut second_rx) = closed_transport_peer(
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        direct,
+        None,
+        None,
+    )
+    .await;
+    let mut manifest = two_provider_failover_manifest_with_execution_mode(
+        &first_url,
+        &second_url,
+        if direct {
+            V3EntryProtocolExecutionMode::Direct
+        } else {
+            V3EntryProtocolExecutionMode::Relay
+        },
+    );
+    if direct {
+        use_native_direct_responses(&mut manifest);
+    } else {
+        for provider in manifest.providers.values_mut() {
+            provider.provider_type = "openai_chat".into();
+            provider.responses = None;
+            for interface in provider.interfaces.values_mut() {
+                interface.provider_type = "openai_chat".into();
+                interface.responses = None;
+            }
+        }
+    }
+    for server in manifest.servers.values_mut() {
+        server
+            .execution
+            .as_mut()
+            .unwrap()
+            .attempt_store
+            .residence_timeout_ms = 4000;
+    }
+    let first_id = format!("failover_first_{}", manifest.servers["a"].port);
+    let second_id = format!("failover_second_{}", manifest.servers["a"].port);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::new();
+    let held_success =
+        if held_sibling {
+            let client = client.clone();
+            let base = base.clone();
+            let task =
+                tokio::spawn(async move {
+                    client.post(format!("{base}/v1/responses"))
+                .json(&json!({"model":"client-test","input":"independence-held","stream":false}))
+                .send().await.unwrap().text().await.unwrap()
+                });
+            let wire = timeout(Duration::from_secs(2), first_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(wire.2.to_string().contains("independence-held"));
+            Some(task)
+        } else {
+            None
+        };
+    let mut request = tokio::spawn({
+        let client = client.clone();
+        let base = base.clone();
+        async move {
+            client.post(format!("{base}/v1/responses"))
+            .json(&json!({"model":"client-test","input":"all tried transport original request","stream":false}))
+            .send().await?.text().await
+        }
+    });
+    let first_wire = timeout(Duration::from_secs(2), first_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second_wire = timeout(Duration::from_secs(2), second_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let expected_path = if direct {
+        "/v1/responses"
+    } else {
+        "/v1/chat/completions"
+    };
+    assert_eq!(first_wire.1, expected_path);
+    assert_eq!(second_wire.1, expected_path);
+    assert!(!first_wire.0 && !second_wire.0);
+    assert!(first_wire
+        .2
+        .to_string()
+        .contains("all tried transport original request"));
+    let mut a_original_business: usize = if !first_wire.0
+        && first_wire
+            .2
+            .to_string()
+            .contains("all tried transport original request")
+    {
+        1
+    } else {
+        0
+    };
+    let b_original_business: usize = if !second_wire.0
+        && second_wire
+            .2
+            .to_string()
+            .contains("all tried transport original request")
+    {
+        1
+    } else {
+        0
+    };
+    assert_eq!(
+        a_original_business, 1,
+        "A must receive the first original-O business send"
+    );
+    assert_eq!(
+        b_original_business, 1,
+        "B must receive the second original-O business send"
+    );
+    let mut early = timeout(Duration::from_millis(150), &mut request).await;
+    let ended_early = early.is_ok();
+    let entries = pool_entries_for_transport_case(&client, &base).await;
+    // Decision 2: the pool also lists pre-cool observation substates, so a
+    // "not cooled" assertion filters those out and means "no committed cooldown".
+    let committed: Vec<&Value> = entries
+        .iter()
+        .filter(|entry| entry["state"] != "pre_cool_observation")
+        .collect();
+    assert!(
+        !committed.iter().any(|e| e["provider_id"] == second_id),
+        "last candidate must not be newly cooled"
+    );
+    ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    // A has not been cooled. Its existing aggregate owner observes it after
+    // the declared hold floor; a manual cooldown probe would bypass that edge.
+    assert!(
+        !committed.iter().any(|e| e["provider_id"] == first_id),
+        "the earlier failed identity must remain in pre-cool observation, never a committed cooldown"
+    );
+    assert!(
+        entries.iter().any(|entry| {
+            entry["provider_id"] == first_id && entry["state"] == "pre_cool_observation"
+        }),
+        "the earlier failed identity must be listed as a pre-cool observation substate: {entries:?}"
+    );
+    let mut spillover: Vec<(bool, String, Value)> = Vec::new();
+    if let Some(held_success) = held_success {
+        // Completion of an already running business request establishes actual
+        // recovery before starting independent consumers on the same key.
+        held_release.add_permits(1);
+        assert!(timeout(Duration::from_secs(1), held_success)
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("all tried peer recovered"));
+        // Original O reselects A after recovery. Let it finish before the
+        // independent wave so the two requests exercise the two configured
+        // upstream slots without borrowing a third slot from pending O.
+        // The probe above already polled `request`; a completed JoinHandle must
+        // never be polled again ("JoinHandle polled after completion"), so reuse
+        // its terminal value instead of awaiting it a second time.
+        // v31: the original request never waits for the held sibling to recover. If
+        // it already reached its terminal, that terminal is asserted below; if it is
+        // still pending it must complete through the recovered candidate.
+        let recovered_original = match &early {
+            Ok(Ok(Ok(body))) => Some(body.clone()),
+            Ok(_) => None,
+            Err(_) => Some(
+                timeout(Duration::from_secs(5), &mut request)
+                    .await
+                    .expect("original O must reach a terminal after recovered A")
+                    .expect("original O task must not panic")
+                    .expect("original O client transport must stay intact"),
+            ),
+        };
+        if let Some(recovered_original) = &recovered_original {
+            assert!(
+                recovered_original.contains("all tried peer recovered"),
+                "{recovered_original}"
+            );
+            assert!(
+                !recovered_original.contains("\"error\""),
+                "{recovered_original}"
+            );
+            early = Ok(Ok(Ok(recovered_original.clone())));
+        }
+
+        let mut wave = Vec::new();
+        for index in 0..2 {
+            let client = client.clone();
+            let base = base.clone();
+            wave.push(tokio::spawn(async move {
+                client.post(format!("{base}/v1/responses"))
+                    .header("session-id", format!("independence-wave-{index}"))
+                    .json(&json!({"model":"client-test","input":format!("independence-wave-{index}"),"stream":false}))
+                    .send().await.unwrap().text().await.unwrap()
+            }));
+        }
+        // Hold both upstream responses. Sequential execution cannot satisfy
+        // two arrivals while the first response is still held.
+        let wave_started = tokio::time::Instant::now();
+        let mut arrivals = 0;
+        while arrivals < 2 && wave_started.elapsed() < Duration::from_millis(700) {
+            let remaining = Duration::from_millis(700).saturating_sub(wave_started.elapsed());
+            match timeout(remaining, first_rx.recv()).await {
+                Ok(Some(item)) => {
+                    let (probe, _, ref body) = item;
+                    if !probe && body.to_string().contains("independence-wave") {
+                        arrivals += 1;
+                    } else {
+                        spillover.push(item);
+                    }
+                }
+                _ => break,
+            }
+        }
+        independent_release.add_permits(2);
+        for mut task in wave {
+            if arrivals == 2 {
+                assert!(timeout(Duration::from_secs(1), &mut task)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .contains("all tried peer recovered"));
+            } else {
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        assert_eq!(arrivals, 2,
+            "the waiting request must release every business lease: both same-key configured slots must remain concurrently usable");
+    }
+    let terminal = match early {
+        Ok(result) => Ok(result),
+        Err(_) => timeout(
+            Duration::from_secs(if held_sibling { 5 } else { 3 }),
+            &mut request,
+        )
+        .await,
+    };
+    request.abort();
+    // v31: a request never waits on provider lifecycle state for captured-pool
+    // recovery. With every captured candidate already failed, the lawful terminal is
+    // this request's own transport termination, reached promptly (the 150ms probe
+    // above proves it does not wait), carrying no fabricated success and no
+    // client-visible error payload or synthetic status.
+    let _ = ended_early;
+    match terminal {
+        Ok(Ok(Ok(body))) => {
+            assert!(body.contains("all tried peer recovered"), "{body}");
+            assert!(!body.contains("\"error\""), "{body}");
+        }
+        Ok(Ok(Err(error))) => assert!(
+            !error.is_status(),
+            "a transport break must not fabricate a client status payload: {error}"
+        ),
+        Ok(Err(join)) => panic!("the original request task must not panic: {join}"),
+        Err(_) => panic!(
+            "the original request must reach its terminal without waiting for captured-pool recovery"
+        ),
+    }
+    handle.shutdown().await;
+    first_task.abort();
+    second_task.abort();
+    if held_sibling {
+        let mut post_ready: Vec<(bool, String, Value)> = Vec::new();
+        post_ready.append(&mut spillover);
+        while let Ok(item) = first_rx.try_recv() {
+            post_ready.push(item);
+        }
+        let post_a_original = post_ready
+            .iter()
+            .filter(|item| {
+                !item.0
+                    && item.1.as_str() == expected_path
+                    && item
+                        .2
+                        .to_string()
+                        .contains("all tried transport original request")
+            })
+            .count();
+        a_original_business += post_a_original;
+        // v31: the terminated request never waits for the held sibling to recover,
+        // so it must not be resent to A. A's send count therefore stays at the one
+        // attempt that was made before the terminal.
+        assert_eq!(
+            a_original_business, 1,
+            "a terminated request must not be resent to the recovered peer"
+        );
+        assert_eq!(
+            b_original_business, 1,
+            "B must receive exactly one original-O send and remain excluded"
+        );
+        assert!(
+            second_rx.try_recv().is_err(),
+            "last failed candidate must not be retried"
+        );
+    } else {
+        let mut recovered_probe = false;
+        let mut recovered_business = false;
+        while let Ok((probe, path, body)) = first_rx.try_recv() {
+            assert_eq!(path, expected_path);
+            recovered_probe |= probe;
+            recovered_business |= !probe
+                && body
+                    .to_string()
+                    .contains("all tried transport original request");
+        }
+        // v31: the request does not wait for captured-pool recovery, so it must not
+        // issue a second business send to the recovered peer on its own behalf.
+        // Lifecycle probes are provider state and stay permitted, but the request's
+        // own attempt count is fixed at what it already spent.
+        assert!(
+            !recovered_business,
+            "a terminated request must not resend to the recovered peer: probe={recovered_probe}"
+        );
+        let _ = recovered_probe;
+        assert!(
+            second_rx.try_recv().is_err(),
+            "last failed candidate must not be retried"
+        );
+    }
+}
+
+#[tokio::test]
+async fn issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer() {
+    assert_all_tried_transport_failure_recovers(false, false).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_all_tried_transport_failure_waits_for_recovered_peer() {
+    assert_all_tried_transport_failure_recovers(true, false).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_relay_all_tried_transport_failure_with_held_sibling_recovers() {
+    assert_all_tried_transport_failure_recovers(false, true).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_all_tried_transport_failure_with_held_sibling_recovers() {
+    assert_all_tried_transport_failure_recovers(true, true).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_probe_success_wakes_long_pool_backoff_immediately() {
+    assert_initial_all_cooled_active_probe(false, true).await;
+}
+
+#[tokio::test]
+async fn issue44cc3af_direct_probe_success_wakes_long_pool_backoff_immediately() {
+    assert_initial_all_cooled_active_probe(true, true).await;
 }

@@ -313,8 +313,6 @@ pub fn provider_target(
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
         request_timeout_ms: provider.request_timeout_ms,
         sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-        initial_concurrency_budget: selected.initial_concurrency_budget,
-        concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
 }
 
@@ -456,51 +454,6 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         wait_ms: event.wait_ms,
         diagnostic_source: Some(event.diagnostic_source.clone()),
         failed_attempt_evidence: event.failed_attempt_evidence.clone(),
-    }
-}
-
-/// 2026-11-07 ruling ①: a capacity admission refusal is local provider capacity,
-/// not a provider failure. It never runs the failure policy and never mutates
-/// provider health, but it is still a typed provider attempt per complete
-/// identity: the private failed-attempt artifact keeps one `provider_concurrency_busy`
-/// entry for every visible candidate the request refused, with no capacity wait
-/// (`wait_ms = None`).
-pub(crate) fn build_v3_runtime_capacity_skipped_failure_observation(
-    candidate: &routecodex_v3_target::V3TargetCandidate,
-) -> V3RuntimeProviderFailureObservation {
-    let message = "provider business capacity is occupied by an in-flight request".to_string();
-    V3RuntimeProviderFailureObservation {
-        provider_key: v3_relay_provider_candidate_key_parts(
-            &candidate.provider_id,
-            Some(&candidate.interface_id),
-            Some(&candidate.auth_alias),
-            Some(&candidate.model_id),
-        ),
-        provider_id: candidate.provider_id.clone(),
-        auth_alias: Some(candidate.auth_alias.clone()),
-        model_id: candidate.model_id.clone(),
-        status: 502,
-        error_type: Some("provider_concurrency_busy".to_string()),
-        external_error_kind: None,
-        external_error_code: Some("provider_concurrency_busy".to_string()),
-        external_error_status: None,
-        internal_code: None,
-        upstream_request_id: None,
-        message: message.clone(),
-        failure_count: 0,
-        health_state: "neutral".to_string(),
-        cooldown_until_ms: None,
-        action: "CapacitySkipped".to_string(),
-        next_provider_key: None,
-        wait_ms: None,
-        diagnostic_source: crate::shared::direct_plain_error(
-            routecodex_v3_error::V3ErrorSourceKind::TargetPoolExhausted,
-            "V3ProviderReqOutbound09TransportRequest",
-            "provider_concurrency_busy",
-            message,
-        )
-        .ok(),
-        failed_attempt_evidence: None,
     }
 }
 

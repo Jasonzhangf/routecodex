@@ -363,11 +363,6 @@ impl V3ProviderFailureDirective {
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
-    /// 2026-11-07 ruling ①: complete identities this request refused at capacity
-    /// admission. They were never contacted, so the failure policy must not
-    /// treat them as tried when it decides whether the current attempt is the
-    /// last eligible candidate.
-    pub(crate) capacity_skipped: &'state BTreeSet<String>,
     pub(crate) retry_selected:
         &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     pub(crate) provider_failure_events: &'state mut Vec<V3RuntimeProviderFailureObservation>,
@@ -894,10 +889,6 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 ..
             }
             | V3ProviderError::ClientDisconnect {
-                request_id,
-                provider_id,
-            }
-            | V3ProviderError::ConcurrencyBusy {
                 request_id,
                 provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),

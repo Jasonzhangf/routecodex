@@ -10,7 +10,6 @@ enum V3ProbeCompletion {
     Superseded,
     Recovered,
     ProviderFailed,
-    CapacityUnavailable,
 }
 
 // A probe is an observation, never a business attempt. Keep its real HTTP
@@ -130,9 +129,6 @@ fn complete_v3_provider_health_probe(
             // superseded by a newer failure. It must not reopen admission.
             Ok(V3ProbeCompletion::Superseded)
         }
-        Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
-            Ok(V3ProbeCompletion::CapacityUnavailable)
-        }
         Err(error) => {
             if let V3ProviderHealthProbeFailure::Provider(error) = error {
                 // Keep the real provider error in the typed diagnostic chain,
@@ -154,7 +150,6 @@ fn complete_v3_provider_health_probe(
             match error {
                 V3ProviderHealthProbeFailure::Provider(_) => unreachable!(),
                 V3ProviderHealthProbeFailure::Internal(error) => Err(error),
-                V3ProviderHealthProbeFailure::ConcurrencyBusy => unreachable!(),
             }
         }
     }

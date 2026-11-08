@@ -1128,7 +1128,7 @@ fn neutral_failure_action_preserves_real_success_streak_and_score() {
 }
 
 #[test]
-fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
+fn quota_and_diagnostics_are_provider_owned_inputs() {
     let store = V3ProviderHealthStore::default();
     store
         .update_quota_state(
@@ -1149,12 +1149,6 @@ fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
     assert!(
         store
             .availability("provider-a", Some("key-a"), Some("other-model"), 101)
-            .available
-    );
-    store.update_concurrency_state("provider-b", 2, 2).unwrap();
-    assert!(
-        !store
-            .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
             .available
     );
     assert!(
@@ -1196,29 +1190,6 @@ fn legacy_quota_scope_migrates_to_default_interface_only() {
     );
     assert!(
         store
-            .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
-            .available
-    );
-}
-
-#[test]
-fn concurrency_budget_is_shared_across_interfaces() {
-    let store = V3ProviderHealthStore::default();
-    store.update_concurrency_state("provider-a", 2, 2).unwrap();
-
-    assert!(
-        !store
-            .availability_for_interface(
-                "provider-a",
-                "default",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                101,
-            )
-            .available
-    );
-    assert!(
-        !store
             .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
             .available
     );

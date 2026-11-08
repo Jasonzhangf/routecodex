@@ -358,8 +358,6 @@ fn project_anthropic_direct_request(
         provider_request_cleanup: candidate.provider_request_cleanup.clone(),
         request_timeout_ms: candidate.request_timeout_ms,
         sse_first_frame_timeout_ms: candidate.sse_first_frame_timeout_ms,
-        initial_concurrency_budget: candidate.initial_concurrency_budget,
-        concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
     };
     build_v3_provider_12_responses_wire_payload(policy.request_id.clone(), target, request_body)
         .map_err(|error| {
@@ -521,8 +519,6 @@ targets = [{ kind = "forwarder", id = "anthropic", priority = 1 }]
                 reasoning_effort: None,
                 request_timeout_ms: 300_000,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
                 compatibility_profile: None,
                 headers: BTreeMap::from([(
                     "anthropic-version".to_string(),

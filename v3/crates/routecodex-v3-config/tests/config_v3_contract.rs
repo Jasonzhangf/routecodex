@@ -70,6 +70,32 @@ fn issue2f2ab62_rejects_retired_project_message_mode() {
     );
 }
 
+/// v34 (request-path concurrency/admission removal): the retired
+/// `[provider.concurrency]` table must fail loudly at authoring parse instead of
+/// silently defaulting to a blocking wait. This follows the repo precedent for
+/// retired authoring surface (`client_error_projection_policy`, `status`,
+/// `message_mode`): the strict `deny_unknown_fields` parse rejects the unknown
+/// table itself, so any wait knob a user config still places inside it is
+/// rejected with it rather than silently ignored.
+#[test]
+fn rejects_retired_provider_concurrency_table_loudly() {
+    let source = r#"version = 3
+route_groups = {}
+
+[providers.cc]
+default_model = "m"
+models = {}
+auth = { type = "api_key", entries = [{ alias = "k", env = "K" }] }
+concurrency = {}
+"#;
+    let error = parse_v3_config_02_authoring(source)
+        .expect_err("retired provider concurrency table must be rejected at authoring parse");
+    assert!(
+        error.to_string().contains("unknown field `concurrency`"),
+        "{error}"
+    );
+}
+
 const FULL_CONFIG: &str = r#"
 version = 3
 
@@ -109,7 +135,6 @@ base_url = "https://api.anyint.ai/openai/v1"
 default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_API_KEY" }] }
 responses = { process = "chat", streaming = "always" }
-concurrency = { max_in_flight = 8, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000 }
 provider_request_cleanup = { historical_fields = ["reasoning.encrypted_content"] }
 

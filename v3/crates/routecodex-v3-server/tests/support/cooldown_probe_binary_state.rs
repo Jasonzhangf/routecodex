@@ -275,7 +275,6 @@ type = "{provider_type}"
 {probe_timeout}
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
-concurrency = {{ max_in_flight = 4, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "spare", env = "V3_COOLDOWN_BINARY_SPARE_KEY" }}] }}
 [providers.{provider_id}.models.test]
 [route_groups.default.pools.default]
@@ -644,7 +643,6 @@ endpoints = ["responses"]
 type = "responses"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
-concurrency = {{ max_in_flight = 4, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "spare", env = "V3_COOLDOWN_BINARY_SPARE_KEY" }}] }}
 [providers.{provider_id}.models.test]
 [route_groups.default.pools.default]

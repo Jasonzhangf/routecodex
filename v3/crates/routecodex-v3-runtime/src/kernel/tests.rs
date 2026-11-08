@@ -7,10 +7,7 @@ async fn provider_health_observes_failure_without_request_alternative() {
         V3RelayProviderFailurePolicyState,
     };
     for direct in [true, false] {
-        let manifest = provider_concurrency_two_provider_manifest(
-            if direct { "isolated_health_direct" } else { "isolated_health_relay" },
-            "unused_health_peer", 50,
-        );
+        let manifest = provider_concurrency_two_provider_manifest(if direct { "isolated_health_direct" } else { "isolated_health_relay" }, "unused_health_peer");
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
         let scope = test_failure_session_scope("default");
         let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -50,7 +47,6 @@ async fn provider_health_observes_failure_without_request_alternative() {
                 &selected, source, 503,
                 &mut V3DirectProviderFailurePolicyState {
                     failed_candidates: &mut failed, trace: &mut trace,
-                    capacity_skipped: &BTreeSet::new(),
                 },
                 None,
             ).await.expect("Direct failure policy").event.unwrap().health_state
@@ -79,7 +75,7 @@ async fn provider_health_observes_failure_without_request_alternative() {
 #[tokio::test]
 async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_errors() {
     let manifest =
-        provider_concurrency_two_provider_manifest("direct_terminal_qualified", "unused_peer", 50);
+        provider_concurrency_two_provider_manifest("direct_terminal_qualified", "unused_peer");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -139,7 +135,6 @@ async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_erro
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut BTreeSet::new(),
             trace: &mut Vec::new(),
-            capacity_skipped: &BTreeSet::new(),
         },
         Some(&witness),
     )
@@ -173,7 +168,6 @@ async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_erro
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut BTreeSet::new(),
             trace: &mut Vec::new(),
-            capacity_skipped: &BTreeSet::new(),
         },
         Some(&witness),
     )
@@ -193,11 +187,7 @@ async fn assert_first_byte_timeout_preserves_untried_siblings(
     use crate::provider_failure_runtime_policy::V3ProviderFailureRuntimeHealth;
     use routecodex_v3_error::V3Error05ExecutionAction;
 
-    let manifest = provider_concurrency_two_key_then_other_provider_manifest(
-        "hang_sibling_a",
-        "hang_sibling_b",
-        80,
-    );
+    let manifest = provider_concurrency_two_key_then_other_provider_manifest("hang_sibling_a", "hang_sibling_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -265,7 +255,6 @@ async fn assert_first_byte_timeout_preserves_untried_siblings(
         502,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            capacity_skipped: &BTreeSet::new(),
             trace: &mut trace,
         },
         None,
@@ -331,7 +320,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
         V3RelayProviderFailurePolicyContext, V3RelayProviderFailurePolicyState,
     };
     let manifest =
-        provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b", 50);
+        provider_concurrency_two_provider_manifest("relay_markup_a", "relay_markup_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -435,7 +424,7 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
 
 #[tokio::test]
 async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
-    let manifest = provider_concurrency_two_provider_manifest("markup_a", "markup_b", 50);
+    let manifest = provider_concurrency_two_provider_manifest("markup_a", "markup_b");
     let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let scope = test_failure_session_scope("default");
     let raw = crate::nodes::build_v3_server_03_http_request_raw(
@@ -493,7 +482,6 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
         200,
         &mut V3DirectProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            capacity_skipped: &BTreeSet::new(),
             trace: &mut trace,
         },
         None,
@@ -1083,7 +1071,7 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
 #[test]
 fn responses_direct_transport_header_timeout_keeps_120_second_budget() {
     let manifest =
-        provider_concurrency_two_key_then_other_provider_manifest("remote_a", "remote_b", 80);
+        provider_concurrency_two_key_then_other_provider_manifest("remote_a", "remote_b");
     assert_eq!(
         super::default_transport::responses_direct_transport_response_timeout(
             &manifest, "remote_a"

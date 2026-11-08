@@ -587,7 +587,6 @@ async fn run_v3_plan_execution_unboxed(
 mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-    use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
     use routecodex_v3_target::V3TargetInterpreter;
     use serde_json::json;
 
@@ -640,15 +639,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         )
         .expect("opaque hit");
         let request = json!({"model": "client-model", "input": "opaque"});
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let controller_key =
-            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                "r05_sdk_success",
-                "key1",
-            );
-        let before = controller
-            .snapshot(&controller_key)
-            .map(|value| value.in_flight);
         let now_ms =
             crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
                 .expect("clock");
@@ -680,19 +670,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert!(plan.selected.candidate_count > 0);
         assert_eq!(plan.selected.candidate.provider_id, "r05_sdk_success");
         assert_eq!(plan.execution_mode, V3HubExecutionMode::Direct);
-        assert_eq!(
-            controller
-                .snapshot(&controller_key)
-                .map(|value| value.in_flight),
-            before
-        );
-        drop(plan);
-        assert_eq!(
-            controller
-                .snapshot(&controller_key)
-                .map(|value| value.in_flight),
-            before
-        );
     }
 
     #[test]
@@ -854,125 +831,6 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
             .expect("expanded candidates");
         let _ = scope;
         (hit, expanded)
-    }
-
-    #[test]
-    fn preplan_and_execution_ignore_occupied_provider_capacity() {
-        let mut manifest = test_manifest("r05_preplan_capacity");
-        manifest
-            .providers
-            .get_mut("r05_preplan_capacity")
-            .unwrap()
-            .concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-            max_in_flight: 1,
-            acquire_timeout_ms: 1000,
-            stale_lease_ms: 30_000,
-        });
-        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-        let scope = V3ProviderFailureSessionScope::new("test", "default", "r05-preplan-capacity")
-            .expect("session scope");
-        let request = json!({"model": "client-model", "input": "opaque"});
-        let (hit, expanded) = preplan_test_input(&manifest, &scope, &request);
-        let controller = V3AdaptiveConcurrencyController::process_shared();
-        let provider_key =
-            crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
-                "r05_preplan_capacity",
-                "key1",
-            );
-        controller
-            .ensure_initial_budget(&provider_key, 1)
-            .expect("initial budget");
-        let identity =
-            routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-                interface_id: "default".into(),
-                model_id: "gpt-test".into(),
-            };
-        let occupied = controller
-            .try_acquire_business_scoped(&provider_key, Some(&identity))
-            .expect("occupy sole provider permit");
-        let cleanup = TestLeaseCleanup {
-            controller: controller.clone(),
-            permit: Arc::new(std::sync::Mutex::new(Some(occupied.into_permit()))),
-        };
-        let now_ms =
-            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                .expect("clock");
-        let preplan = run_v3_plan_execution_preplan_operator(
-            request.clone(),
-            manifest.clone(),
-            V3PlanExecutionTargetSource::OpaqueHit(hit),
-            scope.clone(),
-            health.clone(),
-            BTreeSet::new(),
-            now_ms,
-            0,
-            V3PlanExecutionModePolicy::DirectEntry {
-                entry_protocol: V3HubEntryProtocol::Responses,
-                allowed_modes: vec!["direct".to_string(), "relay".to_string()],
-            },
-        )
-        .unwrap_or_else(|stop| {
-            panic!(
-                "preplan must not acquire provider capacity: {}",
-                match stop {
-                    V3PlanExecutionStop::Exhausted { exhaustion, .. } => {
-                        format!("exhausted: {exhaustion:?}")
-                    }
-                    V3PlanExecutionStop::Failed(source) => format!("failed: {source:?}"),
-                    V3PlanExecutionStop::OperatorFault(fault) => {
-                        format!("operator fault: {fault:?}")
-                    }
-                }
-            )
-        });
-        assert_eq!(
-            preplan.protocol_decision.target.candidate.provider_id,
-            "r05_preplan_capacity"
-        );
-        assert!(preplan.request_local_excluded_candidates.is_empty());
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("occupied snapshot")
-                .in_flight,
-            1
-        );
-
-        let admission = run_v3_plan_execution_operator(
-            request,
-            manifest,
-            V3PlanExecutionTargetSource::Expanded(expanded),
-            scope,
-            health,
-            BTreeSet::new(),
-            now_ms,
-            0,
-            None,
-            V3PlanExecutionModePolicy::DirectEntry {
-                entry_protocol: V3HubEntryProtocol::Responses,
-                allowed_modes: vec!["direct".to_string(), "relay".to_string()],
-            },
-        )
-        .expect("admission path run");
-        let V3PlanExecutionOutcome::Selected { plan, .. } = admission else {
-            panic!("occupied capacity must not block execution selection");
-        };
-        assert_eq!(plan.selected.candidate.provider_id, "r05_preplan_capacity");
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("post-admission snapshot")
-                .in_flight,
-            1
-        );
-        drop(cleanup);
-        assert_eq!(
-            controller
-                .snapshot(&provider_key)
-                .expect("released snapshot")
-                .in_flight,
-            0
-        );
     }
 
     #[test]
@@ -1240,19 +1098,4 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert_ne!(plan.selected.candidate.provider_id, zero);
     }
 
-    struct TestLeaseCleanup {
-        controller: V3AdaptiveConcurrencyController,
-        permit:
-            Arc<std::sync::Mutex<Option<routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyPermit>>>,
-    }
-
-    impl Drop for TestLeaseCleanup {
-        fn drop(&mut self) {
-            if let Some(permit) = self.permit.lock().expect("cleanup permit holder").take() {
-                self.controller
-                    .release(permit)
-                    .expect("cleanup release busy lease");
-            }
-        }
-    }
 }

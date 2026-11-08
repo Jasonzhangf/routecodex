@@ -716,7 +716,6 @@ fn compile_providers(
                 auth,
                 models,
                 responses,
-                concurrency: provider.concurrency,
                 health,
                 provider_request_cleanup,
                 reasoning_effort: provider.reasoning_effort,

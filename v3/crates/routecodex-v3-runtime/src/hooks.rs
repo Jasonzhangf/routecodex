@@ -794,8 +794,6 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             websocket_v2_url: candidate.websocket_v2_url.clone(),
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
             request_timeout_ms: candidate.request_timeout_ms,
-            initial_concurrency_budget: candidate.initial_concurrency_budget,
-            concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
         },
         request_body,
         namespace_registry,
@@ -1100,8 +1098,6 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
             websocket_v2_url: candidate.websocket_v2_url.clone(),
             provider_request_cleanup: candidate.provider_request_cleanup.clone(),
             request_timeout_ms: candidate.request_timeout_ms,
-            initial_concurrency_budget: candidate.initial_concurrency_budget,
-            concurrency_acquire_timeout_ms: candidate.concurrency_acquire_timeout_ms,
         },
         wire_body,
     )
@@ -1185,12 +1181,6 @@ pub(crate) fn build_v3_provider_error_source(
                 ),
             )
         }
-        V3ProviderError::ConcurrencyBusy { .. } => crate::shared::direct_plain_error(
-            V3ErrorSourceKind::TargetPoolExhausted,
-            stage,
-            "provider_concurrency_busy",
-            message,
-        ),
         V3ProviderError::ClientDisconnect { .. } => crate::shared::direct_plain_error(
             V3ErrorSourceKind::ClientDisconnect,
             stage,
@@ -1240,7 +1230,6 @@ pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -
         | V3ProviderError::OAuthCredential { .. }
         | V3ProviderError::NamespaceToolFlattenFailed { .. }
         | V3ProviderError::FunctionToolShapeFailed { .. }
-        | V3ProviderError::ConcurrencyBusy { .. }
         | V3ProviderError::ClientDisconnect { .. } => "provider_responses_error".to_string(),
     }
 }
@@ -1378,7 +1367,6 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
         | V3ProviderError::AuthSecretRead { .. }
         | V3ProviderError::NamespaceToolFlattenFailed { .. }
         | V3ProviderError::FunctionToolShapeFailed { .. }
-        | V3ProviderError::ConcurrencyBusy { .. }
         | V3ProviderError::ClientDisconnect { .. } => V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: None,

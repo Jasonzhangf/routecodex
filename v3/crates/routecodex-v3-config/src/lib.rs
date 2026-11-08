@@ -13,8 +13,8 @@ mod user_config;
 pub use memory_raw_capture::{V3MemoryRawCaptureAuthoringConfig, V3MemoryRawCaptureManifest};
 pub use provider_config::{
     generate_v2_provider_config_file, parse_v2_provider_config_file, V2ProviderAuthConfig,
-    V2ProviderAuthEntry, V2ProviderConcurrencyConfig, V2ProviderConfig, V2ProviderConfigFile,
-    V2ProviderModelConfig, V2ProviderResponsesConfig, V2ProviderV3Config, V3ReasoningEffort,
+    V2ProviderAuthEntry, V2ProviderConfig, V2ProviderConfigFile, V2ProviderModelConfig,
+    V2ProviderResponsesConfig, V2ProviderV3Config, V3ReasoningEffort,
 };
 pub use provider_priority_schedule::{
     default_provider_priority_timezone, V3DailyTimeWindowAuthoringConfig,

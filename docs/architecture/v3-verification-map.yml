@@ -1240,7 +1240,7 @@ features:
   - Direct provider errors enter the shared Error01-06/provider-health policy; success payload semantics remain provider-owned while client transport projection follows the client stream intent
   - Direct provider raw response decode/projection errors enter the same Error01-06 provider failure policy and reselect before Error06 while alternatives remain
   - Direct target-local reselection uses the full captured Target09 candidate set; if the newly selected Target10 requires Hub Relay and no Direct-owned previous_response_id is active, Direct returns a
-    typed relay handoff side-channel carrying both the complete request-local failed-candidate exclusion set and the exact request-local capacity-busy candidate set, without inferring busy provenance from exclusions, so Relay cannot retry an already-failed Direct target
+    typed relay handoff side-channel carrying the complete request-local failed-candidate exclusion set only — the request-local capacity-busy candidate set was removed with request-path capacity admission (requirements ledger v34) and no busy provenance may be inferred from exclusions — so Relay cannot retry an already-failed Direct target
   - Direct server execution passes the server-scoped provider health store so cross-request cooldown affects subsequent selection
   - Direct server observability derives JSON finish_reason from parsed response status only for log/usage output; non-stream JSON client bodies are not mutated, while stream requests may project valid provider
     JSON as client SSE without treating provider inbound transport as client protocol truth
@@ -1366,27 +1366,27 @@ features:
   - Provider HTTP transport rejects text/event-stream raw responses for JSON-intent requests instead of silently switching provider response kind
   - Provider transport dispatches by selected provider_type; Anthropic targets use /v1/messages, x-api-key, anthropic-version, Anthropic wire, and Responses client projection
   - Provider errors stay typed for missing auth, HTTP status, transport failure, malformed SSE, and client disconnect
-  - 'Adaptive provider concurrency is keyed by providerId plus authAlias: admission is atomic and a full candidate is skipped immediately for this request'
-  - 'Business HTTP429 no longer adjusts any concurrency bucket: the transport 429 observation hook is removed, HTTP 429 is an ordinary typed recoverable failure on the unified consecutive ladder, and only the declared static provider.concurrency.maxInFlight ceiling governs admission; issue44cc3af_429_healthy_alternatives_keep_parallelism and issue44cc3af_direct_429_healthy_alternatives_keep_parallelism still hold eight sibling-model requests before any success and require all eight configured slots'
-  - 'Configured maxInFlight bounds business admission; Direct and Relay try the next eligible candidate, then wait within the acquisition budget when remaining candidates are temporarily full'
-  - 'provider.concurrency.maxInFlight is the declared static hard ceiling defaulting to 40; no production path records 429 watermarks, no measured ceiling is computed, and no 429-driven contraction exists'
-  - 'The admission budget stays at its declared static ceiling; recoverable provider errors, including HTTP 429, never shrink it, and a transient 429 never collapses the pool'
-  - 'A business 2xx or an accepted probe releases the identity''s concurrency lease and clears saturation up to the declared hard maximum; no rate-limit trailing window or smoothed ceiling exists'
-  - 'HTTP429 creates no concurrency mask: a 429-cooled identity follows the unified consecutive ladder and restores through exact-identity probe success or business success, so a cooled peer never turns the rate-limited candidate into a permanent request-local failure'
-  - 'Pure all-busy exhaustion retains TargetPoolExhausted/provider_concurrency_busy only when every captured Target09 candidate key was proven capacity-busy; mixed exhaustion remains selected_target_exhausted'
-  - 'Concurrency exclusions remain request-local and never mutate provider failure health or cooldown; scheduled probes remain separately bounded'
-  - 'WebSocketV2 preserves a granted lease for an available session slot, releases it before an actual slot wait, and returns typed ConcurrencyBusy on a losing readmission race for Runtime reselect; the exact candidate busy provenance survives subsequent request-local exhaustion'
+  - 'Request-path capacity admission was removed (requirements ledger v34): there is no provider-concurrency admission keyed by providerId plus authAlias, no candidate is skipped or queued for capacity, and the selected candidate reaches provider transport immediately'
+  - 'Business HTTP429 adjusts no concurrency accounting because none exists: the transport 429 observation hook is removed, HTTP 429 is an ordinary typed recoverable failure on the unified consecutive ladder, and issue44cc3af_429_healthy_alternatives_keep_parallelism and issue44cc3af_direct_429_healthy_alternatives_keep_parallelism prove sibling-model requests proceed to transport immediately after a 429 without throttling any sibling identity'
+  - 'There is no configured admission ceiling and no acquisition wait: Direct and Relay proceed to the selected provider transport immediately, and when no eligible candidate remains the request terminates truthfully while a single/last eligible candidate passes the real provider error through'
+  - 'The provider.concurrency table and its maxInFlight ceiling were removed with request-path capacity admission (requirements ledger v34) and a config declaring that table now fails authoring parse loudly (rejects_retired_provider_concurrency_table_loudly); no production path records 429 watermarks, computes a measured ceiling, or performs 429-driven contraction'
+  - 'No admission budget exists: it was removed with request-path capacity admission (requirements ledger v34), so no recoverable provider error including HTTP 429 can shrink a budget and a transient 429 never collapses the pool'
+  - 'Concurrency leases were removed with request-path capacity admission (requirements ledger v34): a business 2xx or an accepted probe releases no lease, no saturation or declared hard maximum exists, and no rate-limit trailing window or smoothed ceiling exists'
+  - 'HTTP429 creates no request-local capacity mask: the concurrency mask was removed with request-path capacity admission (requirements ledger v34), and a 429-cooled identity follows the unified consecutive ladder, restoring through exact-identity probe success or business success, so a cooled peer never makes the failing identity a permanent request-local failure'
+  - 'provider_concurrency_busy was removed with request-path capacity admission (requirements ledger v34) and no gate may reintroduce it: pure exhaustion of the captured Target09 set retains TargetPoolExhausted and mixed exhaustion retains selected_target_exhausted, with no capacity-busy relabeling path'
+  - 'Concurrency exclusions were removed with request-path capacity admission (requirements ledger v34): request-local exclusions carry only genuine provider failures and never mutate provider failure health or cooldown, and scheduled probes remain separately bounded'
+  - 'The WebSocketV2 provider capacity lease was removed with request-path capacity admission (requirements ledger v34): no granted lease is preserved or released before a slot wait, typed ConcurrencyBusy can no longer be produced by any readmission race, and the retired candidate busy provenance no longer exists'
   - 'When a cooled preceding-tier candidate already has a rescue probe in flight, selection skips it without waiting and continues to an eligible later tier; probe success can restore it for subsequent requests'
-  - 'Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini preserve the target-specific acquireTimeoutMs; they do not fall back to the builder default when a typed target is available'
-  - A successful probe restores the exact identity''s eligibility without stepping any adaptive budget, rate-limited probes record no in-flight watermark, and SSE leases release only when the raw stream is dropped or exhausted
+  - 'The acquireTimeoutMs knob was removed with request-path capacity admission (requirements ledger v34): Direct and global-probe builders for Responses, OpenAI Chat, Anthropic, and Gemini carry no concurrency acquisition timeout and no builder default replaces it'
+  - 'A successful probe restores the exact identity''s eligibility and advances only its own probe cadence; with capacity admission removed there is no adaptive budget to step, no in-flight watermark to record, and no SSE lease to release'
   - Responses HTTP transport applies the configured provider SSE first-frame timeout to the response-header wait and the timeout reason projects as the health-neutral transient transport hang in both direct and relay failure policies
   - Responses, OpenAI Chat, Anthropic, and Gemini transport builders propagate the configured provider SSE first-frame timeout through the shared transport request
   - A Responses selection-time pool exhaustion (every candidate excluded by the context window before any provider attempt) breaks the client transport for both the streaming and the nonstreaming boundary instead of projecting the synthesized 502 `network_error` body, which stays provider-private Error06 evidence
   - A provider terminal disposition records provider-private evidence before the client transport breaks: the real external upstream status, headers, and body are persisted for the failed request, and a terminal with no provider response records that instead of a fabricated status
   required_contract:
-  - Provider concurrency policy is Config-owned; maxInFlight bounds business admission and acquireTimeoutMs bounds temporary capacity recovery and scheduled probe admission; neither is reconstructed from payload, MetadataCenter, or Debug
-  - Reaching the adaptive concurrency budget immediately selects another request-eligible candidate without a capacity wait or Router reentry
-  - An explicit provider.model request remains pinned; a full pinned candidate waits within its acquisition budget and cannot escape its pin
+  - 'Request-path capacity policy was removed (requirements ledger v34): maxInFlight and acquireTimeoutMs no longer exist, neither is reconstructed from payload, MetadataCenter, or Debug, and no request waits on capacity'
+  - There is no adaptive concurrency budget to reach; selection happens once inside the visible pool and reselect stays inside the captured Target09 candidate set without Router reentry
+  - An explicit provider.model request remains pinned and cannot escape its pin; with capacity admission removed the pinned request proceeds to that provider''s transport immediately, and the single/last eligible candidate passes the real provider error through
   - Only an actual typed provider failure such as HTTP 429 may enter Error recovery and select another provider after transport
   - routecodex-v3-provider-responses remains generic across provider IDs and may branch only by provider_type/protocol, never by deployment provider ID
   - Provider consumes an already selected target and never reads config, Virtual Router, Target interpreter, route groups, or Forwarder resources; only the probe-only Runtime target builder reads the published manifest to construct that target
@@ -1397,11 +1397,11 @@ features:
   - npm run test:v3-opencode-zen-provider-headers
   - npm run test:v3-opencode-zen-tcm-bridge-blackbox
   - npm run test:v3-provider-responses
-  - npm run test:v3-provider-adaptive-concurrency
   - npm run test:v3-responses-direct-blackbox
   - npm run test:v3-anthropic-relay-runtime-integration
   - npm run test:v3-provider-health-contract
-  - npm run test:v3-provider-sse-header-timeout
+  - npm run test:v3-provider-immediate-passthrough
+  - npm --prefix v3 run test:v3-provider-sse-header-timeout
   - npm run verify:v3-module-boundaries
   - npm run test:v3-source-gate-red-fixtures
   - npm run test:v3-compile-fail
@@ -3077,7 +3077,6 @@ features:
   - Terminal provider HTTP errors reach the public `/v1/responses` failure boundary without waiting for provider action admission.
   required_gates:
   - npm run test:v3-provider-action-gate
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract isolated_terminal_projection_commits_without_waiting_for_provider_action_admission -- --exact --nocapture
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
   - npm run test:v3-provider-session-cooldown
@@ -3383,7 +3382,6 @@ features:
   - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
   - select_v3_target_with_session_then_global
-  - take_or_acquire_provider_admission_scoped
   required_positive:
   - ordinary_429_exact_identity_direct_public_http and ordinary_429_exact_identity_relay_public_http prove a real429 uses the healthy fallback immediately, exposes only the exact failed identity after its failed probe, and keeps other listeners and healthy identities usable without resending the failed identity.
   - ordinary_429_probe_failure_visibility_direct_public_http and ordinary_429_probe_failure_visibility_relay_public_http prove a real429 remains excluded after a real503 probe while healthy business and the other listener continue; a qualified HTTP202 probe restores only the exact identity.
@@ -3417,33 +3415,33 @@ features:
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
   - A completely received upstream HTTP502 or truncated2xx body at the last candidate through Direct or Relay does not create cooldown, retry or a recovery probe for that identity. The request waits its original captured-pool recovery budget without business capacity; only final cancellation/deadline/eligibility exhaustion ends its own transport detectably.
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
-  - Direct and Relay atomically admit the highest-priority health-and-capacity-eligible provider, immediately skipping full candidates without a capacity wait
-  - Public `/v1/responses` switches to a spare provider while the first remains held; all-full pools wait for capacity without extra upstream requests and terminate only after their declared wait budget
-  - responses_provider_concurrency_full_switches_without_queueing and responses_provider_concurrency_all_full_exhausts_after_wait_budget prove capacity admission never queues a request behind a busy identity: a full preferred candidate switches immediately, and a completely full captured target ends its own request with a typed capacity-busy outcome instead of queueing or sending extra upstream work
-  - The async admission and WebSocket readmission paths preserve exact capacity-busy keys until the final direct or relay terminal source is built
-  - responses_provider_concurrency_direct_all_busy_preserves_typed_source and responses_provider_concurrency_relay_all_busy_preserves_typed_source prove the final terminal keeps the exact capacity-busy source on the public entry: every recorded attempt carries error_type=provider_concurrency_busy with wait_ms=null, and the terminal request-local exhaustion source still reports provider_concurrency_busy
-  - responses_provider_concurrency_direct_mixed_exclusion_stays_generic and responses_provider_concurrency_relay_mixed_exclusion_stays_generic prove a non-busy request-local exclusion prevents all-busy source relabeling, so the terminal keeps the generic request-local provider failure instead of claiming capacity-busy
-  - Concurrency exclusions are request-local and health-neutral; reselect stays inside the captured Target09 candidate set without Router reentry
-  - Mixed prior-failure and temporary-busy exhaustion carries both exact typed sets without any capacity-admission wait; only the captured-target recovery budget bounds genuine provider recovery, and a source label never reconstructs busy identities
-  - Successful admission removes scan-local busy exclusions before callers adopt the returned exclusion state; a busy candidate freed while its selected peer fails remains eligible for Direct and Relay recovery
-  - An exhausted scan retains transport-busy identities until the original request recovery due; level-triggered capacity availability or unrelated health notifications cannot clear them early. Healthy non-busy alternatives remain immediately eligible, and waits own no business lease.
-  - Actual probe work permits a fresh admission check only for busy identities discovered within the current planning call. Inherited transport-busy and permanent failures remain masked; metadata-only or no-permit probe rounds cannot reopen them, and failed admission rechecks retain busy provenance without repeating the probe phase.
-  - A received HTTP429 constrains only its exact identity; current and fresh requests immediately use healthy alternatives without joining that identity's wait lane, and unrelated keys/models retain their configured parallelism
-  - Post-attempt failure with only cooled peers remaining uses typed Error04 target_recovery_pending and Error05 ReevaluateTarget before bounded captured-target planning; the eight failed_attempt public cases cover Direct/Relay recovery, acquisition-budget exhaustion, whole-request residence deadline and client cancellation without retrying excluded A or forwarding its error payload
+  - Direct and Relay select once inside the visible pool and the highest-priority visible eligible candidate reaches provider transport immediately; capacity eligibility and skip-for-full were removed with request-path capacity admission (requirements ledger v34)
+  - Public `/v1/responses` switches to a spare provider while the first remains held; with capacity admission removed (requirements ledger v34) no pool waits for capacity — a pool whose remaining candidates are exhausted or cooled switches to any visible eligible candidate immediately or terminates that request truthfully, and a single/last eligible candidate passes the real provider error through
+  - 'No request is ever queued behind another identity''s load — capacity admission was removed (requirements ledger v34), the selected candidate''s transport is reached immediately, and the retired queueing scenarios are superseded by the public-entry immediate pass-through requirement in runtime_evidence'
+  - The async admission and WebSocket readmission paths were removed with request-path capacity admission (requirements ledger v34): no capacity-busy keys exist for any terminal source to preserve
+  - provider_concurrency_busy was removed with request-path capacity admission (requirements ledger v34): no terminal, attempt record, or request-local exhaustion source may report it, and the retired all-busy typed-source scenarios are superseded by the public-entry immediate pass-through requirement in runtime_evidence
+  - The all-busy relabeling distinction was removed with request-path capacity admission (requirements ledger v34): request-local exhaustion keeps its generic typed provider-failure source, and no capacity-versus-failure source relabeling exists
+  - Reselect stays inside the captured Target09 candidate set without Router reentry; request-local failed-candidate exclusions are the only exclusion kind because concurrency exclusions were removed with request-path capacity admission (requirements ledger v34)
+  - Request-local exhaustion carries its exact typed failure set with no capacity-admission wait — the mechanism was removed by requirements ledger v34 — and only the captured-target recovery budget bounds genuine provider recovery; a source label never reconstructs identities
+  - Scan-local busy exclusions were removed with request-path capacity admission (requirements ledger v34): candidate eligibility is decided by pool visibility and request-local failure exclusions only
+  - Transport-busy identity retention was removed with request-path capacity admission (requirements ledger v34): an exhausted scan retains only genuine failure and cooldown exclusions until their own recovery due, healthy alternatives stay immediately eligible, and no request owns a business lease
+  - Actual probe work reopens only genuinely cooled identities discovered within the current planning call; the busy-identity admission recheck was removed with request-path capacity admission (requirements ledger v34), and permanent failures remain masked
+  - A received HTTP429 constrains only its exact identity — current and fresh requests immediately use healthy alternatives, there is no wait lane to join after capacity admission removal (requirements ledger v34), and no parallelism accounting limits unrelated keys or models
+  - Post-attempt failure with only cooled peers remaining uses typed Error04 target_recovery_pending and Error05 ReevaluateTarget before bounded captured-target planning; the eight failed_attempt public cases cover Direct/Relay recovery, captured-target wait-budget exhaustion, whole-request residence deadline and client cancellation without retrying excluded A or forwarding its error payload
   - issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer and its native Direct counterpart prove real pre-header transport failures on every candidate do not immediately close the client; matching successful probe restores only the earlier failed peer, the last failed candidate is not cooled or retried, and the original business request completes through the recovered peer without an error payload
-  - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
+  - Caller-authorized semantic recovery of an eligible cooled candidate is decided by visibility and caller authorization only; capacity fullness cannot disable it because capacity admission was removed (requirements ledger v34)
   - Direct Chat and Messages precommit SSE failures consume ReevaluateTarget and recover on a cooled peer; live Responses initial protocol preplanning shares one residence deadline with subsequent Direct or Relay execution
-  - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
+  - Business leases were removed with request-path capacity admission (requirements ledger v34); due scheduled probes retain their separate bounded probe-owner admission
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - Non-2xx probe responses and connection failures preserve cooldown; business response parsing is unaffected by status-only probes
   - an early due probe does not make the provider available before HTTP 2xx probe success
   - zero or greater-than-30-minute provider health probe_interval_ms values fail config compilation
   - automatic model-less cooldown state never blocks other complete identities or enters provider/client payload or MetadataCenter; explicit manual administration retains its declared scope
-  - Crossing the adaptive budget cannot record provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
-  - Capacity saturation cannot trigger health rescue probes for the full candidate, provider-action waits, oversubscription, or escape from an explicit provider.model pin
-  - Mixed exhaustion with a cooldown, capability exclusion, prior provider failure, or initial request-local exclusion cannot be relabeled provider_concurrency_busy
-  - WebSocketV2 session-slot contention cannot retain provider capacity, starve another request that owns the session, or leak its session slot or provider lease on cancellation
+  - The adaptive budget was removed with request-path capacity admission (requirements ledger v34); no gate may reintroduce capacity-driven recording of provider failure health, auth-key cooldown, model cooldown, MetadataCenter state, or provider/client payload truth
+  - Capacity saturation is no longer a runtime state after capacity admission removal (requirements ledger v34); no gate may reintroduce saturation-triggered health rescue probes, provider-action waits, oversubscription, or escape from an explicit provider.model pin
+  - provider_concurrency_busy no longer exists after capacity admission removal (requirements ledger v34): no exhaustion path can be relabeled with it, and mixed exhaustion keeps its generic typed source
+  - WebSocketV2 session-slot contention cannot starve another request that owns the session or leak its session slot on cancellation; provider capacity leases were removed with request-path capacity admission (requirements ledger v34) and no gate may reintroduce them
   required_gates:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue231_responses_relay_stale_probe_public_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue245_permission_11128_search_continuation_public_blackbox -- --nocapture
@@ -3470,13 +3468,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue44cc3af -- --nocapture --test-threads=1
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib adaptive_concurrency::tests::saturated_admission_expires_without_leaking_a_lease -- --exact --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib transport::tests::saturated_provider_admission_without_preacquired_lease_does_not_wait -- --exact --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_waiting_for_shared_connection_releases_pre_acquired_admission -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test responses_websocket_v2 websocket_v2_full_concurrency_does_not_block_pre_acquired_session_owner -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-session-cooldown-red-fixtures
@@ -3486,20 +3478,19 @@ features:
   - npm run verify:v3-module-boundaries
   - git diff --check
   runtime_evidence:
-    status: installed_mixed_exclusion_verified
-    installed_cases:
-    - issue-745f6e9-provider-concurrency-all-busy-direct
-    - issue-745f6e9-provider-concurrency-all-busy-relay
-    - issue-745f6e9-provider-concurrency-mixed-exclusion-direct
-    - issue-745f6e9-provider-concurrency-mixed-exclusion-relay
-    installed_binary: /Users/fanzhang/.local/bin/rccv3
-    installed_version: rccv3 0.90.4931
-    evidence_path: /private/tmp/rcc-mixed-installed-evidence.md
-    mixed_source_kinds:
-    - direct: target_pool_exhausted / selected_target_exhausted
-    - relay: provider_failure / selected_target_exhausted
+    status: retired_with_capacity_admission
+    retired_mechanism: provider_concurrency_busy / lease admission (requirements ledger v34)
+    replaced_by: public-entry immediate pass-through evidence (saturated pool, >1 eligible candidate)
+    installed_cases: []
+    note: the four issue-745f6e9-provider-concurrency mock cases were retired with the
+      admission mechanism; no gate may reintroduce them. installed_binary/installed_version
+      fields described the 2026-11-07 installation receipt and are not evidence for this head.
     required:
-    - Controlled same-entry public /v1/responses replay for Direct and Relay, with pure and mixed subcases, must prove typed source classification, zero extra upstream dispatch, health neutrality, and client transport termination without error payload or fabricated success
+    - Public-entry /v1/responses request in a saturated or all-cooled pool with more than one
+      eligible candidate must reach provider transport immediately, with no queue, no capacity
+      wait, and no provider_concurrency_busy terminal; it switches to a visible candidate or
+      terminates truthfully. A negative control must fail if any wait/busy path returns.
+
   completion_boundary:
     source_controlled: true
     live_cutover: required
@@ -3853,7 +3844,7 @@ features:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
   - npm run verify:v3-resource-map
-  - npm run verify-architecture-mainline-call-map
+  - npm run verify:architecture-mainline-call-map
   - git diff --check
   completion_boundary:
     source_controlled: true
@@ -3869,7 +3860,7 @@ features:
   owner_kind: rust_v3_resident_request_execution_lifecycle
   owner_scope: Resident Direct and Relay transitions reuse one request control, target plan, Error05 recovery state, deadline, and attempt budget.
   required_positive:
-  - Generic Direct registers the selected plan candidate count before transport admission or protocol handoff; cumulative attempts and the configured hard ceiling remain unchanged.
+  - Generic Direct registers the selected plan candidate count before protocol handoff; cumulative attempts and the configured hard ceiling remain unchanged (transport admission was removed with request-path capacity admission, requirements ledger v34).
   - fa22072_direct_to_relay_business_continuation_public_entry requires JSON/SSE A1/B1; removing only Direct plan-budget registration reproduces A1/B0.
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
@@ -3892,7 +3883,6 @@ features:
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server all_tried_transport_failure -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib target_recovery_ -- --nocapture
-  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_wait_outlives_single_candidate -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue44cc3af_untried_tier_attempt_ -- --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib unsent_capacity_rejection_releases_only_pending_attempt -- --nocapture
   - npm run verify:v3-execution-control-payload-architecture

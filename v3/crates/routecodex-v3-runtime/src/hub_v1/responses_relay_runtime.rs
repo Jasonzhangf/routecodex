@@ -383,18 +383,6 @@ async fn handle_v3_responses_relay_provider_failure(
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    // 2026-11-07 ruling ①: a capacity-skipped identity never received a
-    // request, so it must not count as "tried" while the policy decides whether
-    // this attempt is the last eligible candidate. Hold it out of the exclusion
-    // basis for that decision only; the runtime's own selection set keeps it so
-    // the next plan still moves on to another visible candidate.
-    let capacity_skipped = state.capacity_skipped.clone();
-    let mut held_back_capacity_keys: Vec<String> = Vec::new();
-    for key in capacity_skipped.iter() {
-        if state.failed_candidates.remove(key) {
-            held_back_capacity_keys.push(key.clone());
-        }
-    }
     let policy_outcome = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
@@ -424,9 +412,6 @@ async fn handle_v3_responses_relay_provider_failure(
         Err(Ok(error)) => Err(Ok(error)),
         Err(Err(fault)) => Err(Err(fault)),
     };
-    for key in held_back_capacity_keys {
-        state.failed_candidates.insert(key);
-    }
     let result = match policy_outcome {
         Ok(result) => result,
         Err(Ok(error)) => return Err(V3ResponsesRelayRuntimeError::ProviderHealth(error)),
@@ -1249,8 +1234,6 @@ pub(crate) fn provider_target(
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
         request_timeout_ms: provider.request_timeout_ms,
         sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-        initial_concurrency_budget: selected.initial_concurrency_budget,
-        concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
 }
 
@@ -1348,7 +1331,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let mut state = V3ResponsesRelayProviderRetryState {
             failed_candidates: &mut failed_candidates,
             retry_selected: &mut retry_selected,
-            capacity_skipped: &std::collections::BTreeSet::new(),
             provider_failure_events: &mut provider_failure_events,
             provider_failure_event_sink: None,
             selected_observability: &selected_observability,
@@ -1479,7 +1461,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let mut state = V3ResponsesRelayProviderRetryState {
             failed_candidates: &mut failed_candidates,
             retry_selected: &mut retry_selected,
-            capacity_skipped: &std::collections::BTreeSet::new(),
             provider_failure_events: &mut provider_failure_events,
             provider_failure_event_sink: None,
             selected_observability: &selected_observability,

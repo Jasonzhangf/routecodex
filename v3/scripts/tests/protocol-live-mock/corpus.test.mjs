@@ -75,9 +75,9 @@ function upstreamToolCall(upstream) {
       .find((call) => call?.function?.arguments);
 }
 
-test('real corpus loads 78 fixtures sorted with exact identities', () => {
+test('real corpus loads 74 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 78);
+  assert.equal(loaded.length, 74);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -85,12 +85,12 @@ test('real corpus loads 78 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 78);
+  assert.equal(report.case_count, 74);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 46);
+  assert.equal(report.extensions.length, 42);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
@@ -170,64 +170,7 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
   assert.ok(responsesSourceCipher.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-source'));
 });
 
-test('provider concurrency replay fixtures bind both execution modes and exact all-busy evidence', () => {
-  const loaded = loadFixtures(realFixtureRoot);
-  const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
-  for (const [caseId, mode] of [
-    ['issue-745f6e9-provider-concurrency-all-busy-direct', 'direct'],
-    ['issue-745f6e9-provider-concurrency-all-busy-relay', 'relay'],
-  ]) {
-    const value = byId.get(caseId);
-    assert.ok(value, caseId);
-    assert.equal(value.cell.mode, mode);
-    assert.equal(value.runtime_setup.provider_concurrency.maxInFlight, 1);
-    assert.equal(value.concurrency_replay.kind, 'provider_concurrency_all_busy');
-    assert.equal(value.concurrency_replay.upstream_business_sends, 1);
-    assert.deepEqual(value.concurrency_replay.typed_error_codes, ['provider_concurrency_busy']);
-    assert.equal(value.concurrency_replay.expected_exhaustion_client.error_codes_must_not[0], 'ETIMEDOUT');
-    const holderSession = value.client_request.headers['session-id'];
-    const exhaustedSession = value.concurrency_replay.exhaustion_client_request.headers['session-id'];
-    assert.notEqual(holderSession, exhaustedSession);
-  }
-});
 
-test('provider concurrency replay mutations cannot weaken transport or typed-evidence contracts', () => {
-  const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
-  const mutations = [
-    {
-      name: 'missing typed code',
-      mutate(value) { value.concurrency_replay.typed_error_codes = []; },
-      expected: /typed_error_codes must be a non-empty string array/,
-    },
-    {
-      name: 'timeout accepted',
-      mutate(value) { value.concurrency_replay.expected_exhaustion_client.error_codes_must_not = []; },
-      expected: /error_codes_must_not must include ETIMEDOUT/,
-    },
-    {
-      name: 'second send allowed',
-      mutate(value) { value.concurrency_replay.upstream_business_sends = 2; },
-      expected: /upstream_business_sends must be 1/,
-    },
-    {
-      name: 'same session',
-      mutate(value) {
-        value.concurrency_replay.exhaustion_client_request.headers['session-id'] =
-          value.client_request.headers['session-id'];
-      },
-      expected: /exhaustion request must use a distinct session-id/,
-    },
-  ];
-  for (const mutation of mutations) {
-    const value = realCase(caseId);
-    mutation.mutate(value);
-    withFixture(
-      { [caseId]: value },
-      validManifest([caseId]),
-      (root) => assert.match(findingsOf(root), mutation.expected, mutation.name),
-    );
-  }
-});
 
 test('Codex replay fixtures preserve exact raw arguments and assertion-only negatives', () => {
   const loaded = loadFixtures(realFixtureRoot);
