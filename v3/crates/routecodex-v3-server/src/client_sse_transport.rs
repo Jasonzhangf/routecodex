@@ -19,8 +19,9 @@
 //!   one owner at a time: this channel owns it while the runtime outcome is
 //!   pending, and the drained SSE body owns it afterwards.
 //! - An outcome with no successful client payload closes the client transport
-//!   without projecting a provider status, error payload, or fabricated success.
-//!   The real cause stays in the typed Error chain and in the console record.
+//!   with a detectable transport error, without projecting a provider status,
+//!   error payload, or fabricated success. The real cause stays in the typed
+//!   Error chain and in the console record.
 use crate::V3LiveSnapClientWireCaptureSlot;
 use axum::body::{Body, BodyDataStream};
 use axum::http::{header, StatusCode};
@@ -302,7 +303,8 @@ struct V3ClientSseChannelStream {
     /// Committed frames that arrived before the channel was committed.
     client_frame_prefix: std::collections::VecDeque<Vec<u8>>,
     /// Set as soon as one committed frame reached the client. From that point the
-    /// transport never emits another keepalive and never projects an error.
+    /// transport never emits another keepalive or business/error frame; an
+    /// uncompletable outcome surfaces as a detectable stream error.
     client_frame_emitted: bool,
     /// Hands the client-response sample recorder from the runtime outcome to the
     /// transport boundary wrapper that owns the final client wire.
@@ -460,18 +462,23 @@ impl Stream for V3ClientSseChannelStream {
                             if committed_already {
                                 // The client already holds committed business
                                 // bytes. Only the continuing committed SSE body
-                                // may follow; any other outcome is a silent
-                                // transport close without an error frame.
+                                // may follow; any other outcome is a detectable
+                                // transport break without an error frame.
                                 match disposition {
                                     V3ClientSseChannelDisposition::Drain => {
                                         this.state = V3ClientSseChannelState::Drain(Box::pin(
                                             response.into_body().into_data_stream(),
                                         ));
                                     }
-                                    V3ClientSseChannelDisposition::Close(_)
-                                    | V3ClientSseChannelDisposition::FrameCommittedPayload => {
+                                    V3ClientSseChannelDisposition::Close(error) => {
                                         this.state = V3ClientSseChannelState::Finished;
-                                        return Poll::Ready(None);
+                                        return Poll::Ready(Some(Err(error)));
+                                    }
+                                    V3ClientSseChannelDisposition::FrameCommittedPayload => {
+                                        this.state = V3ClientSseChannelState::Finished;
+                                        return Poll::Ready(Some(Err(io::Error::other(
+                                            "committed client SSE channel received a non-SSE outcome after a client frame; the transport closes without an error frame",
+                                        ))));
                                     }
                                 }
                                 continue;
@@ -496,9 +503,6 @@ impl Stream for V3ClientSseChannelStream {
                         }
                         Poll::Ready(Err(_)) => {
                             this.state = V3ClientSseChannelState::Finished;
-                            if committed_already {
-                                return Poll::Ready(None);
-                            }
                             return Poll::Ready(Some(Err(io::Error::other(
                                 "committed client SSE channel lost the runtime outcome channel; the client transport closes without an error frame",
                             ))));
@@ -872,13 +876,24 @@ mod tests {
             "the committed business frame reaches the client before the runtime outcome"
         );
         // The committed prefix already crossed the client boundary. A lost
-        // runtime outcome is a silent transport close, not an error frame.
+        // runtime outcome is a detectable transport break, not an error frame.
         drop(outcome_sender);
-        assert!(stream.next().await.is_none());
+        let error = stream
+            .next()
+            .await
+            .expect("a lost runtime outcome must break the committed transport")
+            .expect_err("a lost runtime outcome must not become a clean EOF");
+        assert!(
+            error
+                .to_string()
+                .contains("lost the runtime outcome channel"),
+            "the stream error must identify the transport break: {error}"
+        );
     }
 
     #[tokio::test]
-    async fn client_sse_first_frame_channel_closes_silently_after_a_committed_frame_on_failure() {
+    async fn client_sse_first_frame_channel_returns_a_transport_error_after_a_committed_frame_on_failure(
+    ) {
         let (outcome_sender, outcome) = oneshot::channel();
         let (frame_sender, frames) = tokio::sync::mpsc::unbounded_channel();
         let mut stream = Box::pin(channel_with_client_frames(
@@ -903,9 +918,14 @@ mod tests {
             "application/json".parse().expect("content type"),
         );
         outcome_sender.send(failed).expect("runtime outcome");
+        let error = stream
+            .next()
+            .await
+            .expect("a post-commit failure must break the committed transport")
+            .expect_err("a post-commit failure must not become a clean EOF");
         assert!(
-            stream.next().await.is_none(),
-            "a post-commit failure ends the channel without an error frame"
+            error.to_string().contains("status 507"),
+            "the stream error must retain the runtime outcome status for diagnostics: {error}"
         );
     }
 
