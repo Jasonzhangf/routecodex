@@ -15,15 +15,57 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
                 vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
             )
         })?;
+    let residence_deadline =
+        tokio::time::Instant::from_std(control.attempt_budget().residence_deadline());
+    let health: V3ProviderFailureRuntimeHealth = provider_health.into();
     let plan = tokio::time::timeout_at(
-        tokio::time::Instant::from_std(control.attempt_budget().residence_deadline()),
+        residence_deadline,
         async {
+            let mut captured_target = None;
+            let failure = match plan_v3_responses_protocol_execution_with_captured_target(
+                manifest,
+                raw.clone(),
+                health.clone(),
+                now_epoch_ms,
+                &mut captured_target,
+            ) {
+                Ok(plan) => return Ok(plan),
+                Err(failure) => failure,
+            };
+            let Some(expanded) = failure.recovery_candidates.clone() else {
+                return Err(failure);
+            };
+            // v31: a pool that is empty at request entry cannot use a
+            // health-blocked identity blindly. The only recovery is the
+            // identity's own probe: run one bounded rescue round, then plan
+            // again. A round that cannot complete keeps this request's typed
+            // failure, and the round is capped by the residence deadline, so a
+            // stalled probe never extends the request.
+            if !health
+                .run_v3_bounded_cooldown_rescue_round(
+                    manifest,
+                    &expanded,
+                    now_epoch_ms,
+                    residence_deadline,
+                )
+                .await
+            {
+                return Err(failure);
+            }
+            let now_epoch_ms =
+                crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(|error| {
+                        protocol_plan_source_failure(
+                            runtime_source("V3ProviderCooldownRescueProbe", error),
+                            failure.node_trace.clone(),
+                        )
+                    })?;
             plan_v3_responses_protocol_execution_with_captured_target(
                 manifest,
-                raw,
-                provider_health.into(),
+                raw.clone(),
+                health.clone(),
                 now_epoch_ms,
-                &mut None,
+                &mut captured_target,
             )
         },
     )

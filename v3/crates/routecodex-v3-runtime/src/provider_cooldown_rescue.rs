@@ -4,6 +4,17 @@ pub(crate) struct V3CooldownRescueProbeOutcome {
     pub(crate) did_work: bool,
 }
 
+/// Upper bound for the single rescue round a request may run at exhaustion.
+///
+/// v31 keeps requests independent of provider lifecycle: a request never waits
+/// for a probe's cadence, a cooldown window or a recovery schedule. The one
+/// bounded probe round below exists because a captured target can exhaust while
+/// a cooled identity is the only candidate that can answer; it changes pool
+/// visibility only, never reruns transport selection, and the caller keeps its
+/// own typed failure when the round cannot complete inside this budget.
+pub(crate) const V3_COOLDOWN_RESCUE_ROUND_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(750);
+
 pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &str) -> String {
     format!("{provider_id}:{auth_alias}")
 }
@@ -140,6 +151,35 @@ impl V3ProviderFailureRuntimeHealth {
             outcome.did_work |= result.did_work;
         }
         Ok(outcome)
+    }
+
+    /// Run at most one bounded rescue round for an exhausted captured target.
+    ///
+    /// Returns `true` only when a probe was actually attempted. A probe that
+    /// stalls past the round budget or deadline is cancelled (its cooldown and
+    /// single-flight state stay with the store), so the caller's typed failure
+    /// remains the truthful outcome instead of a fabricated recovery.
+    pub(crate) async fn run_v3_bounded_cooldown_rescue_round(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        expanded: &V3Target09CandidateSetExpanded,
+        now_ms: u64,
+        deadline: tokio::time::Instant,
+    ) -> bool {
+        let budget_deadline = tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET;
+        let round_deadline = if budget_deadline < deadline {
+            budget_deadline
+        } else {
+            deadline
+        };
+        matches!(
+            tokio::time::timeout_at(
+                round_deadline,
+                self.run_exhaustion_rescue_probes(manifest, expanded, now_ms),
+            )
+            .await,
+            Ok(Ok(V3CooldownRescueProbeOutcome { did_work: true, .. }))
+        )
     }
 
     pub(crate) async fn run_exhaustion_rescue_probes(

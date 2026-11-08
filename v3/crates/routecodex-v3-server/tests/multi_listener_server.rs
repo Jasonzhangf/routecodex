@@ -3132,8 +3132,10 @@ async fn start_controlled_status_upstream(
 /// A real upstream 502 must be recorded as provider-private evidence, not
 /// reported as "no provider response".
 ///
-/// Bug `705d624` keeps the 502 out of every client response; that rule decides
-/// what the client may see and must not decide what the evidence records. The
+/// The client-projection rule and the evidence rule are separate: what the
+/// client may see is decided by the v31 single/last eligible candidate
+/// passthrough (this route holds one candidate, so the upstream 502 and its body
+/// pass through verbatim), and must not decide what the evidence records. The
 /// upstream here really did answer 502 with a body and headers, so the artifact
 /// has to say `external_http` and carry the real status, headers, and body.
 #[tokio::test]
@@ -3153,20 +3155,33 @@ async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
             .unwrap();
     let port = handle.listeners[0].addr.port();
 
-    // The client boundary stays a transport break: no upstream status, code, or
-    // body is projected, and no proxy 502 is fabricated for the entry either.
+    // v31 single/last eligible candidate passthrough: the captured target holds
+    // exactly one candidate, so its real Provider HTTP error is the request's
+    // answer. The client receives the upstream status and body verbatim; the
+    // proxy neither fabricates a replacement envelope nor a success, and the
+    // provider-private evidence below stays independent of that projection.
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
-        .expect("a streaming client must receive the SSE response head");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let body = response.text().await;
+        .expect("the only candidate must answer the client with its real provider error");
+    let f3_status = response.status();
+    let f3_headers = response.headers().clone();
+    let body = response
+        .text()
+        .await
+        .expect("the provider's own error body must reach the client");
+    assert_eq!(f3_status, StatusCode::BAD_GATEWAY);
+    assert_eq!(f3_headers["content-type"], "application/json");
+    assert_eq!(body, r#"{"error":"controlled_bad_gateway"}"#);
     assert!(
-        body.is_err(),
-        "an upstream 502 must abort the streaming body, not project the upstream response: {body:?}"
+        !body.contains("routecodex"),
+        "no proxy-generated error envelope may replace the provider body: {body}"
+    );
+    assert!(
+        !body.contains("network_error"),
+        "no proxy error classification may replace the provider body: {body}"
     );
 
     let evidence =
@@ -10508,9 +10523,11 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
             .unwrap();
     let client = reqwest::Client::new();
 
-    // The last real upstream HTTP error is provider-side evidence only. The
-    // client boundary is the transport break, so the direct entry must not
-    // forward the provider status or body.
+    // v31 single/last eligible candidate passthrough: this route captures one
+    // candidate, so the direct entry answers the client with that identity's real
+    // Provider HTTP status and body verbatim. The provider's error payload stays
+    // out of every multi-candidate projection, and the proxy fabricates neither a
+    // replacement envelope nor a success for the failed attempt.
     let started = std::time::Instant::now();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -10518,15 +10535,27 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
         .header("thread-id", "direct-terminal-provider-error-no-wait")
         .json(&json!({"model":"test.test","input":"preserve provider HTTP error"}))
         .send()
-        .await;
-    assert!(
-        response.is_err(),
-        "a provider HTTP error must not fabricate a client HTTP response"
-    );
+        .await
+        .expect("the only candidate must answer the client with its real provider error");
     assert!(
         started.elapsed() < Duration::from_millis(750),
         "a terminal provider error must not wait for recovery admission: {:?}",
         started.elapsed()
+    );
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = response
+        .text()
+        .await
+        .expect("the provider's own error body must reach the client");
+    assert_eq!(body, r#"{"error":"controlled_unavailable"}"#);
+    assert!(
+        !body.contains("network_error"),
+        "no proxy error classification may replace the provider body: {body}"
+    );
+    assert!(
+        !body.contains("routecodex"),
+        "no proxy-generated error envelope may replace the provider body: {body}"
     );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");

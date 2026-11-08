@@ -570,6 +570,11 @@ impl V3TargetInterpreter {
         // waiting for a probe or fabricating an error.
         let mut cooldown_fallback = Vec::new();
         let mut cooldown_notes: Vec<String> = Vec::new();
+        // Declared candidate order of the attempts this request already made.
+        // The cooldown fallback only continues that walk: a cooled identity that
+        // outranks an identity the request already attempted is never
+        // resurrected, because the request has already moved past it.
+        let mut attempted_order_ceiling: Option<(usize, i32)> = None;
         for (index, candidate) in expanded.candidates.iter().enumerate() {
             if !Self::candidate_in_availability_window(candidate, now_ms) {
                 unavailable.push(format!(
@@ -645,6 +650,16 @@ impl V3TargetInterpreter {
                         &candidate.model_id,
                     ));
                 }
+                if projection
+                    .blocked_scopes
+                    .iter()
+                    .any(|scope| scope == "request_local_provider_failure")
+                {
+                    let order = (route_tier_rank, candidate.priority);
+                    attempted_order_ceiling = Some(
+                        attempted_order_ceiling.map_or(order, |current| current.max(order)),
+                    );
+                }
                 let note = format_candidate_scheduling_unavailable(candidate, &projection);
                 if Self::blocked_only_by_automatic_cooldown(&projection.blocked_scopes) {
                     cooldown_fallback.push((
@@ -679,6 +694,13 @@ impl V3TargetInterpreter {
             // probe or fabricating an error. A real provider failure there stays
             // a typed pre-candidate-terminal Error and the last eligible
             // candidate passes its original provider response through.
+            if let Some(ceiling) = attempted_order_ceiling {
+                cooldown_fallback.retain(
+                    |(_, candidate, _, route_tier_rank, _, _)| {
+                        (*route_tier_rank, candidate.priority) <= ceiling
+                    },
+                );
+            }
             let fallback_pool_visible = cooldown_fallback
                 .iter()
                 .any(|(_, candidate, ..)| candidate.pool_ids.contains(&expanded.route.pool_id));
