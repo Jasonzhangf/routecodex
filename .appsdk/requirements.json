@@ -965,9 +965,36 @@
         "version": 2
       },
       "version": 36
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "429现在太频繁了没处理，要在错误响应返回时处理，provider429需要在响应阶段进行阻塞回退，连续错误稍微控制下返回速度间歇。",
+          "role": "user",
+          "source": "Direct user instruction relayed by project master Jenny in Collab notification m1794176595936-5608 on 2026-11-08"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261108-provider-429-response-stage-backoff",
+        "requirement_id": "routecodex-provider-429-response-stage-backoff",
+        "text": "429现在太频繁了没处理，要在错误响应返回时处理，provider429需要在响应阶段进行阻塞回退，连续错误稍微控制下返回速度间歇。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "429现在太频繁了没处理，要在错误响应返回时处理，provider429需要在响应阶段进行阻塞回退，连续错误稍微控制下返回速度间歇。",
+          "role": "user",
+          "source": "Direct user instruction relayed by project master Jenny in Collab notification m1794176595936-5608 on 2026-11-08"
+        },
+        "requirement_id": "routecodex-provider-429-response-stage-backoff",
+        "status": "active",
+        "text": "429现在太频繁了没处理，要在错误响应返回时处理，provider429需要在响应阶段进行阻塞回退，连续错误稍微控制下返回速度间歇。",
+        "version": 1
+      },
+      "version": 37
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 36
+  "version": 37
 }
