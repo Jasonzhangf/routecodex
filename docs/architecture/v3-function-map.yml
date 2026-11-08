@@ -4295,7 +4295,6 @@ features:
   - V3ProviderFailureRuntimeHealth::defer_provider_health_action
   - V3ProviderFailureRuntimeHealth::managed_precool_probe
   - V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
-  - V3RuntimeProviderAdmission::take_rate_limit_control
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
   - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
   - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
@@ -4906,18 +4905,15 @@ features:
   - V3ProviderFailureRuntimeHealth::managed_probe
   - complete_v3_provider_health_probe
   - classify_provider_probe_failure
-  - V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
   - V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
-  - run_v3_plan_execution_operator_with_probes
+  - run_v3_plan_execution
+  - run_v3_plan_execution_operator
   - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
-  - step_v3_target_planning_with_admission_sync
-  - try_admit_v3_selected_target
-  - V3RuntimeProviderAdmission::into_lease
-  - V3RuntimeProviderAdmission::drop
+  - take_or_acquire_provider_admission_scoped
   - V3PreAcquiredProviderAdmission::release
   - V3AdaptiveConcurrencyPermitGuard::drop
   - V3AdaptiveConcurrencyController::observe_rate_limit
