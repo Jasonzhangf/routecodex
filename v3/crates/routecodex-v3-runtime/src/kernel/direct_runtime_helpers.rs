@@ -144,12 +144,9 @@ pub(crate) struct V3DirectProviderFailurePolicyContext<
     expanded: Option<&'ctx routecodex_v3_target::V3Target09CandidateSetExpanded>,
     provider_pinned: bool,
     now_epoch_ms: u64,
-    /// Manifest owning the captured target. The bounded cooldown-rescue round
-    /// needs it to build the same identity's probe target.
+    /// Manifest owning the captured target. The detached control-plane rescue
+    /// observation needs it to build the same identity's probe target.
     manifest: &'ctx V3Config05ManifestPublished,
-    /// Request residence deadline. Bounds the single rescue round so a stalled
-    /// probe cannot outlive the request (v31: requests never wait for probes).
-    rescue_deadline: tokio::time::Instant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,19 +165,38 @@ pub(crate) struct V3DirectProviderFailurePolicyState<'state> {
     trace: &'state mut Vec<&'static str>,
 }
 
-/// Whether the captured target still holds a candidate this request never
-/// attempted. Such a sibling keeps the failed attempt from being the last
-/// eligible candidate, so its provider HTTP error never becomes the client's
-/// answer.
-fn target_has_untried_candidate(
-    expanded: Option<&routecodex_v3_target::V3Target09CandidateSetExpanded>,
+/// Whether the captured target still holds an alternative this request can
+/// actually use: a sibling this request never attempted *and* that the pool can
+/// still offer right now.
+///
+/// The visibility half uses the same availability projection target selection
+/// uses, so a sibling hidden by its own cooldown, a pending probe, an auth-key
+/// cooldown or a declared availability window is not an alternative and must not
+/// keep the failed attempt from being the last eligible candidate. Only a
+/// genuinely usable sibling suppresses the passthrough of that candidate's real
+/// provider status and body. Capacity refusal stays outside this predicate: it
+/// is decided by the transport admission path, not by health visibility.
+fn target_has_untried_eligible_candidate<R: V3ProviderAvailabilityReader + ?Sized>(
+    context: &V3DirectProviderFailurePolicyContext<'_, R>,
     state: &V3DirectProviderFailurePolicyState<'_>,
 ) -> bool {
-    expanded.is_none_or(|expanded| {
-        expanded
-            .candidates
-            .iter()
-            .any(|candidate| !state.failed_candidates.contains(&candidate_key(candidate)))
+    let Some(expanded) = context.expanded else {
+        return true;
+    };
+    expanded.candidates.iter().any(|candidate| {
+        if state.failed_candidates.contains(&candidate_key(candidate)) {
+            return false;
+        }
+        context
+            .availability
+            .availability_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+                context.now_epoch_ms,
+            )
+            .available
     })
 }
 
@@ -916,42 +932,18 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
     for key in held_back_capacity_keys {
         state.failed_candidates.insert(key);
     }
-    let mut next_selected = next_selected;
     if next_selected.is_none() {
         if let Some(expanded) = context.expanded {
             // No visible candidate is left and the captured target is only
-            // cooling. Cooldown only changes pool visibility, so the identity's
-            // own bounded probe is the recovery: run one rescue round and
-            // reselect once. A round that cannot complete leaves this request's
-            // typed failure untouched.
-            let rescue_now =
-                crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                    .map_err(|error| {
-                        direct_policy_failure(&source, "V3ProviderCooldownRescueProbe", error)
-                    })?;
-            let rescue_did_work = context
-                .provider_health
-                .run_v3_bounded_cooldown_rescue_round(
+            // cooling. v31 keeps provider lifecycle off the request path, so the
+            // identity's own probe is scheduled as a detached control-plane
+            // observation: this attempt keeps its truthful typed failure
+            // immediately, and a later selection may use the identity again once
+            // its own probe has recovered it.
+                context.provider_health.spawn_v3_background_cooldown_rescue_round(
                     context.manifest,
                     expanded,
-                    rescue_now,
-                    context.rescue_deadline,
-                )
-                .await;
-            if rescue_did_work {
-                next_selected = select_v3_target_with_session_then_global(
-                    &V3TargetInterpreter::default(),
-                    (*expanded).clone(),
-                    context.failure_session_scope,
-                    context.availability,
-                    context.provider_health,
-                    state.failed_candidates,
-                    crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                        .unwrap_or(rescue_now),
-                    0,
-                )
-                .ok();
-            }
+                );
         }
     }
     let health_record = match &next_selected {
@@ -1065,11 +1057,11 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         // constrained v27 constructor; request-local/compat failures keep
         // their provider-private disposition even with a complete witness.
         // A failed attempt is the last eligible candidate only when the
-        // captured target holds no untried candidate left: an untried sibling
-        // that the pool currently cannot use (a cooldown row) keeps the
-        // provider-private disposition, so its own failure is not projected as
-        // the request's answer.
-        if is_health_neutral_failure || target_has_untried_candidate(context.expanded, state) {
+        // captured target holds no untried candidate the pool can still offer.
+        // An untried sibling hidden by cooldown, a pending probe or an auth-key
+        // cooldown is not an alternative, so the failed attempt is the last
+        // eligible one and its real provider status/body pass through.
+        if is_health_neutral_failure || target_has_untried_eligible_candidate(context, state) {
             V3ErrorHandlingCenter::provider_terminal_disposition(terminal, witness)
         } else {
             V3ErrorHandlingCenter::last_candidate_terminal_disposition(witness)

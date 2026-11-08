@@ -46,7 +46,6 @@ async fn provider_health_observes_failure_without_request_alternative() {
                     availability: &health.session_bound_availability(&scope),
                     expanded: Some(&expanded), provider_pinned: false, now_epoch_ms: 0,
                     manifest: &manifest,
-                    rescue_deadline: tokio::time::Instant::now(),
                 },
                 &selected, source, 503,
                 &mut V3DirectProviderFailurePolicyState {
@@ -117,7 +116,6 @@ async fn direct_policy_grants_last_candidate_only_to_ordinary_terminal_http_erro
         provider_pinned: false,
         now_epoch_ms: 0,
         manifest: &manifest,
-        rescue_deadline: tokio::time::Instant::now(),
     };
 
     let ordinary = run_v3_direct_provider_failure_policy(
@@ -261,7 +259,6 @@ async fn assert_first_byte_timeout_preserves_untried_siblings(
             provider_pinned: false,
             now_epoch_ms: 0,
             manifest: &manifest,
-            rescue_deadline: tokio::time::Instant::now(),
         },
         &selected,
         source,
@@ -490,7 +487,6 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
             provider_pinned: false,
             now_epoch_ms: 0,
             manifest: &manifest,
-            rescue_deadline: tokio::time::Instant::now(),
         },
         &selected,
         source.clone(),
