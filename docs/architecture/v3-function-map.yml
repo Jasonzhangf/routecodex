@@ -4997,10 +4997,11 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib saturated_provider_admission_without_preacquired_lease_does_not_wait -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_request_reaches_provider_transport_immediately_without_capacity_wait -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_negative_control_fails_if_a_capacity_wait_or_busy_source_returns -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server sustained_429_window_blackbox::ordinary_429_exact_identity_direct_public_http -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server sustained_429_window_blackbox::ordinary_429_exact_identity_relay_public_http -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling v29_arbitration_last_eligible_429_passes_original_typed_error_to_client -- --exact --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map
