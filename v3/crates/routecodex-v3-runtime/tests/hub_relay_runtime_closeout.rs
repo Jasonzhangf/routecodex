@@ -318,10 +318,7 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
     // Ordinary non-provider.model requests use current-turn classification. A
     // `match.models` declaration does not create a second model-driven route;
     // the required default pool is the no-match floor for this request.
-    assert_eq!(
-        json_observability.pool_id.as_deref(),
-        Some("default")
-    );
+    assert_eq!(json_observability.pool_id.as_deref(), Some("default"));
     assert_eq!(
         json_observability.provider_id.as_deref(),
         Some("controlled")
