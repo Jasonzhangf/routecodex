@@ -447,7 +447,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         // observation, so this request keeps its truthful typed
                         // exhaustion immediately and a later selection may use
                         // the identity once its own probe has recovered it.
-                            provider_health.spawn_v3_background_cooldown_rescue_round(
+                            provider_health.submit_v3_background_cooldown_rescue_round(
                                 manifest,
                                 &exhausted_expanded,
                             );
@@ -840,7 +840,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     if !cooldown_rescue_attempted {
                         cooldown_rescue_attempted = true;
                             if let Some(captured) = expanded.as_ref() {
-                                provider_health.spawn_v3_background_cooldown_rescue_round(
+                                provider_health.submit_v3_background_cooldown_rescue_round(
                                     manifest,
                                     captured,
                                 );

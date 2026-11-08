@@ -495,3 +495,332 @@ async fn witness(startup: bool) {
     upstream.abort();
     let _ = upstream.await;
 }
+
+// ---------------------------------------------------------------------------
+// Rescue-round custody.
+//
+// A bounded rescue round is provider lifecycle state, not request state: it is
+// submitted to the Server-owned aggregate probe lifecycle, which retains it,
+// cancels it on shutdown and joins it. The request path must never create a
+// probe task of its own.
+// ---------------------------------------------------------------------------
+
+/// Stable projection of the cooldown pool. The relative `remaining_ms` field is
+/// excluded so snapshots taken at different instants stay comparable; every
+/// other field participates.
+#[allow(clippy::type_complexity)]
+fn custody_cooldown_snapshot(
+    health: &V3ProviderFailureRuntimeHealth,
+) -> Vec<(
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    Option<u64>,
+    Option<u32>,
+    String,
+)> {
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().expect("custody clock");
+    health
+        .store
+        .cooldown_entries(now_ms)
+        .into_iter()
+        .map(|entry| {
+            (
+                entry.provider_id,
+                entry.interface_id,
+                entry.auth_alias,
+                entry.model_id,
+                entry.state,
+                entry.until_ms,
+                entry.failure_count,
+                entry.kind,
+            )
+        })
+        .collect()
+}
+
+/// The captured target a request of this fixture resolves to. A rescue round is
+/// submitted for the expansion a real request path would have produced, not for
+/// a hand-built candidate list.
+fn custody_expanded(
+    manifest: &V3Config05ManifestPublished,
+) -> routecodex_v3_target::V3Target09CandidateSetExpanded {
+    let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+        manifest,
+        "chat",
+        "openai_chat",
+        "/v1/chat/completions",
+        &json!({"model": "recovery", "messages": [{"role": "user", "content": "custody"}]}),
+        0,
+    )
+    .expect("custody opaque hit");
+    crate::provider_failure_runtime_policy::expand_v3_relay_target_candidates_from_opaque_hit(
+        manifest, hit, 0,
+    )
+    .expect("custody expanded candidates")
+}
+
+struct CustodyFixture {
+    manifest: Arc<V3Config05ManifestPublished>,
+    health: V3ProviderFailureRuntimeHealth,
+    ids: Vec<String>,
+    peer: Arc<Peer>,
+    upstream: tokio::task::JoinHandle<()>,
+}
+
+impl CustodyFixture {
+    async fn new() -> Self {
+        std::env::set_var("FA22072_RUNTIME_FAIRNESS_KEY", "runtime-fairness-fixture");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (manifest, ids) = manifest(&format!("http://{addr}"), addr.port());
+        let manifest = Arc::new(manifest);
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let peer = Arc::new(Peer {
+            holder_entered: Semaphore::new(0),
+            holder_release: Semaphore::new(0),
+            probe_entered: Semaphore::new(0),
+            probe_release: Semaphore::new(0),
+        });
+        let peer_server = peer.clone();
+        let upstream = tokio::spawn(async move {
+            let mut connections = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => { let (socket, _) = accepted.unwrap(); connections.spawn(serve(socket, peer_server.clone())); },
+                    done = connections.join_next(), if !connections.is_empty() => { done.unwrap().unwrap(); },
+                }
+            }
+        });
+        Self {
+            manifest,
+            health,
+            ids,
+            peer,
+            upstream,
+        }
+    }
+
+    /// Commit a real cooldown for one identity through the public request entry.
+    /// Nothing is injected into the store directly: the hold a rescue round acts
+    /// on is the same one an ordinary failure produces.
+    async fn cool(&self, id: &str) {
+        let result = timeout(
+            Duration::from_secs(5),
+            business(
+                self.manifest.clone(),
+                self.health.clone(),
+                format!("{id}-failure"),
+                "genuine failure",
+            ),
+        )
+        .await
+        .expect("custody cooldown request must finish");
+        assert!(
+            result.error_chain.is_none(),
+            "eligible fallback must deliver: {result:?}"
+        );
+        let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
+        let held = V3ProviderAvailabilityReader::availability_for_interface(
+            &self.health,
+            id,
+            "default",
+            Some("key"),
+            Some("recovery"),
+            now_ms,
+        );
+        assert!(
+            !held.available,
+            "custody fixture must hold the identity: {held:?}"
+        );
+        assert!(
+            held.blocked_scopes
+                .iter()
+                .any(|scope| scope == "provider_cooldown_probe_pending"),
+            "custody hold must be the typed probe substate: {held:?}"
+        );
+    }
+
+    /// Register the aggregate probe lifecycle the way a listener does, and return
+    /// the shutdown trigger with the task that retains and joins it.
+    fn register(
+        &self,
+    ) -> (
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
+        let lifecycle = self
+            .health
+            .aggregate_provider_probe_lifecycle_resume(self.manifest.clone(), shutdown_rx)
+            .expect("custody aggregate registers once");
+        (shutdown, tokio::spawn(lifecycle))
+    }
+}
+
+/// No owner, no task: without a registered aggregate the round is refused and
+/// dropped, and the store keeps exactly the state it had.
+#[tokio::test]
+async fn rescue_round_without_owner_is_dropped_instead_of_spawned() {
+    let fixture = CustodyFixture::new().await;
+    let expanded = custody_expanded(&fixture.manifest);
+    fixture.cool(&fixture.ids[0]).await;
+    assert!(
+        fixture.health.probe_owner.lock().unwrap().is_none(),
+        "this fixture registers no aggregate probe owner"
+    );
+    let before = custody_cooldown_snapshot(&fixture.health);
+    let submission = fixture
+        .health
+        .submit_v3_background_cooldown_rescue_round(&fixture.manifest, &expanded);
+    assert_eq!(
+        submission,
+        V3CooldownRescueSubmission::OwnerUnavailable,
+        "an absent owner must refuse custody instead of creating a task"
+    );
+    // Past the grace and the round budget: a request-owned task would have
+    // reached the provider and mutated its health by now.
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert!(
+        fixture.peer.probe_entered.try_acquire().is_err(),
+        "a round with no owner must never probe"
+    );
+    assert_eq!(
+        custody_cooldown_snapshot(&fixture.health),
+        before,
+        "a refused round must leave provider health byte-identical"
+    );
+    fixture.upstream.abort();
+}
+
+/// The aggregate is the executor: a submitted round runs inside it, obeys the
+/// bound, and leaves the health observation it is supposed to leave.
+#[tokio::test]
+async fn rescue_round_is_executed_by_the_registered_aggregate() {
+    let fixture = CustodyFixture::new().await;
+    let expanded = custody_expanded(&fixture.manifest);
+    fixture.cool(&fixture.ids[0]).await;
+    let before = custody_cooldown_snapshot(&fixture.health);
+    let (shutdown, lifecycle) = fixture.register();
+    let owner = fixture
+        .health
+        .probe_owner
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("registered aggregate owner");
+    assert_eq!(owner.capacity.available_permits(), 4);
+    // The retained schedule is not due for this identity yet, so any probe that
+    // appears later in this test is the submitted round's.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(
+        fixture.peer.probe_entered.try_acquire().is_err(),
+        "the retained schedule must not probe an identity whose rescue deadline is still ahead"
+    );
+    assert_eq!(
+        custody_cooldown_snapshot(&fixture.health),
+        before,
+        "nothing may observe this identity before the round runs"
+    );
+
+    assert_eq!(
+        fixture
+            .health
+            .submit_v3_background_cooldown_rescue_round(&fixture.manifest, &expanded),
+        V3CooldownRescueSubmission::Initiated,
+        "a registered owner must take custody"
+    );
+    assert_eq!(
+        owner.capacity.available_permits(),
+        3,
+        "the submitted round holds one owner slot until it finishes"
+    );
+    timeout(Duration::from_secs(2), fixture.peer.probe_entered.acquire())
+        .await
+        .expect("the aggregate must execute the submitted round")
+        .unwrap()
+        .forget();
+    // Answer the parked probe so the round observes a real provider 2xx.
+    fixture.peer.probe_release.add_permits(1);
+    timeout(Duration::from_secs(2), async {
+        while owner.capacity.available_permits() != 4 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the round must finish inside its bound and release the owner slot");
+    let now_ms = v3_relay_provider_policy_now_epoch_ms().unwrap();
+    let restored = V3ProviderAvailabilityReader::availability_for_interface(
+        &fixture.health,
+        &fixture.ids[0],
+        "default",
+        Some("key"),
+        Some("recovery"),
+        now_ms,
+    );
+    assert!(
+        restored.available,
+        "the executed round's real 2xx must restore the identity: {restored:?}"
+    );
+    assert_ne!(
+        custody_cooldown_snapshot(&fixture.health),
+        before,
+        "the executed round must leave its health observation"
+    );
+    shutdown.send(()).expect("aggregate shutdown trigger");
+    timeout(Duration::from_secs(2), lifecycle)
+        .await
+        .expect("the aggregate must join on shutdown")
+        .expect("the aggregate task must not panic");
+    fixture.upstream.abort();
+}
+
+/// Shutdown custody: the aggregate owns the pending round, so shutdown drops it
+/// and no health mutation can happen afterwards.
+#[tokio::test]
+async fn shutdown_cancels_pending_rescue_round_without_health_mutation() {
+    let fixture = CustodyFixture::new().await;
+    let expanded = custody_expanded(&fixture.manifest);
+    fixture.cool(&fixture.ids[0]).await;
+    let before = custody_cooldown_snapshot(&fixture.health);
+    let (shutdown, lifecycle) = fixture.register();
+    let owner = fixture
+        .health
+        .probe_owner
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("registered aggregate owner");
+    assert_eq!(
+        fixture
+            .health
+            .submit_v3_background_cooldown_rescue_round(&fixture.manifest, &expanded),
+        V3CooldownRescueSubmission::Initiated
+    );
+    // Shutdown lands while the round is still inside its grace period.
+    shutdown.send(()).expect("aggregate shutdown trigger");
+    timeout(Duration::from_secs(2), lifecycle)
+        .await
+        .expect("shutdown must join the aggregate")
+        .expect("the aggregate task must not panic");
+    // Past the grace and the round budget: a request-owned detached task would
+    // have reached the provider and mutated health regardless of shutdown.
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    assert!(
+        fixture.peer.probe_entered.try_acquire().is_err(),
+        "a cancelled round must never reach the provider"
+    );
+    assert_eq!(
+        custody_cooldown_snapshot(&fixture.health),
+        before,
+        "shutdown must prevent post-shutdown provider health mutation"
+    );
+    assert_eq!(
+        owner.capacity.available_permits(),
+        4,
+        "the dropped round must release its owner slot"
+    );
+    fixture.upstream.abort();
+}
