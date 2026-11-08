@@ -1,5 +1,4 @@
 use super::*;
-use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct DirectOnlyFailureTransport {
@@ -162,8 +161,6 @@ async fn direct_generic_provider_http_400_reselects_untried_sibling_model() {
 async fn direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait() {
     let routing_group = "direct_provider_compat_terminal";
     let mut manifest = scoped_test_manifest(provider_compat_single_manifest(), routing_group);
-    // The controller is process-shared; isolate this test's provider identity
-    // so another test's legitimate lease cannot contaminate the zero assertion.
     let provider_id = "direct_terminal_lease_test";
     let mut provider = manifest.providers.remove("first").unwrap();
     provider.id = provider_id.into();

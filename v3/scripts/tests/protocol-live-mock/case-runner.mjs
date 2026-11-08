@@ -73,8 +73,6 @@ export const REQUIRED_EXECUTION_MODES = Object.freeze({
   'issue-3192e71-over-safe-int-negative': 'relay',
   'issue-3192e71-nested-extra-negative': 'relay',
   'issue-3192e71-missing-optional-preserved': 'relay',
-  'issue-745f6e9-provider-concurrency-all-busy-direct': 'direct',
-  'issue-745f6e9-provider-concurrency-all-busy-relay': 'relay',
 });
 
 /**

@@ -359,9 +359,6 @@ impl V3ProviderFailureRuntimeHealth {
                 self.store.publish_availability_change();
                 Ok(V3ProbeCompletion::Recovered)
             }
-            Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
-                Ok(V3ProbeCompletion::CapacityUnavailable)
-            }
             Err(V3ProviderHealthProbeFailure::Internal(error)) => Err(error),
             Err(V3ProviderHealthProbeFailure::Provider(error)) => {
                 let (_, action) = classify_provider_probe_failure(error)?;

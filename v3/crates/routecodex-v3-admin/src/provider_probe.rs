@@ -500,11 +500,6 @@ async fn stage_l3(
             StageRun::failed("probe_internal_error", json!({ "message": message }))
                 .with_evidence(evidence)
         }
-        Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => StageRun::failed(
-            "probe_concurrency_busy",
-            json!({ "message": "provider concurrency admission is busy; retry the probe" }),
-        )
-        .with_evidence(evidence),
     }
 }
 

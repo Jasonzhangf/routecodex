@@ -152,10 +152,6 @@ impl V3ProviderFailureRuntimeHealth {
                         )
                         .map(|()| true)
                         .map_err(|error| error.to_string()),
-                    Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
-                        drop(cancellation);
-                        return Ok(V3CooldownRescueProbeOutcome { completed_all: false, did_work: false });
-                    }
                     Err(_error) => {
                         health
                             .store

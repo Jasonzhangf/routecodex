@@ -48,8 +48,6 @@ pub struct V3TargetCandidate {
     pub reasoning_effort: Option<V3ReasoningEffort>,
     pub request_timeout_ms: u64,
     pub sse_first_frame_timeout_ms: Option<u64>,
-    pub initial_concurrency_budget: u32,
-    pub concurrency_acquire_timeout_ms: u64,
     pub compatibility_profile: Option<String>,
     pub headers: BTreeMap<String, String>,
     pub env_name: Option<String>,
@@ -450,12 +448,11 @@ impl V3TargetInterpreter {
     /// identity. The request is sent and its real typed failure is passed
     /// through to the client.
     ///
-    /// The 2026-11-07 ruling adds capacity admission to the same exemption:
-    /// the last eligible candidate is sent over the adaptive budget instead of
-    /// returning a proxy `ConcurrencyBusy`. That half is carried by the
-    /// transport request's capacity bypass flag; this predicate answers the
-    /// scheduling-block half from the health scopes it can see, and its name
-    /// therefore says "scheduling" rather than "health". It covers every
+    /// There is no capacity half any more: r5 removed adaptive-concurrency
+    /// admission, so no send can wait on or fail for provider capacity and
+    /// nothing has to be bypassed. This predicate answers the scheduling-block
+    /// half from the health scopes it can see, and its name therefore says
+    /// "scheduling" rather than "health". It covers every
     /// health-owned block, including a manual/admin cooldown and an auth-key
     /// cooldown, because the single candidate has no alternative to switch to
     /// and the client must see the provider's real answer instead of a proxy
@@ -1170,14 +1167,6 @@ impl V3TargetInterpreter {
                     reasoning_effort: provider.reasoning_effort,
                     request_timeout_ms: provider.request_timeout_ms,
                     sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-                    initial_concurrency_budget: provider
-                        .concurrency
-                        .as_ref()
-                        .map_or(40, |concurrency| concurrency.max_in_flight),
-                    concurrency_acquire_timeout_ms: provider
-                        .concurrency
-                        .as_ref()
-                        .map_or(60_000, |concurrency| concurrency.acquire_timeout_ms),
                     compatibility_profile: interface
                         .compatibility_profile
                         .clone()

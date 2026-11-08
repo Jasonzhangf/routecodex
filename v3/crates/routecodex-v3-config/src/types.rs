@@ -523,8 +523,6 @@ pub struct V3ProviderAuthoringConfig {
     #[serde(default)]
     pub responses: Option<V3ProviderResponsesAuthoringConfig>,
     #[serde(default)]
-    pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
-    #[serde(default)]
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     #[serde(
         default,
@@ -728,16 +726,6 @@ pub enum V3StreamingPolicy {
     Always,
     Client,
     Never,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct V3ProviderConcurrencyAuthoringConfig {
-    pub max_in_flight: u32,
-    /// Runtime recovery waits for temporary capacity/cooldown exhaustion within
-    /// this budget. A single synchronous admission remains nonblocking.
-    pub acquire_timeout_ms: u64,
-    pub stale_lease_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1212,7 +1200,6 @@ pub struct V3ProviderManifest {
     pub default_model: String,
     pub auth: V3ProviderAuthManifest,
     pub models: BTreeMap<String, V3ProviderModelManifest>,
-    pub concurrency: Option<V3ProviderConcurrencyAuthoringConfig>,
     pub health: Option<V3ProviderHealthAuthoringConfig>,
     pub provider_request_cleanup: V3ProviderRequestCleanupAuthoringConfig,
     pub reasoning_effort: Option<V3ReasoningEffort>,

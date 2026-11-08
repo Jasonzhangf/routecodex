@@ -14,7 +14,7 @@ use routecodex_v3_error::{
     V3ExternalErrorKind, V3ExternalErrorLink, V3ProviderFailureSessionScope, V3ProviderHealthScope,
 };
 use routecodex_v3_provider_responses::{
-    adaptive_concurrency::V3AdaptiveConcurrencyController, V3ProviderAvailabilityProjection,
+    V3ProviderAvailabilityProjection,
     V3ProviderAvailabilityReader, V3ProviderError, V3ProviderFailureAction,
     V3ProviderFailureCooldownScope, V3ProviderFailurePolicy, V3ProviderFailureRecord,
     V3ProviderHealthListenerScope, V3ProviderHealthStore, V3ProviderKeyHealthProjection,
@@ -56,7 +56,6 @@ const V3_PROVIDER_HEALTH_PROBE_MAX_CONCURRENCY: usize = 4;
 pub enum V3ProviderHealthProbeFailure {
     Provider(V3ProviderError),
     Internal(String),
-    ConcurrencyBusy,
 }
 
 fn execute_provider_health_probe<F, Fut>(
@@ -168,10 +167,6 @@ pub(crate) fn is_health_neutral_request_compat_failure(
         // not provider health. Relay may surface them as a runtime 502 after
         // decoding an HTTP-200 SSE error event, so status alone is insufficient.
         || error_type == Some("invalid_request_error")
-        // Local connection-slot capacity busy describes the request's admission
-        // contention, not provider health. The failed identity is still excluded
-        // from this request, but it must not cool a healthy provider.
-        || error_type == Some("provider_concurrency_busy")
 }
 
 /// A Relay Error-operator contract failure. This is a typed control resource:

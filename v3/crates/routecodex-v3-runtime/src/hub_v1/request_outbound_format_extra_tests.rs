@@ -1688,8 +1688,6 @@ fn d701cc8_target_with_capabilities(
         priority: 0,
         weight: 1,
         sse_first_frame_timeout_ms: None,
-        initial_concurrency_budget: 8,
-        concurrency_acquire_timeout_ms: 60_000,
         compatibility_profile: None,
         headers: Default::default(),
         env_name: Some("V3_D701CC8_TEST_KEY".into()),

@@ -226,7 +226,6 @@ base_url = "http://127.0.0.1:{}/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_MANAGED_TEST_KEY" }}, {{ alias = "spare", env = "FA22072_CLI_SPARE_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 [providers.rollback.models.test]
 wire_name = "wire-test"
 capabilities = ["text"]

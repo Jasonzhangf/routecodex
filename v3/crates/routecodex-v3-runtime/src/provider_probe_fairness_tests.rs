@@ -109,7 +109,6 @@ base_url = "{base}/{index}/v1"
 default_model = "recovery"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_RUNTIME_FAIRNESS_KEY" }}] }}
 health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 2, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 [providers.{id}.models.recovery]
 wire_name = "recovery"
 capabilities = ["text"]
@@ -325,7 +324,6 @@ async fn witness(startup: bool) {
     let before = health
         .store
         .cooldown_entries(v3_relay_provider_policy_now_epoch_ms().unwrap());
-    let controller = V3AdaptiveConcurrencyController::process_shared();
     let mut holders = Vec::new();
     for id in &ids[..4] {
         holders.push(tokio::spawn(business(
@@ -340,18 +338,6 @@ async fn witness(startup: bool) {
         .unwrap()
         .unwrap()
         .forget();
-    for id in &ids[..4] {
-        // Business holders reach the real transport: the holder gate above
-        // proves the send itself. Provider concurrency tracking may observe
-        // their in-flight sends, but must never park a holder beyond its
-        // declared budget.
-        assert!(
-            controller
-                .snapshot(&format!("{id}:key"))
-                .is_none_or(|state| state.in_flight <= state.budget),
-            "business holders must never be gated beyond the declared provider budget"
-        );
-    }
     let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
     let lifecycle = if startup {
         Box::pin(
@@ -452,9 +438,6 @@ async fn witness(startup: bool) {
             // holder_release below.
             continue;
         }
-        if let Some(snapshot) = controller.snapshot(&format!("{id}:key")) {
-            assert_eq!(snapshot.in_flight, 0, "probe cancellation must release {id}");
-        }
     }
     assert_eq!(peer.probe_release.available_permits(), 0);
     assert!(health
@@ -484,12 +467,6 @@ async fn witness(startup: bool) {
             .unwrap()
             .error_chain
             .is_none());
-    }
-    for id in &ids {
-        let snapshot = controller.snapshot(&format!("{id}:key"));
-        if let Some(snapshot) = snapshot {
-            assert_eq!(snapshot.in_flight, 0, "terminal transport must release {id}");
-        }
     }
     eprintln!("focused fairness: startup={startup} exact deadlines unchanged; manager slots=4; terminal transports=0 acquisitions=0");
     upstream.abort();

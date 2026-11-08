@@ -148,11 +148,6 @@ pub(crate) fn provider_runtime_failure(
                 || routecodex_v3_error::is_v3_provider_response_header_timeout_reason(reason)
     ) {
         V3_TRANSIENT_TRANSPORT_HANG_CODE.to_string()
-    } else if matches!(&error, V3ProviderError::ConcurrencyBusy { .. }) {
-        // Local connection-slot capacity busy: the typed policy keeps this
-        // identity health-neutral and must not cool a healthy provider. The
-        // category needs its own code so the policy can classify it.
-        "provider_concurrency_busy".to_string()
     } else {
         // Category comes from the typed provider error so a transport failure and
         // a provider response-body failure stay distinct instead of collapsing

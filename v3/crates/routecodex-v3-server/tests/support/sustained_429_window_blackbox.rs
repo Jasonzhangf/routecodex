@@ -172,7 +172,7 @@ async fn assert_ordinary_429_lifecycle(direct: bool, failed_probe_first: bool) {
         "quota-window-fallback",
     )
     .await;
-    let mut manifest = concurrency_switch_manifest_with_mode(
+    let mut manifest = two_provider_failover_manifest_with_execution_mode(
         &first_url,
         &second_url,
         if direct {
@@ -193,7 +193,7 @@ async fn assert_ordinary_429_lifecycle(direct: bool, failed_probe_first: bool) {
             }
         }
     }
-    let first_id = format!("concurrency_first_{}", manifest.servers["a"].port);
+    let first_id = format!("failover_first_{}", manifest.servers["a"].port);
     let handle = routecodex_v3_server::spawn_v3_server_aggregate(manifest)
         .await
         .unwrap();
