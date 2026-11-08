@@ -315,18 +315,12 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         json_observability.routing_group_id.as_deref(),
         Some("controlled")
     );
-    // OPEN CONTRACT CONFLICT (not a stale expectation): the manifest declares the
-    // `client_responses` pool for this request, so the declared intent is that the
-    // request lands in it. The base virtual router builds a plan tier only when a
-    // pool id equals a route signal or declares it in `required_capabilities`, and
-    // `pool_matches` never consults `match.models`, so a models/protocol-only pool
-    // is unreachable and the declared `default` fallback serves the request
-    // instead. The assertion keeps the declared intent so this test stays a
-    // witness of the gap (owner: router/config design), and the same gap is the
-    // cause of `model_pool_wins_over_default_even_with_custom_tool_declaration`.
+    // Ordinary non-provider.model requests use current-turn classification. A
+    // `match.models` declaration does not create a second model-driven route;
+    // the required default pool is the no-match floor for this request.
     assert_eq!(
         json_observability.pool_id.as_deref(),
-        Some("client_responses")
+        Some("default")
     );
     assert_eq!(
         json_observability.provider_id.as_deref(),
