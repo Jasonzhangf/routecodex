@@ -459,8 +459,16 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         model_id: event.candidate.model_id.clone(),
         status: event.status,
         error_type: event.error_type.clone(),
-        external_error_kind: None,
-        external_error_code: event.error_type.clone(),
+        external_error_kind: event
+            .diagnostic_source
+            .external_error
+            .as_ref()
+            .map(|external| relay_external_kind_label(&external.kind).to_string()),
+        external_error_code: event
+            .diagnostic_source
+            .external_error
+            .as_ref()
+            .and_then(|external| external.code.clone()),
         // The real upstream HTTP status; `None` for a response-less failure.
         external_error_status: event.provider_status,
         internal_code: None,
@@ -476,6 +484,15 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         wait_ms: event.wait_ms,
         diagnostic_source: Some(event.diagnostic_source.clone()),
         failed_attempt_evidence: event.failed_attempt_evidence.clone(),
+    }
+}
+
+fn relay_external_kind_label(kind: &V3ExternalErrorKind) -> &'static str {
+    match kind {
+        V3ExternalErrorKind::Provider => "provider",
+        V3ExternalErrorKind::Upstream => "upstream",
+        V3ExternalErrorKind::Client => "client",
+        V3ExternalErrorKind::Transport => "transport",
     }
 }
 
