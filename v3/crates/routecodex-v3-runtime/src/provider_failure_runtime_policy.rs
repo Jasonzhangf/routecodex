@@ -1013,7 +1013,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             ) {
                 context
                     .provider_health
-                    .spawn_v3_background_cooldown_rescue_round(context.manifest, expanded);
+                    .submit_v3_background_cooldown_rescue_round(context.manifest, expanded);
             }
         }
     }

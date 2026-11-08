@@ -38,7 +38,7 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
                 // immediately; the identities' own probes are scheduled as a
                 // detached control-plane observation so a later request can use
                 // them again.
-                health.spawn_v3_background_cooldown_rescue_round(
+                health.submit_v3_background_cooldown_rescue_round(
                     manifest,
                     expanded,
                 );

@@ -4,6 +4,22 @@ pub(crate) struct V3CooldownRescueProbeOutcome {
     pub(crate) did_work: bool,
 }
 
+/// Whether the aggregate probe owner took custody of one rescue round.
+///
+/// The request path only reports custody; it never waits on the round. A round
+/// that no owner accepted is dropped, never spawned: provider probe resource
+/// lifetime belongs to the Server-owned aggregate, which cancels and joins what
+/// it retains.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum V3CooldownRescueSubmission {
+    /// The owner admitted the round into its managed probe queue.
+    Initiated,
+    /// The owner's probe capacity or queue is full; nothing was scheduled.
+    CapacityUnavailable,
+    /// No aggregate owner is registered or its sender is closed.
+    OwnerUnavailable,
+}
+
 /// Upper bound for one background rescue round (control plane only).
 ///
 /// v31 keeps requests independent of provider lifecycle: a request never waits
@@ -15,11 +31,11 @@ pub(crate) struct V3CooldownRescueProbeOutcome {
 pub(crate) const V3_COOLDOWN_RESCUE_ROUND_BUDGET: std::time::Duration =
     std::time::Duration::from_millis(750);
 
-/// Delay before a spawned rescue round starts probing.
+/// Delay before a submitted rescue round starts probing.
 ///
 /// A probe and a business request of the same complete
 /// provider/interface/model/auth-key identity share one concurrency lease. The
-/// request that scheduled the round may itself send business to that identity
+/// request that submitted the round may itself send business to that identity
 /// in the very next steps, so the control-plane observation waits out a short
 /// grace period instead of contending for the lease its own request needs. The
 /// grace is a scheduling detail of the observation; no request waits on it.
@@ -193,31 +209,49 @@ impl V3ProviderFailureRuntimeHealth {
         )
     }
 
-    /// Schedule the bounded rescue round as a detached control-plane
-    /// observation.
+    /// Hand the bounded rescue round to the aggregate probe owner.
     ///
-    /// The caller never awaits it: the round cannot gate target selection, delay
-    /// or replace a business send, retry an attempt or suppress a typed
-    /// failure. Its only effect is the ordinary provider-health state that a
-    /// later selection observes, so a request that scheduled it keeps its own
-    /// immediate outcome.
-    pub(crate) fn spawn_v3_background_cooldown_rescue_round(
+    /// Provider probe tasks are Server-owned: the aggregate probe lifecycle
+    /// retains every managed probe, cancels what is still pending on shutdown and
+    /// joins it, so a request path must never create a probe task of its own.
+    /// Custody is therefore taken synchronously — owner lookup, a capacity slot
+    /// and queue admission — and the return value reports whether the owner
+    /// accepted the round. The caller never awaits it: the round cannot gate
+    /// target selection, delay or replace a business send, retry an attempt or
+    /// suppress a typed failure. Its only effect is the ordinary provider-health
+    /// state that a later selection observes, so a request that submitted it
+    /// keeps its own immediate outcome.
+    pub(crate) fn submit_v3_background_cooldown_rescue_round(
         &self,
         manifest: &V3Config05ManifestPublished,
         expanded: &V3Target09CandidateSetExpanded,
-    ) {
+    ) -> V3CooldownRescueSubmission {
+        let owner = match self.probe_owner.lock() {
+            Ok(owner) => owner.clone(),
+            // No custody can be taken while the owner lock is poisoned. Nothing
+            // is scheduled and the request outcome is untouched.
+            Err(_) => return V3CooldownRescueSubmission::OwnerUnavailable,
+        };
+        // No aggregate registered (or it already closed its sender): there is no
+        // owner to take the round, so it is dropped instead of spawned.
+        let Some(owner) = owner.filter(|owner| !owner.sender.is_closed()) else {
+            return V3CooldownRescueSubmission::OwnerUnavailable;
+        };
+        let Ok(slot) = owner.capacity.clone().try_acquire_owned() else {
+            return V3CooldownRescueSubmission::CapacityUnavailable;
+        };
         let health = self.clone();
         let manifest = manifest.clone();
         let expanded = expanded.clone();
-        tokio::spawn(async move {
+        let work: V3ManagedProbe = Box::pin(async move {
+            // The owner's slot is held for exactly the life of this round.
+            let _slot = slot;
             tokio::time::sleep(V3_COOLDOWN_RESCUE_BACKGROUND_DELAY).await;
             // The observation reads the clock when it actually runs: a decision
             // made against the pre-grace timestamp could already be stale for a
             // cooldown that expired inside the grace.
-            let Ok(now_ms) =
-                v3_relay_provider_policy_now_epoch_ms()
-            else {
-                return;
+            let Ok(now_ms) = v3_relay_provider_policy_now_epoch_ms() else {
+                return Ok(V3ProbeCompletion::Superseded);
             };
             let _ = health
                 .run_v3_bounded_cooldown_rescue_round(
@@ -227,7 +261,19 @@ impl V3ProviderFailureRuntimeHealth {
                     tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET,
                 )
                 .await;
+            // The round is an observation only: it never reports a business
+            // outcome and never becomes a health verdict of its own.
+            Ok(V3ProbeCompletion::Superseded)
         });
+        match owner.sender.try_send(work) {
+            Ok(()) => V3CooldownRescueSubmission::Initiated,
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                V3CooldownRescueSubmission::CapacityUnavailable
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                V3CooldownRescueSubmission::OwnerUnavailable
+            }
+        }
     }
 
     pub(crate) async fn run_exhaustion_rescue_probes(

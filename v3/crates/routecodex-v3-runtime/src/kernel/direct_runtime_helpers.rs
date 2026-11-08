@@ -940,7 +940,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
             // observation: this attempt keeps its truthful typed failure
             // immediately, and a later selection may use the identity again once
             // its own probe has recovered it.
-                context.provider_health.spawn_v3_background_cooldown_rescue_round(
+                context.provider_health.submit_v3_background_cooldown_rescue_round(
                     context.manifest,
                     expanded,
                 );

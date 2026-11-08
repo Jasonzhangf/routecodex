@@ -520,7 +520,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         // rescue probe is scheduled as a detached control-plane
                         // observation; this request keeps its truthful typed
                         // exhaustion immediately.
-                            provider_health.spawn_v3_background_cooldown_rescue_round(
+                            provider_health.submit_v3_background_cooldown_rescue_round(
                                 manifest,
                                 &exhausted_expanded,
                             );
@@ -943,7 +943,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         // control-plane observation, never awaited here.
                         if !cooldown_rescue_attempted {
                             cooldown_rescue_attempted = true;
-                                provider_health.spawn_v3_background_cooldown_rescue_round(
+                                provider_health.submit_v3_background_cooldown_rescue_round(
                                     manifest,
                                     &retained_expanded,
                                 );
