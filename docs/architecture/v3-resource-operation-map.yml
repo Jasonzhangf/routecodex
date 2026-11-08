@@ -3236,11 +3236,11 @@ resources:
     owner_node: V3OperationRunnerPlanExecution
     identity: [requestId, invocationId, attemptId]
     semantic_contract:
-      storage_owner: V3OperationRunnerPlanExecution persists one request-local exclusion set of genuine provider failures; no capacity-busy provenance exists because request-path capacity admission was removed (requirements ledger v34), and this is not a process-global store or a second admission controller
-      mutation_owner: typed Error action consumption adds non-capacity exclusions only; no capacity admission or post-transport capacity readmission exists to add busy candidate keys before captured-target reselection
-      provenance_rule: an exclusion never comes from cooldown, capability mismatch, an initial exclusion, or attempted_candidates, and no capacity-busy evidence exists
-      classification: pure all-busy requires a nonempty captured Target09 set, every captured key busy, and every exclusion busy; any other exclusion cause leaves generic mixed exhaustion
-      request_boundary: exclusion and busy provenance never enter request, response, provider, client, MetadataCenter, or Debug payloads
+      storage_owner: V3OperationRunnerPlanExecution persists one request-local exclusion set of genuine provider failures; request-path capacity admission was removed (requirements ledger v34), so this is not a process-global store or a second admission controller
+      mutation_owner: typed Error action consumption adds genuine-failure exclusions only; no capacity admission or post-transport capacity readmission adds candidate keys before captured-target reselection
+      provenance_rule: an exclusion comes only from a genuine provider failure in the current request; cooldown, capability mismatch, initial exclusions, and attempted_candidates never create an exclusion
+      classification: 'captured-target exhaustion stays generic: a fully excluded captured set retains TargetPoolExhausted, while mixed or partially eligible exhaustion retains selected_target_exhausted; no pure-all-busy or capacity-busy classification exists'
+      request_boundary: exclusion provenance never enters request, response, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [RuntimeErrorActionConsumed, V3OperationRunnerPlanExecution]
     allowed_readers: [V3OperationRunnerPlanExecution]
     forbidden_writers: [V3OperationRunnerResolveTarget, routecodex-v3-server, routecodex-v3-debug]
