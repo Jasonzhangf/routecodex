@@ -722,19 +722,23 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 );
             let transport_result = match send_attempt_control {
                 Ok(attempt_control) => {
-                    let cleanup_control = attempt_control.clone();
+                    let mut cleanup = attempt_control.as_ref().map(
+                        routecodex_v3_provider_responses::V3ProviderTransportAttemptCleanup::new,
+                    );
                     match tokio::time::timeout_at(
                         send_deadline,
                         transport.send_observed(transport_request, attempt_control),
                     )
                     .await
                     {
-                        Ok(result) => result,
+                        Ok(result) => {
+                            if let Some(cleanup) = cleanup.as_mut() {
+                                cleanup.disarm();
+                            }
+                            result
+                        }
                         Err(_elapsed) => {
                             if residence_is_binding {
-                                crate::kernel::v3_discard_provider_transport_attempt(
-                                    cleanup_control.as_ref(),
-                                );
                                 let failure = provider_runtime_failure(
                                     V3ProviderError::Transport {
                                         request_id: input.request_id.clone(),

@@ -7547,7 +7547,7 @@ chains:
     semantic_contract:
       - Responses Relay runtime uses the surviving relay plan-execution entry for selected Target10 resolution after its route facts are captured, carried by its refill owner execute_v3_responses_relay_runtime_inner_with_refill.
       - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
-      - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
+      - The selected concrete provider is handed to Relay Provider transport exactly once; no admission lease exists, so Runtime has nothing to release before terminal projection.
       - Exhaustion can no longer be caused by capacity; terminal projection carries TargetPoolExhausted for a fully excluded captured set and selected_target_exhausted for a mixed set, and never a capacity-busy source.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
@@ -7692,8 +7692,8 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
     semantic_contract:
-      - build_v3_provider_global_probe_target is the probe-only Runtime reader that copies the typed provider concurrency capability from the published manifest into the probe target.
-      - The probe target preserves acquireTimeoutMs for Responses, OpenAI Chat, Anthropic, and Gemini transport builders; this control value never enters provider, client, MetadataCenter, or Debug payloads.
+      - build_v3_provider_global_probe_target is the probe-only Runtime reader that builds the probe target from the published manifest; the retired provider concurrency capability is no longer copied because it no longer exists (requirements ledger v34).
+      - The probe target carries the provider's declared request_timeout_ms and sse_first_frame_timeout_ms into the Responses, OpenAI Chat, Anthropic, and Gemini transport builders; these control values never enter provider, client, MetadataCenter, or Debug payloads.
 
   - step_id: v3-provider-global-probe-http-status
     from_node: V3ProviderGlobalProbeExecution
