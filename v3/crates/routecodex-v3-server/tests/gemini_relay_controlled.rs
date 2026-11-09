@@ -212,7 +212,7 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
     assert!(!rest.contains("[DONE]"));
     let _sse_capture = captures_rx.recv().await.unwrap();
 
-    let error_result = client
+    let error_response = client
         .post(&endpoint)
         .header("x-session-id", "gemini-controlled-test-session")
         .header("x-conversation-id", "gemini-controlled-test-conversation")
@@ -221,19 +221,28 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
             "stream":false
         }))
         .send()
-        .await;
-    // The provider's real 429 is provider-private. The client boundary is a broken
-    // transport, never the upstream status or the converted error body.
-    match error_result {
-        Ok(response) => panic!(
-            "a provider-terminal 429 must not reach the Gemini client, got {}",
-            response.status()
-        ),
-        Err(error) => assert!(
-            error.is_request(),
-            "expected an aborted Gemini client transport: {error}"
-        ),
-    }
+        .await
+        .expect("the single eligible candidate's real 429 must reach the Gemini client");
+    // This manifest declares one distinct identity, so the v27/v29 last-eligible
+    // passthrough applies: the real provider status and body cross to the Gemini
+    // client with only the required protocol projection. A synthesized 502, a
+    // transport break, or a fabricated success is not allowed here. Multi-candidate
+    // exhaustion keeps its own no-client-error contract in its own fixture.
+    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let error_content_type = error_response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        error_content_type.starts_with("application/json"),
+        "the last eligible candidate's provider content type must pass through: {error_content_type}"
+    );
+    assert_eq!(
+        error_response.json::<Value>().await.unwrap(),
+        json!({"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}}),
+        "the last eligible candidate's original provider body must pass through unchanged"
+    );
     let _error_capture = captures_rx.recv().await.unwrap();
     while tokio::time::timeout(Duration::from_millis(25), captures_rx.recv())
         .await
