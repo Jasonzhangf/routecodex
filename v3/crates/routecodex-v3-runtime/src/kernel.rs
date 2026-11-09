@@ -1605,6 +1605,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .is_some_and(|sink| sink.is_committed())
                             {
                                 drop(provider_action_permit.take());
+                                if let Some(original_source) = fault.original_source.as_ref() {
+                                    if let Err(node) = record_post_commit_direct_provider_failure(
+                                        &provider_health,
+                                        &direct_failure_session_scope,
+                                        &policy.target,
+                                        original_source,
+                                    ) {
+                                        trace.push(node);
+                                    }
+                                }
                                 return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
                                     Err(fault),
                                     last_external_http.clone(),
@@ -1637,6 +1647,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .is_some_and(|sink| sink.is_committed())
                             {
                                 drop(provider_action_permit.take());
+                                if let Err(node) = record_post_commit_direct_provider_failure(
+                                    &provider_health,
+                                    &direct_failure_session_scope,
+                                    &policy.target,
+                                    &source,
+                                ) {
+                                    trace.push(node);
+                                }
                                 return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
                                     Ok(source),
                                     last_external_http.clone(),
