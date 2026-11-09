@@ -445,17 +445,31 @@ async fn public_recovery_witness_with_generation(
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["choices"][0]["message"]["content"], "step5 complete");
     if let Some(earlier_business) = earlier_business {
-        // Actual pinned business 403 passes through typed Error/Provider health
-        // before this request-local close. Probe A remains authenticated and held.
+        // This request pins the single `cooled` candidate, so the single/last
+        // eligible candidate rule applies: the provider's own real 403 status and
+        // body terminate the request either as a byte-less transport close or as a
+        // verbatim passthrough. Only a proxy-generated envelope or a fabricated
+        // success is forbidden. Probe A remains authenticated and held.
         peer.business_release.add_permits(1);
         let bytes = timeout(Duration::from_secs(2), earlier_business)
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            bytes.is_empty(),
-            "provider 403 must not become client error data"
-        );
+        if !bytes.is_empty() {
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(
+                text.starts_with("HTTP/1.1 403"),
+                "the real provider 403 must pass through verbatim: {text}"
+            );
+            assert!(
+                text.contains("owned earlier business forbidden"),
+                "the provider's own 403 body must pass through verbatim: {text}"
+            );
+            assert!(
+                !text.contains("step5 complete") && !text.contains("routecodex"),
+                "no fabricated success and no proxy envelope: {text}"
+            );
+        }
         assert_eq!(peer.probe_release.available_permits(), 0);
         eprintln!("same-identity earlier business403 processed after held probe capture; healthy content already complete");
     }
