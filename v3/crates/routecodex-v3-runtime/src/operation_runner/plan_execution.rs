@@ -3,7 +3,7 @@ use crate::hub_v1::{V3HubEntryProtocol, V3HubExecutionMode};
 use crate::nodes::V3Execution11ProtocolDecisionMode;
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_candidates_from_opaque_hit, select_v3_target_with_session_then_global,
-    V3ProviderFailureRuntimeHealth,
+    v3_pre_exhaustion_rescue_round_for_selected, V3ProviderFailureRuntimeHealth,
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_config::V3Config05ManifestPublished;
@@ -214,6 +214,24 @@ impl PlanExecutionOperator {
                 }
             }
         };
+        if matches!(self.phase, V3PlanExecutionPhase::AdmitAtExecution) {
+            if let Some(rescue_round) = v3_pre_exhaustion_rescue_round_for_selected(
+                &expanded,
+                &self.failure_session_scope,
+                &self.provider_health,
+                &self.request_local_excluded_candidates,
+                self.now_ms,
+                &selected,
+            ) {
+                // The request keeps its selected candidate and proceeds to
+                // transport immediately. The aggregate owner retains the
+                // detached probe round and applies its result only to later
+                // provider visibility.
+                let _ = self
+                    .provider_health
+                    .submit_v3_background_cooldown_rescue_round(&self.manifest, &rescue_round);
+            }
+        }
         match self.decide_execution_mode(selected) {
             Ok(decision) if matches!(self.phase, V3PlanExecutionPhase::PreplanWithoutAdmission) => {
                 PlanExecutionOperatorOutput::Preplanned {

@@ -46,6 +46,105 @@ pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &
     format!("{provider_id}:{auth_alias}")
 }
 
+/// Build the detached observation round for cooled candidates that were skipped
+/// by the current request's normal selection. This is control-plane work only:
+/// the caller submits it after selecting an immediately usable candidate and
+/// never waits for the probe before sending business traffic.
+pub(crate) fn v3_pre_exhaustion_rescue_round_for_selected(
+    expanded: &V3Target09CandidateSetExpanded,
+    failure_session_scope: &V3ProviderFailureSessionScope,
+    provider_health: &V3ProviderFailureRuntimeHealth,
+    request_local_excluded_candidates: &BTreeSet<String>,
+    now_ms: u64,
+    selected: &V3Target10ConcreteProviderSelected,
+) -> Option<V3Target09CandidateSetExpanded> {
+    let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
+    let availability = provider_health.session_bound_availability(failure_session_scope);
+    let available_count = expanded
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            let key = v3_relay_provider_candidate_key(candidate);
+            !request_local_excluded_candidates.contains(&key)
+                && availability
+                    .availability_for_interface(
+                        &candidate.provider_id,
+                        &candidate.interface_id,
+                        Some(&candidate.auth_alias),
+                        Some(&candidate.model_id),
+                        now_ms,
+                    )
+                    .available
+        })
+        .count();
+    let cooled_peer_exists = expanded.candidates.iter().any(|candidate| {
+        let key = v3_relay_provider_candidate_key(candidate);
+        key != selected_key
+            && !request_local_excluded_candidates.contains(&key)
+            && availability
+                .availability_for_interface(
+                    &candidate.provider_id,
+                    &candidate.interface_id,
+                    Some(&candidate.auth_alias),
+                    Some(&candidate.model_id),
+                    now_ms,
+                )
+                .blocked_scopes
+                .iter()
+                .any(|scope| scope.contains("cooldown"))
+    });
+    let selected_tier =
+        V3TargetInterpreter::route_tier_index_for_candidate(&selected.route, &selected.candidate);
+    let candidates = if selected_tier == usize::MAX {
+        Vec::new()
+    } else {
+        let preceding = expanded
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                let key = v3_relay_provider_candidate_key(candidate);
+                V3TargetInterpreter::route_tier_index_for_candidate(&selected.route, candidate)
+                    < selected_tier
+                    && !request_local_excluded_candidates.contains(&key)
+                    && availability
+                        .availability_for_interface(
+                            &candidate.provider_id,
+                            &candidate.interface_id,
+                            Some(&candidate.auth_alias),
+                            Some(&candidate.model_id),
+                            now_ms,
+                        )
+                        .blocked_scopes
+                        .iter()
+                        .any(|scope| scope.contains("cooldown"))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !preceding.is_empty() {
+            preceding
+        } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
+            expanded
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    !request_local_excluded_candidates
+                        .contains(&v3_relay_provider_candidate_key(candidate))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        }
+    };
+    (!candidates.is_empty()).then(|| V3Target09CandidateSetExpanded {
+        route: expanded.route.clone(),
+        candidates,
+        provider_priority_schedule: expanded.provider_priority_schedule.clone(),
+        route_pool_tier_priorities: expanded.route_pool_tier_priorities.clone(),
+        sticky_pool_members: expanded.sticky_pool_members.clone(),
+    })
+}
+
 impl V3ProviderFailureRuntimeHealth {
     pub(crate) fn target_availability_generation(&self) -> u64 {
         self.store.availability_generation()
