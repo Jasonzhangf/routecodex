@@ -27,6 +27,8 @@ pub struct Peer {
     pub holders_release: Semaphore,
     pub fifth_entered: Semaphore,
     pub fifth_release: Semaphore,
+    pub sibling_probes_entered: Semaphore,
+    pub sibling_probes_release: Semaphore,
     pub ready: AtomicBool,
 }
 
@@ -72,10 +74,18 @@ async fn serve(
     }
     if marker == "ping; reply pong" {
         assert_eq!(body["model"], "recovery");
-        assert_eq!(
-            index, 4,
-            "the four earlier provider/auth budgets must remain held"
-        );
+        if index != 4 {
+            // The request path no longer carries a capacity permit, so a probe
+            // is not gated by another transport holding the same identity. Keep
+            // this sibling's probe open for as long as its transport is held:
+            // the free fifth identity must still receive its own admitted probe.
+            peer.sibling_probes_entered.add_permits(1);
+            peer.sibling_probes_release.acquire().await.unwrap().forget();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error":{"message":"held sibling probe released"}})),
+            );
+        }
         peer.fifth_entered.add_permits(1);
         peer.fifth_release.acquire().await.unwrap().forget();
         return (StatusCode::OK, Json(json!({"actual":"2xx probe success"})));
@@ -93,6 +103,8 @@ pub async fn peer() -> (Arc<Peer>, String, JoinHandle<()>) {
         holders_release: Semaphore::new(0),
         fifth_entered: Semaphore::new(0),
         fifth_release: Semaphore::new(0),
+        sibling_probes_entered: Semaphore::new(0),
+        sibling_probes_release: Semaphore::new(0),
         ready: AtomicBool::new(false),
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
