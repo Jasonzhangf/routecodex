@@ -207,8 +207,8 @@ for (const [source, pattern, label] of [
   ],
   [
     keepaliveWiki,
-    /Error06 SSE starts with `event: error`/,
-    "HTTP keepalive wiki must preserve Error06 first-frame polarity",
+    /Provider failure keeps Error01-06 internal[\s\S]*never emits `event: error`/,
+    "HTTP keepalive wiki must keep provider failure internal with no client error event",
   ],
   [
     tests,

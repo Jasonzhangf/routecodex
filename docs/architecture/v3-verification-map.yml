@@ -1161,8 +1161,10 @@ features:
   - routecodex-v3-cli config check and server status tests
   - routecodex-v3-debug pending endpoint event construction tests by server integration
   - routecodex-v3-error six-node pending endpoint projection tests by server integration
-  - post-commit Responses SSE failure traverses Error01-06 and projects one standard
-    error event before clean EOF; it never becomes a Hyper body decode error
+  - post-commit Responses SSE provider failure traverses Error01-06 internally and
+    ends the committed channel with a detectable transport break without a client
+    error frame, provider status or body, clean EOF, fabricated completion, reroute,
+    or rebuild; it never becomes a Hyper body decode error
   required_contract:
   - no TypeScript in V3 source scan
   - no config file IO outside routecodex-v3-config
@@ -1821,7 +1823,8 @@ features:
   - loopback upstream receives exactly one POST /v1/chat/completions per valid request
   - Server JSON response preserves controlled provider semantics
   - Server does not commit SSE response headers or frames before the controlled provider attempt reaches a valid terminal
-  - Server 429 response exposes Error01-06 and does not wrap success
+  - Server 429 failures expose Error01-06 internally without a client status,
+    error payload, error frame, or success wrapper
   - OpenAI Chat Relay has no secondary SSE accept worker and never serializes Error06 JSON as a normal Chat completion data frame
   - the Relay collector handoff after a partial provider frame and typed ClientDisconnect retains its typed Error01 ClientDisconnect source, proves the partial frame was observed, keeps the primary health-neutral, and starts no additional provider attempt while a second eligible candidate exists; the untyped-transport counterexample after the same partial frame cools the primary, reselects the eligible secondary, and delivers the secondary payload
   - the public Server socket-drop path separately aborts the runtime outcome task, releases the request-local attempt, and starts no additional provider attempt; it does not claim to exercise the typed codec-to-collector handoff
@@ -2319,7 +2322,8 @@ features:
   - loopback upstream receives exactly one POST /v1beta/models/gemini-wire:generateContent per valid request
   - Server JSON response preserves controlled Gemini candidates and usage metadata
   - Server SSE uses Body::from_stream and delivers first frame before controlled terminal delay
-  - Server 429 response exposes Error01-06 and does not wrap success
+  - Server 429 failures expose Error01-06 internally without a client status,
+    error payload, error frame, or success wrapper
   - rejected metadata_center request produces zero upstream captures
   - Config binding marks gemini Direct implemented with the Gemini Direct Server owner
   - Virtual Router recognizes dynamic /v1beta/models/:model/generateContent as gemini entry protocol
