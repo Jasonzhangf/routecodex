@@ -6712,6 +6712,131 @@ async fn responses_relay_provider_503_never_reaches_the_client() {
 }
 
 #[tokio::test]
+async fn responses_relay_503_failure_derives_status_external_classification() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("35aa0d1-relay-503-status-external");
+    let (failure_base_url, failure_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    let (success_base_url, mut success_capture, success_shutdown) =
+        start_controlled_openai_chat_upstream().await;
+    std::env::set_var("V3_RELAY_503_FAIL_KEY", "secret-relay-503-fail");
+    std::env::set_var("V3_RELAY_503_OK_KEY", "secret-relay-503-ok");
+    let port_a = free_port();
+    let port_b = free_port();
+    let source = format!(
+        r#"
+version = 3
+{HUB_V1_TEST_DECLARATION}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{HUB_V1_TEST_SERVER_EXECUTION}
+[providers.relay_fail]
+type = "openai_chat"
+base_url = "{failure_base_url}"
+default_model = "relay-fail"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_RELAY_503_FAIL_KEY" }}] }}
+[providers.relay_fail.models.relay-fail]
+wire_name = "wire-relay-fail"
+[providers.relay_ok]
+type = "openai_chat"
+base_url = "{success_base_url}"
+default_model = "relay-ok"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_RELAY_503_OK_KEY" }}] }}
+[providers.relay_ok.models.relay-ok]
+wire_name = "wire-relay-ok"
+[forwarders.relay503]
+model = "client-test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "relay_fail", model = "relay-fail", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "relay_ok", model = "relay-ok", key = "key", priority = 1 }}
+]
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "relay503", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "relay503", priority = 1 }}]
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    // Negative: the real relay provider 503 is provider-private and must not
+    // become a client error payload. Positive: the typed failure switches to
+    // the healthy candidate and the same client request completes.
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay 503 status classification",
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{response:?}");
+    let body: Value = response.json().await.unwrap();
+    assert!(body.get("error").is_none(), "{body}");
+    let ok_capture = success_capture.recv().await.unwrap();
+    assert_eq!(ok_capture.body["model"], "wire-relay-ok");
+
+    let evidence = wait_for_concurrency_failure_source(
+        &home_guard.codex_samples_root(handle.listeners[0].addr.port()),
+    )
+    .await;
+    let attempts = evidence["attempts"]
+        .as_array()
+        .unwrap_or_else(|| panic!("failure evidence must carry attempts: {evidence}"));
+    let attempt = attempts.first().unwrap_or_else(|| {
+        panic!("failure evidence must carry a real upstream attempt: {evidence}")
+    });
+    assert_eq!(attempt["status"], 503, "{attempt}");
+    assert_eq!(attempt["provider_status"], 503, "{attempt}");
+    assert_eq!(attempt["external_error_code"], "HTTP_503", "{attempt}");
+    assert_eq!(
+        attempt["diagnostic_source"]["code"], "provider_http_503",
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["diagnostic_source"]["external_error"]["code"], "HTTP_503",
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["diagnostic_source"]["external_error"]["status"], 503,
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+        "{attempt}"
+    );
+
+    std::env::remove_var("V3_RELAY_503_FAIL_KEY");
+    std::env::remove_var("V3_RELAY_503_OK_KEY");
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
+    success_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 // feature_id: v3.responses_inbound_websocket_proxy
 async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -9947,15 +10072,7 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
                 assert_eq!(attempt["status"], 503, "{attempt}");
                 assert_eq!(attempt["provider_status"], 503, "{attempt}");
                 assert_eq!(
-                    attempt["diagnostic_source"]["code"],
-                    if matches!(
-                        attempt["provider_id"].as_str(),
-                        Some("direct_second" | "direct_final")
-                    ) {
-                        "provider_http_503"
-                    } else {
-                        "provider_error"
-                    },
+                    attempt["diagnostic_source"]["code"], "provider_http_503",
                     "{attempt}"
                 );
                 assert_eq!(
