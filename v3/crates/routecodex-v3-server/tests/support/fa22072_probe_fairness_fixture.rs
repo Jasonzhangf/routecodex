@@ -30,6 +30,11 @@ pub struct Peer {
     pub ready: AtomicBool,
 }
 
+/// Width of the current-turn input-token band that makes each fairness identity
+/// pool selectable on its own. Request `index` carries `index` bands of filler
+/// so exactly one identity pool window matches it.
+pub const FAIRNESS_BAND_TOKENS: u64 = 512;
+
 pub fn business(model: &str) -> Value {
     json!({"id":"fairness-complete", "object":"chat.completion", "model":model,
         "choices":[{"index":0,"message":{"role":"assistant","content":"complete fifth payload including tail", "tool_calls":[{"id":"paired-call","type":"function","function":{"name":"retain","arguments":"{\"tail\":true}"}}]},"finish_reason":"tool_calls"}],
@@ -142,12 +147,17 @@ max_context_tokens = 1000000
 "#
     ));
     // Cooldown setup needs an eligible alternative. A singleton pin failure is
-    // deliberately health-neutral under the last-candidate contract.
-    for id in &ids {
+    // deliberately health-neutral under the last-candidate contract. A declared
+    // `match.models` name is not an ordinary-request selector, so every identity
+    // pool is selected by the plain user-turn `thinking` signal together with a
+    // disjoint current-turn input-token band that the caller pins per request.
+    for (index, id) in ids.iter().enumerate() {
+        let low = index as u64 * FAIRNESS_BAND_TOKENS;
+        let high = low + FAIRNESS_BAND_TOKENS - 1;
         source.push_str(&format!(r#"
 [route_groups.fairness.pools.{id}]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 20, models = ["{id}-failure"] }}
+match = {{ precedence = 20, required_capabilities = ["thinking"], min_input_tokens = {low}, max_input_tokens = {high} }}
 targets = [{{ kind = "provider_model", provider = "{id}", model = "recovery", key = "key", priority = 10 }}, {{ kind = "provider_model", provider = "fairness_spare", model = "recovery", key = "key", priority = 1 }}]
 "#));
     }
