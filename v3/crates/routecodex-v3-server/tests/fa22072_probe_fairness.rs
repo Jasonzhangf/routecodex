@@ -98,7 +98,24 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         5
     );
     drop(captures);
-    let before = pool(&client, &base).await;
+    // The declared threshold-one policy commits each identity's cooldown only
+    // when its provider precool observation completes, and that observation is
+    // driven by the probe lane. Wait for the committed ladder so the "held"
+    // baseline cannot race the asynchronous commit.
+    let before = timeout(Duration::from_secs(10), async {
+        loop {
+            let snapshot = pool(&client, &base).await;
+            if ids.iter().all(|id| {
+                exact(&snapshot, id)
+                    .is_some_and(|entry| entry["failure_count"].as_u64().unwrap_or(0) >= 1)
+            }) {
+                break snapshot;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the declared threshold-one cooldown must commit after its precool observation");
     eprintln!("fairness genuine-failure cooldown={before}");
     for id in &ids {
         assert!(
@@ -120,18 +137,28 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         .forget();
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     peer.ready.store(true, Ordering::SeqCst);
-    let admitted = timeout(Duration::from_secs(15), peer.fifth_entered.acquire()).await;
+    // The request path carries no capacity permit any more, so the four cooled
+    // siblings are admitted on the probe lane itself instead of being denied by
+    // a held business transport. Wait until they really occupy the lane.
+    timeout(
+        Duration::from_secs(15),
+        peer.sibling_probes_entered.acquire_many(4),
+    )
+    .await
+    .expect("the four cooled siblings must be probed on their own lane")
+    .unwrap()
+    .forget();
     let during = pool(&client, &base).await;
     eprintln!(
-        "fairness held transports=4 fifth_probe_captured={} cooldown={during}",
-        admitted.is_ok()
+        "fairness held transports=4 fifth_probe_waiting={} cooldown={during}",
+        peer.fifth_entered.available_permits() == 0
     );
-    // Capacity denial must preserve failure count and the original ladder.
-    // The public projection hides expired until_ms; it must never introduce a
-    // new future deadline or restore a held provider's exact recovery model.
+    // A pending probe must preserve failure count and the original ladder. The
+    // public projection hides expired until_ms; it must never introduce a new
+    // future deadline or restore a held provider's exact recovery model.
     for id in &ids[..4] {
         let earlier = exact(&before, id).unwrap();
-        let current = exact(&during, id).expect("capacity-busy identity remains cooled");
+        let current = exact(&during, id).expect("probe-busy identity remains cooled");
         assert_eq!(current["failure_count"], earlier["failure_count"]);
         assert!(current["until_ms"].is_null() || current["until_ms"] == earlier["until_ms"]);
     }
@@ -142,6 +169,15 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         .any(|entry| entry["model_id"] == "sibling"));
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
+    assert_eq!(
+        peer.fifth_entered.available_permits(),
+        0,
+        "the free fifth identity must wait for a probe slot, not for a held transport"
+    );
+    // Free exactly one lane slot. The next probe must be the free fifth
+    // identity: a fixed due prefix may not starve it behind the four siblings.
+    peer.sibling_probes_release.add_permits(1);
+    let admitted = timeout(Duration::from_secs(15), peer.fifth_entered.acquire()).await;
     if let Ok(permit) = admitted {
         permit.unwrap().forget();
     } else {
@@ -154,7 +190,10 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         let _ = upstream.await;
         panic!("fixed due-prefix starved the free fifth identity while four real sibling transports remained held");
     }
-    assert_eq!(exact(&during, &ids[4]).unwrap()["state"], "probing");
+    assert_eq!(
+        exact(&pool(&client, &base).await, &ids[4]).unwrap()["state"],
+        "probing"
+    );
     peer.fifth_release.add_permits(1);
     timeout(Duration::from_secs(2), async {
         loop {
@@ -175,13 +214,26 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
     let after = pool(&client, &base).await;
+    // Exactly one sibling probe was released to free a lane slot. Only that
+    // identity may advance its own ladder; the three still-held siblings and
+    // the fifth identity's recovery must leave every other ladder untouched.
+    let mut advanced = 0;
     for id in &ids[..4] {
-        assert_eq!(
-            exact(&after, id).unwrap()["failure_count"],
-            exact(&before, id).unwrap()["failure_count"]
-        );
+        let held = exact(&during, id).unwrap()["failure_count"]
+            .as_u64()
+            .unwrap();
+        let now = exact(&after, id).unwrap()["failure_count"]
+            .as_u64()
+            .unwrap();
+        if now == held + 1 {
+            advanced += 1;
+        } else {
+            assert_eq!(now, held, "only the released sibling probe may advance");
+        }
     }
+    assert_eq!(advanced, 1, "one released sibling probe, one own-ladder step");
     peer.holders_release.add_permits(4);
+    peer.sibling_probes_release.add_permits(4);
     for holder in holders {
         assert_eq!(
             timeout(Duration::from_secs(2), holder)
