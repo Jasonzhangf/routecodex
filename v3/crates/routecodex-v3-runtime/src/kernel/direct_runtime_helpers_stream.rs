@@ -316,8 +316,29 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks(
 ///   marker and ends the transport on a confirmed marker, so raw provider text
 ///   that the hook owns never reaches the client.
 /// - Requests that do not qualify keep the fully buffered path unchanged.
+fn provider_total_deadline_error_source(
+    attempt_deadline: Option<tokio::time::Instant>,
+    residence_deadline: tokio::time::Instant,
+) -> crate::shared::V3DirectSourceError {
+    if attempt_deadline.is_some_and(|attempt_deadline| attempt_deadline < residence_deadline) {
+        crate::shared::direct_plain_error(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_sse_attempt_timeout",
+            "provider SSE attempt exceeded the provider request total deadline before a client-visible business frame",
+        )
+    } else {
+        crate::shared::direct_plain_error(
+            V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            "provider_response_residence_timeout",
+            "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
+        )
+    }
+}
+
 pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
-    mut stream: V3SseAttemptStream,
+    stream: V3SseAttemptStream,
     provider_protocol: V3HubProviderWireProtocol,
     attempt_budget: crate::nodes::V3AttemptBudget,
     manifest: Option<&V3Config05ManifestPublished>,
@@ -328,7 +349,39 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     )>,
     client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
-    let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
+    collect_direct_sse_attempt_after_terminal_commit_aware(
+        stream,
+        provider_protocol,
+        attempt_budget,
+        manifest,
+        request_id,
+        response_hook,
+        client_frames,
+        None,
+    )
+    .await
+}
+
+async fn collect_direct_sse_attempt_after_terminal_commit_aware(
+    mut stream: V3SseAttemptStream,
+    provider_protocol: V3HubProviderWireProtocol,
+    attempt_budget: crate::nodes::V3AttemptBudget,
+    manifest: Option<&V3Config05ManifestPublished>,
+    request_id: Option<&str>,
+    response_hook: Option<(
+        &crate::hooks::V3HookRegistry,
+        &crate::direct_response_hooks::V3DirectDsmlContext,
+    )>,
+    client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
+    // Pre-commit provider-total deadline. `None` keeps the residence-only
+    // budget used by the buffered (no client channel) collectors.
+    attempt_deadline: Option<tokio::time::Instant>,
+) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
+    let residence_deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
+    let deadline = match attempt_deadline {
+        Some(attempt_deadline) => residence_deadline.min(attempt_deadline),
+        None => residence_deadline,
+    };
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
         .map_err(|error| {
             crate::shared::direct_plain_error(
@@ -355,16 +408,24 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             declared_tools,
         );
     loop {
-        let next = match tokio::time::timeout_at(deadline, stream.next()).await {
-            Ok(next) => next,
-            Err(_) if terminal_seen => break,
-            Err(_) => {
-                return Err(crate::shared::direct_plain_error(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_residence_timeout",
-                    "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
-                ))
+        // Commit-aware attempt budget: until a client-visible business frame
+        // commits the channel, the attempt is bounded by both the request
+        // residence deadline and the provider total, so a stalled provider
+        // still fails over. Once committed, only real transport failure or
+        // client cancellation may end the stream; delivered frames stay
+        // immutable.
+        let next = if client_committed {
+            stream.next().await
+        } else {
+            match tokio::time::timeout_at(deadline, stream.next()).await {
+                Ok(next) => next,
+                Err(_) if terminal_seen => break,
+                Err(_) => {
+                    return Err(provider_total_deadline_error_source(
+                        attempt_deadline,
+                        residence_deadline,
+                    ));
+                }
             }
         };
         let Some(frame) = next else { break };
@@ -1330,6 +1391,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
     failure_session_scope: &V3ProviderFailureSessionScope,
     attempt_budget: V3AttemptBudget,
     client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
+    attempt_deadline: Option<tokio::time::Instant>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
     let projected = wrap_direct_sse_provider_event_json_observation_stream_with_compat(
         stream,
@@ -1356,7 +1418,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         true,
         namespace_tool_identities,
     );
-    collect_direct_sse_attempt_after_terminal_with_hooks_and_client_frames(
+    collect_direct_sse_attempt_after_terminal_commit_aware(
         projected,
         compat_plan.provider_protocol,
         attempt_budget,
@@ -1364,6 +1426,7 @@ pub(crate) async fn project_and_collect_direct_sse_attempt(
         Some(request_id),
         Some((hook_registry, dsml_context)),
         client_frames,
+        attempt_deadline,
     )
     .await
 }

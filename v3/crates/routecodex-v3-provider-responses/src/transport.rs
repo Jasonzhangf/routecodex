@@ -700,6 +700,7 @@ pub trait ResponsesTransport: Send + Sync {
 #[derive(Clone)]
 pub struct ProviderResponsesTransport {
     client: reqwest::Client,
+    sse_client: reqwest::Client,
     websocket_sessions: Arc<Mutex<BTreeMap<String, SharedResponsesWebSocket>>>,
     handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker,
 }
@@ -727,6 +728,14 @@ impl ProviderResponsesTransport {
                 .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
                 .build()
                 .expect("valid V3 provider HTTP client read timeout"),
+            // SSE lifetime is governed by semantic first-word admission in the
+            // Runtime. A client read timeout would also kill an admitted stream
+            // that is already producing business output.
+            sse_client: reqwest::Client::builder()
+                .pool_idle_timeout(Duration::from_secs(V3_PROVIDER_HTTP_POOL_IDLE_TIMEOUT_SECS))
+                .tcp_keepalive(Duration::from_secs(V3_PROVIDER_HTTP_TCP_KEEPALIVE_SECS))
+                .build()
+                .expect("valid V3 provider SSE HTTP client"),
             websocket_sessions: Arc::new(Mutex::new(BTreeMap::new())),
             handoff: crate::transport_handoff::V3ProviderTransportAttemptBroker::default(),
         }
@@ -1161,15 +1170,16 @@ impl ProviderResponsesTransport {
             V3ResponsesStreamIntent::Sse => "text/event-stream",
         };
         let anthropic_messages = is_anthropic_messages_url(&url);
-        let mut request = self
-            .client
-            .post(url)
-            .header(reqwest::header::ACCEPT, accept);
+        let client = match stream_intent {
+            V3ResponsesStreamIntent::Json => &self.client,
+            V3ResponsesStreamIntent::Sse => &self.sse_client,
+        };
+        let mut request = client.post(url).header(reqwest::header::ACCEPT, accept);
         request = match auth_carrier {
             V3ProviderHttpAuthCarrier::ExistingBearer => request.bearer_auth(&secret),
             V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
         };
-        if let Some(deadline) = deadline {
+        if let (V3ResponsesStreamIntent::Json, Some(deadline)) = (stream_intent, deadline) {
             request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
         }
         if anthropic_messages {

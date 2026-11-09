@@ -1561,6 +1561,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         )
                 });
                 let client_commit_probe = attempt_client_frame_sink.clone();
+                // The provider total deadline is a pre-commit bound only: the
+                // header wait already used it at the transport call, and the
+                // collector uses it again for the uncommitted body. A
+                // committed client channel is never cut by it.
+                let sse_attempt_deadline = tokio::time::Instant::now()
+                    + crate::hub_v1::v3_relay_transport_response_timeout(
+                        manifest,
+                        &policy.target.candidate.provider_id,
+                    );
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
                         stream,
@@ -1577,6 +1586,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &direct_failure_session_scope,
                         attempt_budget.clone(),
                         attempt_client_frame_sink,
+                        Some(sse_attempt_deadline),
                     )
                     .await
                     {
