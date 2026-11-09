@@ -6047,6 +6047,12 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             "private",
         ),
+        (
+            "<thinking>private</thinking>Visible answer\n</\u{FF5C}DSML\u{FF5C}parameter>\n</\u{FF5C}DSML\u{FF5C}invoke>\n</\u{FF5C}DSML\u{FF5C}tool_calls>",
+            true,
+            "Visible answer",
+            "private",
+        ),
         ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
         ("```\n<thinking>literal</thinking>\n```", false, "```\n<thinking>literal</thinking>\n```", ""),
         ("Prefix <thinking>literal</thinking>", false, "Prefix ", "literal"),

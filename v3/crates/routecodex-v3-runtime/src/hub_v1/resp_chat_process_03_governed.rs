@@ -2583,12 +2583,38 @@ const V3_RESP03_DSML_CLOSING_BLOCK: &str = concat!(
 );
 
 /// The proven whole-item Anthropic DSML control frame: a text item that starts
-/// exactly with `<thinking>` and ends with the three-line DSML closing block.
-/// It carries no opening invocation, tool name, call ID or arguments, so it
-/// cannot authorize a synthesized call. Text that merely resembles the frame is
-/// not matched and stays representable provider text.
+/// exactly with `<thinking>`, keeps that thinking block open to the end, and
+/// ends with the three-line DSML closing block. It carries no opening
+/// invocation, tool name, call ID or arguments, so it cannot authorize a
+/// synthesized call. Text that merely resembles the frame, or a terminated
+/// thinking block followed by visible prose, is not matched and stays
+/// representable provider text.
 fn is_v3_resp03_whole_item_dsml_control_frame(text: &str) -> bool {
-    text.starts_with("<thinking>") && text.trim_end().ends_with(V3_RESP03_DSML_CLOSING_BLOCK)
+    text.starts_with("<thinking>")
+        && !text.contains("</thinking>")
+        && text.trim_end().ends_with(V3_RESP03_DSML_CLOSING_BLOCK)
+}
+
+/// A terminated thinking block whose visible residue ends with the same orphan
+/// DSML closing block. Only that trailing orphan block is control residue; the
+/// thinking body and the surrounding visible prose stay representable.
+fn is_v3_resp03_thinking_with_trailing_orphan_close(text: &str) -> bool {
+    text.starts_with("<thinking>")
+        && text.contains("</thinking>")
+        && text.trim_end().ends_with(V3_RESP03_DSML_CLOSING_BLOCK)
+}
+
+fn strip_v3_resp03_trailing_orphan_close(text: &mut String) -> bool {
+    let kept = text.trim_end().len();
+    if !text[..kept].ends_with(V3_RESP03_DSML_CLOSING_BLOCK) {
+        return false;
+    }
+    let mut end = kept - V3_RESP03_DSML_CLOSING_BLOCK.len();
+    if text[..end].ends_with('\n') {
+        end -= 1;
+    }
+    text.truncate(end);
+    true
 }
 
 fn v3_resp03_payload_has_native_tool_call(payload: &Value) -> bool {
@@ -2605,13 +2631,24 @@ fn v3_resp03_payload_has_native_tool_call(payload: &Value) -> bool {
         })
 }
 
+/// Governs one Anthropic text carrier: a proven whole-item control frame is
+/// dropped, while a terminated thinking block keeps its visible prose and only
+/// loses the trailing orphan DSML closing block.
+fn govern_v3_resp03_text_carrier_dsml_residue(text: &mut String) -> bool {
+    if is_v3_resp03_whole_item_dsml_control_frame(text) {
+        text.clear();
+        return true;
+    }
+    if is_v3_resp03_thinking_with_trailing_orphan_close(text) {
+        return strip_v3_resp03_trailing_orphan_close(text);
+    }
+    false
+}
+
 fn drop_v3_resp03_whole_item_dsml_control_frame_text(payload: &mut Value) -> bool {
     let mut changed = false;
     if let Some(Value::String(text)) = payload.get_mut("output_text") {
-        if is_v3_resp03_whole_item_dsml_control_frame(text) {
-            text.clear();
-            changed = true;
-        }
+        changed |= govern_v3_resp03_text_carrier_dsml_residue(text);
     }
     let Some(output) = payload.get_mut("output").and_then(Value::as_array_mut) else {
         return changed;
@@ -2619,18 +2656,12 @@ fn drop_v3_resp03_whole_item_dsml_control_frame_text(payload: &mut Value) -> boo
     for item in output {
         match item {
             Value::String(text) => {
-                if is_v3_resp03_whole_item_dsml_control_frame(text) {
-                    text.clear();
-                    changed = true;
-                }
+                changed |= govern_v3_resp03_text_carrier_dsml_residue(text);
             }
             Value::Object(object) => match object.get("type").and_then(Value::as_str) {
                 Some("output_text") => {
                     if let Some(Value::String(text)) = object.get_mut("text") {
-                        if is_v3_resp03_whole_item_dsml_control_frame(text) {
-                            text.clear();
-                            changed = true;
-                        }
+                        changed |= govern_v3_resp03_text_carrier_dsml_residue(text);
                     }
                 }
                 Some("message") => {
@@ -2644,16 +2675,10 @@ fn drop_v3_resp03_whole_item_dsml_control_frame_text(payload: &mut Value) -> boo
                                     continue;
                                 }
                                 if let Some(Value::String(text)) = part_object.get_mut("text") {
-                                    if is_v3_resp03_whole_item_dsml_control_frame(text) {
-                                        text.clear();
-                                        changed = true;
-                                    }
+                                    changed |= govern_v3_resp03_text_carrier_dsml_residue(text);
                                 }
                             } else if let Value::String(text) = part {
-                                if is_v3_resp03_whole_item_dsml_control_frame(text) {
-                                    text.clear();
-                                    changed = true;
-                                }
+                                changed |= govern_v3_resp03_text_carrier_dsml_residue(text);
                             }
                         }
                     }
