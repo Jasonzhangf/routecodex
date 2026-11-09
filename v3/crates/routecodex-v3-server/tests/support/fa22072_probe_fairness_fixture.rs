@@ -80,7 +80,11 @@ async fn serve(
             // this sibling's probe open for as long as its transport is held:
             // the free fifth identity must still receive its own admitted probe.
             peer.sibling_probes_entered.add_permits(1);
-            peer.sibling_probes_release.acquire().await.unwrap().forget();
+            peer.sibling_probes_release
+                .acquire()
+                .await
+                .unwrap()
+                .forget();
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({"error":{"message":"held sibling probe released"}})),

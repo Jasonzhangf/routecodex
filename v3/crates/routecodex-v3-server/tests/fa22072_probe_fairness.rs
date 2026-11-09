@@ -45,7 +45,9 @@ async fn fail(port: u16, id: &str, index: usize) {
     let response = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .json(&json!({"model":format!("{id}-failure"),"messages":messages,"stream":false}))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     let status = response.status();
     let body: Value = response.json().await.unwrap();
     assert_eq!(
@@ -74,7 +76,11 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     let client = reqwest::Client::new();
     timeout(
         Duration::from_secs(2),
-        futures_util::future::join_all(ids.iter().enumerate().map(|(index, id)| fail(port, id, index))),
+        futures_util::future::join_all(
+            ids.iter()
+                .enumerate()
+                .map(|(index, id)| fail(port, id, index)),
+        ),
     )
     .await
     .expect("real failures must recover independently");
@@ -231,7 +237,10 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
             assert_eq!(now, held, "only the released sibling probe may advance");
         }
     }
-    assert_eq!(advanced, 1, "one released sibling probe, one own-ladder step");
+    assert_eq!(
+        advanced, 1,
+        "one released sibling probe, one own-ladder step"
+    );
     peer.holders_release.add_permits(4);
     peer.sibling_probes_release.add_permits(4);
     for holder in holders {
