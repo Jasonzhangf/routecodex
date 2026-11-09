@@ -106,8 +106,11 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     drop(captures);
     // The declared threshold-one policy commits each identity's cooldown only
     // when its provider precool observation completes, and that observation is
-    // driven by the probe lane. Wait for the committed ladder so the "held"
-    // baseline cannot race the asynchronous commit.
+    // driven by the probe lane. The pool entry of a committed provider cooldown
+    // reports the probe-lane counter (V3ProviderCooldownProbe.probe_failure_count
+    // in routecodex-v3-provider-responses cooldown_entries), not the business
+    // consecutive-failure ladder, so wait for that counter and let the "held"
+    // baseline race nothing.
     let before = timeout(Duration::from_secs(10), async {
         loop {
             let snapshot = pool(&client, &base).await;
@@ -220,9 +223,12 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
     let after = pool(&client, &base).await;
-    // Exactly one sibling probe was released to free a lane slot. Only that
-    // identity may advance its own ladder; the three still-held siblings and
-    // the fifth identity's recovery must leave every other ladder untouched.
+    // Exactly one sibling probe was released to free a lane slot. This counter is
+    // the probe-lane counter: a failed recovery probe advances only its own
+    // cadence and never the business cooldown ladder (AGENTS.md Runtime
+    // Ownership). Only the released identity may advance; the three still-held
+    // siblings and the fifth identity's recovery leave every other counter
+    // untouched.
     let mut advanced = 0;
     for id in &ids[..4] {
         let held = exact(&during, id).unwrap()["failure_count"]
@@ -234,12 +240,15 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         if now == held + 1 {
             advanced += 1;
         } else {
-            assert_eq!(now, held, "only the released sibling probe may advance");
+            assert_eq!(
+                now, held,
+                "only the released sibling probe's own probe-lane counter may advance"
+            );
         }
     }
     assert_eq!(
         advanced, 1,
-        "one released sibling probe, one own-ladder step"
+        "one released sibling probe, one probe-lane step"
     );
     peer.holders_release.add_permits(4);
     peer.sibling_probes_release.add_permits(4);
