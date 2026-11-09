@@ -1,6 +1,8 @@
 //! Public-entry black-box regression for canonical issue `6a2766a`.
 //!
-//! Stable test ID: `issue6a2766a_direct_provider_terminal_record_written_once`.
+//! Stable test IDs:
+//! - `issue6a2766a_single_candidate_provider_error_passes_through`
+//! - `issue6a2766a_multi_candidate_provider_error_not_projected`
 //!
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue6a2766a_direct_provider_terminal_record -- --nocapture`
@@ -8,17 +10,20 @@
 //! The incident family (`/Volumes/Intel/playground/routecodex/.worker-runs/`
 //! `patrol-400-502-latest-20261022-r1/incidents.tsv`, 18 rows) is a Responses
 //! Direct request whose only candidate is `inxk:default:key1:deepseek-v4-pro`
-//! and whose provider answers HTTP 400 with an empty body. The ledger kept the
+//! and whose provider answers HTTP 400. The ledger kept the
 //! `provider_attempt_failure` row (`action=terminal_default_floor_exhausted`,
 //! `health_state=last_candidate_terminal`) but never wrote a terminal
 //! `request.failed` row.
 //!
-//! This fixture reproduces the same public entry with a controlled provider
-//! that always answers HTTP 400 with an empty body. It asserts:
-//! - the provider attempt row carries the incident signature;
-//! - exactly one terminal row (`request.failed`) is persisted;
-//! - the client observes a transport break, not a fabricated provider HTTP
-//!   status, error payload, or success.
+//! The now-effective `routecodex-last-provider-failure-terminal-policy`
+//! requirement retires the old single-candidate assertion: a sole or last
+//! eligible candidate keeps its real typed Error, and its real provider
+//! status/body passes through to the client with only the necessary protocol
+//! conversion. This file proves both sides of that contract:
+//! - single candidate: the provider HTTP 400 and its body reach the client
+//!   unchanged, and exactly one terminal `request.failed` row is persisted;
+//! - multi candidate: the failed candidate's provider error stays
+//!   provider-private while a healthy sibling completes the client request.
 
 use axum::{
     body::Body, extract::State, http::StatusCode, response::Response, routing::post, Router,
@@ -47,32 +52,54 @@ static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
 const AUTH_ENV: &str = "ISSUE_6A2766A_INXK_KEY";
 const CLIENT_MODEL: &str = "deepseek-v4-pro";
+const HEALTHY_MODEL: &str = "healthy-v1";
+const PROVIDER_400_BODY: &str =
+    r#"{"error":{"type":"provider_terminal_body","message":"controlled upstream 400 body"}}"#;
+const HEALTHY_TEXT: &str = "multi-candidate healthy result";
 
 struct ProviderCallCount(AtomicU64);
 
-/// The controlled provider always answers HTTP 400 with an empty body. That is
-/// the incident's provider response shape; the fixture does not model its root
+/// The controlled failing provider answers HTTP 400 with a real body. That is
+/// the incident's provider failure shape; the fixture does not model its root
 /// cause, which the issue leaves UNVERIFIED.
-async fn empty_400_upstream(State(calls): State<Arc<ProviderCallCount>>) -> Response<Body> {
+async fn terminal_400_upstream(State(calls): State<Arc<ProviderCallCount>>) -> Response<Body> {
     calls.0.fetch_add(1, Ordering::SeqCst);
     Response::builder()
         .status(StatusCode::BAD_REQUEST)
-        .body(Body::empty())
+        .header("content-type", "application/json")
+        .body(Body::from(PROVIDER_400_BODY))
         .unwrap()
 }
 
-async fn start_empty_400_upstream() -> (
-    u16,
-    Arc<ProviderCallCount>,
-    tokio::sync::oneshot::Sender<()>,
-) {
+/// A healthy sibling candidate. The multi-candidate negative control proves the
+/// request completes on this candidate instead of projecting the failed
+/// candidate's provider error to the client.
+async fn healthy_upstream(State(calls): State<Arc<ProviderCallCount>>) -> Response<Body> {
+    calls.0.fetch_add(1, Ordering::SeqCst);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(format!(
+            concat!(
+                r#"{{"id":"resp_6a2766a_healthy","object":"response","status":"completed","#,
+                r#""model":"{model}","output_text":"{text}","output":["#,
+                r#"{{"id":"msg_6a2766a","type":"message","role":"assistant","#,
+                r#""status":"completed","content":[{{"type":"output_text","text":"{text}","#,
+                r#""annotations":[]}}]}}],"#,
+                r#""usage":{{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}}"#,
+            ),
+            model = HEALTHY_MODEL,
+            text = HEALTHY_TEXT,
+        )))
+        .unwrap()
+}
+
+/// Start one controlled provider on an ephemeral port. The caller owns the
+/// returned shutdown sender; the server task ends when it fires.
+async fn start_upstream(app: Router) -> (u16, tokio::sync::oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let calls = Arc::new(ProviderCallCount(AtomicU64::new(0)));
+    let port = listener.local_addr().unwrap().port();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-    let app = Router::new()
-        .route("/v1/responses", post(empty_400_upstream))
-        .with_state(Arc::clone(&calls));
     tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -81,11 +108,46 @@ async fn start_empty_400_upstream() -> (
             .await
             .unwrap();
     });
-    (address.port(), calls, shutdown_tx)
+    (port, shutdown_tx)
 }
 
-fn manifest(server_port: u16, peer_port: u16) -> routecodex_v3_config::V3Config05ManifestPublished {
+fn manifest(
+    server_port: u16,
+    primary_port: u16,
+    healthy_port: Option<u16>,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
+    // Only the multi-candidate negative control adds a second, healthy provider.
+    // It sits behind the failing candidate in priority order so the request must
+    // fail over to it.
+    let (healthy_provider, healthy_target) = match healthy_port {
+        Some(port) => (
+            format!(
+                r#"
+[providers.healthy]
+type = "responses"
+base_url = "http://127.0.0.1:{port}/v1"
+default_model = "{model}"
+auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "{auth_env}" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+responses = {{ process = "direct", streaming = "never" }}
+
+[providers.healthy.models.{model}]
+wire_name = "{model}"
+capabilities = ["text"]
+max_context_tokens = 128000
+"#,
+                port = port,
+                model = HEALTHY_MODEL,
+                auth_env = AUTH_ENV,
+            ),
+            format!(
+                r#", {{ kind = "provider_model", provider = "healthy", model = "{model}", key = "key1", priority = 1 }}"#,
+                model = HEALTHY_MODEL,
+            ),
+        ),
+        None => (String::new(), String::new()),
+    };
     let source = format!(
         r#"
 version = 3
@@ -103,7 +165,7 @@ allowed_transports = ["json", "sse"]
 
 [providers.inxk]
 type = "responses"
-base_url = "http://127.0.0.1:{peer_port}/v1"
+base_url = "http://127.0.0.1:{primary_port}/v1"
 default_model = "{client_model}"
 auth = {{ type = "api_key", entries = [{{ alias = "key1", env = "{auth_env}" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
@@ -113,20 +175,22 @@ responses = {{ process = "direct", streaming = "never" }}
 wire_name = "{client_model}"
 capabilities = ["text"]
 max_context_tokens = 128000
-
+{healthy_provider}
 [debug]
 log_console = false
 snapshots = false
 
 [route_groups.owned.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "inxk", model = "{client_model}", key = "key1", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "inxk", model = "{client_model}", key = "key1", priority = 2 }}{healthy_target}]
 "#,
         declaration = declaration,
         server_port = server_port,
-        peer_port = peer_port,
+        primary_port = primary_port,
         client_model = CLIENT_MODEL,
         auth_env = AUTH_ENV,
+        healthy_provider = healthy_provider,
+        healthy_target = healthy_target,
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
@@ -154,15 +218,48 @@ fn is_terminal(row: &Value) -> bool {
     )
 }
 
+/// Read the request ledger until a terminal row lands, or give up after the
+/// bounded wait. The caller asserts what must be present.
+async fn wait_for_terminal_rows(path: &std::path::Path) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let rows = read_rows(path);
+        if rows.iter().any(is_terminal) || Instant::now() >= deadline {
+            return rows;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Split the client outcome into (status, body). A transport error has no status.
+async fn client_outcome(
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> (Option<reqwest::StatusCode>, String) {
+    match response {
+        Err(_) => (None, String::new()),
+        Ok(response) => {
+            let status = Some(response.status());
+            match response.bytes().await {
+                Ok(bytes) => (status, String::from_utf8_lossy(&bytes).into_owned()),
+                Err(_) => (status, String::new()),
+            }
+        }
+    }
+}
+
 #[tokio::test]
-async fn issue6a2766a_direct_provider_terminal_record_written_once() {
+async fn issue6a2766a_single_candidate_provider_error_passes_through() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
     std::env::set_var(AUTH_ENV, "owned-fixture-secret");
 
-    let (peer_port, calls, peer_shutdown) = start_empty_400_upstream().await;
+    let calls = Arc::new(ProviderCallCount(AtomicU64::new(0)));
+    let upstream = Router::new()
+        .route("/v1/responses", post(terminal_400_upstream))
+        .with_state(Arc::clone(&calls));
+    let (primary_port, primary_shutdown) = start_upstream(upstream).await;
     let server_port = test_ports::free_port();
-    let handle = spawn_v3_server_aggregate(manifest(server_port, peer_port))
+    let handle = spawn_v3_server_aggregate(manifest(server_port, primary_port, None))
         .await
         .unwrap();
     let listener_addr = handle.listeners[0].addr;
@@ -176,52 +273,33 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
         .post(format!("http://{listener_addr}/v1/responses"))
         .json(&json!({
             "model": CLIENT_MODEL,
-            "input": "inxk 400 empty-body terminal-row regression",
+            "input": "inxk 400 single-candidate passthrough regression",
             "stream": false
         }))
         .send()
         .await;
+    let (client_status, client_body) = client_outcome(response).await;
 
-    // The provider is contacted exactly once and the client boundary must not
-    // fabricate a provider HTTP status, an error payload, or a success.
+    // The sole candidate is contacted exactly once, and its real provider status
+    // and body pass through unchanged. This is the last-eligible passthrough that
+    // the retired assertion used to reject.
     assert_eq!(
         calls.0.load(Ordering::SeqCst),
         1,
         "the sole candidate must be attempted exactly once"
     );
-    let (client_status, client_body) = match response {
-        Err(_) => (None, String::new()),
-        Ok(response) => {
-            let status = Some(response.status());
-            let body = response
-                .bytes()
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-            match body {
-                Ok(body) => (status, body),
-                Err(_) => (status, String::new()),
-            }
-        }
-    };
-    assert_ne!(
+    assert_eq!(
         client_status,
         Some(reqwest::StatusCode::BAD_REQUEST),
-        "a provider HTTP 400 must never be projected as the client status"
+        "the sole candidate's real provider HTTP 400 must pass through: {client_body:?}"
     );
-    assert!(
-        !client_body.contains("\"error\"") && !client_body.contains("400"),
-        "the provider error payload must not reach the client: {client_body:?}"
+    assert_eq!(
+        client_body, PROVIDER_400_BODY,
+        "the real provider body must reach the client unchanged"
     );
 
     let records_path = request_records_path(&home, server_port);
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let rows = loop {
-        let rows = read_rows(&records_path);
-        if rows.iter().any(is_terminal) || Instant::now() >= deadline {
-            break rows;
-        }
-        sleep(Duration::from_millis(50)).await;
-    };
+    let rows = wait_for_terminal_rows(&records_path).await;
 
     assert!(
         !rows.is_empty(),
@@ -233,7 +311,7 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
         .filter(|row| row["event_type"] == "request.provider_attempt_failed")
         .collect();
     eprintln!(
-        "[issue6a2766a] event_types={:?}",
+        "[issue6a2766a] single-candidate event_types={:?}",
         rows.iter()
             .map(|row| row["event_type"].as_str().unwrap_or("?"))
             .collect::<Vec<_>>()
@@ -273,14 +351,140 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
     );
 
     eprintln!(
-        "[issue6a2766a] client_status={client_status:?} body={client_body:?} rows={} terminal_rows={}",
+        "[issue6a2766a] single-candidate status={client_status:?} body={client_body:?} rows={} terminal_rows={}",
         rows.len(),
         terminal_rows.len()
     );
-    eprintln!("[issue6a2766a] terminal_row={terminal_row}");
+    eprintln!("[issue6a2766a] single-candidate terminal_row={terminal_row}");
 
     handle.shutdown().await;
-    let _ = peer_shutdown.send(());
+    let _ = primary_shutdown.send(());
+    std::env::remove_var(AUTH_ENV);
+    drop(home_guard);
+}
+
+#[tokio::test]
+async fn issue6a2766a_multi_candidate_provider_error_not_projected() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    std::env::set_var(AUTH_ENV, "owned-fixture-secret");
+
+    let failing_calls = Arc::new(ProviderCallCount(AtomicU64::new(0)));
+    let failing_upstream = Router::new()
+        .route("/v1/responses", post(terminal_400_upstream))
+        .with_state(Arc::clone(&failing_calls));
+    let (failing_port, failing_shutdown) = start_upstream(failing_upstream).await;
+
+    let healthy_calls = Arc::new(ProviderCallCount(AtomicU64::new(0)));
+    let healthy_route = Router::new()
+        .route("/v1/responses", post(healthy_upstream))
+        .with_state(Arc::clone(&healthy_calls));
+    let (healthy_port, healthy_shutdown) = start_upstream(healthy_route).await;
+
+    let server_port = test_ports::free_port();
+    let handle = spawn_v3_server_aggregate(manifest(server_port, failing_port, Some(healthy_port)))
+        .await
+        .unwrap();
+    let listener_addr = handle.listeners[0].addr;
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("http://{listener_addr}/v1/responses"))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "inxk 400 multi-candidate failover regression",
+            "stream": false
+        }))
+        .send()
+        .await;
+    let (client_status, client_body) = client_outcome(response).await;
+
+    // Negative control: the failed candidate's provider error must never reach
+    // the client while a healthy sibling is still eligible.
+    eprintln!(
+        "[issue6a2766a] multi-candidate attempts failing={} healthy={} status={client_status:?}",
+        failing_calls.0.load(Ordering::SeqCst),
+        healthy_calls.0.load(Ordering::SeqCst)
+    );
+    // The negative control is the client projection, not a per-candidate call
+    // count: selecting a later candidate also submits the branch's detached
+    // rescue round, so a failed identity can legitimately be attempted again.
+    assert!(
+        failing_calls.0.load(Ordering::SeqCst) >= 1,
+        "the failing candidate must be attempted at least once"
+    );
+    assert!(
+        healthy_calls.0.load(Ordering::SeqCst) >= 1,
+        "the healthy sibling must serve the request at least once"
+    );
+    assert_eq!(
+        client_status,
+        Some(reqwest::StatusCode::OK),
+        "a healthy sibling must complete the request: {client_body:?}"
+    );
+    assert!(
+        client_body.contains(HEALTHY_TEXT),
+        "the healthy candidate's business result must reach the client: {client_body:?}"
+    );
+    assert!(
+        !client_body.contains("provider_terminal_body"),
+        "the failed candidate's provider error must stay provider-private: {client_body:?}"
+    );
+
+    let records_path = request_records_path(&home, server_port);
+    let rows = wait_for_terminal_rows(&records_path).await;
+    assert!(
+        !rows.is_empty(),
+        "the request must leave at least one ledger row: {}",
+        records_path.display()
+    );
+    eprintln!(
+        "[issue6a2766a] multi-candidate event_types={:?}",
+        rows.iter()
+            .map(|row| row["event_type"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        rows.iter().any(|row| {
+            row["event_type"] == "request.provider_attempt_failed"
+                && row["meta"]["observed_error"]["action"] == "switch_provider"
+                && row["meta"]["observed_error"]["external_error_status"] == 400
+        }),
+        "the failed attempt must keep the real provider 400 internally: {rows:#?}"
+    );
+
+    let terminal_rows: Vec<&Value> = rows.iter().filter(|row| is_terminal(row)).collect();
+    assert_eq!(
+        terminal_rows.len(),
+        1,
+        "the recovered request must write exactly one terminal row: {rows:#?}"
+    );
+    assert_eq!(
+        terminal_rows[0]["event_type"], "request.completed",
+        "the recovered request is a completed terminal, not a provider failure"
+    );
+    assert_eq!(
+        terminal_rows[0]["result"], "success",
+        "the completed terminal must record the successful result"
+    );
+    assert!(
+        !rows.iter().any(|row| row["event_type"] == "request.failed"),
+        "a recovered request must not record a failed terminal: {rows:#?}"
+    );
+
+    eprintln!(
+        "[issue6a2766a] multi-candidate status={client_status:?} body={client_body:?} rows={} terminal_rows={}",
+        rows.len(),
+        terminal_rows.len()
+    );
+
+    handle.shutdown().await;
+    let _ = failing_shutdown.send(());
+    let _ = healthy_shutdown.send(());
     std::env::remove_var(AUTH_ENV);
     drop(home_guard);
 }
