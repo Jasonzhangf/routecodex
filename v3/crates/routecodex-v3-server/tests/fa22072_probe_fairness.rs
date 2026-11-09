@@ -104,22 +104,34 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         5
     );
     drop(captures);
-    // The declared threshold-one policy commits each identity's cooldown only
-    // when its provider precool observation completes, and that observation is
-    // driven by the probe lane. The pool entry of a committed provider cooldown
-    // reports the probe-lane counter (V3ProviderCooldownProbe.probe_failure_count
-    // in routecodex-v3-provider-responses cooldown_entries), not the business
-    // consecutive-failure ladder, so wait for that counter and let the "held"
-    // baseline race nothing.
+    // Each identity commits its threshold-one cooldown synchronously with the
+    // counted business failure, so the retained pool entry already exists here.
+    // The pool projects the probe-lane counter (V3ProviderCooldownProbe
+    // .probe_failure_count), which only advances when the identity's own
+    // recovery probe is attempted. The fixture declares a 500ms cooldown step,
+    // so that probe is due right after the commit, while the failing provider
+    // answers every probe with 403 until `ready` is set. Wait for the real
+    // upstream event (the fixture records each probe attempt before it answers)
+    // instead of racing a wall-clock margin; the deadline below only guards
+    // against a hang.
     let mut observed = Value::Null;
     let mut settled = false;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     while tokio::time::Instant::now() < deadline {
+        let probed = peer
+            .captures
+            .lock()
+            .await
+            .iter()
+            .filter(|capture| capture["body"]["messages"][0]["content"] == "ping; reply pong")
+            .count();
         observed = pool(&client, &base).await;
-        if ids.iter().all(|id| {
-            exact(&observed, id)
-                .is_some_and(|entry| entry["failure_count"].as_u64().unwrap_or(0) >= 1)
-        }) {
+        if probed >= ids.len()
+            && ids.iter().all(|id| {
+                exact(&observed, id)
+                    .is_some_and(|entry| entry["failure_count"].as_u64().unwrap_or(0) >= 1)
+            })
+        {
             settled = true;
             break;
         }
@@ -127,7 +139,7 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     }
     assert!(
         settled,
-        "the declared threshold-one cooldown must commit after its precool observation: {observed}"
+        "every identity's recovery probe must be attempted once while the upstream is failing: {observed}"
     );
     let before = observed;
     eprintln!("fairness genuine-failure cooldown={before}");

@@ -135,7 +135,7 @@ type = "openai_chat"
 base_url = "{base}/{index}/v1"
 default_model = "recovery"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_FAIRNESS_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 500, probe_interval_ms = 3000 }}
 [providers.{id}.models.recovery]
 wire_name = "recovery"
 capabilities = ["text", "tools"]
