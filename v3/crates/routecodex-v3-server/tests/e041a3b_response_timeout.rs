@@ -77,6 +77,30 @@ async fn upstream(
             .unwrap();
     }
 
+    if input.contains("committed-transport-failure") {
+        let delta = json!({
+            "type": "response.output_text.delta",
+            "delta": "committed-prefix-before-transport-failure",
+            "item_id": "msg_e041a3b_committed_transport_failure",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        });
+        let frame = format!("event: response.output_text.delta\ndata: {delta}\n\n");
+        let stream = stream::once(async move { Ok::<Bytes, std::io::Error>(Bytes::from(frame)) })
+            .chain(stream::once(async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Err(std::io::Error::other(
+                    "post-commit provider transport failure",
+                ))
+            }));
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+
     if input.contains("deadline") && body["model"] != "wire-recover" {
         // The initial SSE guard waits for the provider's first semantic event
         // with the configured first-frame timeout, so a body that emits nothing
@@ -686,5 +710,78 @@ async fn first_word_then_pause_survives_provider_request_total_deadline() {
     }
 
     drop(stream);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn committed_prefix_then_transport_failure_breaks_without_backup_or_error_frame() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start_with(15_000, 5_000, true, true).await;
+    let body = json!({
+        "model": "test.test",
+        "input": "committed-transport-failure",
+        "stream": true
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-committed-transport-failure\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut wire = Vec::new();
+    let ended = timeout(Duration::from_secs(5), socket.read_to_end(&mut wire)).await;
+    assert!(
+        ended.is_ok(),
+        "post-commit transport failure did not terminate the broken channel: {}",
+        String::from_utf8_lossy(&wire)
+    );
+    let text = String::from_utf8_lossy(&wire);
+
+    assert!(
+        text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+        "unexpected client transport framing: {text}"
+    );
+    assert_eq!(
+        text.matches("committed-prefix-before-transport-failure")
+            .count(),
+        1,
+        "the committed prefix must be delivered exactly once: {text}"
+    );
+    assert!(
+        !text.contains("response.completed")
+            && !text.contains("\"status\":\"completed\"")
+            && !text.contains("\"error\"")
+            && !text.contains("network_error")
+            && !text.contains("598")
+            && !text.contains("599")
+            && !text.contains("502"),
+        "post-commit failure must not fabricate a terminal or client error payload: {text}"
+    );
+
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-e041a3b"
+    );
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "post-commit provider failure must not dispatch a backup candidate"
+    );
+    let pool = cooldown_pool(&entry).await;
+    assert!(
+        !pool["entries"].as_array().unwrap().is_empty(),
+        "post-commit provider failure must record provider health: {pool}"
+    );
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.text().await.unwrap().contains("sibling-success"));
+    eprintln!("e041a3b post-commit transport failure: prefix-once, no backup, health={pool}");
     entry.stop().await;
 }
