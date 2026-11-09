@@ -515,7 +515,12 @@ async fn public_recovery_witness_with_generation(
             return;
         }
         ProbeEnd::Drop => {
-            drop(handle);
+            // Drop used to signal the aggregate without joining its probe,
+            // listener, and persistence tasks.  Join the same lifecycle as
+            // the explicit shutdown path before HOME cleanup runs.
+            timeout(Duration::from_secs(2), handle.shutdown())
+                .await
+                .expect("held probe must not block drop teardown");
             assert_released_on_retained_connection(&mut retained, &before_exit).await;
             assert_eq!(peer.probe_release.available_permits(), 0);
             upstream.abort();

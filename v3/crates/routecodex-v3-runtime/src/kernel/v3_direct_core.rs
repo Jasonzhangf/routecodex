@@ -298,30 +298,9 @@ where
                 expanded.clone(),
             );
         let selected = plan.selected;
-        // 选择后备候选时, captured target 中若仍有处于 cooldown 的 peer, 该身份
-        // 不能被这次请求搁置。提交一次由 Server 聚合探测 owner 持有的 detached
-        // cooldown rescue round, 只改变后续池可见性; 本请求不等待探测节奏、冷却
-        // 或恢复, 自身结果不变。
-        let availability =
-            provider_health.session_bound_availability(&direct_failure_session_scope);
-        let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
-        let cooled_peer_remains = expanded.candidates.iter().any(|candidate| {
-            v3_relay_provider_candidate_key(candidate) != selected_key
-                && availability
-                    .availability_for_interface(
-                        &candidate.provider_id,
-                        &candidate.interface_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        now_epoch_ms,
-                    )
-                    .blocked_scopes
-                    .iter()
-                    .any(|scope| scope.contains("cooldown"))
-        });
-        if cooled_peer_remains {
-            provider_health.submit_v3_background_cooldown_rescue_round(manifest, &expanded);
-        }
+        // 预先耗尽的探测由 PlanExecutionOperator (plan_execution.rs 的
+        // AdmitAtExecution phase) 作为唯一 owner 提交一次；本请求不等待
+        // 探测节奏、冷却或恢复，自身结果不变。
         let decision = plan.protocol_decision;
         if expands_target {
             trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]);
