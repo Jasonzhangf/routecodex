@@ -754,6 +754,75 @@ async fn rescue_round_is_executed_by_the_registered_aggregate() {
     fixture.upstream.abort();
 }
 
+/// One rescue pass per listener. The request path reports exhaustion from more
+/// than one live entry (a selected-target pre-exhaustion and the exhausted
+/// stop), so the owner takes custody of exactly one round per failure cycle and
+/// the refused report neither spends a second owner slot nor runs a probe.
+#[tokio::test]
+async fn rescue_round_is_single_flight_per_listener() {
+    let fixture = CustodyFixture::new().await;
+    let expanded = custody_expanded(&fixture.manifest);
+    fixture.cool(&fixture.ids[0]).await;
+    let (shutdown, lifecycle) = fixture.register();
+    let owner = fixture
+        .health
+        .probe_owner
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("registered aggregate owner");
+    assert_eq!(owner.capacity.available_permits(), 4);
+    assert_eq!(
+        fixture
+            .health
+            .submit_v3_background_cooldown_rescue_round(&fixture.manifest, &expanded),
+        V3CooldownRescueSubmission::Initiated,
+        "the first report of the exhausted target takes the single rescue pass"
+    );
+    assert_eq!(
+        fixture
+            .health
+            .submit_v3_background_cooldown_rescue_round(&fixture.manifest, &expanded),
+        V3CooldownRescueSubmission::RoundInFlight,
+        "a second live entry in the same failure cycle must not start a second pass"
+    );
+    assert_eq!(
+        owner.capacity.available_permits(),
+        3,
+        "the refused report must not take a second owner slot"
+    );
+    timeout(Duration::from_secs(2), fixture.peer.probe_entered.acquire())
+        .await
+        .expect("the aggregate executes the admitted round")
+        .unwrap()
+        .forget();
+    fixture.peer.probe_release.add_permits(1);
+    timeout(Duration::from_secs(2), async {
+        while owner.capacity.available_permits() != 4 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the round must finish inside its bound and release the owner slot");
+    assert!(
+        fixture.peer.probe_entered.try_acquire().is_err(),
+        "the refused report must not have queued a second probe"
+    );
+    assert_eq!(
+        fixture
+            .health
+            .submit_v3_background_cooldown_rescue_round(&fixture.manifest, &expanded),
+        V3CooldownRescueSubmission::Initiated,
+        "the single-flight flag must be released when the round ends"
+    );
+    shutdown.send(()).expect("aggregate shutdown trigger");
+    timeout(Duration::from_secs(2), lifecycle)
+        .await
+        .expect("the aggregate must join on shutdown")
+        .expect("the aggregate task must not panic");
+    fixture.upstream.abort();
+}
+
 /// Shutdown custody: the aggregate owns the pending round, so shutdown drops it
 /// and no health mutation can happen afterwards.
 #[tokio::test]

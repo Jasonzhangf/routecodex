@@ -987,31 +987,13 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     .await;
     // An exhausted captured target whose remaining candidates are only hidden by
     // their own cooldown still has a real alternative, and provider lifecycle
-    // owns that recovery. v31 keeps the request off that path: the rescue probe
-    // is scheduled as a detached control-plane observation and the request keeps
-    // the resolution it already has, so a stalled probe can neither extend nor
-    // reroute this attempt.
-    if matches!(
-        resolution,
-        V3RelayProviderTargetResolution::Exhausted { .. }
-    ) && !is_request_local_compat_failure
-    {
-        if let Some(expanded) = context.captured_target_09 {
-            let now = v3_relay_provider_policy_now_epoch_ms()
-                .map_err(v3_relay_provider_policy_ordinary_error)?;
-            if v3_exhaustion_is_cooldown_only(
-                expanded,
-                &excluded_with_failed,
-                &context.failure_session_scope,
-                context.provider_health,
-                now,
-            ) {
-                context
-                    .provider_health
-                    .submit_v3_background_cooldown_rescue_round(context.manifest, expanded);
-            }
-        }
-    }
+    // owns that recovery. The rescue round therefore has exactly one live
+    // request-path owner: the plan-execution admission for a selected candidate
+    // plus the exactly-once exhaustion branch of the request loop. This policy
+    // reports the typed resolution above and never submits a round of its own,
+    // because a second submission inside the same failure cycle would occupy
+    // another aggregate probe slot for the same identities while
+    // v3-mainline-call-map.yml defines one rescue pass.
     let request_local_state = if is_response_processing_failure {
         "request_local_response_processing"
     } else {

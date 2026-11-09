@@ -362,8 +362,9 @@ impl V3ServerAggregateHandle {
     }
 
     /// Shared budget for joining every accept loop during teardown. A listener that
-    /// cannot stop inside this window is reported and left behind: `shutdown()` must
-    /// always return, and it must not panic or hide the sample-persist report.
+    /// cannot stop inside this window is aborted and joined before `shutdown()`
+    /// returns: a listener task must never outlive teardown while it still holds
+    /// the socket and the HOME-backed sample/observability paths.
     const LISTENER_TEARDOWN_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
     async fn join_listener_tasks(listeners: &mut [V3ListenerHandle]) {
@@ -373,17 +374,26 @@ impl V3ServerAggregateHandle {
                 continue;
             };
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            match tokio::time::timeout(remaining, task).await {
+            let mut task = task;
+            match tokio::time::timeout(remaining, &mut task).await {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => eprintln!(
                     "V3 listener {} accept loop failed during shutdown: {error}",
                     listener.server_id
                 ),
-                Err(_) => eprintln!(
-                    "V3 listener {} did not stop within the {:?} teardown budget; continuing shutdown",
-                    listener.server_id,
-                    Self::LISTENER_TEARDOWN_BUDGET
-                ),
+                Err(_) => {
+                    // Leaving the task behind let a stopped server keep writing
+                    // through the old HOME. Abort the accept loop and join the
+                    // aborted handle so teardown never reports success while a
+                    // listener is still attached to it.
+                    task.abort();
+                    let _ = task.await;
+                    eprintln!(
+                        "V3 listener {} did not stop within the {:?} teardown budget; aborted and joined",
+                        listener.server_id,
+                        Self::LISTENER_TEARDOWN_BUDGET
+                    );
+                }
             }
         }
     }

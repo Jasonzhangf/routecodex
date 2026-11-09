@@ -3,7 +3,6 @@ pub(crate) struct V3CooldownRescueProbeOutcome {
     pub(crate) completed_all: bool,
     pub(crate) did_work: bool,
 }
-
 /// Whether the aggregate probe owner took custody of one rescue round.
 ///
 /// The request path only reports custody; it never waits on the round. A round
@@ -14,10 +13,25 @@ pub(crate) struct V3CooldownRescueProbeOutcome {
 pub(crate) enum V3CooldownRescueSubmission {
     /// The owner admitted the round into its managed probe queue.
     Initiated,
+    /// One rescue pass is already running for this listener. A rescue round is
+    /// provider lifecycle state, not request state, so the request path must not
+    /// start a second pass for the same failure/exhaustion cycle.
+    RoundInFlight,
     /// The owner's probe capacity or queue is full; nothing was scheduled.
     CapacityUnavailable,
     /// No aggregate owner is registered or its sender is closed.
     OwnerUnavailable,
+}
+
+/// Clears the aggregate's one-rescue-pass flag when the round ends. A dropped
+/// or cancelled round clears it too, because the guard is owned by the round's
+/// future instead of by the submission call.
+struct V3CooldownRescueSingleFlight(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for V3CooldownRescueSingleFlight {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Upper bound for one background rescue round (control plane only).
@@ -316,6 +330,14 @@ impl V3ProviderFailureRuntimeHealth {
     /// suppress a typed failure. Its only effect is the ordinary provider-health
     /// state that a later selection observes, so a request that submitted it
     /// keeps its own immediate outcome.
+    ///
+    /// The owner admits one rescue pass at a time. Every live entry that can
+    /// report an exhausted captured target — the selected-target pre-exhaustion
+    /// entry in plan execution, the exhausted stop on the Direct and Relay
+    /// request loops, the pre-plan exhaustion entry and the last-candidate
+    /// terminal entry — calls this function, and the owner answers a second
+    /// report of the same failure cycle with `RoundInFlight` instead of starting
+    /// a second pass.
     pub(crate) fn submit_v3_background_cooldown_rescue_round(
         &self,
         manifest: &V3Config05ManifestPublished,
@@ -332,7 +354,26 @@ impl V3ProviderFailureRuntimeHealth {
         let Some(owner) = owner.filter(|owner| !owner.sender.is_closed()) else {
             return V3CooldownRescueSubmission::OwnerUnavailable;
         };
+        // Exactly one rescue pass per listener. Every production entry that can
+        // observe an exhausted captured target reports here, so the round is
+        // single-flight at its owner instead of being counted per entry: a
+        // request cycle that reaches both the selected-target pre-exhaustion
+        // entry and the exhausted stop still produces one round.
+        if owner
+            .rescue_in_flight
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return V3CooldownRescueSubmission::RoundInFlight;
+        }
+        let single_flight = V3CooldownRescueSingleFlight(owner.rescue_in_flight.clone());
         let Ok(slot) = owner.capacity.clone().try_acquire_owned() else {
+            drop(single_flight);
             return V3CooldownRescueSubmission::CapacityUnavailable;
         };
         let health = self.clone();
@@ -341,6 +382,7 @@ impl V3ProviderFailureRuntimeHealth {
         let work: V3ManagedProbe = Box::pin(async move {
             // The owner's slot is held for exactly the life of this round.
             let _slot = slot;
+            let _single_flight = single_flight;
             tokio::time::sleep(V3_COOLDOWN_RESCUE_BACKGROUND_DELAY).await;
             // The observation reads the clock when it actually runs: a decision
             // made against the pre-grace timestamp could already be stale for a
@@ -380,46 +422,4 @@ impl V3ProviderFailureRuntimeHealth {
         self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates, now_ms)
             .await
     }
-}
-
-pub(crate) fn v3_exhaustion_is_cooldown_only(
-    expanded: &V3Target09CandidateSetExpanded,
-    request_local_excluded_candidates: &BTreeSet<String>,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    now_ms: u64,
-) -> bool {
-    let availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut nonfailed_candidates = expanded.candidates.iter().filter(|candidate| {
-        !request_local_excluded_candidates.contains(&v3_relay_provider_candidate_key(candidate))
-    });
-    let Some(first) = nonfailed_candidates.next() else {
-        return false;
-    };
-    std::iter::once(first)
-        .chain(nonfailed_candidates)
-        .all(|candidate| {
-            let projection = availability.availability_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-                now_ms,
-            );
-            v3_availability_is_cooldown_recovery_only(&projection)
-        })
-}
-
-fn v3_availability_is_cooldown_recovery_only(
-    projection: &V3ProviderAvailabilityProjection,
-) -> bool {
-    !projection.available
-        && projection.blocked_scopes.iter().all(|scope| {
-            scope == "provider_cooldown_probe_pending"
-                || scope.starts_with(&format!("auth_key:{}:", projection.provider_id))
-        })
-        && projection
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope == "provider_cooldown_probe_pending")
 }
