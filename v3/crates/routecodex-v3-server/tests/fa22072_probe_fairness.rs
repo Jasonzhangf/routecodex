@@ -31,10 +31,20 @@ fn exact<'a>(pool: &'a Value, id: &str) -> Option<&'a Value> {
     })
 }
 
-async fn fail(port: u16, id: &str) {
+async fn fail(port: u16, id: &str, index: usize) {
+    // The identity pool is selected by the plain user-turn `thinking` signal
+    // plus a disjoint current-turn input-token band, so request `index` carries
+    // `index` bands of filler tokens behind the marker message.
+    let mut messages = vec![json!({"role":"user","content":"genuine failure"})];
+    if index > 0 {
+        messages.push(json!({
+            "role":"user",
+            "content":"pad ".repeat(index * fixture::FAIRNESS_BAND_TOKENS as usize)
+        }));
+    }
     let response = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
-        .json(&json!({"model":format!("{id}-failure"),"messages":[{"role":"user","content":"genuine failure"}],"stream":false}))
+        .json(&json!({"model":format!("{id}-failure"),"messages":messages,"stream":false}))
         .send().await.unwrap();
     let status = response.status();
     let body: Value = response.json().await.unwrap();
@@ -64,7 +74,7 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     let client = reqwest::Client::new();
     timeout(
         Duration::from_secs(2),
-        futures_util::future::join_all(ids.iter().map(|id| fail(port, id))),
+        futures_util::future::join_all(ids.iter().enumerate().map(|(index, id)| fail(port, id, index))),
     )
     .await
     .expect("real failures must recover independently");
