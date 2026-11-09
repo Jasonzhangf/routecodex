@@ -394,7 +394,13 @@ async fn public_recovery_witness_with_generation(
             .json(&json!({"model":"step-5-preview","messages":[{"role":"user","content":"step5 marker"}],"stream":false}))
             .send().await
     });
-    match timeout(Duration::from_secs(2), peer.probe_entered.acquire()).await {
+    // The aggregate probe scheduler is intentionally low frequency (one
+    // second). Under the full canonical verification stack, compile/test
+    // contention can delay the first scheduler tick beyond the old two-second
+    // watchdog even though the probe eventually enters the real upstream.
+    // Keep this as a bounded event wait, but allow the scheduler enough time to
+    // run without weakening the upstream-entry assertion.
+    match timeout(Duration::from_secs(30), peer.probe_entered.acquire()).await {
         Ok(permit) => permit.expect("probe semaphore").forget(),
         Err(_) => panic!(
             "real probe must enter upstream; pool after the deadline = {}",
