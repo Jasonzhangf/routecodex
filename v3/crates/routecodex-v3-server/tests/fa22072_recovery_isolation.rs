@@ -517,10 +517,18 @@ async fn public_recovery_witness_with_generation(
         ProbeEnd::Drop => {
             // Drop used to signal the aggregate without joining its probe,
             // listener, and persistence tasks.  Join the same lifecycle as
-            // the explicit shutdown path before HOME cleanup runs.
-            timeout(Duration::from_secs(2), handle.shutdown())
+            // the explicit shutdown path before HOME cleanup runs, and assert
+            // the teardown report instead of only asserting that shutdown
+            // returned: join_listener_tasks now abort-joins every listener that
+            // misses the shared budget, so no listener, probe or persistence
+            // task can still touch this test's HOME afterwards.
+            let persist_failures = timeout(Duration::from_secs(2), handle.shutdown())
                 .await
                 .expect("held probe must not block drop teardown");
+            assert!(
+                persist_failures.is_empty(),
+                "teardown must report no persistence failure before HOME cleanup: {persist_failures:?}"
+            );
             assert_released_on_retained_connection(&mut retained, &before_exit).await;
             assert_eq!(peer.probe_release.available_permits(), 0);
             upstream.abort();

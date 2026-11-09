@@ -159,6 +159,11 @@ fn complete_v3_provider_health_probe(
 struct V3ManagedProbeSender {
     sender: tokio::sync::mpsc::Sender<V3ManagedProbe>,
     capacity: std::sync::Arc<tokio::sync::Semaphore>,
+    // One rescue pass at a time. A rescue round probes the cooled candidates of
+    // one captured target; the entry that submits it is only a reporter, so a
+    // request cycle that reaches two live submission entries (selected-target
+    // pre-exhaustion plus the exhausted stop) must still produce a single round.
+    rescue_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -211,6 +216,9 @@ impl V3ProviderFailureRuntimeHealth {
         *owner = Some(V3ManagedProbeSender {
             sender,
             capacity: capacity.clone(),
+            rescue_in_flight: std::sync::Arc::new(
+                std::sync::atomic::AtomicBool::new(false),
+            ),
         });
         drop(owner);
         let health = self.clone();

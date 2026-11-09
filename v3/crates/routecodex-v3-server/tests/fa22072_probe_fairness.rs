@@ -111,20 +111,25 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     // in routecodex-v3-provider-responses cooldown_entries), not the business
     // consecutive-failure ladder, so wait for that counter and let the "held"
     // baseline race nothing.
-    let before = timeout(Duration::from_secs(10), async {
-        loop {
-            let snapshot = pool(&client, &base).await;
-            if ids.iter().all(|id| {
-                exact(&snapshot, id)
-                    .is_some_and(|entry| entry["failure_count"].as_u64().unwrap_or(0) >= 1)
-            }) {
-                break snapshot;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+    let mut observed = Value::Null;
+    let mut settled = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        observed = pool(&client, &base).await;
+        if ids.iter().all(|id| {
+            exact(&observed, id)
+                .is_some_and(|entry| entry["failure_count"].as_u64().unwrap_or(0) >= 1)
+        }) {
+            settled = true;
+            break;
         }
-    })
-    .await
-    .expect("the declared threshold-one cooldown must commit after its precool observation");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        settled,
+        "the declared threshold-one cooldown must commit after its precool observation: {observed}"
+    );
+    let before = observed;
     eprintln!("fairness genuine-failure cooldown={before}");
     for id in &ids {
         assert!(
