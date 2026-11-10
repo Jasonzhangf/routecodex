@@ -63,6 +63,15 @@ surface and asserts:
 - the same request has exactly one `request.completed` row;
 - the admin records surface counts `failed_attempts == 1`.
 
+The test then flips provider `a` to success and sends a second request on the
+same listener. That success control asserts:
+
+- provider `a` is attempted once and provider `b` is never reached;
+- the control request writes no `request.provider_attempt_failed` and no
+  `request.provider_switched` row;
+- the control request has exactly one `request.completed` row;
+- the admin records surface counts `failed_attempts == 0` for it.
+
 The test is bound to `v3.server_internal_observability_projection` in
 `docs/architecture/v3-verification-map.yml`.
 

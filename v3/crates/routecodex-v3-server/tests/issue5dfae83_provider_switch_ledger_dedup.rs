@@ -12,7 +12,9 @@
 //! `request.provider_switched` line must not repeat the failed attempt's
 //! `provider_status`, `error_category`, `error_detail`, or `observed_error`.
 //! The admin HTTP surface must see the same request as one failed attempt that
-//! ends completed.
+//! ends completed. A second request then succeeds on provider `a`'s first
+//! attempt and must add no failure or switch row and count zero failed
+//! attempts, giving the dedup a same-listener success control.
 
 use axum::{
     body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router,
@@ -24,7 +26,7 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -41,12 +43,12 @@ const PROVIDER_KEY_ENV: &str = "ISSUE_5DFAE83_KEY";
 
 struct Upstream {
     calls: AtomicUsize,
-    fail: bool,
+    fail: AtomicBool,
 }
 
 async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) -> Response<Body> {
     state.calls.fetch_add(1, Ordering::SeqCst);
-    if state.fail {
+    if state.fail.load(Ordering::SeqCst) {
         Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .header("content-type", "application/json")
@@ -88,7 +90,7 @@ async fn start_upstream(fail: bool) -> (u16, Arc<Upstream>, tokio::sync::oneshot
     let port = listener.local_addr().unwrap().port();
     let state = Arc::new(Upstream {
         calls: AtomicUsize::new(0),
-        fail,
+        fail: AtomicBool::new(fail),
     });
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let app = Router::new()
@@ -383,6 +385,116 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
     assert_eq!(
         row["failed_attempts"], 1,
         "admin consumption must count one failed attempt: {row}"
+    );
+
+    // Success control: the second request succeeds on provider a's first
+    // attempt. It must add no failure or switch row, and the admin consumer
+    // must count zero failed attempts for it.
+    a.fail.store(false, Ordering::SeqCst);
+    let control_response = client
+        .post(format!("http://{server_addr}/v1/responses"))
+        .json(&json!({
+            "model": "client",
+            "input": "success control request",
+            "stream": false
+        }))
+        .send()
+        .await
+        .expect("the success control request must reach the real listener");
+    assert_eq!(control_response.status(), reqwest::StatusCode::OK);
+    let control_body = control_response.text().await.unwrap();
+    assert!(
+        control_body.contains("SWITCHED_BUSINESS_OK"),
+        "the control provider's business body must reach the client: {control_body}"
+    );
+    assert_eq!(
+        a.calls.load(Ordering::SeqCst),
+        2,
+        "provider a must be attempted once per request"
+    );
+    assert_eq!(
+        b.calls.load(Ordering::SeqCst),
+        1,
+        "the success control must not reach provider b"
+    );
+
+    let first_request_key = failed_rows[0]["request_key"]
+        .as_str()
+        .expect("the failed row carries a request_key")
+        .to_string();
+    let control_deadline = Instant::now() + Duration::from_secs(20);
+    let rows_after_control = loop {
+        let rows = read_raw_rows(&records_path);
+        let completed = rows
+            .iter()
+            .filter(|row| row["event_type"] == "request.completed")
+            .count();
+        if completed >= 2 || Instant::now() >= control_deadline {
+            break rows;
+        }
+        sleep(Duration::from_millis(50)).await;
+    };
+    let mut request_keys: Vec<String> = rows_after_control
+        .iter()
+        .filter_map(|row| row["request_key"].as_str().map(str::to_string))
+        .collect();
+    request_keys.sort();
+    request_keys.dedup();
+    assert_eq!(
+        request_keys.len(),
+        2,
+        "the listener must record exactly two independent requests: {rows_after_control:#?}"
+    );
+    let control_key = request_keys
+        .iter()
+        .find(|key| **key != first_request_key)
+        .expect("the control request has its own request_key")
+        .clone();
+    let control_rows: Vec<&Value> = rows_after_control
+        .iter()
+        .filter(|row| row["request_key"] == control_key.as_str())
+        .collect();
+    assert!(
+        control_rows
+            .iter()
+            .all(|row| row["event_type"] != "request.provider_attempt_failed"),
+        "a first-attempt success must not write a failure row: {control_rows:#?}"
+    );
+    assert!(
+        control_rows
+            .iter()
+            .all(|row| row["event_type"] != "request.provider_switched"),
+        "a first-attempt success must not write a switch row: {control_rows:#?}"
+    );
+    assert_eq!(
+        control_rows
+            .iter()
+            .filter(|row| row["event_type"] == "request.completed")
+            .count(),
+        1,
+        "the success control must complete exactly once"
+    );
+
+    let control_admin_deadline = Instant::now() + Duration::from_secs(20);
+    let control_row = loop {
+        let (status, body) = get_json(&client, &list_url).await;
+        assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
+        if let Some(row) = body["records"].as_array().and_then(|records| {
+            records
+                .iter()
+                .find(|row| row["request_key"] == control_key.as_str())
+        }) {
+            break row.clone();
+        }
+        assert!(
+            Instant::now() < control_admin_deadline,
+            "no success-control record in admin list: {body}"
+        );
+        sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(
+        control_row["failed_attempts"], 0,
+        "admin consumption must count zero failed attempts for a first-attempt success: {control_row}"
     );
 
     let _samples_cleanup = fs::remove_dir_all(&home);
