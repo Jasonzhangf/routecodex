@@ -1711,6 +1711,11 @@ async fn assert_mixed_capacity_recovery(direct: bool, initially_busy_first: bool
     if direct {
         use_native_direct_responses(&mut manifest);
     }
+    for provider in manifest.providers.values_mut() {
+        if let Some(health) = provider.health.as_mut() {
+            health.enabled = true;
+        }
+    }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
     let held_endpoint = endpoint.clone();

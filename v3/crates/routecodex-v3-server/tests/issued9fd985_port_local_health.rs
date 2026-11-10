@@ -137,6 +137,10 @@ impl UpstreamState {
     fn probe_count(&self) -> usize {
         self.probes.load(Ordering::SeqCst)
     }
+
+    fn reset_probe_count(&self) {
+        self.probes.store(0, Ordering::SeqCst);
+    }
 }
 
 fn success_body() -> Response<Body> {
@@ -511,6 +515,11 @@ async fn id9_failure_cooldown_is_port_local() {
         "the spare candidate must answer the switched attempts"
     );
 
+    // A recoverable failure first runs the declared pre-cool observation.
+    wait_until("port A exact cooldown", || async {
+        exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some()
+    })
+    .await;
     let entries_a = cooldown_entries(&client, &base_a).await;
     let exact = exact_primary_entry(&entries_a).expect("port A exact cooldown must exist");
     assert!(
@@ -532,8 +541,9 @@ async fn id9_failure_cooldown_is_port_local() {
     );
 
     let primary_before_other = primary.business_count();
+    // models-only pools are not inbound routes; pin the direct provider model.
     let (status, body) =
-        business_request(&client, &base_a, "other-test", "other model isolation").await;
+        business_request(&client, &base_a, "primary.other", "other model isolation").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
@@ -544,7 +554,7 @@ async fn id9_failure_cooldown_is_port_local() {
 
     let primary_before_sibling = primary.business_count();
     let (status, body) =
-        business_request(&client, &base_a, "sibling-test", "sibling key isolation").await;
+        business_request(&client, &base_a, "primary.main", "sibling key isolation").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
@@ -596,6 +606,12 @@ async fn id9_probe_outcomes_are_port_local() {
         exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some()
     })
     .await;
+    assert_eq!(
+        primary.probe_count(),
+        1,
+        "the real recoverable failure must produce exactly one automatic observation probe"
+    );
+    primary.reset_probe_count();
     assert!(
         exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none(),
         "port B must not inherit port A failure state: {:?}",
@@ -683,8 +699,9 @@ async fn id9_exact_identity_isolation() {
     );
 
     let primary_before_other = primary.business_count();
+    // models-only pools are not inbound routes; pin the direct provider model.
     let (status, body) =
-        business_request(&client, &base_a, "other-test", "same-port-other-model").await;
+        business_request(&client, &base_a, "primary.other", "same-port-other-model").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
@@ -695,7 +712,7 @@ async fn id9_exact_identity_isolation() {
 
     let primary_before_sibling = primary.business_count();
     let (status, body) =
-        business_request(&client, &base_a, "sibling-test", "same-port-other-key").await;
+        business_request(&client, &base_a, "primary.main", "same-port-other-key").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
