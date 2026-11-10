@@ -41,6 +41,31 @@ keeps `provider_status=400` and `error_category=provider_http_400`, and the
 `request.provider_switched` line has null `provider_status`, `error_category`,
 `error_detail`, and `observed_error`.
 
+## Public-entry black-box test
+
+File:
+`v3/crates/routecodex-v3-server/tests/issue5dfae83_provider_switch_ledger_dedup.rs`
+
+Stable test ID: `issue5dfae83_provider_switch_ledger_dedup`.
+
+It starts a real listener plus the admin WebUI, sends a real request through
+the listener, and makes provider `a` answer HTTP 503 while provider `b` answers
+business 200. It then reads the public request-records store and the admin HTTP
+surface and asserts:
+
+- provider `a` and provider `b` are each attempted exactly once;
+- the client receives the switched provider's business body;
+- the raw lifecycle stream has exactly one
+  `request.provider_attempt_failed` row and exactly one
+  `request.provider_switched` row;
+- the switch row has null `provider_status`, `error_category`, `error_detail`,
+  and `observed_error`;
+- the same request has exactly one `request.completed` row;
+- the admin records surface counts `failed_attempts == 1`.
+
+The test is bound to `v3.server_internal_observability_projection` in
+`docs/architecture/v3-verification-map.yml`.
+
 ## Green results
 
 Focused red-to-green test:
@@ -58,6 +83,22 @@ cargo test -p routecodex-v3-server --lib webui_observability::tests
 ```
 
 Result: 22 passed.
+
+Observability store suite:
+
+```sh
+cargo test -p routecodex-v3-debug --lib observability_store
+```
+
+Result: 12 passed.
+
+Public-entry black-box:
+
+```sh
+cargo test -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup
+```
+
+Result: 1 passed.
 
 Admin observability suite:
 
@@ -82,6 +123,16 @@ npm run verify:v3-architecture-ci
 ```
 
 Result: ok (33/33 sub-gates green).
+
+Architecture map gates:
+
+```sh
+npm run verify:v3-resource-map
+npm run verify:architecture-mainline-call-map
+git diff --check
+```
+
+Result: all passed.
 
 ## Unrelated suite hang
 
