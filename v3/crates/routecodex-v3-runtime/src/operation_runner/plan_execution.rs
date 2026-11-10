@@ -999,9 +999,23 @@ pub(crate) async fn wait_for_target_recovery(
     let permanent: BTreeSet<String> = excluded.difference(busy).cloned().collect();
     let availability = health.session_bound_availability(scope);
     let concurrency = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared();
+    // A capacity-saturated identity is a declared acquisition wait, not a
+    // health recovery lane. While any exhausted identity is only busy, bound
+    // the wait by the captured acquisition budget so an all-busy or mixed
+    // exclusion pool reaches its typed terminal within
+    // concurrency_acquire_timeout_ms. Pure failure exclusion (busy empty) keeps
+    // the health ladder until the residence deadline so a sole or last failed
+    // candidate stays pending without cooldown, probe, or retry.
+    let acquire_deadline = (!busy.is_empty()).then(|| {
+        std::time::Instant::now()
+            + target_recovery_remaining(expanded, attempt_budget.target_recovery_started())
+    });
     loop {
         let now = std::time::Instant::now();
         if now >= attempt_budget.residence_deadline() {
+            return Ok(false);
+        }
+        if acquire_deadline.is_some_and(|deadline| now >= deadline) {
             return Ok(false);
         }
         if now >= due_at {
@@ -1045,8 +1059,11 @@ pub(crate) async fn wait_for_target_recovery(
             busy.clear();
             return Ok(true);
         }
+        // Sleep no later than the acquisition deadline so a saturated pool
+        // observes budget expiry promptly instead of riding the ladder step.
+        let wake_at = acquire_deadline.map_or(due_at, |deadline| due_at.min(deadline));
         tokio::select! {
-            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(due_at)) => {}
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(wake_at)) => {}
             changed = health.wait_for_target_availability_change(observed_generation) => {
                 changed.map_err(|error| build_v3_error_01_source_raised(
                     V3ErrorSourceKind::RuntimeFailure, "V3TargetRecoveryWait",
