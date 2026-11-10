@@ -1688,6 +1688,20 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 );
                             }
                             drop(provider_action_permit.take());
+                            // A provider SSE that ends without its protocol
+                            // terminal is a recoverable provider failure. The
+                            // policy reselects immediately when another
+                            // candidate exists. Only the final failed attempt
+                            // (ProjectTerminal, no replacement) stays pending
+                            // until the declared residence deadline, without
+                            // retrying or probing the failed identity.
+                            let is_missing_terminal_provider_failure = source.source_kind
+                                == V3ErrorSourceKind::ProviderFailure
+                                && source
+                                    .external_error
+                                    .as_ref()
+                                    .and_then(|external| external.code.as_deref())
+                                    == Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL");
                             let mut policy_result = match run_v3_direct_provider_failure_policy(
                                 &V3DirectProviderFailurePolicyContext {
                                     failure_session_scope: &direct_failure_session_scope,
@@ -1763,6 +1777,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     continue;
                                 }
                                 V3Error05ExecutionAction::ProjectTerminal => {
+                                    if is_missing_terminal_provider_failure {
+                                        let deadline =
+                                            tokio::time::Instant::from_std(
+                                                attempt_budget.residence_deadline(),
+                                            );
+                                        if tokio::time::Instant::now() < deadline {
+                                            tokio::time::sleep_until(deadline).await;
+                                        }
+                                    }
                                     let mut observability = build_v3_direct_runtime_observability(
                                         &policy.target,
                                         "responses",
