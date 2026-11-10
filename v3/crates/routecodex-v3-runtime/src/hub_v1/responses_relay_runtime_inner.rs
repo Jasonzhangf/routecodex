@@ -328,7 +328,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 }) => {
                     let source = match source {
                         Some(source) => Some(source),
-                        None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                        None => match crate::provider_failure_runtime_policy::v3_pure_pool_exhaustion_source(
                             &exhausted_expanded,
                             &failed_candidates,
                             &request_local_busy_candidates,
@@ -491,7 +491,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     }) => {
                         let source = match source {
                             Some(source) => Some(source),
-                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            None => match crate::provider_failure_runtime_policy::v3_pure_pool_exhaustion_source(
                                 &exhausted_expanded,
                                 &failed_candidates,
                                 &request_local_busy_candidates,
@@ -832,12 +832,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-            let transport_request = match selected_admission.take() {
-                Some(admission) => {
-                    transport_request.with_pre_acquired_admission(admission.into_lease())
-                }
-                None => transport_request,
-            };
             let transport_result = match tokio::time::timeout(
                 v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
                 transport.send(transport_request),
@@ -853,19 +847,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             };
             let provider_raw = match transport_result {
                 Ok(raw) => raw,
-                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                    attempt_budget.release_unsent_transport_attempt();
-                    provider_send_attempts = attempt_budget.transport_attempts();
-                    handle_error_before_resp03!(runtime_timing
-                        .finish_external()
-                        .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                    failed_candidates.insert(busy_key.clone());
-                    request_local_busy_candidates.insert(busy_key);
-                    drop(_provider_action_permit.take());
-                    provider_action_permit_target = None;
-                    continue;
-                }
                 Err(V3ProviderError::HttpStatus { response }) => {
                     if response.status == 429 {
                         attempt_budget.record_rate_limited_attempt();

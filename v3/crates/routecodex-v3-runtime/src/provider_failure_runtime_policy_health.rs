@@ -633,21 +633,6 @@ impl V3ProviderFailureRuntimeHealth {
                 health_now_ms,
             )?;
         }
-        // A completed business 2xx is the recovery counterpart of an observed
-        // 429: it restores one unit of adaptive concurrency budget up to the
-        // configured hard maximum and clears the saturation window for the
-        // same provider/auth/interface/model identity.
-        if let Some(auth_alias) = auth_alias {
-            V3AdaptiveConcurrencyController::process_shared()
-                .observe_business_success_scoped(
-                    &v3_provider_concurrency_key_parts(provider_id, auth_alias),
-                    model_id.map(|model_id| routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-                        interface_id: interface_id.to_owned(), model_id: model_id.to_owned(),
-                    }).as_ref(),
-                    now_ms,
-                )
-                .map_err(|error| error.to_string())?;
-        }
         let provider_scope = V3ProviderActionProviderScope::new(
             failure_session_scope,
             v3_relay_provider_candidate_key_parts(

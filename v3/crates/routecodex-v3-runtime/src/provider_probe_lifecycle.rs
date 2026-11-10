@@ -1,10 +1,6 @@
 type V3ManagedProbe =
     std::pin::Pin<Box<dyn Future<Output = Result<V3ProbeCompletion, String>> + Send>>;
 
-#[cfg(test)]
-#[path = "provider_probe_fairness_tests.rs"]
-mod provider_probe_fairness_tests;
-
 #[derive(Debug)]
 enum V3ProbeCompletion {
     Superseded,
@@ -144,9 +140,6 @@ fn complete_v3_provider_health_probe(
             // superseded by a newer failure. It must not reopen admission.
             Ok(V3ProbeCompletion::Superseded)
         }
-        Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
-            Ok(V3ProbeCompletion::CapacityUnavailable)
-        }
         Err(error) => {
             if let V3ProviderHealthProbeFailure::Provider(error) = error {
                 let (status, action) = classify_provider_probe_failure(error)?;
@@ -179,7 +172,6 @@ fn complete_v3_provider_health_probe(
             match error {
                 V3ProviderHealthProbeFailure::Provider(_) => unreachable!(),
                 V3ProviderHealthProbeFailure::Internal(error) => Err(error),
-                V3ProviderHealthProbeFailure::ConcurrencyBusy => unreachable!(),
             }
         }
     }

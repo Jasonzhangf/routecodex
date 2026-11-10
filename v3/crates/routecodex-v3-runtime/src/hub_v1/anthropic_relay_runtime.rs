@@ -689,24 +689,26 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 ..
             }) => {
                 let source = match source {
-                Some(source) => Some(source),
-                None => {
-                    match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
-                        &exhausted_expanded,
-                        &failed_candidates,
-                        &request_local_busy_candidates,
-                    ) {
-                        Ok(source) => source,
-                        Err(fault) => {
-                            return Ok(provider_failure_output(
-                                super::relay_runtime_shared::provider_operator_fault_failure(fault),
-                                trace,
-                                std::mem::take(&mut provider_failure_events),
-                            ))
+                    Some(source) => Some(source),
+                    None => {
+                        match crate::provider_failure_runtime_policy::v3_pure_pool_exhaustion_source(
+                            &exhausted_expanded,
+                            &failed_candidates,
+                            &request_local_busy_candidates,
+                        ) {
+                            Ok(source) => source,
+                            Err(fault) => {
+                                return Ok(provider_failure_output(
+                                    super::relay_runtime_shared::provider_operator_fault_failure(
+                                        fault,
+                                    ),
+                                    trace,
+                                    std::mem::take(&mut provider_failure_events),
+                                ))
+                            }
                         }
                     }
-                }
-            };
+                };
                 let failure = provider_request_failure(
                     "V3Target10ConcreteProviderSelected",
                     "selected_target_exhausted",
@@ -825,7 +827,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                 }) => {
                     let source = match source {
                             Some(source) => Some(source),
-                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
+                            None => match crate::provider_failure_runtime_policy::v3_pure_pool_exhaustion_source(
                                 &exhausted_expanded,
                                 &failed_candidates,
                                 &request_local_busy_candidates,
@@ -1076,12 +1078,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
         })?;
-        let transport_request = match selected_admission.take() {
-            Some(admission) => {
-                transport_request.with_pre_acquired_admission(admission.into_lease())
-            }
-            None => transport_request,
-        };
         let transport_result = match tokio::time::timeout(
             v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
             transport.send(transport_request),
@@ -1098,18 +1094,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
         let provider_raw = match transport_result {
             Ok(raw) => raw,
-            Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                attempt_budget.release_unsent_transport_attempt();
-                runtime_timing
-                    .finish_external()
-                    .map_err(V3AnthropicRelayRuntimeError::Target)?;
-                let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                failed_candidates.insert(busy_key.clone());
-                request_local_busy_candidates.insert(busy_key);
-                drop(_provider_action_permit.take());
-                provider_action_permit_target = None;
-                continue;
-            }
             Err(V3ProviderError::HttpStatus { response }) => {
                 if response.status == 429 {
                     attempt_budget.record_rate_limited_attempt();

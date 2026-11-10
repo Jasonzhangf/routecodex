@@ -25,42 +25,26 @@ fn v3_direct_admit_pinned_target(
     ),
     V3ResponsesDirectRuntimeOutput,
 > {
-    match try_admit_v3_selected_target(&selected) {
-        Ok(Some(mut admission)) => {
-            let control = provider_health
-                .try_admit_candidate_rate_limit(failure_scope, &selected.candidate)
-                .map_err(|reason| {
-                    direct_runtime_helpers_stream::source_failure_output(
-                        runtime_source("V3ProviderActionGateAdmission", reason),
-                        last_external_http.clone(),
-                        trace.to_vec(),
-                        hook_registry,
-                    )
-                })?;
-            admission.bind_pinned_rate_limit_control(control);
-            Ok((selected, Some(admission)))
-        }
-        Ok(None) => Err(
-            direct_runtime_helpers_stream::target_exhausted_output_with_observability(
-                crate::shared::direct_plain_error(
-                    V3ErrorSourceKind::TargetPoolExhausted,
-                    "V3Target10ConcreteProviderSelected",
-                    "provider_concurrency_busy",
-                    "pinned provider concurrency is full",
-                ),
+    let control = provider_health
+        .try_admit_candidate_rate_limit(failure_scope, &selected.candidate)
+        .map_err(|reason| {
+            direct_runtime_helpers_stream::source_failure_output(
+                runtime_source("V3ProviderActionGateAdmission", reason),
                 last_external_http.clone(),
                 trace.to_vec(),
                 hook_registry,
-                None,
-            ),
-        ),
-        Err(reason) => Err(direct_runtime_helpers_stream::source_failure_output(
+            )
+        })?;
+    let mut admission = try_admit_v3_selected_target(&selected).map_err(|reason| {
+        direct_runtime_helpers_stream::source_failure_output(
             runtime_source("V3Target10ConcreteProviderSelected", reason),
             last_external_http.clone(),
             trace.to_vec(),
             hook_registry,
-        )),
-    }
+        )
+    })?;
+    admission.bind_pinned_rate_limit_control(control);
+    Ok((selected, Some(admission)))
 }
 
 fn v3_direct_selected_available_for_send(

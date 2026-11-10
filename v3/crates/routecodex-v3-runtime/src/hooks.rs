@@ -1188,12 +1188,6 @@ pub(crate) fn build_v3_provider_error_source(
                 ),
             )
         }
-        V3ProviderError::ConcurrencyBusy { .. } => crate::shared::direct_plain_error(
-            V3ErrorSourceKind::TargetPoolExhausted,
-            stage,
-            "provider_concurrency_busy",
-            message,
-        ),
         V3ProviderError::ClientDisconnect { .. } => crate::shared::direct_plain_error(
             V3ErrorSourceKind::ClientDisconnect,
             stage,
@@ -1243,7 +1237,6 @@ pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -
         | V3ProviderError::OAuthCredential { .. }
         | V3ProviderError::NamespaceToolFlattenFailed { .. }
         | V3ProviderError::FunctionToolShapeFailed { .. }
-        | V3ProviderError::ConcurrencyBusy { .. }
         | V3ProviderError::ClientDisconnect { .. } => "provider_responses_error".to_string(),
     }
 }
@@ -1381,7 +1374,6 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
         | V3ProviderError::AuthSecretRead { .. }
         | V3ProviderError::NamespaceToolFlattenFailed { .. }
         | V3ProviderError::FunctionToolShapeFailed { .. }
-        | V3ProviderError::ConcurrencyBusy { .. }
         | V3ProviderError::ClientDisconnect { .. } => V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: None,
