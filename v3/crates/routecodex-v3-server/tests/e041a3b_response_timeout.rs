@@ -77,6 +77,30 @@ async fn upstream(
             .unwrap();
     }
 
+    if input.contains("committed-transport-failure") {
+        let delta = json!({
+            "type": "response.output_text.delta",
+            "delta": "committed-prefix-before-transport-failure",
+            "item_id": "msg_e041a3b_committed_transport_failure",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        });
+        let frame = format!("event: response.output_text.delta\ndata: {delta}\n\n");
+        let stream = stream::once(async move { Ok::<Bytes, std::io::Error>(Bytes::from(frame)) })
+            .chain(stream::once(async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Err(std::io::Error::other(
+                    "post-commit provider transport failure",
+                ))
+            }));
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+
     if input.contains("deadline") && body["model"] != "wire-recover" {
         // The initial SSE guard waits for the provider's first semantic event
         // with the configured first-frame timeout, so a body that emits nothing
@@ -253,7 +277,9 @@ async fn raw_deadline_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Res
     (wire, started.elapsed(), ended)
 }
 
-async fn raw_committed_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Result<usize>) {
+/// Reads the committed business delta and hands the open socket back so the
+/// caller can prove the committed channel survives the residence deadline.
+async fn open_committed_request(entry: &Entry) -> (Vec<u8>, TcpStream) {
     let body = json!({
         "model": "test.test",
         "input": "committed-deadline",
@@ -267,13 +293,30 @@ async fn raw_committed_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Re
         "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-committed\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
-    let started = Instant::now();
     socket.write_all(request.as_bytes()).await.unwrap();
     let mut wire = Vec::new();
-    let ended = timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
-        .await
-        .expect("committed deadline request must terminate before the fixture watchdog");
-    (wire, started.elapsed(), ended)
+    let mut buf = [0u8; 4096];
+    let commit_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let remaining = commit_deadline.saturating_duration_since(tokio::time::Instant::now());
+        match timeout(remaining, socket.read(&mut buf)).await {
+            Err(_) => panic!(
+                "committed business frame did not arrive within 2s: {}",
+                String::from_utf8_lossy(&wire)
+            ),
+            Ok(Ok(0)) => panic!(
+                "stream closed before the committed business frame: {}",
+                String::from_utf8_lossy(&wire)
+            ),
+            Ok(Ok(n)) => {
+                wire.extend_from_slice(&buf[..n]);
+                if String::from_utf8_lossy(&wire).contains("committed-business-delta") {
+                    return (wire, socket);
+                }
+            }
+            Ok(Err(error)) => panic!("read failed before commit: {error}"),
+        }
+    }
 }
 
 #[tokio::test]
@@ -512,28 +555,19 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn committed_first_frame_then_residence_deadline_breaks_transport_without_backup_dispatch() {
+async fn committed_first_frame_survives_residence_deadline_without_backup_dispatch() {
     let _guard = TEST_LOCK.lock().await;
     let mut entry = start_with(250, 5000, true, true).await;
 
-    let (wire, elapsed, ended) = raw_committed_request(&entry).await;
+    let (wire, mut socket) = open_committed_request(&entry).await;
     let wire_text = String::from_utf8_lossy(&wire);
 
     eprintln!(
-        "e041a3b-committed elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
-        elapsed.as_millis(),
+        "e041a3b-committed-survive wire_bytes={} wire={}",
         wire.len(),
         wire_text
     );
 
-    assert!(
-        elapsed <= Duration::from_millis(2000),
-        "committed deadline request took {elapsed:?}; expected the 250ms residence deadline, not the 5s provider timeout"
-    );
-    assert!(
-        elapsed >= Duration::from_millis(200),
-        "committed deadline request ended before the declared 250ms residence deadline: {elapsed:?}"
-    );
     assert!(
         wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),
         "unexpected client transport framing: {wire_text}"
@@ -551,19 +585,44 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
             && !wire_text.contains("598")
             && !wire_text.contains("599")
             && !wire_text.contains("502"),
-        "client received fake success or a provider/proxy error payload: {wire_text}"
+        "committed prefix carried fake success or a provider/proxy error payload: {wire_text}"
     );
+
+    // The residence deadline is 250ms. Once a client-visible business frame is
+    // committed, that deadline must not terminate the stream: the committed
+    // channel stays open past it with no terminal and no error. A transport
+    // break or a fabricated terminal inside this window is the regression.
+    let mut hold = Vec::new();
+    let mut buf = [0u8; 1024];
+    let hold_deadline = tokio::time::Instant::now() + Duration::from_millis(900);
+    loop {
+        let remaining = hold_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match timeout(remaining, socket.read(&mut buf)).await {
+            Err(_) => break,
+            Ok(Ok(0)) => panic!(
+                "committed stream closed within the residence hold window: {}",
+                String::from_utf8_lossy(&hold)
+            ),
+            Ok(Ok(n)) => hold.extend_from_slice(&buf[..n]),
+            Ok(Err(error)) => {
+                panic!("committed stream broke within the residence hold window: {error}")
+            }
+        }
+    }
+    let hold_text = String::from_utf8_lossy(&hold);
     assert!(
-        !wire.ends_with(b"0\r\n\r\n"),
-        "committed transport must break, not fake a normal chunked completion: {wire_text}"
+        !hold_text.contains("response.completed")
+            && !hold_text.contains("\"status\":\"completed\"")
+            && !hold_text.contains("\"error\"")
+            && !hold_text.contains("network_error"),
+        "committed stream produced a terminal or error after the residence deadline: {hold_text}"
     );
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "client transport ended abnormally without an acceptable reset: {ended:?}"
-    );
+
+    drop(socket);
+
     assert_eq!(
         entry.captures.recv().await.unwrap()["model"],
         "wire-e041a3b"
@@ -588,7 +647,141 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
     let sibling = response.text().await.unwrap();
     assert!(sibling.contains("sibling-success"));
     assert!(sibling.contains("response.completed"));
-    eprintln!("e041a3b-committed sibling={sibling}");
+    eprintln!("e041a3b-committed-survive sibling={sibling}");
 
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn first_word_then_pause_survives_provider_request_total_deadline() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start_with(15_000, 150, false, false).await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .header("x-session-id", "9a4fc39-first-word-pause")
+        .json(&json!({
+            "model": "test.test",
+            "input": "committed-deadline",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut stream = response.bytes_stream();
+    let first = timeout(Duration::from_secs(2), stream.next())
+        .await
+        .expect("first semantic frame must arrive")
+        .expect("first semantic frame chunk")
+        .expect("first semantic frame chunk must not fail");
+    assert!(
+        std::str::from_utf8(&first)
+            .unwrap()
+            .contains("committed-business-delta"),
+        "unexpected first semantic frame: {}",
+        String::from_utf8_lossy(&first)
+    );
+
+    let pause_deadline = tokio::time::Instant::now() + Duration::from_millis(1200);
+    loop {
+        let remaining = pause_deadline.saturating_duration_since(tokio::time::Instant::now());
+        match timeout(remaining, stream.next()).await {
+            Err(_) => break,
+            Ok(Some(Ok(chunk))) => {
+                let text = String::from_utf8_lossy(&chunk);
+                assert!(
+                    !text.contains("response.completed")
+                        && !text.contains("\"error\"")
+                        && !text.contains("network_error"),
+                    "post-first-word pause must not produce a terminal or error: {text}"
+                );
+            }
+            Ok(Some(Err(error))) => {
+                panic!("post-first-word pause failed within provider total deadline: {error}")
+            }
+            Ok(None) => panic!("post-first-word pause ended without a terminal"),
+        }
+    }
+
+    drop(stream);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn committed_prefix_then_transport_failure_breaks_without_backup_or_error_frame() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start_with(15_000, 5_000, true, true).await;
+    let body = json!({
+        "model": "test.test",
+        "input": "committed-transport-failure",
+        "stream": true
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-committed-transport-failure\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut wire = Vec::new();
+    let ended = timeout(Duration::from_secs(5), socket.read_to_end(&mut wire)).await;
+    assert!(
+        ended.is_ok(),
+        "post-commit transport failure did not terminate the broken channel: {}",
+        String::from_utf8_lossy(&wire)
+    );
+    let text = String::from_utf8_lossy(&wire);
+
+    assert!(
+        text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+        "unexpected client transport framing: {text}"
+    );
+    assert_eq!(
+        text.matches("committed-prefix-before-transport-failure")
+            .count(),
+        1,
+        "the committed prefix must be delivered exactly once: {text}"
+    );
+    assert!(
+        !text.contains("response.completed")
+            && !text.contains("\"status\":\"completed\"")
+            && !text.contains("\"error\"")
+            && !text.contains("network_error")
+            && !text.contains("598")
+            && !text.contains("599")
+            && !text.contains("502"),
+        "post-commit failure must not fabricate a terminal or client error payload: {text}"
+    );
+
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-e041a3b"
+    );
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "post-commit provider failure must not dispatch a backup candidate"
+    );
+    let pool = cooldown_pool(&entry).await;
+    assert!(
+        !pool["entries"].as_array().unwrap().is_empty(),
+        "post-commit provider failure must record provider health: {pool}"
+    );
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.text().await.unwrap().contains("sibling-success"));
+    eprintln!("e041a3b post-commit transport failure: prefix-once, no backup, health={pool}");
     entry.stop().await;
 }

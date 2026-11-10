@@ -911,11 +911,15 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 &hook_registry,
             );
         }
-        let provider_raw = match tokio::time::timeout(
-            default_transport::responses_direct_transport_response_timeout(
+        // One provider-attempt deadline covers header acquisition and the
+        // uncommitted SSE body. It must not be restarted after headers.
+        let provider_attempt_deadline = tokio::time::Instant::now()
+            + default_transport::responses_direct_transport_response_timeout(
                 manifest,
                 &policy.target.candidate.provider_id,
-            ),
+            );
+        let provider_raw = match tokio::time::timeout_at(
+            provider_attempt_deadline,
             transport.send(transport_request),
         )
         .await
@@ -1561,6 +1565,11 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         )
                 });
                 let client_commit_probe = attempt_client_frame_sink.clone();
+                // Reuse the absolute attempt deadline created before the
+                // provider send. Header time is part of the same total budget;
+                // the collector only carries it forward for the uncommitted
+                // body. A committed client channel is never cut by it.
+                let sse_attempt_deadline = provider_attempt_deadline;
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
                         stream,
@@ -1577,6 +1586,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &direct_failure_session_scope,
                         attempt_budget.clone(),
                         attempt_client_frame_sink,
+                        Some(sse_attempt_deadline),
                     )
                     .await
                     {
@@ -1595,6 +1605,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .is_some_and(|sink| sink.is_committed())
                             {
                                 drop(provider_action_permit.take());
+                                if let Some(original_source) = fault.original_source.as_ref() {
+                                    if let Err(node) = record_post_commit_direct_provider_failure(
+                                        &provider_health,
+                                        &direct_failure_session_scope,
+                                        &policy.target,
+                                        original_source,
+                                    ) {
+                                        trace.push(node);
+                                    }
+                                }
                                 return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
                                     Err(fault),
                                     last_external_http.clone(),
@@ -1627,6 +1647,14 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .is_some_and(|sink| sink.is_committed())
                             {
                                 drop(provider_action_permit.take());
+                                if let Err(node) = record_post_commit_direct_provider_failure(
+                                    &provider_health,
+                                    &direct_failure_session_scope,
+                                    &policy.target,
+                                    &source,
+                                ) {
+                                    trace.push(node);
+                                }
                                 return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
                                     Ok(source),
                                     last_external_http.clone(),
@@ -1672,6 +1700,13 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .is_some_and(|sink| sink.is_committed())
                             {
                                 drop(provider_action_permit.take());
+                                // Known architecture gap: this delivery keeps
+                                // the committed prefix immutable and records
+                                // provider health, but does not reroute. A
+                                // second candidate would append a second
+                                // response to the same committed channel;
+                                // cross-provider continuation is a separate
+                                // design decision, not a local fallback here.
                                 if let Err(node) = record_post_commit_direct_provider_failure(
                                     &provider_health,
                                     &direct_failure_session_scope,
