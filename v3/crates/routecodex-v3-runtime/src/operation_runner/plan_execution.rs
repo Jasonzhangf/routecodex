@@ -983,6 +983,60 @@ pub(crate) fn target_recovery_remaining(
     std::time::Duration::from_millis(budget_ms).saturating_sub(started.elapsed())
 }
 
+fn target_recovery_has_probe_opportunity(
+    expanded: &V3Target09CandidateSetExpanded,
+    health: &V3ProviderFailureRuntimeHealth,
+    now_ms: u64,
+) -> Result<bool, V3Error01SourceRaised> {
+    for candidate in &expanded.candidates {
+        let projection = health.availability_for_interface(
+            &candidate.provider_id,
+            &candidate.interface_id,
+            Some(&candidate.auth_alias),
+            Some(&candidate.model_id),
+            now_ms,
+        );
+        // A pending pre-cool observation owns a live recovery lane: the
+        // managed probe may restore the identity while this request waits.
+        // Treating it as permanently excluded would end the request while a
+        // recovery opportunity still exists.
+        if projection
+            .blocked_scopes
+            .iter()
+            .any(|scope| scope == "provider_pre_cool_observation")
+        {
+            return Ok(true);
+        }
+    }
+    let store = health.store();
+    for candidate in &expanded.candidates {
+        // Any cooldown entry is a live recovery opportunity: the window can
+        // expire, a matching success can cancel the pending cooldown, an
+        // in-flight probe can restore routing, or a due probe can run. Only a
+        // permanently excluded identity with no cooldown/probe lane may end
+        // the wait early.
+        if store
+            .has_provider_cooldown_probe_pending_for_interface(
+                &candidate.provider_id,
+                &candidate.interface_id,
+                Some(&candidate.auth_alias),
+                Some(&candidate.model_id),
+            )
+            .map_err(|error| {
+                build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3TargetRecoveryWait",
+                    "target_recovery_probe_state_failed",
+                    error.to_string(),
+                )
+            })?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) async fn wait_for_target_recovery(
     expanded: &V3Target09CandidateSetExpanded,
     health: &V3ProviderFailureRuntimeHealth,
@@ -999,9 +1053,32 @@ pub(crate) async fn wait_for_target_recovery(
     let permanent: BTreeSet<String> = excluded.difference(busy).cloned().collect();
     let availability = health.session_bound_availability(scope);
     let concurrency = routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController::process_shared();
+    let captured: BTreeSet<String> = expanded
+        .candidates
+        .iter()
+        .map(crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key)
+        .collect();
+    let wait_started = std::time::Instant::now();
     loop {
         let now = std::time::Instant::now();
         if now >= attempt_budget.residence_deadline() {
+            return Ok(false);
+        }
+        let current_now_ms = now_ms.saturating_add(
+            now.saturating_duration_since(wait_started)
+                .as_millis()
+                .min(u128::from(u64::MAX)) as u64,
+        );
+        // The pool has no recoverable candidate when every expanded candidate
+        // is permanently excluded, no candidate is busy, and no cooldown probe
+        // is in flight or due. Waiting the full residence ladder cannot change
+        // that outcome. Keep the wait for any busy candidate, any in-flight or
+        // due probe, and any candidate that is not permanently excluded.
+        if busy.is_empty()
+            && !captured.is_empty()
+            && captured.is_subset(&permanent)
+            && !target_recovery_has_probe_opportunity(expanded, health, current_now_ms)?
+        {
             return Ok(false);
         }
         if now >= due_at {
