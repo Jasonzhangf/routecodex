@@ -674,9 +674,36 @@
         "version": 1
       },
       "version": 25
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "立即恢复 p0-35f96d3-laneai-deepseek-anthropic-relay-400-20261107。用户要求现在处理活跃的 400 问题。",
+          "role": "user",
+          "source": "Explicit human user instruction relayed by master Jenny via RouteCodex Collab notify m1794272758136-870 and m1794273310208-29"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "req-20261110-routecodex-p0-35f96d3-strict-legacy-provider-input",
+        "requirement_id": "routecodex-p0-35f96d3-strict-legacy-provider-input",
+        "text": "用户经 master Jenny 派单（collab 消息 m1794272758136-870、m1794273310208-29）明确要求：立即恢复 P0 35f96d3 LaneAI DeepSeek Anthropic Relay/Responses HTTP 400 问题，在保留上游原始请求与 raw response 的前提下，对 qingyanx 等严格 legacy Responses 后端项目相同 provider/interface/auth/model 角色做最小 provider-compat 修复，绑定首个偏离字段并交付公开入口红前/绿后证据。本条为该 P0 修复明确授权改动 provider-compat-core 与 routecodex-v3-runtime provider 兼容投影及测试，不扩展其他未授权的运行时/协议/payload 变更；未获本授权的任务不得按此条改动运行时。候选在独立 review PASS 后方可集成，合并前按受保护 Git 流程执行，合并前不 install/restart，安装重启须另行取得用户明确批准。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "立即恢复 p0-35f96d3-laneai-deepseek-anthropic-relay-400-20261107。用户要求现在处理活跃的 400 问题。",
+          "role": "user",
+          "source": "Explicit human user instruction relayed by master Jenny via RouteCodex Collab notify m1794272758136-870 and m1794273310208-29"
+        },
+        "requirement_id": "routecodex-p0-35f96d3-strict-legacy-provider-input",
+        "status": "active",
+        "text": "用户经 master Jenny 派单（collab 消息 m1794272758136-870、m1794273310208-29）明确要求：立即恢复 P0 35f96d3 LaneAI DeepSeek Anthropic Relay/Responses HTTP 400 问题，在保留上游原始请求与 raw response 的前提下，对 qingyanx 等严格 legacy Responses 后端项目相同 provider/interface/auth/model 角色做最小 provider-compat 修复，绑定首个偏离字段并交付公开入口红前/绿后证据。本条为该 P0 修复明确授权改动 provider-compat-core 与 routecodex-v3-runtime provider 兼容投影及测试，不扩展其他未授权的运行时/协议/payload 变更；未获本授权的任务不得按此条改动运行时。候选在独立 review PASS 后方可集成，合并前按受保护 Git 流程执行，合并前不 install/restart，安装重启须另行取得用户明确批准。",
+        "version": 1
+      },
+      "version": 26
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 25
+  "version": 26
 }
