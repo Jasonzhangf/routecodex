@@ -83,16 +83,8 @@ async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) 
     }
 }
 
-async fn start_upstream(
-    fail: bool,
-) -> (
-    u16,
-    Arc<Upstream>,
-    tokio::sync::oneshot::Sender<()>,
-) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+async fn start_upstream(fail: bool) -> (u16, Arc<Upstream>, tokio::sync::oneshot::Sender<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let state = Arc::new(Upstream {
         calls: AtomicUsize::new(0),

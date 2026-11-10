@@ -134,6 +134,66 @@ git diff --check
 
 Result: all passed.
 
+## CI and baseline comparison
+
+PR554 test job:
+https://github.com/Jasonzhangf/routecodex/actions/runs/42854045909/job/129962958322
+
+The PR554 head `69029ffc9c` failed the `test` job at the rustfmt gate, not at
+the provider behavior tests. The failing check was:
+
+```text
+[v3 verify] FAIL 1 gate(s)
+- rustfmt: cargo fmt --all -- --check failed: exit 1
+```
+
+The only formatting difference was in the new public-entry test:
+
+```text
+v3/crates/routecodex-v3-server/tests/issue5dfae83_provider_switch_ledger_dedup.rs
+```
+
+The current worktree fixes only that formatting difference. After the fix:
+
+```sh
+cargo fmt --all -- --check
+```
+
+Result: exit 0.
+
+```sh
+node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup -- --nocapture
+```
+
+Result: 1 passed.
+
+```sh
+cargo test -p routecodex-v3-server --lib provider_switch_row_does_not_repeat_failure_fields_in_records
+```
+
+Result: 1 passed.
+
+For comparison, origin/main run:
+https://github.com/Jasonzhangf/routecodex/actions/runs/42772306077
+
+That run is the latest main baseline at `1a01fc3fdd`. Its installed V3
+protocol live-mock matrix stopped with six inherited failures:
+
+```text
+issue-745f6e9-provider-concurrency-all-busy-direct
+issue-745f6e9-provider-concurrency-all-busy-relay
+issue-745f6e9-provider-concurrency-mixed-exclusion-direct
+issue-745f6e9-provider-concurrency-mixed-exclusion-relay
+media-anthropic-older-turn-tool-image
+provider-error-exhaustion
+```
+
+Those six failures belong to their existing owners and are outside this
+change. The PR554 rustfmt failure is separate from that baseline and is fixed
+only in the local worktree. The fix has not been pushed, so PR554 still points
+to the pre-fix head until the delivery owner is authorized to push and rerun
+CI.
+
 ## Unrelated suite hang
 
 The full `cargo test -p routecodex-v3-server --lib` suite was interrupted while
