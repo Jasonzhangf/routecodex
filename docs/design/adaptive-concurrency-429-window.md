@@ -1,4 +1,21 @@
-# 自适应并发预算（429 样本驱动）设计
+---
+status: superseded
+superseded_by: requirements ledger v34
+active_design_routing: false
+---
+
+> **已废止 / RETIRED / SUPERSEDED（要求台账 v34，2026-11-07）**
+>
+> 本文描述的 429 样本驱动自适应并发预算、`provider.concurrency.maxInFlight` 硬上限与
+> 准入/等待机制**已从运行路径移除**。现行契约是：不存在并发准入、不存在预算收缩、
+> 不存在容量等待，请求取得选择后立即进入 transport；冷却只改变候选池可见性。
+> 本文仅作为历史设计记录保留，**不得据此实现或复述为当前行为**。现行条款见
+> `docs/architecture/v3-verification-map.yml` 与 `AGENTS.md` 的 P0 段。
+>
+> Active design routing: none. Keep this file only for historical provenance; do not bind it
+> as an implementation plan, required gate, owner contract, or release acceptance source.
+
+# 自适应并发预算（429 样本驱动）设计（历史记录）
 
 ## 目标
 

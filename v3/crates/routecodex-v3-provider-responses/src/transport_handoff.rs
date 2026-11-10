@@ -368,6 +368,41 @@ impl V3ProviderTransportAttemptBroker {
     }
 }
 
+/// Runtime-owned cleanup for an attempt whose outer send future may be
+/// cancelled before Provider transport can publish a terminal state.
+///
+/// Normal completion disarms this guard so the terminal or SSE stream keeps
+/// the handoff checkpoint available for its regular lifecycle. Dropping the
+/// guard while armed removes only this attempt from its owning broker.
+#[derive(Debug)]
+pub struct V3ProviderTransportAttemptCleanup {
+    broker: V3ProviderTransportAttemptBroker,
+    key: V3ProviderTransportAttemptKey,
+    armed: bool,
+}
+
+impl V3ProviderTransportAttemptCleanup {
+    pub fn new(control: &V3ProviderTransportAttemptControl) -> Self {
+        Self {
+            broker: control.broker.clone(),
+            key: control.key.clone(),
+            armed: true,
+        }
+    }
+
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for V3ProviderTransportAttemptCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            self.broker.remove(&self.key);
+        }
+    }
+}
+
 /// Cloneable read handle for one provider-owned attempt. Runtime may retain a
 /// clone outside its timeout future and read the transport fact after a drop.
 /// It cannot mutate transport state through the public surface.
@@ -503,6 +538,35 @@ mod tests {
         assert_eq!(
             broker.state(&key),
             Some(V3ProviderTransportAttemptState::Terminal)
+        );
+    }
+
+    #[test]
+    fn provider_transport_attempt_cleanup_removes_only_on_drop() {
+        let broker = V3ProviderTransportAttemptBroker::default();
+        let key = key();
+        broker
+            .begin(key.clone(), V3ProviderTransportKind::Http, scope(3))
+            .unwrap();
+        let control = V3ProviderTransportAttemptControl::new(broker.clone(), key.clone());
+        {
+            let _cleanup = V3ProviderTransportAttemptCleanup::new(&control);
+            assert_eq!(
+                broker.state(&key),
+                Some(V3ProviderTransportAttemptState::Connecting)
+            );
+        }
+        assert_eq!(broker.state(&key), None);
+
+        broker
+            .begin(key.clone(), V3ProviderTransportKind::Http, scope(4))
+            .unwrap();
+        let mut cleanup = V3ProviderTransportAttemptCleanup::new(&control);
+        cleanup.disarm();
+        drop(cleanup);
+        assert_eq!(
+            broker.state(&key),
+            Some(V3ProviderTransportAttemptState::Connecting)
         );
     }
 

@@ -245,6 +245,11 @@ pub struct V3ListenerHandle {
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
     accept_state: Arc<V3ListenerAcceptState>,
+    /// Accept-loop task. `shutdown()` joins it so that no listener task outlives
+    /// the aggregate handle; a fire-and-forget shutdown let a stopped server keep
+    /// touching its sockets, log sink and `HOME` store while the next owner has
+    /// already taken over (test-teardown race, O10).
+    join: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
@@ -336,17 +341,61 @@ impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
         self.probe_lifecycle.terminate();
         self.probe_lifecycle.join().await;
-        self.flush_runtime_persistence();
-        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
-            Some(mut worker) => worker.shutdown().await,
-            None => Vec::new(),
-        };
+        // Signal every listener first, then join the accept loops before returning.
+        // A listener task that outlives `shutdown()` keeps its socket bound and can
+        // still write through the sample/observability/HOME paths, which is how a
+        // stopped server raced its successor (O10 test-teardown leak).
         for listener in &mut self.listeners {
             if let Some(shutdown) = listener.shutdown.take() {
                 let _ = shutdown.send(());
             }
         }
+        Self::join_listener_tasks(&mut self.listeners).await;
+        // Flush after the listeners stopped, so persistence covers everything they
+        // wrote instead of racing it.
+        self.flush_runtime_persistence();
+        let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
+            Some(mut worker) => worker.shutdown().await,
+            None => Vec::new(),
+        };
         codex_sample_persist_failures
+    }
+
+    /// Shared budget for joining every accept loop during teardown. A listener that
+    /// cannot stop inside this window is aborted and joined before `shutdown()`
+    /// returns: a listener task must never outlive teardown while it still holds
+    /// the socket and the HOME-backed sample/observability paths.
+    const LISTENER_TEARDOWN_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
+    async fn join_listener_tasks(listeners: &mut [V3ListenerHandle]) {
+        let deadline = tokio::time::Instant::now() + Self::LISTENER_TEARDOWN_BUDGET;
+        for listener in listeners.iter_mut() {
+            let Some(task) = listener.join.take() else {
+                continue;
+            };
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let mut task = task;
+            match tokio::time::timeout(remaining, &mut task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!(
+                    "V3 listener {} accept loop failed during shutdown: {error}",
+                    listener.server_id
+                ),
+                Err(_) => {
+                    // Leaving the task behind let a stopped server keep writing
+                    // through the old HOME. Abort the accept loop and join the
+                    // aborted handle so teardown never reports success while a
+                    // listener is still attached to it.
+                    task.abort();
+                    let _ = task.await;
+                    eprintln!(
+                        "V3 listener {} did not stop within the {:?} teardown budget; aborted and joined",
+                        listener.server_id,
+                        Self::LISTENER_TEARDOWN_BUDGET
+                    );
+                }
+            }
+        }
     }
 
     /// Stop new business dispatch, wait for accepted requests to finish, then
@@ -696,6 +745,7 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
             addr,
             shutdown: Some(shutdown_tx),
             accept_state,
+            join: None,
         });
     }
     for listener in &listeners {
@@ -740,16 +790,23 @@ async fn spawn_v3_server_aggregate_with_health_dependencies(
             None
         }
     };
+    let mut listener_tasks = Vec::with_capacity(pending_listener_tasks.len());
     for (listener, app_for_serve, shutdown_rx, connection_broker, accept_state) in
         pending_listener_tasks
     {
-        tokio::spawn(run_v3_listener_accept_loop(
+        listener_tasks.push(tokio::spawn(run_v3_listener_accept_loop(
             listener,
             app_for_serve,
             shutdown_rx,
             connection_broker,
             accept_state,
-        ));
+        )));
+    }
+    // `listeners` and `listener_tasks` are appended by the same loop above, so the
+    // pairing is positional and total.
+    debug_assert_eq!(listeners.len(), listener_tasks.len());
+    for (listener, task) in listeners.iter_mut().zip(listener_tasks) {
+        listener.join = Some(task);
     }
     if console_enabled {
         emit_v3_startup_console_line(&listeners);
@@ -1577,3 +1634,39 @@ pub(crate) fn persist_v3_responses_relay_failure_sources(
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod listener_teardown_join_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// O10 teardown pin: joining must *wait for* every accept-loop task, not merely
+    /// consume the handle. A synthetic listener task that only sets its flag after a
+    /// yield discriminates the two: with a wait the flag is set, with a fire-and-forget
+    /// shutdown the assertion fails.
+    #[tokio::test]
+    async fn join_listener_tasks_waits_for_the_accept_loop_to_finish() {
+        let finished = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&finished);
+        let task = tokio::spawn(async move {
+            tokio::task::yield_now().await;
+            flag.store(true, Ordering::SeqCst);
+        });
+        let mut listeners = vec![V3ListenerHandle {
+            server_id: "synthetic-teardown".to_string(),
+            addr: "127.0.0.1:0".parse().unwrap(),
+            shutdown: None,
+            accept_state: Arc::new(V3ListenerAcceptState::new()),
+            join: Some(task),
+        }];
+        V3ServerAggregateHandle::join_listener_tasks(&mut listeners).await;
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "teardown must wait for the accept loop task, not just signal it"
+        );
+        assert!(
+            listeners[0].join.is_none(),
+            "the accept-loop join handle is consumed exactly once"
+        );
+    }
+}

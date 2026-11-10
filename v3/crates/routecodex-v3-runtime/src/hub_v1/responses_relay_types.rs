@@ -96,7 +96,6 @@ pub struct V3ResponsesRelayRuntimeSeeds {
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,
     pub request_execution_control: Option<crate::nodes::V3RequestExecutionControl>,
-    pub request_local_busy_candidates: BTreeSet<String>,
     /// Client frame channel of the request. Present only when the client
     /// requested SSE and the Server created the committed client channel.
     /// Relay uses it to project its first business frame at provider arrival
@@ -161,37 +160,6 @@ pub struct V3ResponsesRelayProviderSnapshots {
 pub struct V3RelayProviderSnapshots {
     pub provider_request: Option<Value>,
     pub provider_response: Option<Value>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct V3ResponsesRelayRetryPolicy {
-    pub same_candidate_retries: usize,
-}
-
-impl Default for V3ResponsesRelayRetryPolicy {
-    fn default() -> Self {
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
-}
-
-impl V3ResponsesRelayRetryPolicy {
-    pub(crate) fn from_manifest(manifest: &V3Config05ManifestPublished) -> Self {
-        // Every provider failure changes the candidate. RetrySame is retained
-        // only as a config compatibility enum and never grants production
-        // same-candidate retries.
-        let _ = manifest;
-        Self {
-            same_candidate_retries: 0,
-        }
-    }
-
-    pub(crate) fn as_shared_policy(self) -> V3RelayProviderFailureRetryPolicy {
-        V3RelayProviderFailureRetryPolicy {
-            same_candidate_retries: self.same_candidate_retries,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -395,10 +363,8 @@ impl V3ProviderFailureDirective {
 pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) last_external_http: &'state mut Option<routecodex_v3_error::V3ExternalHttpWitness>,
     pub(crate) failed_candidates: &'state mut BTreeSet<String>,
-    pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) retry_selected:
         &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pub(crate) pending_recovery: &'state mut Option<V3Error05RecoveryAdmissionWitness>,
     pub(crate) provider_failure_events: &'state mut Vec<V3RuntimeProviderFailureObservation>,
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
     pub(crate) selected_observability: &'state V3RuntimeObservability,
@@ -923,10 +889,6 @@ impl V3LiveSnapProviderSnapshotRecorder {
                 ..
             }
             | V3ProviderError::ClientDisconnect {
-                request_id,
-                provider_id,
-            }
-            | V3ProviderError::ConcurrencyBusy {
                 request_id,
                 provider_id,
             } => self.record_transport_provider_error(attempt, request_id, provider_id, error),

@@ -2,8 +2,7 @@
 use crate::{
     provider_directory::V3ProviderDirectorySource, validation, V3ConfigError,
     V3ProviderAuthAuthoringConfig, V3ProviderAuthEntryAuthoringConfig, V3ProviderAuthType,
-    V3ProviderAuthoringConfig, V3ProviderConcurrencyAuthoringConfig,
-    V3ProviderHealthAuthoringConfig, V3ProviderInterfaceAuthoringConfig,
+    V3ProviderAuthoringConfig, V3ProviderHealthAuthoringConfig, V3ProviderInterfaceAuthoringConfig,
     V3ProviderModelAuthoringConfig, V3ProviderRequestCleanupAuthoringConfig,
     V3ProviderResponsesAuthoringConfig, V3ProviderSemanticErrorPolicyAuthoringConfig,
     V3ResponsesTransportKind, V3StreamingPolicy, V3WebSearchExecutionMode,
@@ -149,13 +148,6 @@ pub(crate) fn compile_provider_directory(
                 auth,
                 models,
                 responses,
-                concurrency: provider.concurrency.map(|concurrency| {
-                    V3ProviderConcurrencyAuthoringConfig {
-                        max_in_flight: concurrency.max_in_flight.unwrap_or(40),
-                        acquire_timeout_ms: concurrency.acquire_timeout_ms.unwrap_or(60000),
-                        stale_lease_ms: concurrency.stale_lease_ms.unwrap_or(300000),
-                    }
-                }),
                 health: v3.health,
                 semantic_error_policy: v3.semantic_error_policy,
                 provider_request_cleanup: v3.provider_request_cleanup,
@@ -494,7 +486,6 @@ pub struct V2ProviderConfig {
     pub default_model: String,
     pub auth: V2ProviderAuthConfig,
     pub responses: Option<V2ProviderResponsesConfig>,
-    pub concurrency: Option<V2ProviderConcurrencyConfig>,
     #[serde(default, alias = "compatibilityProfile")]
     pub compatibility_profile: Option<String>,
     #[serde(default)]
@@ -562,15 +553,6 @@ pub struct V2ProviderResponsesConfig {
     pub transport: Option<V3ResponsesTransportKind>,
     #[serde(default, alias = "websocket_v2_url", alias = "websocketV2URL")]
     pub websocket_v2_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct V2ProviderConcurrencyConfig {
-    pub max_in_flight: Option<u32>,
-    /// Legacy compatibility field. Business request admission does not wait on concurrency.
-    pub acquire_timeout_ms: Option<u64>,
-    pub stale_lease_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

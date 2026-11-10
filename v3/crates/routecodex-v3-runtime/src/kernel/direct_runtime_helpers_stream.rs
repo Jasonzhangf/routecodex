@@ -576,11 +576,21 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         });
         return sealed;
     }
-    Err(crate::shared::direct_plain_error(
+    Err(crate::shared::direct_external_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_sse_stream",
-        "provider SSE ended without a protocol terminal",
+        "provider response SSE stream ended without a terminal semantic event",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string()),
+            provider_id: None,
+            upstream_request_id: None,
+            message: Some(
+                "provider response SSE stream ended without a terminal semantic event".to_string(),
+            ),
+        },
     ))
 }
 
@@ -1817,7 +1827,7 @@ pub(crate) fn error_output_with_observability_and_snapshots(
     let target_exhausted = source.source_kind == V3ErrorSourceKind::TargetPoolExhausted;
     let original_source = source.clone();
     let (decision_projection, decision) =
-        match hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, false, None) {
+        match hook_registry.run_error(source, V3ErrorActionScope::None, 0, false, None) {
             Ok(result) => result,
             Err(error) => {
                 return sdk_runtime_fault_output_with_observability_and_snapshots(
@@ -1945,7 +1955,16 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
     }
     V3ResponsesDirectRuntimeOutput {
         observability,
-        terminal_disposition: None,
+        // A provider-pool exhaustion terminal carries no client payload: the
+        // Error06 body is provider-private evidence and the client boundary
+        // breaks the transport without an error number, error payload or a
+        // normal empty completion. Every caller that holds a real provider
+        // witness - the single/last eligible candidate passthrough - overrides
+        // this field with its own typed disposition, so that exception keeps
+        // returning the real provider status/body.
+        terminal_disposition: projected
+            .pool_exhausted
+            .then_some(V3ProviderTerminalDisposition::NoResponse),
         diagnostic_source: Some(projected.diagnostic_source),
         diagnostic_cause: None,
         stream_observation: None,
@@ -1964,6 +1983,7 @@ pub(crate) fn projected_error_output_with_observability_and_snapshots(
 
 pub(crate) fn provider_terminal_output(
     decision: V3Error05ExecutionDecision,
+    terminal_disposition: Option<V3ProviderTerminalDisposition>,
     witness: Option<V3ExternalHttpWitness>,
     node_trace: Vec<&'static str>,
     observability: Option<V3RuntimeObservability>,
@@ -1984,10 +2004,10 @@ pub(crate) fn provider_terminal_output(
             )
         }
     };
-    let disposition = match witness {
-        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
+    let disposition = terminal_disposition.unwrap_or_else(|| match witness.as_ref() {
+        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response.clone()),
         None => V3ProviderTerminalDisposition::NoResponse,
-    };
+    });
     provider_terminal_output_with_decision_projection(
         decision,
         decision_projection,
@@ -2032,6 +2052,7 @@ fn provider_terminal_output_with_decision_projection(
             ),
             match disposition.clone() {
                 V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
+                V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness) => Some(witness),
                 V3ProviderTerminalDisposition::NoResponse => None,
             },
             node_trace,
@@ -2044,6 +2065,7 @@ fn provider_terminal_output_with_decision_projection(
             sdk_fault_leaf_source("V3Error06ClientProjected", error),
             match disposition {
                 V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
+                V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness) => Some(witness),
                 V3ProviderTerminalDisposition::NoResponse => None,
             },
             node_trace,
@@ -2309,12 +2331,11 @@ mod target_exhaustion_disposition_tests {
                 source_status: None,
             },
             false,
-            false,
             None,
         );
         assert_eq!(decision.action, V3Error05ExecutionAction::ProjectTerminal);
         let no_response =
-            provider_terminal_output(decision.clone(), None, Vec::new(), None, None, None);
+            provider_terminal_output(decision.clone(), None, None, Vec::new(), None, None, None);
         assert_eq!(
             no_response.terminal_disposition,
             Some(V3ProviderTerminalDisposition::NoResponse)
@@ -2324,8 +2345,22 @@ mod target_exhaustion_disposition_tests {
             vec![("content-type".into(), b"application/json".to_vec())],
             br#"{"error":"limited"}"#.to_vec(),
         );
+        let qualified =
+            V3ErrorHandlingCenter::last_candidate_terminal_disposition(Some(witness.clone()));
         let external = provider_terminal_output(
+            decision.clone(),
+            Some(qualified.clone()),
+            Some(witness.clone()),
+            Vec::new(),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(external.terminal_disposition, Some(qualified));
+
+        let private = provider_terminal_output(
             decision,
+            Some(V3ProviderTerminalDisposition::ExternalHttp(witness.clone())),
             Some(witness.clone()),
             Vec::new(),
             None,
@@ -2333,7 +2368,7 @@ mod target_exhaustion_disposition_tests {
             None,
         );
         assert_eq!(
-            external.terminal_disposition,
+            private.terminal_disposition,
             Some(V3ProviderTerminalDisposition::ExternalHttp(witness))
         );
     }
@@ -2359,7 +2394,6 @@ mod target_exhaustion_disposition_tests {
             routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
                 action,
                 0,
-                false,
                 false,
             );
         routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None)
@@ -2390,41 +2424,37 @@ mod target_exhaustion_disposition_tests {
             "provider_transport_error",
             "provider connection failed",
         );
-        let nonterminal_recovery = V3Error05RecoveryAdmissionWitness::new(
-            V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a")
-                .expect("test session scope must be valid"),
-            "provider-a:key-a:model-a",
-            "provider_transport_error",
-            1,
-        )
-        .expect("test recovery witness must be valid");
-        let nonterminal_decision = V3ErrorHandlingCenter::decide_provider(
-            V3ErrorHandlingCenterInput {
-                source: nonterminal_source.clone(),
-                action_scope: V3ErrorActionScope::ProviderKeyModel {
+        let classified = routecodex_v3_error::build_v3_error_02_classified_from_v3_error_01(
+            nonterminal_source.clone(),
+        );
+        let local_action =
+            routecodex_v3_error::build_v3_error_03_target_local_action_from_v3_error_02(
+                classified,
+                V3ErrorActionScope::ProviderKeyModel {
                     provider_id: "provider-a".to_string(),
                     auth_alias: "key-a".to_string(),
                     model_id: "model-a".to_string(),
                 },
-                candidates_remaining: 1,
-                source_status: Some(200),
-            },
-            false,
-            false,
-            Some(nonterminal_recovery),
-        );
+                1,
+            );
+        let exhaustion =
+            routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_target_recovery(
+                local_action,
+                1,
+                false,
+                true,
+            );
+        let nonterminal_decision =
+            routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
+                exhaustion, None,
+            );
         assert_eq!(
             nonterminal_decision.action,
-            V3Error05ExecutionAction::WaitThenReselect {
-                recovery: nonterminal_decision
-                    .action
-                    .recovery_witness()
-                    .expect("nonterminal decision must retain recovery")
-                    .clone(),
-            }
+            V3Error05ExecutionAction::ReevaluateTarget
         );
         let nonterminal = provider_terminal_output(
             nonterminal_decision,
+            None,
             Some(witness.clone()),
             vec!["V3ProviderResp14Raw"],
             Some(observability.clone()),
@@ -2580,7 +2610,6 @@ mod target_exhaustion_disposition_tests {
                 action,
                 0,
                 false,
-                false,
             );
         let decision = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
             exhaustion, None,
@@ -2634,7 +2663,6 @@ pub(crate) fn relay_handoff_output(
     target: routecodex_v3_target::V3Target10ConcreteProviderSelected,
     expanded: routecodex_v3_target::V3Target09CandidateSetExpanded,
     request_local_excluded_candidates: BTreeSet<String>,
-    request_local_busy_candidates: BTreeSet<String>,
     route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     node_trace: Vec<&'static str>,
@@ -2666,7 +2694,6 @@ pub(crate) fn relay_handoff_output(
             target,
             expanded,
             request_local_excluded_candidates,
-            request_local_busy_candidates,
             route_policy_pending,
             route_policy_scope,
             node_trace,
@@ -2710,50 +2737,6 @@ fn client_payload_debug_value(payload: &V3Resp15ClientPayload) -> Value {
     }
 }
 
-struct V3RuntimeAttemptAvailability<'a, R> {
-    base: &'a R,
-    failed_candidates: &'a BTreeSet<String>,
-}
-
-impl<R: V3ProviderAvailabilityReader> V3ProviderAvailabilityReader
-    for V3RuntimeAttemptAvailability<'_, R>
-{
-    fn availability_for_interface(
-        &self,
-        provider_id: &str,
-        interface_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
-        let mut projection = self.base.availability_for_interface(
-            provider_id,
-            interface_id,
-            auth_alias,
-            model_id,
-            now_ms,
-        );
-        let key = availability_key(provider_id, interface_id, auth_alias, model_id);
-        if self.failed_candidates.contains(&key) {
-            projection.available = false;
-            projection
-                .blocked_scopes
-                .push(format!("request_failed:{key}"));
-        }
-        projection
-    }
-
-    fn availability(
-        &self,
-        provider_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-        now_ms: u64,
-    ) -> V3ProviderAvailabilityProjection {
-        self.availability_for_interface(provider_id, "default", auth_alias, model_id, now_ms)
-    }
-}
-
 fn candidate_key(candidate: &V3TargetCandidate) -> String {
     availability_key(
         &candidate.provider_id,
@@ -2776,62 +2759,6 @@ fn availability_key(
         auth_alias.unwrap_or(""),
         model_id.unwrap_or("")
     )
-}
-
-fn remaining_available_candidates<R: V3ProviderAvailabilityReader>(
-    candidates: &[V3TargetCandidate],
-    availability: &R,
-    failed_candidates: &BTreeSet<String>,
-    now_ms: u64,
-) -> usize {
-    let attempt_availability = V3RuntimeAttemptAvailability {
-        base: availability,
-        failed_candidates,
-    };
-    candidates
-        .iter()
-        .filter(|candidate| {
-            // A window-inactive or capability-mismatched sibling cannot take
-            // this request, so it is not a remaining candidate.
-            routecodex_v3_target::V3TargetInterpreter::candidate_admitted(candidate, now_ms)
-                && attempt_availability
-                    .availability_for_interface(
-                        &candidate.provider_id,
-                        &candidate.interface_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        0,
-                    )
-                    .available
-        })
-        .count()
-}
-
-fn first_remaining_available_candidate_key<R: V3ProviderAvailabilityReader>(
-    candidates: &[V3TargetCandidate],
-    availability: &R,
-    failed_candidates: &BTreeSet<String>,
-    now_ms: u64,
-) -> Option<String> {
-    let attempt_availability = V3RuntimeAttemptAvailability {
-        base: availability,
-        failed_candidates,
-    };
-    candidates
-        .iter()
-        .find(|candidate| {
-            routecodex_v3_target::V3TargetInterpreter::candidate_admitted(candidate, now_ms)
-                && attempt_availability
-                    .availability_for_interface(
-                        &candidate.provider_id,
-                        &candidate.interface_id,
-                        Some(&candidate.auth_alias),
-                        Some(&candidate.model_id),
-                        0,
-                    )
-                    .available
-        })
-        .map(candidate_key)
 }
 
 fn require_static_hooks(hook_registry: &V3HookRegistry) {

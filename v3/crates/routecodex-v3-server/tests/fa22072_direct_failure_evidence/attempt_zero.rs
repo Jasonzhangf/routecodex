@@ -102,21 +102,39 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
         let received = captures.lock().await;
         let current = &received[before..];
         if image {
-            if !current.is_empty() {
+            // v31 transparent-proxy boundary (supersedes the retired local
+            // "attempt zero" admission gate): a pinned text model is not a reason
+            // to reject a forwardable request locally. The image request performs
+            // exactly one real provider attempt against the pinned identity and the
+            // client receives the provider's real business content - never a
+            // cost-free local rejection envelope.
+            if current.len() != 1 {
                 controls.push(format!(
-                    "case{case}: attempt-zero request reached provider: {current:?}"
+                    "case{case}: the image request must perform exactly one provider attempt: {current:?}"
                 ));
-            }
-            if completed
-                || text.contains(TEXT)
-                || text.contains("[DONE]")
-                || text.contains("\"error\"")
-                || text.contains(KEY)
-                || text.contains("model lacks vision")
-                || text.contains("v3_route_target_runtime_failure")
+            } else if current[0].body["model"] != MODEL
+                || current[0].authorization != format!("Bearer {KEY}")
             {
                 controls.push(format!(
-                    "case{case}: attempt-zero error leaked or completed: {text}"
+                    "case{case}: the single attempt must target the pinned provider/model: {current:?}"
+                ));
+            }
+            if !completed
+                || status != Some(200)
+                || !text.contains(TEXT)
+                || (stream && !text.contains("[DONE]"))
+            {
+                controls.push(format!(
+                    "case{case}: the client must receive the provider's real business content: {text}"
+                ));
+            }
+            if text.contains(KEY)
+                || text.contains("model lacks vision")
+                || text.contains("v3_route_target_runtime_failure")
+                || text.contains(original["code"].as_str().unwrap_or_default())
+            {
+                controls.push(format!(
+                    "case{case}: no local rejection or internal source may reach the client: {text}"
                 ));
             }
         } else if current.len() != 1
@@ -152,15 +170,14 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
         }
         let artifact = dirs[0].join("provider-failed-attempts.json");
         if image {
-            let evidence = std::fs::read_to_string(artifact)
-                .ok()
-                .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-            if !evidence.as_ref().is_some_and(|value| {
-                value["object"] == "routecodex.v3.provider_failed_attempt_evidence"
-                    && value["attempts"] == json!([])
-                    && value["terminal_source"] == original
-            }) {
-                diagnostics.push(format!("case{case}: exact attempt-zero source absent: {evidence:?}; expected {original}"));
+            // A forwarded, answered request is not a failed attempt, so no
+            // failed-attempt evidence may be fabricated for it (the retired
+            // attempt-zero rejection used to write an empty-attempts artifact).
+            if let Ok(raw) = std::fs::read_to_string(&artifact) {
+                let evidence = serde_json::from_str::<Value>(&raw).ok();
+                diagnostics.push(format!(
+                    "case{case}: an answered image request must not fabricate failed-attempt evidence: {evidence:?}"
+                ));
             }
         } else if artifact.exists() {
             controls.push(format!(

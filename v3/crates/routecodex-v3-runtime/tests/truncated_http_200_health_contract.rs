@@ -9,9 +9,8 @@ use routecodex_v3_provider_responses::{
     V3ProviderResp14Raw, V3ProviderResponseHeader, V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime_with_health_and_retry_policy, V3ResponsesRelayClientBody,
-    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRetryPolicy,
-    V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime_with_transport_health, V3ResponsesRelayClientBody,
+    V3ResponsesRelayProviderHealthHandle, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::json;
 use std::sync::{
@@ -37,7 +36,6 @@ type = "responses"
 base_url = "http://limited.invalid/v1"
 default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.limited.models."gpt-5.5"]
 wire_name = "gpt-5.5"
 supports_streaming = true
@@ -49,7 +47,6 @@ type = "responses"
 base_url = "http://minimax.invalid/v1"
 default_model = "MiniMax-M3"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.minimax.models."MiniMax-M3"]
 wire_name = "MiniMax-M3"
 supports_streaming = true
@@ -96,7 +93,6 @@ type = "responses"
 base_url = "http://limited.invalid/v1"
 default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "LIMITED_KEY" }] }
-concurrency = { max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 [providers.limited.models."gpt-5.5"]
 wire_name = "gpt-5.5"
 supports_streaming = true
@@ -202,7 +198,7 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         captures: Mutex::new(Vec::new()),
         turn: AtomicUsize::new(0),
     };
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -221,9 +217,6 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
         },
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("truncated primary must reselect into the healthy secondary");
@@ -242,17 +235,52 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    assert_eq!(event.failure_count, 1);
-    assert_eq!(event.health_state, "cooldown");
-    assert!(event.cooldown_until_ms.is_some());
+    // v31 counting basis: a truncated HTTP 200 body is an ordinary recoverable
+    // provider failure, so it is counted IMMEDIATELY as one consecutive failure
+    // for this complete provider/interface/model/key identity. Below the ladder
+    // threshold there is no committed cooldown, so the pre-cool observation row
+    // is only an observability substate carrying the real streak.
+    assert_eq!(
+        event.failure_count, 1,
+        "a recoverable provider failure is counted immediately for the exact identity: {event:?}"
+    );
+    assert_eq!(
+        event.health_state, "pre_cool_observation",
+        "below the ladder threshold the identity is only in the observation substate: {event:?}"
+    );
+    assert!(
+        event.cooldown_until_ms.is_none(),
+        "one failure must not commit a provider cooldown: {event:?}"
+    );
+
+    // The pre-cool hold is a runtime observation substate, not a store
+    // cooldown: the exact identity is listed as pending observation while the
+    // store record itself stays available below the ladder threshold.
+    let observations = provider_health.pending_precool_observations();
+    let exact = observations
+        .iter()
+        .find(|observation| {
+            observation.provider_id == "limited"
+                && observation.auth_alias.as_deref() == Some("key1")
+                && observation.model_id.as_deref() == Some("gpt-5.5")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the exact failed identity must be held in pre-cool observation: {observations:?}"
+            )
+        });
+    assert_eq!(
+        exact.consecutive_failures, 1,
+        "the observation substate must carry the real consecutive streak: {exact:?}"
+    );
 
     let now = u64::MAX;
     assert!(
-        !provider_health
+        provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
-        "the exact failed identity must be cooled"
+        "below the ladder threshold the exact failed identity stays routable"
     );
     assert!(
         provider_health
@@ -290,7 +318,7 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
         captures: Mutex::new(Vec::new()),
         turn: AtomicUsize::new(0),
     };
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -309,9 +337,6 @@ async fn truncated_http_200_keeps_last_candidate_health_neutral() {
         },
         &transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("a last-candidate transport failure still projects a typed terminal");
@@ -348,7 +373,7 @@ async fn complete_http_502_is_health_neutral_when_it_is_the_last_candidate() {
     let manifest = single_candidate_manifest(server_id);
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
+    let output = execute_v3_responses_relay_runtime_with_transport_health(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: server_id.into(),
@@ -367,9 +392,6 @@ async fn complete_http_502_is_health_neutral_when_it_is_the_last_candidate() {
         },
         &CompleteHttp502Transport,
         &provider_health,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 0,
-        },
     )
     .await
     .expect("a last-candidate HTTP error must project a typed terminal");

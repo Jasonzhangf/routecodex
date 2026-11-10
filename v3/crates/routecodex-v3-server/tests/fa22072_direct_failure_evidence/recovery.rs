@@ -83,7 +83,6 @@ async fn run_direct_producer(
         default_responses_transport(),
         V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(manifest),
         now_ms(),
-        true,
         Some(&failure_sink),
         None,
     )

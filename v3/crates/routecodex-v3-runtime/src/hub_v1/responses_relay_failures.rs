@@ -734,7 +734,14 @@ pub(super) fn local_error_output_from_projection(
     trace.extend(V3_ERROR_CHAIN_NODE_IDS);
     V3ResponsesRelayRuntimeOutput {
         status: projected.status,
-        terminal_disposition: None,
+        // Keep the lane symmetric with the other relay lanes: a provider-pool
+        // exhaustion is a transport terminal, never a client payload. The
+        // Error06 body stays provider-private evidence; a caller that holds a
+        // real provider witness (the single/last eligible candidate
+        // passthrough) sets its own typed disposition on this output.
+        terminal_disposition: projected
+            .pool_exhausted
+            .then_some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse),
         client_body: V3ResponsesRelayClientBody::Json(projected.body),
         node_trace: trace,
         error_chain: Some(projected.chain.to_vec()),
@@ -796,7 +803,6 @@ mod tests {
             source.clone(),
             V3ErrorActionScope::None,
             0,
-            false,
             false,
             None,
         )
@@ -1110,7 +1116,7 @@ mod tests {
         );
         let exhaustion =
             routecodex_v3_error::build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-                local, 0, false, false,
+                local, 0, false,
             );
         let execution = routecodex_v3_error::build_v3_error_05_execution_decision_from_v3_error_04(
             exhaustion, None,

@@ -80,7 +80,6 @@ fn manifest() -> V3Config05ManifestPublished {
                     },
                 )]),
                 responses: None,
-                concurrency: None,
                 health: None,
                 provider_request_cleanup: Default::default(),
                 reasoning_effort: None,

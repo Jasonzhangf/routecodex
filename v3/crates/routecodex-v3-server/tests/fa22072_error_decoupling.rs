@@ -36,6 +36,79 @@ fn completed() -> Value {
 async fn upstream(State(peer): State<Arc<Peer>>, Json(body): Json<Value>) -> Response<Body> {
     peer.captures.send(body.clone()).unwrap();
     let input = body["input"].to_string();
+    if input.contains("last-http-two-failure") {
+        let (status, marker) = if body["model"] == "wire-recover" {
+            (503, "last candidate B body")
+        } else {
+            (401, "middle candidate A body")
+        };
+        return Response::builder()
+            .status(StatusCode::from_u16(status).unwrap())
+            .header("content-type", "application/json")
+            .header("x-upstream-trace", format!("candidate-{status}"))
+            .body(Body::from(
+                json!({"error":{"status":status,"message":marker}}).to_string(),
+            ))
+            .unwrap();
+    }
+    if input.contains("last-http-raw-body") {
+        let bytes = b"raw-\xff-body\n\twith whitespace  ".to_vec();
+        let mut response = Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/octet-stream")
+            .header("x-end-to-end", "first")
+            .header("connection", "keep-alive, x-listed-hop")
+            .header("keep-alive", "timeout=5")
+            .header("x-listed-hop", "must-not-cross")
+            .header("proxy-authenticate", "must-not-cross")
+            .header("content-length", bytes.len())
+            .body(Body::from(bytes))
+            .unwrap();
+        response
+            .headers_mut()
+            .append("x-end-to-end", "second".parse().unwrap());
+        return response;
+    }
+    // v29 arbitration gate (b): the last eligible candidate's real HTTP 429
+    // crosses to the client as the original typed error, never a fabricated
+    // success or proxy replacement.
+    if input.contains("v29-last-eligible-429") {
+        let (marker, trace) = if body["model"] == "wire-recover" {
+            ("v29 last candidate B 429 body", "candidate-429-b")
+        } else {
+            ("v29 middle candidate A 429 body", "candidate-429-a")
+        };
+        return Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/json")
+            .header("x-upstream-trace", trace)
+            .body(Body::from(
+                json!({"error":{"status":429,"message":marker}}).to_string(),
+            ))
+            .unwrap();
+    }
+    // Real single-candidate upstream error for the v27 last-candidate public
+    // gate: original status, original body bytes, and a legal duplicate header.
+    // This marker never participates in the older fixed 500 fixture branch.
+    if let Some(code) = ["401", "429", "503"]
+        .into_iter()
+        .find(|code| input.contains(&format!("last-http-error-{code}")))
+    {
+        let status_code = code.parse::<u16>().unwrap();
+        let bytes = format!(
+            r#"{{"error":{{"type":"v27_last_http_error","status":{status_code},"message":"original upstream body for {status_code}"}}}}"#
+        );
+        let mut response = Response::builder()
+            .status(StatusCode::from_u16(status_code).unwrap())
+            .header("content-type", "application/json")
+            .header("x-upstream-trace", "first")
+            .body(Body::from(bytes))
+            .unwrap();
+        response
+            .headers_mut()
+            .append("x-upstream-trace", "second".parse().unwrap());
+        return response;
+    }
     let (status, media, bytes) =
         if input.contains("provider-failure") && body["model"] != "wire-recover" {
             (
@@ -177,8 +250,8 @@ async fn raw(entry: &Entry, path: &str, header: &str, body: &str) -> Vec<u8> {
     bytes
 }
 async fn drained(entry: &Entry) {
-    // This public maintenance preparation waits for actual activity/admission
-    // permits. It neither execs nor restarts the listener; dropping resumes it.
+    // This public preparation quiesces probes and persistence. It neither
+    // execs nor restarts the listener; dropping returns it to normal operation.
     let preparation = timeout(Duration::from_secs(5), entry.handle.prepare_exec_attempt())
         .await
         .expect("failed request leaked activity/lease")
@@ -202,7 +275,7 @@ async fn drained(entry: &Entry) {
         bytes.contains("business error word survives") && bytes.contains("response.completed"),
         "{bytes}"
     );
-    eprintln!("release-public maintenance=drained sibling=business-completed");
+    eprintln!("release-public preparation=drained sibling=business-completed");
 }
 
 async fn internal_chain_receipt(entry: &Entry, origin: &str) {
@@ -374,32 +447,34 @@ async fn websocket_three_sources_close_without_business_or_error_frames_and_rele
 #[tokio::test]
 async fn provider_http_failure_recovers_before_client_business_commit() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start("chat", true).await;
-    let response = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap()
-        .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"input":"provider-failure","stream":true}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let bytes = response.text().await.unwrap();
-    assert!(
-        bytes.contains("business error word survives")
-            && !bytes.contains("owned private provider cause")
-    );
-    assert_eq!(entry.captures.recv().await.unwrap()["model"], "wire-owned");
-    assert_eq!(
-        entry.captures.recv().await.unwrap()["model"],
-        "wire-recover"
-    );
-    assert!(entry.captures.try_recv().is_err());
-    eprintln!("public-recovery attempts=2 client={bytes}");
-    drained(&entry).await;
-    entry.stop().await;
+    for process in ["direct", "chat"] {
+        let mut entry = start(process, true).await;
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .post(format!("{}/v1/responses", entry.base()))
+            .json(&json!({"input":"provider-failure","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.text().await.unwrap();
+        assert!(
+            bytes.contains("business error word survives")
+                && !bytes.contains("owned private provider cause")
+        );
+        assert_eq!(entry.captures.recv().await.unwrap()["model"], "wire-owned");
+        assert_eq!(
+            entry.captures.recv().await.unwrap()["model"],
+            "wire-recover"
+        );
+        assert!(entry.captures.try_recv().is_err());
+        eprintln!("public-recovery process={process} attempts=2 client={bytes}");
+        drained(&entry).await;
+        entry.stop().await;
+    }
 }
 
 #[tokio::test]
@@ -437,10 +512,22 @@ async fn three_failed_requests_do_not_block_concurrent_or_same_identity_followup
             );
         };
         let (wire, ()) = tokio::join!(raw(&entry, "/v1/responses", &headers, &failed), sibling);
-        assert!(
-            wire.is_empty(),
-            "JSON failure must close before any HTTP head"
-        );
+        if origin == "provider-failure" {
+            let text = String::from_utf8_lossy(&wire);
+            assert!(
+                text.starts_with("HTTP/1.1 500"),
+                "last-candidate provider error must return the original HTTP status: {text}"
+            );
+            assert!(
+                text.contains("owned private provider cause"),
+                "last-candidate provider error must return the original body: {text}"
+            );
+        } else {
+            assert!(
+                wire.is_empty(),
+                "non-provider or incomplete-body failure must close before any HTTP head"
+            );
+        }
         let expected_attempts = if origin == "request" { 1 } else { 2 };
         for _ in 0..expected_attempts {
             entry.captures.try_recv().unwrap();
@@ -449,5 +536,225 @@ async fn three_failed_requests_do_not_block_concurrent_or_same_identity_followup
         drained(&entry).await;
         eprintln!("isolation-public origin={origin} concurrent=completed same-identity-followup=completed");
         entry.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn v27_last_http_error_passthrough_original_status_body_headers() {
+    let _guard = TEST_LOCK.lock().await;
+    for process in ["direct", "chat"] {
+        for status in [401u16, 429, 503] {
+            for stream in [false, true] {
+                let mut entry = start(process, false).await;
+                let marker = format!("last-http-error-{status}");
+                let request_body =
+                    json!({"model":"test.test","input":marker,"stream":stream}).to_string();
+                let headers = format!(
+                    "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                    request_body.len()
+                );
+                let wire = raw(&entry, "/v1/responses", &headers, &request_body).await;
+
+                // The real upstream must receive exactly one business send. A
+                // timeout, a zero-match fixture, or a compile failure is not red.
+                let captured = entry.captures.recv().await.unwrap();
+                let expected_input = format!("last-http-error-{status}");
+                assert!(
+                    captured.to_string().contains(&expected_input),
+                    "single business send must carry the request marker for {process} {status} stream={stream}: {captured}"
+                );
+                assert!(
+                    entry.captures.try_recv().is_err(),
+                    "single business send expected for {process} {status} stream={stream}"
+                );
+                entry.stop().await;
+
+                let text = String::from_utf8_lossy(&wire).to_string();
+                eprintln!(
+                    "v27-last-http-error process={process} status={status} stream={stream} wire={text}"
+                );
+
+                // v27: a normal last-candidate complete HTTP error must return
+                // the original upstream response. The Server projection owner
+                // is frame_builders.rs; direct stays red until Runtime grants
+                // LastCandidateExternalHttp instead of rebuilding ExternalHttp.
+                assert!(
+                    text.starts_with(&format!("HTTP/1.1 {status}")),
+                    "expected original upstream status {status} for {process} stream={stream}; wire={text}"
+                );
+                let expected_body = format!(
+                    r#"{{"error":{{"type":"v27_last_http_error","status":{status},"message":"original upstream body for {status}"}}}}"#
+                );
+                assert!(
+                    text.contains(&expected_body),
+                    "expected original upstream body for {status} for {process} stream={stream}; wire={text}"
+                );
+                let lowered = text.to_ascii_lowercase();
+                assert!(
+                    lowered.contains("x-upstream-trace: first")
+                        && lowered.contains("x-upstream-trace: second"),
+                    "expected both duplicate legal upstream headers for {status}; wire={text}"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn v27_last_http_error_after_a_and_b_failure_returns_only_b() {
+    let _guard = TEST_LOCK.lock().await;
+    for process in ["direct", "chat"] {
+        let mut entry = start(process, true).await;
+        let request_body = json!({
+            "input": "last-http-two-failure",
+            "stream": false,
+        })
+        .to_string();
+        let headers = format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            request_body.len()
+        );
+        let wire = raw(&entry, "/v1/responses", &headers, &request_body).await;
+
+        assert_eq!(
+            timeout(Duration::from_secs(5), entry.captures.recv())
+                .await
+                .expect("first candidate send")
+                .unwrap()["model"],
+            "wire-owned"
+        );
+        assert_eq!(
+            timeout(Duration::from_secs(5), entry.captures.recv())
+                .await
+                .expect("last candidate send")
+                .unwrap()["model"],
+            "wire-recover"
+        );
+        assert!(
+            entry.captures.try_recv().is_err(),
+            "each failed candidate must receive one send"
+        );
+        entry.stop().await;
+        let text = String::from_utf8_lossy(&wire);
+        assert!(text.starts_with("HTTP/1.1 503"), "{process}: {text}");
+        assert!(text.contains("last candidate B body"), "{process}: {text}");
+        assert!(
+            !text.contains("middle candidate A body"),
+            "{process}: middle candidate error leaked: {text}"
+        );
+        assert!(
+            text.contains("x-upstream-trace: candidate-503")
+                && !text.contains("x-upstream-trace: candidate-401"),
+            "{process}: only B headers may cross: {text}"
+        );
+    }
+}
+
+/// v29 arbitration gate (b): when the captured target's remaining eligible
+/// candidate is the last one, its real HTTP 429 passes through to the client
+/// as the original typed error with the original status and body. No
+/// fabricated success is produced, each candidate receives exactly one
+/// business send, and this gate deliberately does not assert a
+/// no-client-error invariant on the exhausted path.
+#[tokio::test]
+async fn v29_arbitration_last_eligible_429_passes_original_typed_error_to_client() {
+    let _guard = TEST_LOCK.lock().await;
+    for process in ["direct", "chat"] {
+        let mut entry = start(process, true).await;
+        let request_body = json!({
+            "input": "v29-last-eligible-429",
+            "stream": false,
+        })
+        .to_string();
+        let headers = format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            request_body.len()
+        );
+        let wire = raw(&entry, "/v1/responses", &headers, &request_body).await;
+
+        assert_eq!(
+            timeout(Duration::from_secs(5), entry.captures.recv())
+                .await
+                .expect("first candidate send")
+                .unwrap()["model"],
+            "wire-owned"
+        );
+        assert_eq!(
+            timeout(Duration::from_secs(5), entry.captures.recv())
+                .await
+                .expect("last candidate send")
+                .unwrap()["model"],
+            "wire-recover"
+        );
+        assert!(
+            entry.captures.try_recv().is_err(),
+            "each candidate must receive exactly one business send"
+        );
+        entry.stop().await;
+        let text = String::from_utf8_lossy(&wire);
+        assert!(text.starts_with("HTTP/1.1 429"), "{process}: {text}");
+        assert!(
+            text.contains("v29 last candidate B 429 body"),
+            "{process}: last candidate original body must cross: {text}"
+        );
+        assert!(
+            !text.contains("v29 middle candidate A 429 body"),
+            "{process}: middle candidate error leaked: {text}"
+        );
+        assert!(
+            text.contains("x-upstream-trace: candidate-429-b")
+                && !text.contains("x-upstream-trace: candidate-429-a"),
+            "{process}: only the last candidate headers may cross: {text}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn v27_last_http_error_preserves_raw_body_and_filters_transport_headers() {
+    let _guard = TEST_LOCK.lock().await;
+    let raw_body = b"raw-\xff-body\n\twith whitespace  ";
+    for process in ["direct", "chat"] {
+        let mut entry = start(process, false).await;
+        let request_body = json!({
+            "model": "test.test",
+            "input": "last-http-raw-body",
+            "stream": false,
+        })
+        .to_string();
+        let headers = format!(
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            request_body.len()
+        );
+        let wire = raw(&entry, "/v1/responses", &headers, &request_body).await;
+
+        let captured = entry.captures.try_recv().unwrap();
+        assert!(
+            captured.to_string().contains("last-http-raw-body"),
+            "single business send must carry the raw-body marker: {captured}"
+        );
+        assert!(entry.captures.try_recv().is_err());
+        entry.stop().await;
+        let text = String::from_utf8_lossy(&wire).to_ascii_lowercase();
+        assert!(
+            text.starts_with("http/1.1 429"),
+            "{process}: raw-body status lost: {text}"
+        );
+        assert!(
+            wire.windows(raw_body.len())
+                .any(|window| window == raw_body),
+            "{process}: original non-UTF8 body was not byte-preserved"
+        );
+        assert!(
+            text.contains("x-end-to-end: first") && text.contains("x-end-to-end: second"),
+            "{process}: duplicate end-to-end headers were not preserved: {text}"
+        );
+        assert!(!text.contains("x-listed-hop"), "{process}: {text}");
+        assert!(!text.contains("proxy-authenticate"), "{process}: {text}");
+        assert!(!text.contains("keep-alive"), "{process}: {text}");
+        let expected_length = format!("content-length: {}", raw_body.len());
+        assert!(
+            text.contains(&expected_length),
+            "{process}: response framing was not recomputed: {text}"
+        );
     }
 }

@@ -280,7 +280,6 @@ fn provider_failure_output_keeps_real_http_witness_outside_error06_body() {
                 source_status: Some(429),
             },
             false,
-            false,
             None,
         )
         .try_into_terminal()
@@ -1062,7 +1061,6 @@ targets = [{ kind = "provider_model", provider = "test", model = "test", key = "
         },
         &RefusalTransport(raw.to_vec()),
         V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest),
-        V3ResponsesRelayRetryPolicy::default(), false,
         Some(Arc::new(|_, failure| eprintln!("refusal harness typed failure: {failure:?}"))),
         None, None, None,
         BTreeSet::new(), V3ResponsesRelayRuntimeSeeds::default(),

@@ -372,7 +372,9 @@ async fn json_function_call_governance_preserves_gemini_name_mapping() {
     );
 }
 
-struct ErrorTransport;
+struct ErrorTransport {
+    sends: Mutex<usize>,
+}
 
 #[async_trait]
 impl ResponsesTransport for ErrorTransport {
@@ -380,6 +382,7 @@ impl ResponsesTransport for ErrorTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.sends.lock().unwrap() += 1;
         Err(V3ProviderError::HttpStatus {
             response: Box::new(V3ProviderHttpFailure {
                 request_id: request.request_id().to_string(),
@@ -513,17 +516,11 @@ impl ResponsesTransport for MalformedErrorTransport {
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let server_id = "gemini_provider_error_projection";
-    let mut manifest = manifest_for_action_gate_scope(server_id);
-    manifest
-        .servers
-        .get_mut(server_id)
-        .expect("gemini relay test server")
-        .execution
-        .as_mut()
-        .expect("execution policy")
-        .attempt_store
-        .residence_timeout_ms = 500;
-    let error = execute_v3_gemini_relay_runtime(
+    let manifest = manifest_for_action_gate_scope(server_id);
+    let transport = ErrorTransport {
+        sends: Mutex::new(0),
+    };
+    let output = execute_v3_gemini_relay_runtime(
         &manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
@@ -540,18 +537,46 @@ async fn provider_error_enters_error01_06_without_success_projection() {
                 "stream":false
             }),
         },
-        &ErrorTransport,
+        &transport,
     )
     .await
-    .expect_err("a 429-only Gemini pool must remain recoverable until the residence bound");
-    assert!(
-        matches!(
-            &error,
-            routecodex_v3_runtime::V3GeminiRelayRuntimeError::Target(message)
-                if message.contains("provider action wait exceeded request residence deadline")
-        ),
-        "provider failure must wait for recovery and terminate only at the declared residence bound: {error}"
+    .expect("a 429-only Gemini pool must terminal immediately, never wait on lifecycle");
+
+    // 失败身份不得重发：完整身份只发送一次，不等待、不重试。
+    assert_eq!(
+        *transport.sends.lock().unwrap(),
+        1,
+        "failed identity must not be re-sent"
     );
+
+    // 不伪造成功：client 只得到 transport break。
+    assert_eq!(output.status, 502);
+    let client_error = match output.client_body {
+        V3GeminiRelayClientBody::Json(value) => value,
+        V3GeminiRelayClientBody::Sse(_) => panic!("failed attempt must not produce client SSE"),
+    };
+    assert_eq!(client_error["error"]["code"], "network_error");
+
+    // 原始429被原样保留为provider-private terminal证据。
+    assert_eq!(
+        output.terminal_disposition,
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+            routecodex_v3_error::V3ExternalHttpWitness::new(
+                429,
+                vec![],
+                br#"{"error":{"code":429,"message":"controlled rate limit","status":"RESOURCE_EXHAUSTED"}}"#.to_vec(),
+            )
+        ))
+    );
+
+    // 失败走typed Error链，不写health/precool/probe/wait。
+    assert_eq!(output.error_chain.as_ref().map(Vec::len), Some(6));
+    assert_eq!(output.node_trace.last(), Some(&"V3Error06ClientProjected"));
+    assert_eq!(output.provider_failure_attempts.len(), 1);
+    let attempt = &output.provider_failure_attempts[0];
+    assert_eq!(attempt.status, 429);
+    assert_eq!(attempt.health_state, "last_candidate_terminal");
+    assert_eq!(attempt.wait_ms, None);
 }
 
 #[tokio::test]
@@ -932,7 +957,7 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
 }
 
 #[tokio::test]
-async fn uncommitted_sse_repeat_failure_enters_error_chain_and_provider_cooldown() {
+async fn uncommitted_sse_failure_is_health_neutral_and_never_waits_for_recovery() {
     let server_id = "gemini_gate_failure";
     let cases = [
         (
@@ -995,148 +1020,15 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
             V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(
                 &failure_manifest,
             );
-        let failing = StaticSseTransport {
-            chunks: Mutex::new(Some(chunks.clone())),
-        };
-        let first = execute_v3_gemini_relay_runtime_with_provider_health(
-            &failure_manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    concat!(module_path!(), ":", line!()),
-                )
-                .expect("test provider failure session scope"),
-                request_id: format!("req-gemini-uncommitted-failure-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"stream"}]}],
-                    "stream":true
-                }),
-            },
-            &failing,
-            provider_health.runtime_health(),
-        )
-        .await
-        .expect("provider attempt failure must reach terminal Error06");
-        assert_eq!(first.status, 502, "{case}: {first:?}");
-        assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));
-        assert_eq!(first.node_trace.last(), Some(&"V3Error06ClientProjected"));
-        let client_error = match first.client_body {
-            V3GeminiRelayClientBody::Json(value) => value,
-            V3GeminiRelayClientBody::Sse(_) => {
-                panic!("{case} failed provider attempt must not produce client SSE")
-            }
-        };
-        assert!(
-            !client_error.to_string().contains("partial"),
-            "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
-        );
-
-        assert!(!provider_health
-            .store()
-            .provider_cooldown_probe_keys_due(u64::MAX)
-            .expect("isolated failure probe inventory")
-            .is_empty());
-        assert!(
-            !provider_health
-                .store()
-                .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
-                .available,
-            "{case} first non-429 failure cools this exact identity"
-        );
-        assert!(
-            provider_health
-                .store()
-                .availability(server_id, Some(server_id), Some("other-model"), u64::MAX)
-                .available
-        );
-        // Recover this complete identity before exercising a second real
-        // failed business attempt. The public probe blackbox covers wire validation.
-        revive_cooled_provider(&provider_health, server_id).await;
-        let repeated = execute_v3_gemini_relay_runtime_with_provider_health(
-            &failure_manifest,
-            V3GeminiRelayRuntimeInput {
-                server_id: server_id.into(),
-                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                    "test-server",
-                    "test-group",
-                    format!("gemini-repeat-{case}"),
-                )
-                .expect("repeated failure session scope"),
-                request_id: format!("req-gemini-uncommitted-repeat-{case}"),
-                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-                payload: json!({
-                    "contents":[{"role":"user","parts":[{"text":"stream"}]}],
-                    "stream":true
-                }),
-            },
-            &StaticSseTransport {
-                chunks: Mutex::new(Some(chunks)),
-            },
-            provider_health.runtime_health(),
-        )
-        .await
-        .expect("repeated provider failure must reach the typed error chain");
-        assert_eq!(repeated.status, 502, "{case}: {repeated:?}");
-        assert_eq!(repeated.error_chain.as_ref().map(Vec::len), Some(6));
-        // The next actual failed attempt after recovery admits cooldown. The
-        // recovery probe then owns eligibility for subsequent requests.
-        let succeeding = JsonTransport {
-            captured_url: Mutex::new(None),
-            captured_body: Mutex::new(None),
-        };
-        // Repeated typed provider-attempt failures isolate the exact
-        // provider/key/model. Keep the provider held until its recovery probe
-        // succeeds; probe failures are control-plane recovery traffic and do
-        // not count as request attempts.
-        let probe_keys = provider_health
-            .store()
-            .provider_cooldown_probe_keys_due(u64::MAX)
-            .expect("provider cooldown probe inventory");
-        assert!(
-            probe_keys.contains(&(
-                server_id.to_string(),
-                Some(server_id.to_string()),
-                Some("gemini-wire".to_string()),
-            )),
-            "{case} second typed failure must create an exact provider cooldown: {probe_keys:?}"
-        );
-        let held_manifest = manifest.clone();
-        let held_health = provider_health.runtime_health();
-        let probe_server = tokio::spawn(serve_one_gemini_probe(
-            listener,
-            "200 OK",
-            r#"{"candidates":[]}"#,
-        ));
-        // Recovery belongs to the independent Provider probe owner. A single
-        // remaining route does not perform request-blocking rescue probes.
-        provider_health
-            .runtime_health()
-            .run_due_provider_health_probes(
-                u64::MAX,
-                false,
-                |provider_id, interface_id, auth_alias, model_id| {
-                    let manifest = manifest.clone();
-                    async move {
-                        let target = build_v3_provider_global_probe_target(
-                            &manifest,
-                            &provider_id,
-                            &interface_id,
-                            auth_alias.as_deref(),
-                            model_id.as_deref(),
-                        )
-                        .map_err(routecodex_v3_runtime::V3ProviderHealthProbeFailure::Internal)?;
-                        probe_v3_provider_global_target(target).await
-                    }
-                },
-            )
-            .await
-            .expect("the actual provider probe restores the primary identity");
-        let held = tokio::spawn(async move {
-            execute_v3_gemini_relay_runtime_with_provider_health(
-                &held_manifest,
+        // v31 ladder: a cooldown commits at 3 consecutive failures on the
+        // exact identity; below that only precool observation exists. Drive
+        // three consecutive uncommitted failures before the cooldown asserts.
+        for attempt in 0..3 {
+            let failing = StaticSseTransport {
+                chunks: Mutex::new(Some(chunks.clone())),
+            };
+            let first = execute_v3_gemini_relay_runtime_with_provider_health(
+                &failure_manifest,
                 V3GeminiRelayRuntimeInput {
                     server_id: server_id.into(),
                     failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1145,34 +1037,109 @@ data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"late
                         concat!(module_path!(), ":", line!()),
                     )
                     .expect("test provider failure session scope"),
-                    request_id: format!("req-gemini-held-after-uncommitted-{case}"),
+                    request_id: format!("req-gemini-uncommitted-failure-{case}-{attempt}"),
                     endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
                     payload: json!({
-                        "contents":[{"role":"user","parts":[{"text":"held"}]}],
-                        "stream":false
+                        "contents":[{"role":"user","parts":[{"text":"stream"}]}],
+                        "stream":true
                     }),
                 },
-                &succeeding,
-                held_health,
+                &failing,
+                provider_health.runtime_health(),
             )
             .await
-        });
-        // Even an empty Gemini response is a successful HTTP 2xx probe.
-        // The actual independent probe restores eligibility without manual release.
-        let revived = tokio::time::timeout(Duration::from_secs(2), held)
-            .await
-            .expect("held request must wake after HTTP 2xx probe recovery")
-            .expect("held request task must not panic")
-            .expect("probe-revived provider must accept the held request");
-        let probe_request = tokio::time::timeout(Duration::from_secs(2), probe_server)
-            .await
-            .expect("rescue probe must reach the local provider listener")
-            .expect("provider probe task must not panic");
+            .expect("provider attempt failure must reach terminal Error06");
+            assert_eq!(first.status, 502, "{case}: {first:?}");
+            assert_eq!(first.error_chain.as_ref().map(Vec::len), Some(6));
+            assert_eq!(first.node_trace.last(), Some(&"V3Error06ClientProjected"));
+            let client_error = match first.client_body {
+                V3GeminiRelayClientBody::Json(value) => value,
+                V3GeminiRelayClientBody::Sse(_) => {
+                    panic!("{case} failed provider attempt must not produce client SSE")
+                }
+            };
+            assert!(
+                !client_error.to_string().contains("partial"),
+                "{case} failed-attempt bytes crossed the Broker boundary: {client_error}"
+            );
+            if attempt < 2 {
+                assert!(
+                    provider_health
+                        .store()
+                        .provider_cooldown_probe_keys_due(u64::MAX)
+                        .expect("sub-threshold probe inventory")
+                        .is_empty(),
+                    "{case} sub-threshold consecutive failures must not cool the identity"
+                );
+            }
+        }
+
+        // v31: an uncommitted SSE attempt is a local response-processing failure
+        // and enters the same typed Error chain, so it is counted immediately as
+        // one consecutive failure for the exact provider/interface/model/key
+        // identity. Three consecutive failures therefore commit the fixed 10s
+        // ladder cooldown, so the retired "health neutral above the threshold"
+        // claim no longer holds. The cooldown stays visibility only: it schedules
+        // its own independent recovery probe and never blocks, holds or waits a
+        // request.
         assert!(
-            probe_request.starts_with("POST /v1beta/models/gemini-wire:generateContent HTTP/1.1"),
-            "rescue probe must use the Gemini provider endpoint: {probe_request:?}"
+            !provider_health
+                .store()
+                .provider_cooldown_probe_keys_due(u64::MAX)
+                .expect("cooldown probe inventory")
+                .is_empty(),
+            "{case} the committed cooldown owns its own recovery probe cadence"
         );
-        assert_eq!(revived.status, 200);
+        let cooled = provider_health.store().availability(
+            server_id,
+            Some(server_id),
+            Some("gemini-wire"),
+            u64::MAX,
+        );
+        assert!(
+            !cooled.available
+                && cooled.blocked_scopes.iter().any(|scope| {
+                    scope == "provider_key_health_cooldown"
+                        || scope == "provider_cooldown_probe_pending"
+                }),
+            "{case} three consecutive response-processing failures commit exactly the failed identity: {cooled:?}"
+        );
+        assert!(
+            provider_health
+                .store()
+                .availability(server_id, Some(server_id), Some("other-model"), u64::MAX)
+                .available,
+            "{case} the committed cooldown must not hide a sibling model"
+        );
+        // A fresh request selects the declared spare immediately: a committed
+        // cooldown never waits on, or blocks behind, its own recovery probe.
+        let succeeding = JsonTransport {
+            captured_url: Mutex::new(None),
+            captured_body: Mutex::new(None),
+        };
+        let fresh = execute_v3_gemini_relay_runtime_with_provider_health(
+            &failure_manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    format!("gemini-fresh-{case}"),
+                )
+                .expect("fresh request session scope"),
+                request_id: format!("req-gemini-uncommitted-fresh-{case}"),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"fresh"}]}],
+                    "stream":false
+                }),
+            },
+            &succeeding,
+            provider_health.runtime_health(),
+        )
+        .await
+        .expect("fresh request must complete immediately; a cooldown never blocks a request");
+        assert_eq!(fresh.status, 200, "{case}: {fresh:?}");
     }
 }
 
@@ -1235,22 +1202,26 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
             .to_vec(),
         ])),
     };
-    // Health recovery and action-lane release are separate: a matching
-    // semantic probe restores eligibility before the real terminal attempt.
+    // v29/v31: the malformed attempt is a local response-processing failure
+    // and never cools the exact identity, so no recovery probe is scheduled
+    // and the provider stays eligible for the next real terminal attempt.
     assert!(
-        !provider_health
+        provider_health
             .store()
             .availability(server_id, Some(server_id), Some("gemini-wire"), u64::MAX)
-            .available
+            .available,
+        "response-processing failure must keep the exact identity visible"
     );
-    revive_cooled_provider(&provider_health, server_id).await;
     assert!(provider_health
         .store()
         .provider_cooldown_probe_keys_due(u64::MAX)
         .expect("provider cooldown probe inventory")
         .is_empty());
+    // The exact failed identity stays under precool observation, so the
+    // fresh attempt routes through the manifest's spare candidate rather
+    // than exhausting: precool is visibility-only and never waits.
     let successful = execute_v3_gemini_relay_runtime_with_provider_health(
-        &manifest,
+        &failure_manifest,
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -1273,10 +1244,13 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
     .expect("terminal provider action");
     let successful_stream = match successful.client_body {
         V3GeminiRelayClientBody::Sse(stream) => stream,
-        V3GeminiRelayClientBody::Json(_) => panic!("expected SSE"),
+        V3GeminiRelayClientBody::Json(body) => panic!(
+            "expected SSE, got json body {body} with status {}",
+            successful.status
+        ),
     };
 
-    let waiting_manifest = manifest.clone();
+    let waiting_manifest = failure_manifest.clone();
     let waiting_health = provider_health.runtime_health();
     let waiting_server_id = server_id.to_string();
     let waiter = tokio::spawn(async move {
@@ -1322,7 +1296,7 @@ async fn validated_terminal_sse_releases_action_lane_for_a_fresh_request() {
 }
 
 #[tokio::test]
-async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_seconds() {
+async fn broker_terminal_validation_holds_while_healthy_alternative_completes_independently() {
     use futures_util::StreamExt;
     let server_id = "gemini_active_recovery";
     const FAILURE_SESSION_ID: &str = "gemini-active-recovery-session";
@@ -1331,8 +1305,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     // The action gate is process-shared, while this second handle keeps the
     // competing request's availability snapshot independent. That lets the
-    // test exercise the same Error05 lane instead of skipping the cooled
-    // primary before an action can be admitted.
+    // test prove a healthy alternative is NOT serialized behind the first
+    // request's Broker terminal validation or recovery lane.
     let competing_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let (terminal_sender, terminal_receiver) = tokio::sync::mpsc::channel(2);
@@ -1411,10 +1385,26 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    // The second request has a healthy alternative. It must complete while the
+    // first request is still held inside Broker terminal validation, proving
+    // the alternative is not serialized behind another request's recovery lane.
+    let released = tokio::time::timeout(Duration::from_secs(2), waiter)
+        .await
+        .expect(
+            "healthy-alternative request must not be blocked by another request's recovery lane",
+        )
+        .expect("queued Gemini recovery task panicked")
+        .expect("queued Gemini recovery action failed");
     assert!(
-        !waiter.is_finished(),
-        "active Broker recovery permit expired before validated terminal EOF"
+        !first_runtime.is_finished(),
+        "first request must remain held on Broker terminal validation while the healthy alternative completes"
+    );
+    assert_eq!(released.status, 200);
+    assert!(
+        released
+            .node_trace
+            .contains(&"V3TargetLocalReselected"),
+        "the independent Gemini request must reselect a healthy alternative without an action-gate wait"
     );
 
     drop(terminal_sender);
@@ -1424,8 +1414,8 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
         .expect("first Gemini recovery task panicked")
         .expect("first Gemini recovery attempt failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the controlled committed SSE must be a recovery action"
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the controlled committed SSE must follow a target-local reselection"
     );
     let first_stream = match first.client_body {
         V3GeminiRelayClientBody::Sse(stream) => stream,
@@ -1438,19 +1428,6 @@ async fn broker_terminal_validation_holds_active_recovery_lane_beyond_five_secon
     assert!(String::from_utf8(committed[0].clone())
         .unwrap()
         .contains("done"));
-
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("validated terminal did not release the queued Gemini recovery action")
-        .expect("queued Gemini recovery task panicked")
-        .expect("queued Gemini recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing Gemini request must also enter Error05 recovery"
-    );
 }
 
 #[tokio::test]
@@ -1679,34 +1656,17 @@ async fn non_gemini_route_target_returns_gemini_client_projection() {
 }
 
 async fn run_json_client_with_chat_sse(
-    limit: usize,
-    hold_open: bool,
+    content: &str,
 ) -> Result<routecodex_v3_runtime::V3GeminiRelayRuntimeOutput, String> {
     let (sender, receiver) = tokio::sync::mpsc::channel(4);
-    let content = if hold_open {
-        "x".repeat(2048)
-    } else {
-        "complete JSON".to_string()
-    };
     let mut bytes = format!("data: {}\n\n", json!({"id":"chat-json","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":content}}]})).into_bytes();
-    if !hold_open {
-        bytes.extend_from_slice(b"data: {\"id\":\"chat-json\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
-    }
+    bytes.extend_from_slice(b"data: {\"id\":\"chat-json\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
     sender.send(Ok(bytes)).await.unwrap();
-    let sender = hold_open.then_some(sender);
+    drop(sender);
     let transport = ControlledSseTransport {
         receiver: Mutex::new(Some(receiver)),
     };
-    let mut manifest = manifest_with_provider_type("openai_chat");
-    manifest
-        .servers
-        .get_mut("controlled")
-        .unwrap()
-        .execution
-        .as_mut()
-        .unwrap()
-        .attempt_store
-        .attempt_max_bytes = limit;
+    let manifest = manifest_with_provider_type("openai_chat");
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
     let output = tokio::time::timeout(
@@ -1718,10 +1678,10 @@ async fn run_json_client_with_chat_sse(
                 failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
                     "test-server",
                     "test-group",
-                    format!("json-chat-sse-{limit}-{hold_open}"),
+                    format!("json-chat-sse-{}", content.len()),
                 )
                 .unwrap(),
-                request_id: format!("json-chat-sse-{limit}-{hold_open}"),
+                request_id: format!("json-chat-sse-{}", content.len()),
                 endpoint_path: "/v1beta/models/gemini-client:generateContent".into(),
                 payload: json!({"contents":[{"role":"user","parts":[{"text":"hello"}]}]}),
             },
@@ -1730,28 +1690,16 @@ async fn run_json_client_with_chat_sse(
         ),
     )
     .await
-    .map_err(|_| "runtime did not settle before the held-open provider terminal".to_string())?
+    .map_err(|_| "runtime did not materialize the complete provider stream".to_string())?
     .map_err(|error| error.to_string());
-    drop(sender);
-    if hold_open {
-        let availability = provider_health.store().availability(
-            "controlled",
-            Some("controlled"),
-            Some("gemini-wire"),
-            u64::MAX,
-        );
-        assert!(
-            availability.available,
-            "local resource exhaustion must not cool the provider"
-        );
-        assert!(availability.blocked_scopes.is_empty());
-    }
     output
 }
 
 #[tokio::test]
 async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
-    let output = run_json_client_with_chat_sse(16384, false).await.unwrap();
+    let output = run_json_client_with_chat_sse("complete JSON")
+        .await
+        .unwrap();
     let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
         panic!("JSON client must receive projected JSON")
     };
@@ -1764,21 +1712,17 @@ async fn gemini_json_client_materializes_complete_chat_sse_as_json() {
 }
 
 #[tokio::test]
-async fn gemini_json_client_stops_over_budget_chat_sse_before_terminal() {
-    let error = match run_json_client_with_chat_sse(1024, true).await {
-        Err(error) => error,
-        Ok(output) => match output.client_body {
-            V3GeminiRelayClientBody::Json(payload) => panic!(
-                "over-budget attempt returned status={} payload={payload} trace={:?}",
-                output.status, output.node_trace
-            ),
-            _ => panic!("over-budget attempt returned a stream"),
-        },
+async fn gemini_json_client_preserves_large_chat_sse_as_json() {
+    let text = "x".repeat(2048);
+    let output = run_json_client_with_chat_sse(&text).await.unwrap();
+    let V3GeminiRelayClientBody::Json(payload) = output.client_body else {
+        panic!("JSON client must receive projected JSON");
     };
-    assert!(
-        error.contains("V3ExecutionAttemptPayloadStore"),
-        "unexpected failure: {error}"
+    assert_eq!(
+        payload["candidates"][0]["content"]["parts"][0]["text"],
+        text
     );
+    assert_eq!(payload["candidates"][0]["finishReason"], "STOP");
 }
 
 async fn collect_sse_failure(
@@ -1788,27 +1732,43 @@ async fn collect_sse_failure(
     let transport = StaticSseTransport {
         chunks: Mutex::new(Some(chunks)),
     };
-    let manifest = manifest_for_action_gate_scope(server_id);
-    let output = execute_v3_gemini_relay_runtime(
-        &manifest,
-        V3GeminiRelayRuntimeInput {
-            server_id: server_id.into(),
-            failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
-                "test-server",
-                "test-group",
-                concat!(module_path!(), ":", line!()),
-            )
-            .expect("test provider failure session scope"),
-            request_id: "req-sse-negative".into(),
-            endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
-            payload: json!({
-                "contents":[{"role":"user","parts":[{"text":"invalid stream"}]}],
-                "stream":true
-            }),
-        },
-        &transport,
+    // The single-candidate negative cases legitimately stay pending until the
+    // declared request residence budget expires. Keep that budget short and
+    // the outer wait bounded so four serial cases cannot consume the runner.
+    let mut manifest = manifest_for_action_gate_scope(server_id);
+    manifest
+        .servers
+        .get_mut(server_id)
+        .expect("gemini relay test server")
+        .execution
+        .as_mut()
+        .expect("execution policy")
+        .attempt_store
+        .residence_timeout_ms = 500;
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        execute_v3_gemini_relay_runtime(
+            &manifest,
+            V3GeminiRelayRuntimeInput {
+                server_id: server_id.into(),
+                failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
+                    "test-server",
+                    "test-group",
+                    concat!(module_path!(), ":", line!()),
+                )
+                .expect("test provider failure session scope"),
+                request_id: "req-sse-negative".into(),
+                endpoint_path: "/v1beta/models/gemini-client/generateContent".into(),
+                payload: json!({
+                    "contents":[{"role":"user","parts":[{"text":"invalid stream"}]}],
+                    "stream":true
+                }),
+            },
+            &transport,
+        ),
     )
     .await
+    .expect("malformed SSE attempt must settle within the short test residence budget")
     .unwrap();
     let status = output.status;
     let node_trace = output.node_trace;
@@ -2020,7 +1980,6 @@ type = "{provider_type}"
 base_url = "http://controlled.invalid/v1beta"
 default_model = "gemini-wire"
 auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_GEMINI_CONTROLLED_KEY" }}] }}
-concurrency = {{ max_in_flight = 128, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }}
 [providers.controlled.models.gemini-wire]
 wire_name = "gemini-wire"
 aliases = ["gemini-client"]

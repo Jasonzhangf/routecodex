@@ -1,4 +1,4 @@
-/// Live planning waits on typed health without taking a business lease.
+/// Bind the original control and consume an immediate route selection.
 pub async fn plan_v3_responses_protocol_execution_with_recovery(
     manifest: &V3Config05ManifestPublished,
     raw: V3Server03HttpRequestRaw,
@@ -15,15 +15,36 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
                 vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"],
             )
         })?;
+    let residence_deadline =
+        tokio::time::Instant::from_std(control.attempt_budget().residence_deadline());
+    let health: V3ProviderFailureRuntimeHealth = provider_health.into();
     let plan = tokio::time::timeout_at(
-        tokio::time::Instant::from_std(control.attempt_budget().residence_deadline()),
-        plan_v3_responses_protocol_execution_recovery_inner(
-            manifest,
-            raw,
-            provider_health.into(),
-            now_epoch_ms,
-            &control.attempt_budget(),
-        ),
+        residence_deadline,
+        async {
+            let mut captured_target = None;
+            let failure = match plan_v3_responses_protocol_execution_with_captured_target(
+                manifest,
+                raw.clone(),
+                health.clone(),
+                now_epoch_ms,
+                &mut captured_target,
+            ) {
+                Ok(plan) => return Ok(plan),
+                Err(failure) => failure,
+            };
+            if let Some(expanded) = failure.recovery_candidates.as_ref() {
+                // v31: provider lifecycle never gates a request. A pool that is
+                // empty at request entry keeps this request's typed failure
+                // immediately; the identities' own probes are scheduled as a
+                // detached control-plane observation so a later request can use
+                // them again.
+                health.submit_v3_background_cooldown_rescue_round(
+                    manifest,
+                    expanded,
+                );
+            }
+            Err(failure)
+        },
     )
     .await
     .map_err(|_| {
@@ -38,89 +59,6 @@ pub async fn plan_v3_responses_protocol_execution_with_recovery(
         )
     })??;
     Ok((plan, control))
-}
-
-async fn plan_v3_responses_protocol_execution_recovery_inner(
-    manifest: &V3Config05ManifestPublished,
-    raw: V3Server03HttpRequestRaw,
-    provider_health: V3ProviderFailureRuntimeHealth,
-    mut now_epoch_ms: u64,
-    attempt_budget: &crate::execution_control::V3AttemptBudget,
-) -> Result<V3ResponsesProtocolExecutionPlan, V3ResponsesProtocolExecutionPlanFailure> {
-    let health = provider_health;
-    let started = attempt_budget.target_recovery_started();
-    let mut captured_target = None;
-    loop {
-        let failure = match plan_v3_responses_protocol_execution_with_captured_target(
-            manifest,
-            raw.clone(),
-            health.clone(),
-            now_epoch_ms,
-            &mut captured_target,
-        ) {
-            Ok(plan) => return Ok(plan),
-            Err(failure) => failure,
-        };
-        let Some(expanded) = failure.recovery_candidates.clone() else {
-            return Err(failure);
-        };
-        // A stalled advisory probe cannot outlive this request's recovery budget.
-        // Its cancellation preserves cooldown; the final planner below rechecks
-        // current eligibility before returning the typed failure.
-        tokio::time::timeout(
-            crate::operation_runner::plan_execution::target_recovery_remaining(&expanded, started),
-            health.run_exhaustion_rescue_probes(manifest, &expanded, now_epoch_ms),
-        )
-        .await
-        .unwrap_or(Ok(crate::provider_failure_runtime_policy::V3CooldownRescueProbeOutcome::default()))
-        .map_err(|error| {
-            protocol_plan_source_failure(
-                runtime_source("V3ProviderCooldownRescueProbe", error),
-                failure.node_trace.clone(),
-            )
-        })?;
-        now_epoch_ms =
-            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                .map_err(|error| {
-                    protocol_plan_source_failure(
-                        runtime_source("V3TargetRecoveryWait", error),
-                        failure.node_trace.clone(),
-                    )
-                })?;
-        let failure = match plan_v3_responses_protocol_execution_with_captured_target(
-            manifest,
-            raw.clone(),
-            health.clone(),
-            now_epoch_ms,
-            &mut captured_target,
-        ) {
-            Ok(plan) => return Ok(plan),
-            Err(failure) if failure.recovery_candidates.is_some() => failure,
-            Err(failure) => return Err(failure),
-        };
-        if !crate::operation_runner::plan_execution::wait_for_target_recovery(
-            &expanded,
-            &health,
-            &raw.failure_session_scope,
-            &mut BTreeSet::new(),
-            &mut BTreeSet::new(),
-            now_epoch_ms,
-            attempt_budget,
-        )
-        .await
-        .map_err(|source| protocol_plan_source_failure(Ok(source), failure.node_trace.clone()))?
-        {
-            return Err(failure);
-        }
-        now_epoch_ms =
-            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
-                .map_err(|error| {
-                    protocol_plan_source_failure(
-                        runtime_source("V3TargetRecoveryWait", error),
-                        failure.node_trace.clone(),
-                    )
-                })?;
-    }
 }
 
 pub fn plan_v3_responses_protocol_execution_with_provider_health(
@@ -317,7 +255,6 @@ fn plan_v3_responses_protocol_execution_with_captured_target(
         expanded: preplan.expanded,
         protocol_candidate_keys,
         request_local_excluded_candidates: preplan.request_local_excluded_candidates,
-        request_local_busy_candidates: BTreeSet::new(),
         _route_policy_pending: resolved_target.route_policy_pending,
         _route_policy_scope: resolved_target.route_policy_scope,
     })
@@ -592,8 +529,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         Some(plan) => V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(plan),
         None => V3ResponsesDirectRuntimeCoreState::new(),
     }
-    .with_provider_health_neutral()
-    .with_exhaustion_rescue_probe_disabled();
+    .with_provider_health_neutral();
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
         core_state,
         manifest,

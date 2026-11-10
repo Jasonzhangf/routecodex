@@ -2,16 +2,11 @@ use futures_util::Stream;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-const V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES: usize = 64 * 1024 * 1024;
-const V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES: usize = 262_144;
-const V3_COMMITTED_SSE_REQUEST_MAX_BYTES: usize = 64 * 1024 * 1024;
-const V3_COMMITTED_SSE_PROCESS_MAX_BYTES: usize = 512 * 1024 * 1024;
 const V3_COMMITTED_SSE_RESIDENCE_TIMEOUT: Duration = Duration::from_secs(600);
-static V3_COMMITTED_SSE_PROCESS_RESIDENT_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3CommittedSseTerminal {
@@ -59,22 +54,12 @@ impl std::ops::Deref for V3SseAttemptFrame {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct V3AttemptStoreLimits {
-    pub(crate) request_max_attempts: usize,
-    pub(crate) attempt_max_bytes: usize,
-    pub(crate) attempt_max_frames: usize,
-    pub(crate) request_max_bytes: usize,
-    pub(crate) process_max_bytes: usize,
     pub(crate) residence_timeout: Duration,
 }
 
 impl Default for V3AttemptStoreLimits {
     fn default() -> Self {
         Self {
-            request_max_attempts: 8,
-            attempt_max_bytes: V3_COMMITTED_SSE_ATTEMPT_MAX_BYTES,
-            attempt_max_frames: V3_COMMITTED_SSE_ATTEMPT_MAX_FRAMES,
-            request_max_bytes: V3_COMMITTED_SSE_REQUEST_MAX_BYTES,
-            process_max_bytes: V3_COMMITTED_SSE_PROCESS_MAX_BYTES,
             residence_timeout: V3_COMMITTED_SSE_RESIDENCE_TIMEOUT,
         }
     }
@@ -83,7 +68,6 @@ impl Default for V3AttemptStoreLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum V3AttemptStoreError {
     ResidenceDeadlineExceeded(String),
-    TransportAttemptsExhausted(String),
     LocalResourceExhausted(String),
     InvalidAttemptState(String),
     /// The complete-attempt text governance must decide a committed tail, but
@@ -96,7 +80,6 @@ impl fmt::Display for V3AttemptStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ResidenceDeadlineExceeded(message)
-            | Self::TransportAttemptsExhausted(message)
             | Self::LocalResourceExhausted(message)
             | Self::InvalidAttemptState(message)
             | Self::PostCommitGovernedTail(message) => formatter.write_str(message),
@@ -111,7 +94,7 @@ pub(crate) struct V3AttemptBudget {
 
 /// Opaque request-local execution control carried across protocol handoffs.
 /// The server may move this value but cannot inspect or reconstruct its
-/// attempt count, resident-byte reservations, or deadline from payload data.
+/// transport sequence, refill count, or deadline from payload data.
 #[derive(Clone)]
 pub struct V3RequestExecutionControl {
     attempt_budget: V3AttemptBudget,
@@ -144,31 +127,14 @@ impl V3RequestExecutionControl {
             .load(Ordering::Acquire)
     }
 
-    /// Consume one refill execution slot. Returns true only when a slot was
-    /// available (used < max) and was incremented atomically.
-    pub(crate) fn try_admit_refill(&self, max_consecutive_refills: u32) -> bool {
-        if max_consecutive_refills == 0 {
-            return false;
-        }
-        self.attempt_budget
-            .inner
-            .refill_used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                (current < max_consecutive_refills).then_some(current + 1)
-            })
-            .is_ok()
-    }
-
     /// Open one more execution of the same request.
     ///
-    /// A bounded refill is a new execution of the Runtime mainline, so it owns
-    /// its own provider transport attempt allowance; the request-scoped refill
-    /// budget, residence deadline and resident-byte accounting stay unchanged.
+    /// The original deadline and cumulative transport sequence stay unchanged.
     pub(crate) fn begin_refill_execution(&self) {
         self.attempt_budget
             .inner
-            .transport_attempts
-            .store(0, Ordering::Release);
+            .refill_used
+            .fetch_add(1, Ordering::AcqRel);
     }
 
     pub fn deadline_unix_ms(&self) -> Result<u64, V3AttemptStoreError> {
@@ -210,34 +176,8 @@ impl V3RequestExecutionControl {
 struct V3AttemptBudgetInner {
     limits: V3AttemptStoreLimits,
     transport_attempts: AtomicUsize,
-    rate_limited_attempts: AtomicUsize,
-    target_recovery_cursor: Mutex<V3TargetRecoveryCursor>,
     refill_used: AtomicU32,
-    request_resident_bytes: AtomicUsize,
-    process_resident_bytes: V3ProcessResidentBytes,
     deadline: Instant,
-}
-
-#[derive(Default)]
-struct V3TargetRecoveryCursor {
-    step_index: usize,
-    step_due_at: Option<Instant>,
-}
-
-enum V3ProcessResidentBytes {
-    Shared(&'static AtomicUsize),
-    #[cfg(test)]
-    Isolated(Arc<AtomicUsize>),
-}
-
-impl V3ProcessResidentBytes {
-    fn counter(&self) -> &AtomicUsize {
-        match self {
-            Self::Shared(counter) => counter,
-            #[cfg(test)]
-            Self::Isolated(counter) => counter,
-        }
-    }
 }
 
 impl V3AttemptBudget {
@@ -260,54 +200,26 @@ impl V3AttemptBudget {
                 ))
             })?;
         let limits = V3AttemptStoreLimits {
-            request_max_attempts: policy.request_max_attempts,
-            attempt_max_bytes: policy.attempt_max_bytes,
-            attempt_max_frames: policy.attempt_max_frames,
-            request_max_bytes: policy.request_max_bytes,
-            process_max_bytes: policy.process_max_bytes,
             residence_timeout: Duration::from_millis(policy.residence_timeout_ms),
         };
-        Ok(Self::new(
-            limits,
-            V3ProcessResidentBytes::Shared(&V3_COMMITTED_SSE_PROCESS_RESIDENT_BYTES),
-        ))
+        Ok(Self::new(limits))
     }
 
     /// Synthetic protocol projections and tests only. Request execution must
     /// use `from_manifest` so runtime limits have one compiled config owner.
     pub(crate) fn process_default() -> Self {
-        Self::new(
-            V3AttemptStoreLimits::default(),
-            V3ProcessResidentBytes::Shared(&V3_COMMITTED_SSE_PROCESS_RESIDENT_BYTES),
-        )
+        Self::new(V3AttemptStoreLimits::default())
     }
 
-    fn new(limits: V3AttemptStoreLimits, process_resident_bytes: V3ProcessResidentBytes) -> Self {
+    fn new(limits: V3AttemptStoreLimits) -> Self {
         Self {
             inner: Arc::new(V3AttemptBudgetInner {
                 limits,
-                // Zero means no Target10 candidate plan has been installed;
-                // admission then uses the configured request ceiling.
                 transport_attempts: AtomicUsize::new(0),
-                rate_limited_attempts: AtomicUsize::new(0),
-                target_recovery_cursor: Mutex::new(V3TargetRecoveryCursor::default()),
                 refill_used: AtomicU32::new(0),
-                request_resident_bytes: AtomicUsize::new(0),
-                process_resident_bytes,
                 deadline: Instant::now() + limits.residence_timeout,
             }),
         }
-    }
-
-    #[cfg(test)]
-    fn new_isolated(
-        limits: V3AttemptStoreLimits,
-        process_resident_bytes: Arc<AtomicUsize>,
-    ) -> Self {
-        Self::new(
-            limits,
-            V3ProcessResidentBytes::Isolated(process_resident_bytes),
-        )
     }
 
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
@@ -323,64 +235,22 @@ impl V3AttemptBudget {
         self.inner.deadline
     }
 
-    pub(crate) fn target_recovery_started(&self) -> tokio::time::Instant {
-        tokio::time::Instant::from_std(self.inner.deadline - self.inner.limits.residence_timeout)
-    }
-
-    pub(crate) fn current_target_recovery_deadline(&self, now: Instant) -> Option<Instant> {
-        if now >= self.inner.deadline {
-            return None;
-        }
-        let mut cursor = self
-            .inner
-            .target_recovery_cursor
-            .lock()
-            .expect("request recovery cursor lock should not be poisoned");
-        let wait_ms = routecodex_v3_config::internal::v3_internal_target_recovery()
-            .wait_ms(cursor.step_index);
-        let due_at = *cursor
-            .step_due_at
-            .get_or_insert_with(|| (now + Duration::from_millis(wait_ms)).min(self.inner.deadline));
-        Some(due_at.min(self.inner.deadline))
-    }
-
-    pub(crate) fn advance_target_recovery_step_if_due(&self, now: Instant) {
-        let mut cursor = self
-            .inner
-            .target_recovery_cursor
-            .lock()
-            .expect("request recovery cursor lock should not be poisoned");
-        if cursor.step_due_at.is_some_and(|due_at| now >= due_at) {
-            cursor.step_index = cursor.step_index.saturating_add(1);
-            cursor.step_due_at = None;
-        }
-    }
-
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
-        self.ensure_resident()?;
-        let limit = self.inner.limits.request_max_attempts;
-        self.inner
-            .transport_attempts
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                // A received 429 consumed a real attempt (keep its sequence),
-                // but its recovery is bounded by the request residence deadline,
-                // not the non-rate-limit candidate-failure count.
-                let rate_limited = self.inner.rate_limited_attempts.load(Ordering::Acquire);
-                (current.saturating_sub(rate_limited) < limit).then_some(current + 1)
-            })
-            .map(|previous| previous + 1)
-            .map_err(|_| {
-                V3AttemptStoreError::TransportAttemptsExhausted(format!(
-                    "request provider transport attempt limit {} exhausted",
-                    limit
-                ))
-            })
+        self.admit_transport_attempt_for_identity(None)
     }
 
-    pub(crate) fn record_rate_limited_attempt(&self) {
-        self.inner
-            .rate_limited_attempts
-            .fetch_add(1, Ordering::AcqRel);
+    pub(crate) fn admit_transport_attempt_for_identity(
+        &self,
+        identity: Option<&str>,
+    ) -> Result<usize, V3AttemptStoreError> {
+        self.ensure_resident()?;
+        // A request is admitted on every typed-authorized send. The captured
+        // target and the existing typed eligibility owners (failure exclusion,
+        // last-provider policy, shape and action gates) bound which identities
+        // may be sent and whether a recovered identity may rejoin. Request
+        // admission must not add a transport-attempt ceiling.
+        let _ = identity;
+        Ok(self.inner.transport_attempts.fetch_add(1, Ordering::AcqRel) + 1)
     }
 
     /// Settle the pending admission when transport reports no wire send.
@@ -392,89 +262,6 @@ impl V3AttemptBudget {
 
     pub(crate) fn transport_attempts(&self) -> usize {
         self.inner.transport_attempts.load(Ordering::Acquire)
-    }
-
-    fn reserve(&self, bytes: usize) -> Result<(), V3AttemptStoreError> {
-        self.ensure_resident()?;
-        reserve_bounded(
-            self.inner.process_resident_bytes.counter(),
-            bytes,
-            self.inner.limits.process_max_bytes,
-            "process-global provider SSE resident byte limit",
-        )?;
-        if let Err(error) = reserve_bounded(
-            &self.inner.request_resident_bytes,
-            bytes,
-            self.inner.limits.request_max_bytes,
-            "request provider SSE resident byte limit",
-        ) {
-            self.inner
-                .process_resident_bytes
-                .counter()
-                .fetch_sub(bytes, Ordering::AcqRel);
-            return Err(error);
-        }
-        Ok(())
-    }
-
-    fn release(&self, bytes: usize) {
-        if bytes == 0 {
-            return;
-        }
-        self.inner
-            .request_resident_bytes
-            .fetch_sub(bytes, Ordering::AcqRel);
-        self.inner
-            .process_resident_bytes
-            .counter()
-            .fetch_sub(bytes, Ordering::AcqRel);
-    }
-
-    #[cfg(test)]
-    fn request_resident_bytes(&self) -> usize {
-        self.inner.request_resident_bytes.load(Ordering::Acquire)
-    }
-}
-
-fn reserve_bounded(
-    counter: &AtomicUsize,
-    bytes: usize,
-    limit: usize,
-    label: &str,
-) -> Result<(), V3AttemptStoreError> {
-    counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-            current.checked_add(bytes).filter(|next| *next <= limit)
-        })
-        .map(|_| ())
-        .map_err(|_| {
-            V3AttemptStoreError::LocalResourceExhausted(format!(
-                "provider SSE attempt exceeded the {label} ({limit})"
-            ))
-        })
-}
-
-struct V3AttemptReservation {
-    budget: V3AttemptBudget,
-    bytes: usize,
-}
-
-impl V3AttemptReservation {
-    fn reserve(&mut self, bytes: usize) -> Result<(), V3AttemptStoreError> {
-        self.budget.reserve(bytes)?;
-        self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
-            self.budget.release(bytes);
-            V3AttemptStoreError::LocalResourceExhausted(
-                "provider SSE attempt reservation byte count overflowed".to_string(),
-            )
-        })?;
-        Ok(())
-    }
-}
-
-impl Drop for V3AttemptReservation {
-    fn drop(&mut self) {
-        self.budget.release(self.bytes);
     }
 }
 
@@ -534,13 +321,12 @@ impl V3AttemptSuccessReceipt {
     }
 }
 
-struct V3ReservedCommittedSseReplay {
+struct V3CommittedSseReplay {
     frames: std::sync::Arc<Vec<Vec<u8>>>,
     next: usize,
-    _reservation: V3AttemptReservation,
 }
 
-impl Stream for V3ReservedCommittedSseReplay {
+impl Stream for V3CommittedSseReplay {
     type Item = Vec<u8>;
 
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -667,15 +453,14 @@ impl Drop for V3ObservedCommittedSseStream {
     }
 }
 
-/// Attempt-local bounded buffer owned by Runtime/Broker. Successful clean EOF
+/// Attempt-local buffer owned by Runtime/Broker. Successful clean EOF
 /// of the protocol-validating projected stream is the only call site allowed
 /// to seal it into `V3CommittedClientSseStream`.
 pub(crate) struct V3CommittedClientSseBuilder {
     frames: Vec<Vec<u8>>,
     byte_len: usize,
     terminal_frame_index: Option<usize>,
-    limits: V3AttemptStoreLimits,
-    reservation: V3AttemptReservation,
+    budget: V3AttemptBudget,
     /// Frames already handed to the client channel after the first business
     /// frame committed the attempt. Zero means the attempt is still fully
     /// buffered, which is the only state that may run a whole-attempt rewrite.
@@ -765,13 +550,11 @@ impl V3CommittedClientSseBuilder {
 
     pub(crate) fn with_budget(budget: V3AttemptBudget) -> Result<Self, V3AttemptStoreError> {
         budget.ensure_resident()?;
-        let limits = budget.inner.limits;
         Ok(Self {
             frames: Vec::new(),
             byte_len: 0,
             terminal_frame_index: None,
-            limits,
-            reservation: V3AttemptReservation { budget, bytes: 0 },
+            budget,
             flushed_frames: 0,
             client_sink: None,
             flush_held: false,
@@ -784,24 +567,12 @@ impl V3CommittedClientSseBuilder {
                 "provider response event codec produced an empty frame".to_string(),
             ));
         }
-        if self.frames.len() >= self.limits.attempt_max_frames {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
-                "provider SSE attempt exceeded the committed replay frame limit ({})",
-                self.limits.attempt_max_frames
-            )));
-        }
         let byte_len = self.byte_len.checked_add(frame.len()).ok_or_else(|| {
             V3AttemptStoreError::LocalResourceExhausted(
                 "provider SSE attempt byte count overflowed".to_string(),
             )
         })?;
-        if byte_len > self.limits.attempt_max_bytes {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
-                "provider SSE attempt exceeded the committed replay byte limit ({})",
-                self.limits.attempt_max_bytes
-            )));
-        }
-        self.reservation.reserve(frame.len())?;
+        self.budget.ensure_resident()?;
         self.byte_len = byte_len;
         self.frames.push(frame);
         self.flush_client_frames();
@@ -865,7 +636,7 @@ impl V3CommittedClientSseBuilder {
     }
 
     pub(crate) fn mark_last_frame_as_terminal(&mut self) -> Result<(), V3AttemptStoreError> {
-        self.reservation.budget.ensure_resident()?;
+        self.budget.ensure_resident()?;
         let terminal_frame_index = self.frames.len().checked_sub(1).ok_or_else(|| {
             V3AttemptStoreError::InvalidAttemptState(
                 "committed SSE terminal cannot precede every frame".to_string(),
@@ -904,17 +675,13 @@ impl V3CommittedClientSseBuilder {
                 "committed SSE frame rewrite must not increase byte count".to_string(),
             ));
         }
-        self.reservation
-            .budget
-            .release(old_bytes.saturating_sub(new_bytes));
-        self.reservation.bytes = new_bytes;
         self.byte_len = new_bytes;
         self.frames = rewritten;
         Ok(())
     }
 
     /// Whole-attempt response hooks run before sealing and remain inside the
-    /// same reservation, frame limit and byte limit as the original attempt.
+    /// original request deadline. Delivered client frames remain immutable.
     pub(crate) fn rewrite_complete_attempt<E>(
         &mut self,
         rewrite: impl FnOnce(&[Vec<u8>]) -> Result<Option<(Vec<Vec<u8>>, usize)>, E>,
@@ -970,26 +737,13 @@ impl V3CommittedClientSseBuilder {
                     "rewritten attempt byte count overflowed".into(),
                 )
             })?;
-        if frames.len() > self.limits.attempt_max_frames || bytes > self.limits.attempt_max_bytes {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(
-                "rewritten attempt exceeds configured limits".into(),
-            )
-            .into());
-        }
         if terminal >= frames.len() || frames.iter().any(Vec::is_empty) {
             return Err(V3AttemptStoreError::InvalidAttemptState(
                 "rewritten attempt requires nonempty frames and a terminal".into(),
             )
             .into());
         }
-        if bytes > self.byte_len {
-            self.reservation
-                .reserve(bytes - self.byte_len)
-                .map_err(E::from)?;
-        } else {
-            self.reservation.budget.release(self.byte_len - bytes);
-            self.reservation.bytes = bytes;
-        }
+        self.budget.ensure_resident().map_err(E::from)?;
         self.byte_len = bytes;
         self.frames = frames;
         self.terminal_frame_index = Some(terminal);
@@ -1007,7 +761,7 @@ impl V3CommittedClientSseBuilder {
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {
-        self.reservation.budget.ensure_resident()?;
+        self.budget.ensure_resident()?;
         if self.frames.is_empty() {
             return Err(V3AttemptStoreError::InvalidAttemptState(
                 "provider response event codec produced an empty stream".to_string(),
@@ -1028,10 +782,9 @@ impl V3CommittedClientSseBuilder {
         let sealed_frames = std::sync::Arc::new(self.frames);
         let replay_frames = std::sync::Arc::clone(&sealed_frames);
         Ok(V3CommittedClientSseStream {
-            inner: Box::pin(V3ReservedCommittedSseReplay {
+            inner: Box::pin(V3CommittedSseReplay {
                 frames: replay_frames,
                 next: self.flushed_frames,
-                _reservation: self.reservation,
             }),
             next_frame_index: 0,
             terminal_frame_index: relative_terminal_frame_index,

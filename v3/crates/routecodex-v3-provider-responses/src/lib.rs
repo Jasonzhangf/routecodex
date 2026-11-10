@@ -1,4 +1,3 @@
-pub mod adaptive_concurrency;
 mod error;
 pub mod global_cooldown;
 #[cfg_attr(not(test), allow(dead_code))]
@@ -13,7 +12,6 @@ pub use provider_cooldown_probe::V3ProviderCooldownProbeKey;
 pub mod raw_response;
 mod shared;
 pub mod transport;
-mod transport_admission;
 pub mod transport_handoff;
 pub mod wire;
 
@@ -30,8 +28,7 @@ pub use health::{
 };
 pub use key_health::{
     V3ProviderHealthProbePermit, V3ProviderKeyHealthProjection, V3ProviderKeyHealthStore,
-    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose,
-    V3ProviderRateLimitProbeDisposition, V3ProviderSchedulingProjection,
+    V3ProviderPrecoolObservationOutcome, V3ProviderProbePurpose, V3ProviderSchedulingProjection,
     V3ProviderSchedulingReader,
 };
 pub use opencode_zen_headers::stamp_opencode_zen_dynamic_request_headers;
@@ -49,7 +46,6 @@ pub use transport::{
     build_v3_anthropic_provider_request_header,
     build_v3_transport_13_responses_http_request_from_parts,
     build_v3_transport_13_responses_http_request_from_parts_with_timeout,
-    build_v3_transport_13_responses_http_request_from_parts_with_timeout_and_concurrency,
     build_v3_transport_13_responses_http_request_from_v3_provider_12,
     build_v3_transport_13_responses_http_request_with_provider_headers_from_parts,
     build_v3_transport_13_responses_request_from_v3_provider_12,
@@ -60,8 +56,9 @@ pub use transport::{
     V3Transport13ResponsesRequest,
 };
 pub use transport_handoff::{
-    V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptControl,
-    V3ProviderTransportAttemptKey, V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
+    V3ProviderTransportAttemptBroker, V3ProviderTransportAttemptCleanup,
+    V3ProviderTransportAttemptControl, V3ProviderTransportAttemptKey,
+    V3ProviderTransportAttemptState, V3ProviderTransportCheckpoint,
     V3ProviderTransportHandoffScope, V3ProviderTransportKind, V3ProviderTransportSendFact,
     V3ProviderTransportSendPhase,
 };

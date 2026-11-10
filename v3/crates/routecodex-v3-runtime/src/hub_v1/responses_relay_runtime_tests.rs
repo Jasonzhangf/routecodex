@@ -179,8 +179,6 @@ async fn execution_control_payload_architecture_relay_reselection_returns_typed_
         },
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -274,8 +272,6 @@ async fn target_protocol_unmapped_field_recovers_through_next_provider() {
         },
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -306,13 +302,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
     manifest
         .servers
         .get_mut("test")
-        .and_then(|server| server.execution.as_mut())
-        .expect("test server execution policy")
-        .attempt_store
-        .request_max_attempts = 1;
-    manifest
-        .servers
-        .get_mut("test")
         .unwrap()
         .execution
         .as_mut()
@@ -326,19 +315,12 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .attempt_budget()
         .admit_transport_attempt()
         .expect("Direct attempt before Relay handoff");
-    let rejection = request_execution_control
-        .attempt_budget()
-        .admit_transport_attempt();
-    assert!(
-        matches!(&rejection, Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
-        if message.contains("limit 1")),
-        "the original attempt ceiling applies before handoff: {rejection:?}"
-    );
     let transport = RecordingChatTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
-
-    let error = execute_v3_responses_relay_runtime_inner(
+    // The Relay handoff reaches the captured provider through the shared
+    // lifecycle and keeps the cumulative wire sequence.
+    let output = execute_v3_responses_relay_runtime_inner(
         &manifest,
         V3ResponsesRelayRuntimeInput {
             server_id: "test".to_string(),
@@ -357,8 +339,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         },
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -370,64 +350,65 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         },
     )
     .await
-    .expect_err("the configured attempt ceiling must reject the exhausted handoff");
-
-    assert!(matches!(
-        error,
-        V3ResponsesRelayRuntimeError::ExecutionControl(message)
-            if message.contains("transport attempt limit 1 exhausted")
-    ));
+    .expect("captured identity handoff is admitted without resetting the sequence");
     assert_eq!(
-        transport.provider_ids.lock().expect("provider ids").len(),
-        0,
-        "the configured ceiling must prevent an additional transport attempt"
+        transport
+            .provider_ids
+            .lock()
+            .expect("provider ids")
+            .as_slice(),
+        &["openai_second".to_string()],
+        "the handoff must reach the captured provider exactly once"
+    );
+    assert_eq!(
+        output.status, 200,
+        "the captured provider business response must complete"
     );
     assert_eq!(
         request_execution_control.transport_attempts(),
-        1,
-        "the handoff must retain the first attempt and reject the second"
+        2,
+        "the handoff must retain the first attempt and keep the second real send"
     );
+    tokio::time::sleep(std::time::Duration::from_millis(320)).await;
     let rejection = request_execution_control
         .attempt_budget()
         .admit_transport_attempt();
-    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
-        "after pending reaches the original residence deadline it takes precedence over the exhausted attempt ceiling: {rejection:?}");
+    assert!(
+        matches!(
+            &rejection,
+            Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))
+        ),
+        "the original residence deadline remains authoritative: {rejection:?}"
+    );
 }
 
-#[test]
-fn execution_control_payload_architecture_responses_replay_exhaustion_stays_local() {
-    let mut manifest = anthropic_then_openai_chat_manifest();
-    let attempt_store = &mut manifest
-        .servers
-        .get_mut("test")
-        .and_then(|server| server.execution.as_mut())
-        .expect("test server execution policy")
-        .attempt_store;
-    attempt_store.attempt_max_bytes = 4_096;
-    attempt_store.request_max_bytes = 1;
-    attempt_store.process_max_bytes = 4_096;
+#[tokio::test]
+async fn execution_control_payload_architecture_responses_replay_preserves_complete_content() {
+    let manifest = anthropic_then_openai_chat_manifest();
     let request_execution_control =
         crate::nodes::V3RequestExecutionControl::from_manifest(&manifest, "test")
             .expect("request execution control");
 
-    let error = match project_v3_responses_relay_client_body(
+    let text = "x".repeat(4096);
+    let body = project_v3_responses_relay_client_body(
         V3HubTransportIntent::Sse,
-        json!({"id": "resp-local-resource", "status": "completed", "output": []}),
+        json!({"id":"resp-complete-replay","status":"completed","output":[
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}
+        ]}),
         false,
         request_execution_control.attempt_budget(),
-    ) {
-        Err(error) => error,
-        Ok(_) => panic!("client replay must reject the request-local byte ceiling"),
+    )
+    .expect("complete client replay has no storage admission");
+    let V3ResponsesRelayClientBody::Sse(stream) = body else {
+        panic!("SSE client replay expected");
     };
-
-    assert!(matches!(
-        error,
-        V3ResponsesRelayRuntimeError::ExecutionControlResponse(_)
-    ));
+    let frames = stream.collect::<Vec<_>>().await;
+    let wire = String::from_utf8(frames.concat()).unwrap();
     assert!(
-        !is_v3_responses_provider_response_failure(&error),
-        "local replay exhaustion must not enter provider retry or health policy"
+        wire.contains(&text),
+        "complete business content must survive replay"
     );
+    assert!(wire.contains("response.completed"));
 }
 
 #[test]
@@ -1633,8 +1614,6 @@ async fn execute_committed_first_round(
         committed_round_input("req-committed-first-round"),
         transport,
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -1662,8 +1641,6 @@ async fn execute_committed_follow_up_round(
         committed_round_input(request_id),
         transport,
         V3ProviderFailureRuntimeHealth::from_manifest(manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,
@@ -1753,8 +1730,6 @@ async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_sec
         },
         &transport,
         V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
         None,
         None,
         None,

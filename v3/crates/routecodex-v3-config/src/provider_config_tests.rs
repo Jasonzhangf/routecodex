@@ -378,9 +378,6 @@ sse_first_frame_timeout_ms = 600000
 [provider.auth]
 env = "ROUNDTRIP_KEY"
 
-[provider.concurrency]
-maxInFlight = 4
-
 [provider.models."model-a"]
 supportsStreaming = true
 supportsThinking = true
@@ -439,11 +436,6 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
                 selection: None,
             },
             responses: None,
-            concurrency: Some(V2ProviderConcurrencyConfig {
-                max_in_flight: Some(2),
-                acquire_timeout_ms: None,
-                stale_lease_ms: None,
-            }),
             compatibility_profile: None,
             models: BTreeMap::new(),
             v3: None,
@@ -463,7 +455,6 @@ fn generate_v2_provider_config_file_writes_camel_case_keys() {
         "{generated}"
     );
     assert!(generated.contains("type = \"anthropic\""), "{generated}");
-    assert!(generated.contains("maxInFlight = 2"), "{generated}");
     assert!(
         generated.contains("env = \"GEN_PROVIDER_KEY\""),
         "{generated}"

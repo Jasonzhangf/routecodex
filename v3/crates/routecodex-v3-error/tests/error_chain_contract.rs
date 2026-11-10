@@ -46,7 +46,6 @@ fn project_exhausted_provider(
                 source_status,
             },
             false,
-            false,
             None,
         )
         .try_into_terminal()
@@ -203,9 +202,8 @@ fn provider_failure_builds_adjacent_action_and_keeps_error_polarity() {
     );
     assert!(action.action.retry_eligible);
     assert!(action.action.health_affecting);
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 1, false, false,
-    );
+    let exhaustion =
+        build_v3_error_04_target_exhaustion_decision_with_provider_availability(action, 1, false);
     assert!(!exhaustion.target_exhausted);
     let execution =
         build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, Some(recovery_witness()));
@@ -237,7 +235,6 @@ fn recoverable_response_processing_runtime_failure_reselects_health_neutral() {
             candidates_remaining: 1,
             source_status: Some(200),
         },
-        false,
         false,
         Some(witness),
     );
@@ -294,7 +291,6 @@ fn recoverable_response_processing_runtime_failure_same_reason_without_typed_cod
                 candidates_remaining: 1,
                 source_status: Some(200),
             },
-            false,
             false,
             None,
         );
@@ -353,9 +349,8 @@ fn client_disconnect_is_health_neutral_and_terminal_projection_is_not_success() 
     );
     assert!(!action.action.health_affecting);
     assert!(!action.action.retry_eligible);
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 0, false, false,
-    );
+    let exhaustion =
+        build_v3_error_04_target_exhaustion_decision_with_provider_availability(action, 0, false);
     let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
     assert_eq!(
         execution.action,
@@ -389,9 +384,8 @@ fn provider_failure_projects_only_after_selected_target_is_fully_exhausted() {
         0,
     );
     assert!(!action.action.retry_eligible);
-    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-        action, 0, false, false,
-    );
+    let exhaustion =
+        build_v3_error_04_target_exhaustion_decision_with_provider_availability(action, 0, false);
     assert!(exhaustion.target_exhausted);
     let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
     assert_eq!(execution.action, V3Error05ExecutionAction::ProjectTerminal);
@@ -598,7 +592,7 @@ fn already_terminal_target_exhaustion_and_success_control_never_become_success()
             0,
         );
         let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
-            action, 0, false, false,
+            action, 0, false,
         );
         let execution = build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None);
         assert_eq!(

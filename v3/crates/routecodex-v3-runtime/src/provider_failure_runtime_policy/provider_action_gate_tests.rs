@@ -33,7 +33,6 @@ targets = [
         _ => panic!("valid fixture must select the provider"),
     };
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -45,7 +44,6 @@ targets = [
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
     let result = run_v3_relay_provider_failure_policy(
@@ -58,7 +56,6 @@ targets = [
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },
@@ -68,7 +65,6 @@ targets = [
 
     assert_eq!(result.event.action, "terminal_route_and_default_exhausted");
     assert!(result.retry_selected.is_none());
-    assert!(same_candidate_retries.is_empty());
     let projection = result
         .terminal_projection
         .expect("unmatched transient exhaustion must be terminal");
@@ -96,7 +92,6 @@ async fn unmatched_transient_reselect_keeps_healthy_alternative_independent() {
         .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
         .expect("capture Target09 before execution");
     let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
@@ -108,7 +103,6 @@ async fn unmatched_transient_reselect_keeps_healthy_alternative_independent() {
         )
         .expect("test failure session scope"),
         provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
     let result = run_v3_relay_provider_failure_policy(
@@ -121,7 +115,6 @@ async fn unmatched_transient_reselect_keeps_healthy_alternative_independent() {
         None,
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             trace: &mut trace,
             last_external_http: &mut None,
         },

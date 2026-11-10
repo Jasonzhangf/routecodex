@@ -1,302 +1,86 @@
-pub(crate) struct V3AdmittedTargetSelection {
-    pub(crate) selected: V3Target10ConcreteProviderSelected,
-    pub(crate) admission: V3RuntimeProviderAdmission,
-}
-
-pub(crate) async fn admit_v3_provider_transport_attempt(
-    budget: &crate::execution_control::V3AttemptBudget,
-    admission: &mut Option<V3RuntimeProviderAdmission>,
-    rate_limit_permit: &mut Option<crate::provider_action_gate::V3ProviderActionPermit>,
-    action_permit: &mut Option<crate::provider_action_gate::V3ProviderActionPermit>,
-) -> Result<usize, crate::execution_control::V3AttemptStoreError> {
-    use crate::execution_control::V3AttemptStoreError;
-    match budget.admit_transport_attempt() {
-        Err(error @ V3AttemptStoreError::TransportAttemptsExhausted(_)) => {
-            // This request cannot send again. It must not retain shared
-            // capacity or an exact-identity admission while it remains pending.
-            drop(admission.take());
-            drop(rate_limit_permit.take());
-            drop(action_permit.take());
-            tokio::time::sleep_until(tokio::time::Instant::from_std(budget.residence_deadline()))
-                .await;
-            Err(V3AttemptStoreError::ResidenceDeadlineExceeded(format!(
-                "request residence deadline expired while waiting after {error}"
-            )))
-        }
-        result => result,
-    }
-}
-
-pub(crate) struct V3RuntimeProviderAdmission {
-    controller: V3AdaptiveConcurrencyController,
-    lease: Option<V3AdaptiveConcurrencyLease>,
-    rate_limit_permit: Option<crate::provider_action_gate::V3ProviderActionPermit>,
-    rate_limit_recovery: Option<V3Error05RecoveryAdmissionWitness>,
-}
-
-impl V3RuntimeProviderAdmission {
-    fn new(controller: V3AdaptiveConcurrencyController, lease: V3AdaptiveConcurrencyLease) -> Self {
-        Self {
-            controller,
-            lease: Some(lease),
-            rate_limit_permit: None,
-            rate_limit_recovery: None,
-        }
-    }
-
-    pub(crate) fn take_rate_limit_control(
-        &mut self,
-        pending: &mut Option<V3Error05RecoveryAdmissionWitness>,
-    ) -> Option<crate::provider_action_gate::V3ProviderActionPermit> {
-        // A 429 witness belongs to the failed identity, not its replacement.
-        // Target admission has already selected and reserved the new identity.
-        if pending
-            .as_ref()
-            .is_some_and(|w| w.normalized_error_family() == "provider_http_429")
-        {
-            *pending = None;
-        }
-        if pending.is_none() {
-            *pending = self.rate_limit_recovery.take();
-        }
-        self.rate_limit_permit.take()
-    }
-
-    pub(crate) fn bind_pinned_rate_limit_control(
-        &mut self,
-        control: crate::provider_action_gate::V3ExactRateLimitAdmission,
-    ) {
-        match control {
-            crate::provider_action_gate::V3ExactRateLimitAdmission::Unrestricted => {}
-            crate::provider_action_gate::V3ExactRateLimitAdmission::Admitted(permit) => {
-                self.rate_limit_permit = Some(permit)
-            }
-            crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(witness) => {
-                self.rate_limit_recovery = Some(witness)
-            }
-        }
-    }
-
-    pub(crate) fn into_lease(mut self) -> V3AdaptiveConcurrencyLease {
-        self.lease
-            .take()
-            .expect("runtime provider admission lease must be present")
-    }
-}
-
-impl Drop for V3RuntimeProviderAdmission {
-    fn drop(&mut self) {
-        if let Some(lease) = self.lease.take() {
-            self.controller
-                .release(lease.into_permit())
-                .expect("runtime provider admission release must never underflow");
-        }
-    }
-}
-
-pub(crate) enum V3SynchronousTargetPlanningStep {
-    Selected(V3Target10ConcreteProviderSelected),
-    NeedPreExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        rescue_candidates: Vec<V3TargetCandidate>,
-        request_local_excluded_candidates: BTreeSet<String>,
-    },
-    NeedExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        exhaustion: V3TargetExhaustion,
-        request_local_excluded_candidates: BTreeSet<String>,
-    },
-    Exhausted(V3TargetExhaustion),
-    Failed(routecodex_v3_error::V3Error01SourceRaised),
-    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-}
-
-pub(crate) enum V3SynchronousTargetAdmissionStep {
-    Selected {
-        selected: V3AdmittedTargetSelection,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
-    NeedPreExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        rescue_candidates: Vec<V3TargetCandidate>,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
-    NeedExhaustionProbes {
-        expanded: V3Target09CandidateSetExpanded,
-        exhaustion: V3TargetExhaustion,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
-    Exhausted {
-        exhaustion: V3TargetExhaustion,
-        source: Option<routecodex_v3_error::V3Error01SourceRaised>,
-        request_local_excluded_candidates: BTreeSet<String>,
-        request_local_busy_candidates: BTreeSet<String>,
-    },
-    Failed(routecodex_v3_error::V3Error01SourceRaised),
-    OperatorFault(crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault),
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct V3CooldownRescueProbeOutcome {
     pub(crate) completed_all: bool,
     pub(crate) did_work: bool,
 }
+/// Whether the aggregate probe owner took custody of one rescue round.
+///
+/// The request path only reports custody; it never waits on the round. A round
+/// that no owner accepted is dropped, never spawned: provider probe resource
+/// lifetime belongs to the Server-owned aggregate, which cancels and joins what
+/// it retains.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum V3CooldownRescueSubmission {
+    /// The owner admitted the round into its managed probe queue.
+    Initiated,
+    /// One rescue pass is already running for this listener. A rescue round is
+    /// provider lifecycle state, not request state, so the request path must not
+    /// start a second pass for the same failure/exhaustion cycle.
+    RoundInFlight,
+    /// The owner's probe capacity or queue is full; nothing was scheduled.
+    CapacityUnavailable,
+    /// No aggregate owner is registered or its sender is closed.
+    OwnerUnavailable,
+}
 
-pub(crate) async fn initiate_v3_target_pre_exhaustion_rescue_probes(
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    manifest: &V3Config05ManifestPublished,
-    candidates: &[V3TargetCandidate],
-    now_ms: u64,
-) -> Result<
-    bool,
-    Result<
-        routecodex_v3_error::V3Error01SourceRaised,
-        crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
-    >,
-> {
-    let mut identities = BTreeSet::new();
-    let mut did_work = false;
-    for candidate in candidates {
-        if !identities.insert(v3_relay_provider_candidate_key(candidate)) {
-            continue;
-        }
-        // Never send a real provider probe outside a declared availability
-        // window: a cooled model whose free window has closed must not be
-        // billed by a rescue probe.
-        if !routecodex_v3_target::V3TargetInterpreter::candidate_in_availability_window(
-            candidate, now_ms,
-        ) {
-            continue;
-        }
-        match provider_health
-            .initiate_cooldown_rescue_probe(manifest, candidate, now_ms)
-            .await
-        {
-            Ok(V3ProbeInitiation::Completed(V3ProbeCompletion::Recovered | V3ProbeCompletion::ProviderFailed)
-                | V3ProbeInitiation::Initiated) => {
-                did_work = true;
-            }
-            Ok(
-                V3ProbeInitiation::Completed(V3ProbeCompletion::Superseded | V3ProbeCompletion::CapacityUnavailable)
-                | V3ProbeInitiation::AlreadyOwned
-                | V3ProbeInitiation::CapacityUnavailable
-                | V3ProbeInitiation::OwnerUnavailable,
-            ) => {}
-            Err(error) => {
-                return Err(target_resolution_source(
-                    "V3ProviderCooldownRescueProbe",
-                    "target_pre_exhaustion_rescue_probe_failed",
-                    error,
-                ));
-            }
-        }
+/// Clears the aggregate's one-rescue-pass flag when the round ends. A dropped
+/// or cancelled round clears it too, because the guard is owned by the round's
+/// future instead of by the submission call.
+struct V3CooldownRescueSingleFlight(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for V3CooldownRescueSingleFlight {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
     }
-    Ok(did_work)
 }
 
-pub(crate) struct V3SynchronousTargetPlanningInput<'a> {
-    pub(crate) manifest: &'a V3Config05ManifestPublished,
-    pub(crate) expanded: V3Target09CandidateSetExpanded,
-    pub(crate) failure_session_scope: &'a V3ProviderFailureSessionScope,
-    pub(crate) provider_health: &'a V3ProviderFailureRuntimeHealth,
-    pub(crate) request_local_excluded_candidates: &'a BTreeSet<String>,
-    pub(crate) request_local_busy_candidates: &'a BTreeSet<String>,
-    pub(crate) now_ms: u64,
-    pub(crate) deterministic_sample: u64,
-    pub(crate) allow_exhaustion_rescue_probe: bool,
-    pub(crate) preferred_selected: Option<V3Target10ConcreteProviderSelected>,
-    pub(crate) pre_exhaustion_probes_completed: bool,
-    pub(crate) exhaustion_probes_completed: bool,
-}
+/// Upper bound for one background rescue round (control plane only).
+///
+/// v31 keeps requests independent of provider lifecycle: a request never waits
+/// for a probe's cadence, a cooldown window or a recovery schedule, and the
+/// rescue round is therefore never awaited by a request path. The round exists
+/// because a captured target can exhaust while a cooled identity is the only
+/// candidate that can answer: it changes pool visibility only, so a later
+/// selection (or a later request) can use the identity again.
+pub(crate) const V3_COOLDOWN_RESCUE_ROUND_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(750);
+
+/// Delay before a submitted rescue round starts probing.
+///
+/// A probe and a business request of the same complete
+/// provider/interface/model/auth-key identity share one concurrency lease. The
+/// request that submitted the round may itself send business to that identity
+/// in the very next steps, so the control-plane observation waits out a short
+/// grace period instead of contending for the lease its own request needs. The
+/// grace is a scheduling detail of the observation; no request waits on it.
+pub(crate) const V3_COOLDOWN_RESCUE_BACKGROUND_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(250);
 
 pub(crate) fn v3_provider_concurrency_key_parts(provider_id: &str, auth_alias: &str) -> String {
     format!("{provider_id}:{auth_alias}")
 }
 
-fn v3_provider_concurrency_key(candidate: &V3TargetCandidate) -> String {
-    v3_provider_concurrency_key_parts(&candidate.provider_id, &candidate.auth_alias)
-}
-
-pub(crate) fn v3_pure_all_busy_exhaustion_source(
+/// Build the detached observation round for cooled candidates that were skipped
+/// by the current request's normal selection. This is control-plane work only:
+/// the caller submits it after selecting an immediately usable candidate and
+/// never waits for the probe before sending business traffic.
+pub(crate) fn v3_pre_exhaustion_rescue_round_for_selected(
     expanded: &V3Target09CandidateSetExpanded,
-    excluded: &BTreeSet<String>,
-    busy: &BTreeSet<String>,
-) -> Result<
-    Option<routecodex_v3_error::V3Error01SourceRaised>,
-    crate::provider_failure_runtime_policy::V3RelayErrorOperatorFault,
-> {
-    let captured: BTreeSet<String> = expanded
-        .candidates
-        .iter()
-        .map(v3_relay_provider_candidate_key)
-        .collect();
-    // Pure all-busy requires every captured candidate, and every request-local
-    // exclusion, to be proven busy by capacity. Any other exclusion reason
-    // makes the final exhaustion mixed.
-    if captured.is_empty() || !captured.is_subset(busy) || !excluded.is_subset(busy) {
-        return Ok(None);
-    }
-    crate::shared::direct_plain_error(
-        V3ErrorSourceKind::TargetPoolExhausted,
-        "V3Target10ConcreteProviderSelected",
-        "provider_concurrency_busy",
-        format!(
-            "{} capacity-saturated candidates unavailable",
-            captured.len()
-        ),
-    )
-    .map(Some)
-}
-
-pub(crate) fn try_admit_v3_selected_target(
-    selected: &V3Target10ConcreteProviderSelected,
-) -> Result<Option<V3RuntimeProviderAdmission>, String> {
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    let capacity_key = v3_provider_concurrency_key(&selected.candidate);
-    controller
-        .ensure_initial_budget(&capacity_key, selected.candidate.initial_concurrency_budget)?;
-    Ok(controller
-        .try_acquire_business_scoped(&capacity_key, Some(&routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: selected.candidate.interface_id.clone(),
-            model_id: selected.candidate.model_id.clone(),
-        }))
-        .map(|lease| V3RuntimeProviderAdmission::new(controller, lease)))
-}
-
-pub(crate) enum V3AdmitAfterRecovery {
-    Admitted(V3RuntimeProviderAdmission),
-    Busy,
-    Failed(String),
-}
-
-pub(crate) fn admit_v3_selected_target_after_recovery(
-    selected: &V3Target10ConcreteProviderSelected,
-) -> V3AdmitAfterRecovery {
-    match try_admit_v3_selected_target(selected) {
-        Ok(Some(admission)) => V3AdmitAfterRecovery::Admitted(admission),
-        Ok(None) => V3AdmitAfterRecovery::Busy,
-        Err(reason) => V3AdmitAfterRecovery::Failed(reason),
-    }
-}
-
-fn v3_rescue_candidates_for_selected(
-    expanded: &V3Target09CandidateSetExpanded,
+    failure_session_scope: &V3ProviderFailureSessionScope,
     provider_health: &V3ProviderFailureRuntimeHealth,
     request_local_excluded_candidates: &BTreeSet<String>,
     now_ms: u64,
     selected: &V3Target10ConcreteProviderSelected,
-) -> Vec<V3TargetCandidate> {
+) -> Option<V3Target09CandidateSetExpanded> {
     let selected_key = v3_relay_provider_candidate_key(&selected.candidate);
+    let availability = provider_health.session_bound_availability(failure_session_scope);
     let available_count = expanded
         .candidates
         .iter()
         .filter(|candidate| {
             let key = v3_relay_provider_candidate_key(candidate);
             !request_local_excluded_candidates.contains(&key)
-                && provider_health
+                && availability
                     .availability_for_interface(
                         &candidate.provider_id,
                         &candidate.interface_id,
@@ -311,7 +95,7 @@ fn v3_rescue_candidates_for_selected(
         let key = v3_relay_provider_candidate_key(candidate);
         key != selected_key
             && !request_local_excluded_candidates.contains(&key)
-            && provider_health
+            && availability
                 .availability_for_interface(
                     &candidate.provider_id,
                     &candidate.interface_id,
@@ -325,10 +109,10 @@ fn v3_rescue_candidates_for_selected(
     });
     let selected_tier =
         V3TargetInterpreter::route_tier_index_for_candidate(&selected.route, &selected.candidate);
-    let preceding_tier_candidates = if selected_tier == usize::MAX {
+    let candidates = if selected_tier == usize::MAX {
         Vec::new()
     } else {
-        expanded
+        let preceding = expanded
             .candidates
             .iter()
             .filter(|candidate| {
@@ -336,7 +120,7 @@ fn v3_rescue_candidates_for_selected(
                 V3TargetInterpreter::route_tier_index_for_candidate(&selected.route, candidate)
                     < selected_tier
                     && !request_local_excluded_candidates.contains(&key)
-                    && provider_health
+                    && availability
                         .availability_for_interface(
                             &candidate.provider_id,
                             &candidate.interface_id,
@@ -349,283 +133,30 @@ fn v3_rescue_candidates_for_selected(
                         .any(|scope| scope.contains("cooldown"))
             })
             .cloned()
-            .collect::<Vec<_>>()
-    };
-    // A later tier is selected only after its preceding tiers are unavailable.
-    // Request-local failures stay excluded permanently.
-    if !preceding_tier_candidates.is_empty() {
-        preceding_tier_candidates
-    } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
-        expanded
-            .candidates
-            .iter()
-            .filter(|candidate| {
-                !request_local_excluded_candidates
-                    .contains(&v3_relay_provider_candidate_key(candidate))
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    }
-}
-
-pub(crate) fn step_v3_target_planning_sync(
-    input: V3SynchronousTargetPlanningInput<'_>,
-) -> V3SynchronousTargetPlanningStep {
-    let V3SynchronousTargetPlanningInput {
-        manifest: _manifest,
-        expanded,
-        failure_session_scope,
-        provider_health,
-        request_local_excluded_candidates,
-        request_local_busy_candidates,
-        now_ms,
-        deterministic_sample,
-        allow_exhaustion_rescue_probe,
-        preferred_selected,
-        pre_exhaustion_probes_completed,
-        exhaustion_probes_completed,
-    } = input;
-    let target = V3TargetInterpreter::default();
-
-    if let Some(preferred) = preferred_selected.filter(|preferred| {
-        let key = v3_relay_provider_candidate_key(&preferred.candidate);
-        !request_local_excluded_candidates.contains(&key)
-            && !request_local_busy_candidates.contains(&key)
-    }) {
-        return V3SynchronousTargetPlanningStep::Selected(preferred);
-    }
-
-    let selected = if pre_exhaustion_probes_completed || exhaustion_probes_completed {
-        match select_v3_target_with_session_then_global(
-            &target,
-            expanded.clone(),
-            failure_session_scope,
-            &provider_health.session_bound_availability(failure_session_scope),
-            provider_health,
-            request_local_excluded_candidates,
-            now_ms,
-            deterministic_sample,
-        ) {
-            Ok(selected) => selected,
-            Err(exhausted) => return V3SynchronousTargetPlanningStep::Exhausted(exhausted),
-        }
-    } else {
-        match select_v3_target_with_session_then_global(
-            &target,
-            expanded.clone(),
-            failure_session_scope,
-            &provider_health.session_bound_availability(failure_session_scope),
-            provider_health,
-            request_local_excluded_candidates,
-            now_ms,
-            0,
-        ) {
-            Ok(selected) => selected,
-            Err(exhaustion) => {
-                if !allow_exhaustion_rescue_probe {
-                    return V3SynchronousTargetPlanningStep::Exhausted(exhaustion);
-                }
-                if !v3_exhaustion_is_cooldown_only(
-                    &expanded,
-                    request_local_excluded_candidates,
-                    failure_session_scope,
-                    provider_health,
-                    now_ms,
-                ) {
-                    return V3SynchronousTargetPlanningStep::Exhausted(exhaustion);
-                }
-                return V3SynchronousTargetPlanningStep::NeedExhaustionProbes {
-                    expanded,
-                    exhaustion,
-                    request_local_excluded_candidates: request_local_excluded_candidates.clone(),
-                };
-            }
+            .collect::<Vec<_>>();
+        if !preceding.is_empty() {
+            preceding
+        } else if selected_tier == 0 && available_count == 1 && cooled_peer_exists {
+            expanded
+                .candidates
+                .iter()
+                .filter(|candidate| {
+                    !request_local_excluded_candidates
+                        .contains(&v3_relay_provider_candidate_key(candidate))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
         }
     };
-
-    let candidate = selected;
-    let rescue_candidates = v3_rescue_candidates_for_selected(
-        &expanded,
-        provider_health,
-        request_local_excluded_candidates,
-        now_ms,
-        &candidate,
-    );
-    if allow_exhaustion_rescue_probe
-        && !pre_exhaustion_probes_completed
-        && !rescue_candidates.is_empty()
-    {
-        return V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
-            expanded,
-            rescue_candidates,
-            request_local_excluded_candidates: request_local_excluded_candidates.clone(),
-        };
-    }
-    V3SynchronousTargetPlanningStep::Selected(candidate)
-}
-
-pub(crate) fn step_v3_target_planning_with_admission_sync(
-    input: V3SynchronousTargetPlanningInput<'_>,
-) -> V3SynchronousTargetAdmissionStep {
-    let V3SynchronousTargetPlanningInput {
-        manifest,
-        expanded,
-        failure_session_scope,
-        provider_health,
-        request_local_excluded_candidates,
-        request_local_busy_candidates,
-        now_ms,
-        deterministic_sample,
-        allow_exhaustion_rescue_probe,
-        preferred_selected,
-        pre_exhaustion_probes_completed,
-        exhaustion_probes_completed,
-    } = input;
-    // Probe metadata rounds retain scan provenance. The async owner rechecks
-    // capacity at a new admission or after an actual probe phase, not while
-    // merely establishing the same health generation for a rescue probe.
-    let mut excluded = request_local_excluded_candidates.clone();
-    // Keep provenance through probe-only dispositions, which can occur before
-    // admission rechecks this identity. Selected and timed-wait exits clear it.
-    let mut busy = request_local_busy_candidates.clone();
-    let mut preferred = preferred_selected;
-    let mut pre_exhaustion_probes_completed = pre_exhaustion_probes_completed;
-    let mut exhaustion_probes_completed = exhaustion_probes_completed;
-    let mut rate_limited = BTreeSet::new();
-    let mut waiting_for_rate_limit = false;
-    loop {
-        let step = step_v3_target_planning_sync(V3SynchronousTargetPlanningInput {
-            manifest,
-            expanded: expanded.clone(),
-            failure_session_scope,
-            provider_health,
-            request_local_excluded_candidates: &excluded,
-            request_local_busy_candidates: &busy,
-            now_ms,
-            deterministic_sample,
-            allow_exhaustion_rescue_probe,
-            preferred_selected: preferred.take(),
-            pre_exhaustion_probes_completed,
-            exhaustion_probes_completed,
-        });
-        match step {
-            V3SynchronousTargetPlanningStep::Selected(selected) => {
-                match try_admit_v3_selected_target(&selected) {
-                    Ok(Some(mut admission)) => {
-                        match provider_health.try_admit_candidate_rate_limit(failure_session_scope, &selected.candidate) {
-                            Ok(crate::provider_action_gate::V3ExactRateLimitAdmission::Unrestricted) => {},
-                            Ok(crate::provider_action_gate::V3ExactRateLimitAdmission::Admitted(permit)) => admission.rate_limit_permit = Some(permit),
-                            Ok(crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(witness)) if waiting_for_rate_limit => admission.rate_limit_recovery = Some(witness),
-                            Ok(crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(_)) => {
-                                let key = v3_relay_provider_candidate_key(&selected.candidate);
-                                excluded.insert(key.clone());
-                                rate_limited.insert(key);
-                                continue;
-                            },
-                            Err(reason) => return match target_resolution_source("V3ProviderActionGateAdmission", "provider_rate_limit_admission_failed", reason) {
-                                Ok(source) => V3SynchronousTargetAdmissionStep::Failed(source),
-                                Err(fault) => V3SynchronousTargetAdmissionStep::OperatorFault(fault),
-                            },
-                        }
-                        busy.remove(&v3_relay_provider_candidate_key(&selected.candidate));
-                        return V3SynchronousTargetAdmissionStep::Selected {
-                            selected: V3AdmittedTargetSelection {
-                                selected,
-                                admission,
-                            },
-                            request_local_excluded_candidates: excluded
-                                .difference(&busy)
-                                .filter(|key| !rate_limited.contains(*key))
-                                .cloned()
-                                .collect(),
-                            request_local_busy_candidates: busy,
-                        };
-                    }
-                    Ok(None) => {
-                        let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                        excluded.insert(busy_key.clone());
-                        // Rechecking the same busy identity after a completed
-                        // probe phase must not restart that phase indefinitely.
-                        let newly_busy = !request_local_busy_candidates.contains(&busy_key);
-                        busy.insert(busy_key);
-                        if newly_busy {
-                            pre_exhaustion_probes_completed = false;
-                            exhaustion_probes_completed = false;
-                        }
-                        // Capacity excludes only this candidate. Preserve the
-                        // caller's recovery policy for eligible cooled peers.
-                    }
-                    Err(reason) => {
-                        return match target_resolution_source(
-                            "V3Target10ConcreteProviderSelected",
-                            "provider_concurrency_admission_invalid_budget",
-                            reason,
-                        ) {
-                            Ok(source) => V3SynchronousTargetAdmissionStep::Failed(source),
-                            Err(fault) => V3SynchronousTargetAdmissionStep::OperatorFault(fault),
-                        };
-                    }
-                }
-            }
-            V3SynchronousTargetPlanningStep::NeedPreExhaustionProbes {
-                expanded,
-                rescue_candidates,
-                mut request_local_excluded_candidates,
-            } => {
-                request_local_excluded_candidates.extend(excluded);
-                // The async probe continuation starts a new admission step.
-                // Keep exact-identity 429 backpressure in its gate, rather than
-                // publishing this step's temporary mask as a failed candidate.
-                request_local_excluded_candidates.retain(|key| !rate_limited.contains(key));
-                return V3SynchronousTargetAdmissionStep::NeedPreExhaustionProbes {
-                    expanded,
-                    rescue_candidates,
-                    request_local_excluded_candidates,
-                    request_local_busy_candidates: busy,
-                };
-            }
-            V3SynchronousTargetPlanningStep::NeedExhaustionProbes {
-                expanded,
-                exhaustion,
-                mut request_local_excluded_candidates,
-            } => {
-                request_local_excluded_candidates.extend(excluded);
-                request_local_excluded_candidates.retain(|key| !rate_limited.contains(key));
-                return V3SynchronousTargetAdmissionStep::NeedExhaustionProbes {
-                    expanded,
-                    exhaustion,
-                    request_local_excluded_candidates,
-                    request_local_busy_candidates: busy,
-                };
-            }
-            V3SynchronousTargetPlanningStep::Exhausted(exhausted) => {
-                if !waiting_for_rate_limit && !rate_limited.is_empty() {
-                    // No healthy alternative can be admitted. Select a typed
-                    // waiting identity; callers release capacity before await.
-                    excluded.retain(|key| !rate_limited.contains(key));
-                    waiting_for_rate_limit = true;
-                    continue;
-                }
-                return match v3_pure_all_busy_exhaustion_source(&expanded, &excluded, &busy) {
-                    Ok(source) => V3SynchronousTargetAdmissionStep::Exhausted {
-                        exhaustion: exhausted,
-                        source,
-                        request_local_excluded_candidates: excluded,
-                        request_local_busy_candidates: busy,
-                    },
-                    Err(fault) => V3SynchronousTargetAdmissionStep::OperatorFault(fault),
-                };
-            }
-            V3SynchronousTargetPlanningStep::Failed(source) => {
-                return V3SynchronousTargetAdmissionStep::Failed(source);
-            }
-            V3SynchronousTargetPlanningStep::OperatorFault(fault) => {
-                return V3SynchronousTargetAdmissionStep::OperatorFault(fault);
-            }
-        }
-    }
+    (!candidates.is_empty()).then(|| V3Target09CandidateSetExpanded {
+        route: expanded.route.clone(),
+        candidates,
+        provider_priority_schedule: expanded.provider_priority_schedule.clone(),
+        route_pool_tier_priorities: expanded.route_pool_tier_priorities.clone(),
+        sticky_pool_members: expanded.sticky_pool_members.clone(),
+    })
 }
 
 impl V3ProviderFailureRuntimeHealth {
@@ -734,10 +265,6 @@ impl V3ProviderFailureRuntimeHealth {
                         )
                         .map(|()| true)
                         .map_err(|error| error.to_string()),
-                    Err(V3ProviderHealthProbeFailure::ConcurrencyBusy) => {
-                        drop(cancellation);
-                        return Ok(V3CooldownRescueProbeOutcome { completed_all: false, did_work: false });
-                    }
                     Err(_error) => {
                         health
                             .store
@@ -762,6 +289,130 @@ impl V3ProviderFailureRuntimeHealth {
         Ok(outcome)
     }
 
+    /// Run at most one bounded rescue round for an exhausted captured target.
+    ///
+    /// Returns `true` only when a probe was actually attempted. A probe that
+    /// stalls past the round budget or deadline is cancelled (its cooldown and
+    /// single-flight state stay with the store), so the caller's typed failure
+    /// remains the truthful outcome instead of a fabricated recovery.
+    pub(crate) async fn run_v3_bounded_cooldown_rescue_round(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        expanded: &V3Target09CandidateSetExpanded,
+        now_ms: u64,
+        deadline: tokio::time::Instant,
+    ) -> bool {
+        let budget_deadline = tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET;
+        let round_deadline = if budget_deadline < deadline {
+            budget_deadline
+        } else {
+            deadline
+        };
+        matches!(
+            tokio::time::timeout_at(
+                round_deadline,
+                self.run_exhaustion_rescue_probes(manifest, expanded, now_ms),
+            )
+            .await,
+            Ok(Ok(V3CooldownRescueProbeOutcome { did_work: true, .. }))
+        )
+    }
+
+    /// Hand the bounded rescue round to the aggregate probe owner.
+    ///
+    /// Provider probe tasks are Server-owned: the aggregate probe lifecycle
+    /// retains every managed probe, cancels what is still pending on shutdown and
+    /// joins it, so a request path must never create a probe task of its own.
+    /// Custody is therefore taken synchronously — owner lookup, a capacity slot
+    /// and queue admission — and the return value reports whether the owner
+    /// accepted the round. The caller never awaits it: the round cannot gate
+    /// target selection, delay or replace a business send, retry an attempt or
+    /// suppress a typed failure. Its only effect is the ordinary provider-health
+    /// state that a later selection observes, so a request that submitted it
+    /// keeps its own immediate outcome.
+    ///
+    /// The owner admits one rescue pass at a time. Every live entry that can
+    /// report an exhausted captured target — the selected-target pre-exhaustion
+    /// entry in plan execution, the exhausted stop on the Direct and Relay
+    /// request loops, the pre-plan exhaustion entry and the last-candidate
+    /// terminal entry — calls this function, and the owner answers a second
+    /// report of the same failure cycle with `RoundInFlight` instead of starting
+    /// a second pass.
+    pub(crate) fn submit_v3_background_cooldown_rescue_round(
+        &self,
+        manifest: &V3Config05ManifestPublished,
+        expanded: &V3Target09CandidateSetExpanded,
+    ) -> V3CooldownRescueSubmission {
+        let owner = match self.probe_owner.lock() {
+            Ok(owner) => owner.clone(),
+            // No custody can be taken while the owner lock is poisoned. Nothing
+            // is scheduled and the request outcome is untouched.
+            Err(_) => return V3CooldownRescueSubmission::OwnerUnavailable,
+        };
+        // No aggregate registered (or it already closed its sender): there is no
+        // owner to take the round, so it is dropped instead of spawned.
+        let Some(owner) = owner.filter(|owner| !owner.sender.is_closed()) else {
+            return V3CooldownRescueSubmission::OwnerUnavailable;
+        };
+        // Exactly one rescue pass per listener. Every production entry that can
+        // observe an exhausted captured target reports here, so the round is
+        // single-flight at its owner instead of being counted per entry: a
+        // request cycle that reaches both the selected-target pre-exhaustion
+        // entry and the exhausted stop still produces one round.
+        if owner
+            .rescue_in_flight
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return V3CooldownRescueSubmission::RoundInFlight;
+        }
+        let single_flight = V3CooldownRescueSingleFlight(owner.rescue_in_flight.clone());
+        let Ok(slot) = owner.capacity.clone().try_acquire_owned() else {
+            drop(single_flight);
+            return V3CooldownRescueSubmission::CapacityUnavailable;
+        };
+        let health = self.clone();
+        let manifest = manifest.clone();
+        let expanded = expanded.clone();
+        let work: V3ManagedProbe = Box::pin(async move {
+            // The owner's slot is held for exactly the life of this round.
+            let _slot = slot;
+            let _single_flight = single_flight;
+            tokio::time::sleep(V3_COOLDOWN_RESCUE_BACKGROUND_DELAY).await;
+            // The observation reads the clock when it actually runs: a decision
+            // made against the pre-grace timestamp could already be stale for a
+            // cooldown that expired inside the grace.
+            let Ok(now_ms) = v3_relay_provider_policy_now_epoch_ms() else {
+                return Ok(V3ProbeCompletion::Superseded);
+            };
+            let _ = health
+                .run_v3_bounded_cooldown_rescue_round(
+                    &manifest,
+                    &expanded,
+                    now_ms,
+                    tokio::time::Instant::now() + V3_COOLDOWN_RESCUE_ROUND_BUDGET,
+                )
+                .await;
+            // The round is an observation only: it never reports a business
+            // outcome and never becomes a health verdict of its own.
+            Ok(V3ProbeCompletion::Superseded)
+        });
+        match owner.sender.try_send(work) {
+            Ok(()) => V3CooldownRescueSubmission::Initiated,
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                V3CooldownRescueSubmission::CapacityUnavailable
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                V3CooldownRescueSubmission::OwnerUnavailable
+            }
+        }
+    }
+
     pub(crate) async fn run_exhaustion_rescue_probes(
         &self,
         manifest: &V3Config05ManifestPublished,
@@ -771,46 +422,4 @@ impl V3ProviderFailureRuntimeHealth {
         self.run_cooldown_rescue_probes_for_candidates(manifest, &expanded.candidates, now_ms)
             .await
     }
-}
-
-pub(crate) fn v3_exhaustion_is_cooldown_only(
-    expanded: &V3Target09CandidateSetExpanded,
-    request_local_excluded_candidates: &BTreeSet<String>,
-    failure_session_scope: &V3ProviderFailureSessionScope,
-    provider_health: &V3ProviderFailureRuntimeHealth,
-    now_ms: u64,
-) -> bool {
-    let availability = provider_health.session_bound_availability(failure_session_scope);
-    let mut nonfailed_candidates = expanded.candidates.iter().filter(|candidate| {
-        !request_local_excluded_candidates.contains(&v3_relay_provider_candidate_key(candidate))
-    });
-    let Some(first) = nonfailed_candidates.next() else {
-        return false;
-    };
-    std::iter::once(first)
-        .chain(nonfailed_candidates)
-        .all(|candidate| {
-            let projection = availability.availability_for_interface(
-                &candidate.provider_id,
-                &candidate.interface_id,
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-                now_ms,
-            );
-            v3_availability_is_cooldown_recovery_only(&projection)
-        })
-}
-
-fn v3_availability_is_cooldown_recovery_only(
-    projection: &V3ProviderAvailabilityProjection,
-) -> bool {
-    !projection.available
-        && projection.blocked_scopes.iter().all(|scope| {
-            scope == "provider_cooldown_probe_pending"
-                || scope.starts_with(&format!("auth_key:{}:", projection.provider_id))
-        })
-        && projection
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope == "provider_cooldown_probe_pending")
 }

@@ -23,9 +23,7 @@ const RUNTIME_SETUP_KEYS = new Set([
   'candidate_ids',
   'all_candidates_fail',
   'attempt_store',
-  'provider_concurrency',
 ]);
-const PROVIDER_CONCURRENCY_KEYS = new Set(['maxInFlight', 'acquireTimeoutMs', 'staleLeaseMs']);
 const CODEX_INTEGER_REPLAY_CASES = new Set([
   'issue-3192e71-codex-integer-positive',
   'issue-3192e71-fractional-negative',
@@ -118,7 +116,6 @@ export function validateCase(relative, value) {
   validateSource(relative, value.source, findings);
   validateToolFollowup(relative, value, findings);
   validateCodexReplayCase(relative, value, findings);
-  validateConcurrencyReplay(relative, value, findings);
   return findings;
 }
 
@@ -313,87 +310,6 @@ function validateRuntimeSetup(relative, setup, findings) {
         fail(`runtime_setup.attempt_store.${lower} must not exceed ${upper}`);
       }
     }
-  }
-  if (setup.provider_concurrency !== undefined) {
-    const concurrency = setup.provider_concurrency;
-    if (!isObject(concurrency)) {
-      fail('runtime_setup.provider_concurrency must be an object');
-      return;
-    }
-    const keys = Object.keys(concurrency);
-    if (keys.length === 0) {
-      fail('runtime_setup.provider_concurrency must declare at least one field');
-    }
-    for (const [key, value] of Object.entries(concurrency)) {
-      if (!PROVIDER_CONCURRENCY_KEYS.has(key)) {
-        fail(`runtime_setup.provider_concurrency.${key} is not a supported field`);
-      }
-      if (!Number.isInteger(value) || value < 1) {
-        fail(`runtime_setup.provider_concurrency.${key} must be a positive integer`);
-      }
-    }
-  }
-}
-
-function validateConcurrencyReplay(relative, value, findings) {
-  const replay = value.concurrency_replay;
-  if (replay === undefined) return;
-  const fail = (message) => findings.push(`${relative}: ${message}`);
-  if (!isObject(replay)) {
-    fail('concurrency_replay must be an object when present');
-    return;
-  }
-  if (replay.kind !== 'provider_concurrency_all_busy') {
-    fail(`concurrency_replay.kind must be provider_concurrency_all_busy: ${replay.kind ?? 'null'}`);
-  }
-  if (!Array.isArray(replay.typed_error_codes)
-    || replay.typed_error_codes.length === 0
-    || replay.typed_error_codes.some((code) => typeof code !== 'string' || code.length === 0)) {
-    fail('concurrency_replay.typed_error_codes must be a non-empty string array');
-  }
-  if (replay.upstream_business_sends !== 1) {
-    fail('concurrency_replay.upstream_business_sends must be 1');
-  }
-  const exhausted = replay.exhaustion_client_request;
-  validateClientRequest(`${relative}: concurrency_replay.exhaustion_client_request`, exhausted, findings);
-  if (isObject(exhausted)) {
-    if (exhausted.path !== value.client_request?.path) {
-      fail('concurrency_replay.exhaustion_client_request.path must equal client_request.path');
-    }
-    const holderSession = value.client_request?.headers?.['session-id'];
-    const exhaustedSession = exhausted.headers?.['session-id'];
-    if (typeof holderSession !== 'string' || holderSession.length === 0) {
-      fail('client_request.headers.session-id must be a non-empty string');
-    }
-    if (typeof exhaustedSession !== 'string' || exhaustedSession.length === 0) {
-      fail('concurrency_replay.exhaustion_client_request.headers.session-id must be a non-empty string');
-    } else if (exhaustedSession === holderSession) {
-      fail('concurrency_replay exhaustion request must use a distinct session-id');
-    }
-  }
-  const expected = replay.expected_exhaustion_client;
-  if (!isObject(expected)) {
-    fail('concurrency_replay.expected_exhaustion_client must be an object');
-    return;
-  }
-  if (expected.transport !== 'closed') {
-    fail('concurrency_replay.expected_exhaustion_client.transport must be closed');
-  }
-  if (!Number.isInteger(expected.deadline_ms) || expected.deadline_ms < 1 || expected.deadline_ms > 10_000) {
-    fail('concurrency_replay.expected_exhaustion_client.deadline_ms must be an integer from 1 to 10000');
-  }
-  if (!Array.isArray(expected.error_codes_must_not)
-    || expected.error_codes_must_not.some((code) => typeof code !== 'string' || code.length === 0)) {
-    fail('concurrency_replay.expected_exhaustion_client.error_codes_must_not must be a string array');
-  } else if (!expected.error_codes_must_not.includes('ETIMEDOUT')) {
-    fail('concurrency_replay.expected_exhaustion_client.error_codes_must_not must include ETIMEDOUT');
-  }
-  if (!isObject(value.runtime_setup?.provider_concurrency)
-    || value.runtime_setup.provider_concurrency.maxInFlight !== 1) {
-    fail('concurrency_replay requires runtime_setup.provider_concurrency.maxInFlight = 1');
-  }
-  if (value.upstream_response?.attempts?.[0]?.fault !== 'hold-open-controlled') {
-    fail('concurrency_replay requires first upstream attempt fault hold-open-controlled');
   }
 }
 

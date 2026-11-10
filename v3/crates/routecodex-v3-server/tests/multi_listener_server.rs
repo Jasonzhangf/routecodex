@@ -475,8 +475,63 @@ async fn assert_websocket_closes_without_data(
     );
 }
 
+/// A single-candidate provider failure stays pending to the request residence
+/// deadline before its transport is terminated. Tests that assert that terminal
+/// disposition bound the deadline so the pending window fits the test.
+fn set_manifest_residence_timeout(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    residence_timeout_ms: u64,
+) {
+    for server in manifest.servers.values_mut() {
+        if let Some(execution) = server.execution.as_mut() {
+            execution.attempt_store.residence_timeout_ms = residence_timeout_ms;
+        }
+    }
+}
+
+fn set_manifest_provider_request_timeout(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    provider_id: &str,
+    request_timeout_ms: u64,
+) {
+    manifest
+        .providers
+        .get_mut(provider_id)
+        .unwrap()
+        .request_timeout_ms = request_timeout_ms;
+}
+
 async fn assert_incomplete_sse_or_no_response(response: Result<reqwest::Response, reqwest::Error>) {
     if let Ok(mut response) = response {
+        if response.status() != StatusCode::OK {
+            // v31 single/last eligible candidate passthrough: with one candidate, or
+            // once the last eligible candidate is being attempted, no cooldown,
+            // admission, wait, probe or recovery block applies; the identity keeps its
+            // original typed Error and its real provider status/body are passed through
+            // to the client verbatim, with no proxy-generated replacement error and no
+            // fabricated success. Multi-candidate exhaustion keeps the payload-free
+            // transport break asserted below.
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            assert!(
+                (400..600).contains(&status.as_u16()),
+                "a passed-through provider failure must keep a real provider error status: {status} {body}"
+            );
+            let lowered = body.to_ascii_lowercase();
+            for proxy_generated in [
+                "network_error",
+                "transport break",
+                "response.failed",
+                "response.completed",
+                "proxy_generated",
+            ] {
+                assert!(
+                    !lowered.contains(proxy_generated),
+                    "the passthrough body must be the provider's real body, not a proxy envelope: {body}"
+                );
+            }
+            return;
+        }
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "text/event-stream");
         let mut wire = Vec::new();
@@ -1841,6 +1896,31 @@ struct HeldProviderState {
     fail_probes: bool,
 }
 
+#[derive(Clone)]
+struct DeadlineHeldProviderState {
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    release: Arc<Semaphore>,
+}
+
+async fn controlled_deadline_held_responses_upstream(
+    State(state): State<Arc<DeadlineHeldProviderState>>,
+    headers: HeaderMap,
+    axum::Json(body): axum::Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(ProviderCapture::from_http(&headers, body.clone()))
+        .unwrap();
+    let _permit = Arc::clone(&state.release).acquire_owned().await.unwrap();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(
+            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_deadline_released\",\"status\":\"completed\",\"output\":[{\"type\":\"output_text\",\"text\":\"released after deadline\"}]}}\n\n",
+        ))
+        .unwrap()
+}
+
 async fn controlled_held_responses_upstream(
     State(state): State<Arc<HeldProviderState>>,
     headers: HeaderMap,
@@ -2357,7 +2437,7 @@ async fn start_controlled_held_upstream() -> (
     )
 }
 
-async fn start_controlled_probe_failing_held_upstream() -> (
+async fn start_controlled_deadline_held_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
     Arc<Semaphore>,
@@ -2369,11 +2449,13 @@ async fn start_controlled_probe_failing_held_upstream() -> (
     let release = Arc::new(Semaphore::new(0));
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
-        .route("/v1/responses", post(controlled_held_responses_upstream))
-        .with_state(Arc::new(HeldProviderState {
+        .route(
+            "/v1/responses",
+            post(controlled_deadline_held_responses_upstream),
+        )
+        .with_state(Arc::new(DeadlineHeldProviderState {
             captures: captures_tx,
             release: Arc::clone(&release),
-            fail_probes: true,
         }));
     tokio::spawn(async move {
         axum::serve(listener, app)
@@ -3016,8 +3098,10 @@ async fn start_controlled_status_upstream(
 /// A real upstream 502 must be recorded as provider-private evidence, not
 /// reported as "no provider response".
 ///
-/// Bug `705d624` keeps the 502 out of every client response; that rule decides
-/// what the client may see and must not decide what the evidence records. The
+/// The client-projection rule and the evidence rule are separate: what the
+/// client may see is decided by the v31 single/last eligible candidate
+/// passthrough (this route holds one candidate, so the upstream 502 and its body
+/// pass through verbatim), and must not decide what the evidence records. The
 /// upstream here really did answer 502 with a body and headers, so the artifact
 /// has to say `external_http` and carry the real status, headers, and body.
 #[tokio::test]
@@ -3037,20 +3121,33 @@ async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
             .unwrap();
     let port = handle.listeners[0].addr.port();
 
-    // The client boundary stays a transport break: no upstream status, code, or
-    // body is projected, and no proxy 502 is fabricated for the entry either.
+    // v31 single/last eligible candidate passthrough: the captured target holds
+    // exactly one candidate, so its real Provider HTTP error is the request's
+    // answer. The client receives the upstream status and body verbatim; the
+    // proxy neither fabricates a replacement envelope nor a success, and the
+    // provider-private evidence below stays independent of that projection.
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
-        .expect("a streaming client must receive the SSE response head");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let body = response.text().await;
+        .expect("the only candidate must answer the client with its real provider error");
+    let f3_status = response.status();
+    let f3_headers = response.headers().clone();
+    let body = response
+        .text()
+        .await
+        .expect("the provider's own error body must reach the client");
+    assert_eq!(f3_status, StatusCode::BAD_GATEWAY);
+    assert_eq!(f3_headers["content-type"], "application/json");
+    assert_eq!(body, r#"{"error":"controlled_bad_gateway"}"#);
     assert!(
-        body.is_err(),
-        "an upstream 502 must abort the streaming body, not project the upstream response: {body:?}"
+        !body.contains("routecodex"),
+        "no proxy-generated error envelope may replace the provider body: {body}"
+    );
+    assert!(
+        !body.contains("network_error"),
+        "no proxy error classification may replace the provider body: {body}"
     );
 
     let evidence =
@@ -3357,13 +3454,9 @@ async fn responses_websocket_provider_429_is_recorded_as_provider_private_eviden
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429-evidence");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let port = handle.listeners[0].addr.port();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
@@ -4031,7 +4124,6 @@ async fn p6_models_endpoint_single_provider_model_pair_advanced_stateful_capabil
                 ),
             ]),
             responses: manifest.providers["test"].responses.clone(),
-            concurrency: manifest.providers["test"].concurrency.clone(),
             health: manifest.providers["test"].health.clone(),
             provider_request_cleanup: manifest.providers["test"].provider_request_cleanup.clone(),
             compatibility_profile: manifest.providers["test"].compatibility_profile.clone(),
@@ -6320,6 +6412,137 @@ async fn responses_relay_endpoint_uses_hub_relay_runtime_for_json_and_sse() {
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
+async fn assert_responses_send_await_residence_deadline_public_entry(
+    expected_execution_mode: &'static str,
+) {
+    const RESIDENCE_TIMEOUT_MS: u64 = 1_200;
+    const PROVIDER_REQUEST_TIMEOUT_MS: u64 = 10_000;
+
+    let (provider_base_url, mut captures, release, upstream_shutdown) =
+        start_controlled_deadline_held_upstream().await;
+    let mut manifest = if expected_execution_mode == "direct" {
+        p6_manifest(free_port(), free_port(), &provider_base_url)
+    } else {
+        responses_relay_manifest(free_port(), free_port(), &provider_base_url)
+    };
+    set_manifest_residence_timeout(&mut manifest, RESIDENCE_TIMEOUT_MS);
+    set_manifest_provider_request_timeout(&mut manifest, "test", PROVIDER_REQUEST_TIMEOUT_MS);
+    std::env::set_var("V3_P6_TEST_KEY", "secret-residence-deadline");
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let addr = handle.listeners[0].addr;
+    let client = reqwest::Client::new();
+    let started = std::time::Instant::now();
+    let response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!("http://{addr}/v1/responses"))
+            .header("accept", "text/event-stream")
+            .json(&json!({
+                "model": "client-test",
+                "input": "residence deadline held responses",
+                "stream": true
+            }))
+            .send(),
+    )
+    .await
+    .expect("the Responses client SSE head must be committed while the Provider head is held")
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut body = response.bytes_stream();
+
+    let capture = timeout(Duration::from_secs(5), captures.recv())
+        .await
+        .expect("the held Responses Provider request must arrive")
+        .expect("the controlled upstream capture channel must stay open");
+    assert_eq!(capture.body["model"], "wire-test");
+    assert_eq!(capture.body["stream"], true);
+
+    let mut received = Vec::new();
+    let mut stream_error = false;
+    let mut clean_eof = false;
+    let stream_end_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout_at(stream_end_deadline, body.next()).await {
+            Ok(Some(Ok(chunk))) => received.extend_from_slice(&chunk),
+            Ok(Some(Err(_))) => {
+                stream_error = true;
+                break;
+            }
+            Ok(None) => {
+                clean_eof = true;
+                break;
+            }
+            Err(_) => panic!(
+                "{expected_execution_mode} Responses send-await did not obey the residence deadline before the guard"
+            ),
+        }
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        stream_error,
+        "the residence deadline must interrupt the unfinished Responses SSE transport, clean_eof={clean_eof}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(1_000) && elapsed < Duration::from_secs(5),
+        "{expected_execution_mode} Responses must use the original deadline, waited {elapsed:?}"
+    );
+    let received = String::from_utf8_lossy(&received).to_string();
+    assert!(!received.contains("data:"), "{received}");
+    assert!(!received.contains("\"error\""), "{received}");
+    assert!(!received.contains("[DONE]"), "{received}");
+    assert!(!received.contains("\"choices\""), "{received}");
+    assert!(!received.contains("response.completed"), "{received}");
+    assert!(!received.contains("response.failed"), "{received}");
+    assert!(
+        captures.try_recv().is_err(),
+        "the residence deadline must not trigger another business send"
+    );
+
+    let logs: Value = client
+        .get(format!("http://{addr}/_routecodex/debug/logs"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let modes = logs["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| {
+            event["node_id"] == "V3Server03HttpRequestRaw" && event["event"] == "received"
+        })
+        .filter_map(|event| event["details"]["execution_mode"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modes,
+        vec![expected_execution_mode],
+        "the actual Responses request must enter {expected_execution_mode}: {logs}"
+    );
+    eprintln!(
+        "responses-residence-deadline mode={expected_execution_mode} elapsed={elapsed:?} residence_ms={RESIDENCE_TIMEOUT_MS} provider_request_ms={PROVIDER_REQUEST_TIMEOUT_MS} stream_error={stream_error} clean_eof={clean_eof} provider_captures=1"
+    );
+
+    release.add_permits(1);
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_direct_send_await_obeys_residence_deadline_public_entry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    assert_responses_send_await_residence_deadline_public_entry("direct").await;
+}
+
+#[tokio::test]
+async fn responses_relay_send_await_obeys_residence_deadline_public_entry() {
+    let _test_guard = TEST_LOCK.lock().await;
+    assert_responses_send_await_residence_deadline_public_entry("relay").await;
+}
+
 #[tokio::test]
 async fn responses_relay_openai_chat_reasoning_content_survives_public_entry() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -6701,10 +6924,25 @@ async fn responses_relay_provider_503_never_reaches_the_client() {
         }))
         .send()
         .await;
-    assert!(
-        json_response.is_err(),
-        "a provider HTTP failure must not fabricate a client HTTP response"
-    );
+    // v31 single/last eligible candidate passthrough: this target has exactly one
+    // candidate, so no cooldown, admission, wait, probe or recovery block applies and
+    // the identity's original typed Error with its real provider status/body is passed
+    // through to the client verbatim. Only a proxy-generated replacement envelope or a
+    // fabricated 200 is forbidden; a multi-candidate exhaustion keeps the payload-free
+    // transport break, which is the `Err` arm.
+    if let Ok(response) = json_response {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        assert!(
+            (400..600).contains(&status.as_u16()),
+            "a passed-through provider failure must keep the real provider status: {status} {body}"
+        );
+        let lowered = body.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("network_error") && !lowered.contains("transport break"),
+            "no proxy-generated replacement envelope may reach the client: {body}"
+        );
+    }
 
     handle.shutdown().await;
     failure_shutdown.send(()).unwrap();
@@ -6972,19 +7210,13 @@ async fn capture_node_preconnection_matches_responses_http_success_and_failure()
     std::env::remove_var("V3_P6_TEST_KEY");
 }
 
-fn p6_manifest_with_isolated_provider_capacity(
+fn p6_manifest_with_isolated_provider_identity(
     provider_base_url: &str,
-    max_in_flight: u32,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let mut manifest = p6_manifest(free_port(), free_port(), provider_base_url);
     let alias = format!("capacity-{}", manifest.servers["a"].port);
     let provider = manifest.providers.get_mut("test").unwrap();
     provider.auth.entries[0].alias = alias.clone();
-    provider.concurrency = Some(routecodex_v3_config::V3ProviderConcurrencyAuthoringConfig {
-        max_in_flight,
-        acquire_timeout_ms: 60_000,
-        stale_lease_ms: 300_000,
-    });
     for pool in manifest
         .route_groups
         .get_mut("default")
@@ -6999,14 +7231,14 @@ fn p6_manifest_with_isolated_provider_capacity(
     manifest
 }
 
-fn concurrency_switch_manifest(
+fn two_provider_failover_manifest(
     first_url: &str,
     second_url: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let port_a = free_port();
     let port_b = free_port();
-    let first_id = format!("concurrency_first_{port_a}");
-    let second_id = format!("concurrency_second_{port_a}");
+    let first_id = format!("failover_first_{port_a}");
+    let second_id = format!("failover_second_{port_a}");
     let providers = [(&first_id, first_url), (&second_id, second_url)]
         .into_iter()
         .map(|(id, url)| {
@@ -7018,7 +7250,6 @@ base_url = "{url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_P6_TEST_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.{id}.models.test]
 wire_name = "wire-test"
@@ -7046,177 +7277,28 @@ routing_group = "default"
 endpoints = ["responses"]
 {HUB_V1_TEST_SERVER_EXECUTION}
 {providers}
-[forwarders.concurrency]
+[forwarders.failover]
 model = "client-test"
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "{first_id}", model = "test", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "{second_id}", model = "test", key = "key", priority = 1 }}]
 [route_groups.default.pools.client_test]
 selection = {{ strategy = "priority" }}
 match = {{ precedence = 10, models = ["client-test"] }}
-targets = [{{ kind = "forwarder", id = "concurrency", priority = 1 }}]
+targets = [{{ kind = "forwarder", id = "failover", priority = 1 }}]
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "forwarder", id = "concurrency", priority = 1 }}]
+targets = [{{ kind = "forwarder", id = "failover", priority = 1 }}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
 }
 
-fn spawn_concurrency_client(
-    endpoint: &str,
-    session: &str,
-) -> tokio::task::JoinHandle<(StatusCode, String)> {
-    let endpoint = endpoint.to_string();
-    let session = session.to_string();
-    tokio::spawn(async move {
-        let response = reqwest::Client::new()
-            .post(endpoint)
-            .header("session-id", &session)
-            .header("thread-id", &session)
-            .json(&json!({"model":"client-test","input":"held","stream":true}))
-            .send()
-            .await
-            .unwrap();
-        let status = response.status();
-        (status, response.text().await.unwrap())
-    })
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_full_switches_without_queueing() {
-    let _test_guard = TEST_LOCK.lock().await;
-    // This case counts upstream provider attempts, so the Chat Process
-    // continuation must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-switch");
-    let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
-        .await
-        .unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "concurrency-first");
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "concurrency-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
-        .await
-        .expect("a full first provider must immediately switch to the second provider")
-        .unwrap();
-    assert!(
-        !first.is_finished(),
-        "the first provider must still be held"
-    );
-    assert!(
-        first_captures.try_recv().is_err(),
-        "the full provider must receive no extra request"
-    );
-    first_release.add_permits(1);
-    second_release.add_permits(1);
-    for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-        assert_responses_sse_delivered_business_text(&body, "held response released");
-    }
-    let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
-    timeout(Duration::from_millis(500), first_captures.recv())
-        .await
-        .expect("released capacity must restore the first provider's priority")
-        .unwrap();
-    assert!(second_captures.try_recv().is_err());
-    first_release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), third)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("response.completed"));
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_all_full_exhausts_after_wait_budget() {
-    let _test_guard = TEST_LOCK.lock().await;
-    // This case counts upstream provider attempts, so the Chat Process
-    // continuation must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
-    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "concurrency-held-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let wait_started = std::time::Instant::now();
-    let exhausted = timeout(
-        Duration::from_millis(500),
-        reqwest::Client::new()
-            .post(&endpoint)
-            .header("session-id", "concurrency-exhausted")
-            .header("thread-id", "concurrency-exhausted")
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    .expect("all full must finish after its declared wait budget");
-    assert!(wait_started.elapsed() >= Duration::from_millis(100));
-    assert!(
-        exhausted.is_err(),
-        "selection exhaustion must preserve the existing transport-break boundary"
-    );
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    assert!(!first.is_finished() && !second.is_finished());
-    first_release.add_permits(1);
-    second_release.add_permits(1);
-    for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-    }
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-fn concurrency_switch_manifest_with_mode(
+fn two_provider_failover_manifest_with_execution_mode(
     first_url: &str,
     second_url: &str,
     execution_mode: V3EntryProtocolExecutionMode,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
-    let mut manifest = concurrency_switch_manifest(first_url, second_url);
+    let mut manifest = two_provider_failover_manifest(first_url, second_url);
     for provider in manifest.providers.values_mut() {
         if let Some(health) = provider.health.as_mut() {
             health.enabled = true;
@@ -7228,11 +7310,11 @@ fn concurrency_switch_manifest_with_mode(
             let binding = manifest
                 .hub_v1
                 .as_mut()
-                .expect("concurrency fixture must declare hub_v1")
+                .expect("failover fixture must declare hub_v1")
                 .entry_protocol_bindings
                 .iter_mut()
                 .find(|binding| binding.entry_protocol == "responses")
-                .expect("concurrency fixture must declare the Responses binding");
+                .expect("failover fixture must declare the Responses binding");
             binding.execution_mode = V3EntryProtocolExecutionMode::Relay;
             binding.protocol_profile_owner = "v3.hub_relay_runtime_closeout".to_string();
             binding.forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.".to_string();
@@ -7242,435 +7324,9 @@ fn concurrency_switch_manifest_with_mode(
                 "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs".to_string(),
             );
         }
-        _ => panic!("concurrency typed-source red tests require Direct or Relay mode"),
+        _ => panic!("typed-source red tests require Direct or Relay mode"),
     }
     manifest
-}
-
-async fn wait_for_concurrency_failure_source(samples_root: &std::path::Path) -> Value {
-    for _ in 0..200 {
-        if let Ok(entries) = fs::read_dir(samples_root) {
-            for entry in entries.flatten() {
-                let path = entry.path().join("provider-failed-attempts.json");
-                if let Ok(raw) = fs::read_to_string(&path) {
-                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
-                        return evidence;
-                    }
-                }
-            }
-        }
-        sleep(Duration::from_millis(25)).await;
-    }
-    panic!("provider failure source evidence must appear under {samples_root:?}");
-}
-
-async fn concurrency_cooldown_entries(client: &reqwest::Client, base: &str) -> Vec<Value> {
-    let pool: Value = client
-        .get(format!("{base}/_routecodex/health/cooldown-pool"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    pool["entries"]
-        .as_array()
-        .cloned()
-        .unwrap_or_else(|| panic!("cooldown pool must return entries: {pool}"))
-}
-
-fn concurrency_cooldown_signature(entries: &[Value]) -> Vec<String> {
-    let mut signature = entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}|{}|{}|{}|{}",
-                entry["provider_id"].as_str().unwrap_or("-"),
-                entry["interface_id"].as_str().unwrap_or("-"),
-                entry["auth_alias"].as_str().unwrap_or("-"),
-                entry["model_id"].as_str().unwrap_or("-"),
-                entry["kind"].as_str().unwrap_or("-"),
-            )
-        })
-        .collect::<Vec<_>>();
-    signature.sort();
-    signature
-}
-
-fn assert_no_concurrency_business_capture(
-    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
-    allow_recovery_probes: bool,
-    label: &str,
-) {
-    while let Ok(capture) = captures.try_recv() {
-        assert!(
-            allow_recovery_probes && capture.body.to_string().contains("ping; reply pong"),
-            "{label} must receive no business request: {capture:?}"
-        );
-    }
-}
-
-async fn assert_concurrency_execution_mode(
-    client: &reqwest::Client,
-    base: &str,
-    request_id: &str,
-    expected_mode: &str,
-) {
-    let logs: Value = client
-        .get(format!("{base}/_routecodex/debug/logs"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let events = logs["logs"]
-        .as_array()
-        .unwrap_or_else(|| panic!("debug logs must return events: {logs}"));
-    let event = events
-        .iter()
-        .find(|event| {
-            event["request_id"] == request_id
-                && event["node_id"] == "V3Server03HttpRequestRaw"
-                && event["event"] == "received"
-        })
-        .unwrap_or_else(|| {
-            panic!("missing V3Server03HttpRequestRaw event for request {request_id}: {logs}")
-        });
-    assert_eq!(
-        event["details"]["execution_mode"], expected_mode,
-        "actual request execution mode must be {expected_mode}, not inferred from the port: {event}"
-    );
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ConcurrencyExhaustionShape {
-    PureAllBusy,
-    MixedBusyAndExcluded,
-}
-
-async fn run_concurrency_typed_source_case(
-    execution_mode: V3EntryProtocolExecutionMode,
-    shape: ConcurrencyExhaustionShape,
-    label: &str,
-) {
-    let _test_guard = TEST_LOCK.lock().await;
-    let home_guard = TestHomeGuard::new(label);
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) = match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => start_controlled_held_upstream().await,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            start_controlled_probe_failing_held_upstream().await
-        }
-    };
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-typed-source");
-
-    let mut manifest =
-        concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
-    // Exercise the terminal source after a real bounded wait, rather than
-    // requiring immediate all-busy rejection (superseded by issue44cc3af).
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let base = format!("http://{}", handle.listeners[0].addr);
-    let endpoint = format!("{base}/v1/responses");
-    let client = reqwest::Client::new();
-
-    let baseline_entries = match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => {
-            let entries = concurrency_cooldown_entries(&client, &base).await;
-            assert!(
-                entries.is_empty(),
-                "pure all-busy baseline must not contain health exclusions: {entries:?}"
-            );
-            entries
-        }
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            let response = client
-                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
-                .json(&json!({
-                    "provider_id": second_id,
-                    "interface_id": "default",
-                    "auth_alias": "key",
-                    "model_id": "test",
-                    "kind": "auth_key",
-                    "duration_ms": 60_000
-                }))
-                .send()
-                .await
-                .unwrap();
-            let status = response.status();
-            let body = response.text().await.unwrap();
-            assert_eq!(status, StatusCode::OK, "{body}");
-
-            let entries = concurrency_cooldown_entries(&client, &base).await;
-            assert_eq!(
-                entries.len(),
-                2,
-                "mixed case must start with the typed auth-key cooldown/probe pair: {entries:?}"
-            );
-            for entry in &entries {
-                assert_eq!(entry["provider_id"], second_id.as_str());
-                assert_eq!(entry["interface_id"], "default");
-                assert_eq!(entry["auth_alias"], "key");
-                assert!(entry["model_id"].is_null());
-            }
-            let cooldown = entries
-                .iter()
-                .find(|entry| entry["kind"] == "auth_key")
-                .expect("mixed case must retain the auth-key cooldown entry");
-            assert_eq!(cooldown["state"], "auth_key_cooldown");
-            let probe = entries
-                .iter()
-                .find(|entry| entry["kind"] == "probe")
-                .expect("mixed case must retain the provider cooldown probe entry");
-            assert!(
-                matches!(
-                    probe["state"].as_str(),
-                    Some("blocked" | "waiting" | "probing")
-                ),
-                "mixed case probe must remain in a cooldown substate: {probe}"
-            );
-            entries
-        }
-    };
-    let baseline_health = concurrency_cooldown_signature(&baseline_entries);
-
-    let first = spawn_concurrency_client(&endpoint, &format!("{label}-held-first"));
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .expect("first provider must receive its held request")
-        .expect("first provider capture channel must stay open");
-
-    let second = if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
-        let task = spawn_concurrency_client(&endpoint, &format!("{label}-held-second"));
-        timeout(Duration::from_secs(2), second_captures.recv())
-            .await
-            .expect("second provider must receive its held request")
-            .expect("second provider capture channel must stay open");
-        Some(task)
-    } else {
-        None
-    };
-
-    let exhausted = match timeout(
-        Duration::from_millis(500),
-        client
-            .post(&endpoint)
-            .header("session-id", format!("{label}-exhausted"))
-            .header("thread-id", format!("{label}-exhausted"))
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => {
-            let first_activity = first_captures.try_recv().ok();
-            let second_activity = second_captures.try_recv().ok();
-            panic!(
-                "capacity exhaustion must complete after the declared wait budget; first_activity={first_activity:?} second_activity={second_activity:?}"
-            );
-        }
-    };
-    let error = exhausted.expect_err(
-        "a capacity terminal must break the client transport without an error payload or normal completion",
-    );
-    assert!(
-        !error.is_status(),
-        "the client must not receive a synthetic status payload: {error}"
-    );
-
-    if let Ok(capture) = first_captures.try_recv() {
-        panic!("the busy first provider must receive no extra request: {capture:?}");
-    }
-    match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => {
-            if let Ok(capture) = second_captures.try_recv() {
-                panic!("the busy second provider must receive no extra request: {capture:?}");
-            }
-        }
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            let capture = second_captures
-                .try_recv()
-                .expect("the mixed case must perform exactly one recovery probe");
-            assert!(
-                capture.body.to_string().contains("ping; reply pong"),
-                "the excluded second provider must receive no business retry: {capture:?}"
-            );
-        }
-    }
-
-    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
-    let evidence = wait_for_concurrency_failure_source(&samples_root).await;
-    let request_id = evidence["request_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("failure evidence must carry request_id: {evidence}"));
-    assert_eq!(
-        evidence["attempts"],
-        json!([]),
-        "capacity rejection must not record or perform an upstream attempt: {evidence}"
-    );
-    let (expected_mode, expected_source_kind, expected_code) = match (execution_mode, shape) {
-        (V3EntryProtocolExecutionMode::Direct, ConcurrencyExhaustionShape::PureAllBusy) => (
-            "direct",
-            "target_pool_exhausted",
-            "provider_concurrency_busy",
-        ),
-        (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::PureAllBusy) => (
-            "relay",
-            "target_pool_exhausted",
-            "provider_concurrency_busy",
-        ),
-        (
-            V3EntryProtocolExecutionMode::Direct,
-            ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        )
-        | (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::MixedBusyAndExcluded) => {
-            (
-                if execution_mode == V3EntryProtocolExecutionMode::Direct {
-                    "direct"
-                } else {
-                    "relay"
-                },
-                "provider_failure",
-                "selected_target_exhausted",
-            )
-        }
-        _ => panic!("unsupported concurrency typed-source case"),
-    };
-    assert_eq!(
-        evidence["terminal_source"]["source_kind"], expected_source_kind,
-        "{expected_mode} {shape:?} must retain the expected typed source kind: {evidence}"
-    );
-    assert_eq!(
-        evidence["terminal_source"]["code"], expected_code,
-        "{expected_mode} {shape:?} must retain the expected typed source code: {evidence}"
-    );
-    assert_concurrency_execution_mode(&client, &base, request_id, expected_mode).await;
-
-    let after_entries = concurrency_cooldown_entries(&client, &base).await;
-    if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
-        assert_eq!(
-            concurrency_cooldown_signature(&after_entries),
-            baseline_health,
-            "pure capacity rejection must not add, remove, or replace health exclusions: before={baseline_entries:?} after={after_entries:?}"
-        );
-    } else {
-        assert!(
-            after_entries
-                .iter()
-                .all(|entry| entry["provider_id"] == second_id.as_str()),
-            "mixed capacity rejection must not mutate first-provider health: before={baseline_entries:?} after={after_entries:?}"
-        );
-    }
-    assert_eq!(
-        after_entries.len(),
-        baseline_entries.len(),
-        "capacity rejection must not mutate cooldown entry count"
-    );
-    assert!(
-        !first.is_finished(),
-        "the first provider holder must remain pending before release"
-    );
-    if let Some(second) = &second {
-        assert!(
-            !second.is_finished(),
-            "the second provider holder must remain pending before release"
-        );
-    }
-
-    first_release.add_permits(1);
-    if second.is_some() {
-        second_release.add_permits(1);
-    }
-    let mut held = vec![first];
-    if let Some(second) = second {
-        held.push(second);
-    }
-    for task in held {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-    }
-    let after_release = spawn_concurrency_client(&endpoint, &format!("{label}-after-release"));
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .expect("released capacity must admit a subsequent normal request")
-        .expect("first provider capture channel must stay open");
-    assert_no_concurrency_business_capture(
-        &mut second_captures,
-        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
-        "the subsequent normal request on the second provider",
-    );
-    first_release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), after_release)
-        .await
-        .expect("the subsequent normal request must complete after release")
-        .expect("the subsequent request task must not panic");
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("response.completed"), "{body}");
-    assert_no_concurrency_business_capture(
-        &mut first_captures,
-        false,
-        "the exhausted request on the first provider",
-    );
-    assert_no_concurrency_business_capture(
-        &mut second_captures,
-        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
-        "the exhausted request on the second provider",
-    );
-
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_direct_all_busy_preserves_typed_source() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Direct,
-        ConcurrencyExhaustionShape::PureAllBusy,
-        "concurrency-direct-all-busy-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_direct_mixed_exclusion_stays_generic() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Direct,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        "concurrency-direct-mixed-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_relay_all_busy_preserves_typed_source() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Relay,
-        ConcurrencyExhaustionShape::PureAllBusy,
-        "concurrency-relay-all-busy-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_relay_mixed_exclusion_stays_generic() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Relay,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        "concurrency-relay-mixed-red",
-    )
-    .await;
 }
 
 #[tokio::test]
@@ -7895,7 +7551,7 @@ async fn responses_keepalive_next_request_waits_for_maintenance_cancellation() {
 }
 
 // Read one actual HTTP response without closing the socket. Business bodies
-// can use chunked framing because their activity permit follows a body stream.
+// can use chunked framing while the client reads the real response wire.
 async fn read_raw_business_response(socket: &mut TcpStream) -> Vec<u8> {
     async fn read_line(socket: &mut TcpStream) -> Vec<u8> {
         let mut line = Vec::new();
@@ -7949,9 +7605,8 @@ async fn responses_same_listener_different_session_remains_concurrent() {
     let (provider_base_url, mut captures, release, shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-p6-session-concurrency");
-    let handle = spawn_v3_server_aggregate(p6_manifest_with_isolated_provider_capacity(
+    let handle = spawn_v3_server_aggregate(p6_manifest_with_isolated_provider_identity(
         &provider_base_url,
-        2,
     ))
     .await
     .unwrap();
@@ -8910,13 +8565,9 @@ async fn responses_inbound_websocket_provider_429_never_reaches_the_client() {
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-429");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -8946,13 +8597,9 @@ async fn responses_inbound_websocket_upstream_502_closes_without_fabricated_even
     let (provider_base_url, mut captures, shutdown) =
         start_controlled_terminal_upstream(StatusCode::BAD_GATEWAY).await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-502");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -8994,13 +8641,9 @@ async fn responses_inbound_websocket_binary_provider_error_body_never_reaches_th
     )
     .await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-ws-binary-error");
-    let handle = spawn_v3_server_aggregate(responses_relay_manifest(
-        free_port(),
-        free_port(),
-        &provider_base_url,
-    ))
-    .await
-    .unwrap();
+    let mut manifest = responses_relay_manifest(free_port(), free_port(), &provider_base_url);
+    set_manifest_residence_timeout(&mut manifest, 800);
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let endpoint = format!("ws://{}/v1/responses", handle.listeners[0].addr);
     let mut request = endpoint.into_client_request().unwrap();
     request.headers_mut().insert(
@@ -9567,11 +9210,39 @@ targets = [
         .send()
         .await;
     let business = if exhausted {
-        if let Ok(response) = response {
-            assert!(
-                response.text().await.is_err(),
-                "exhaustion must break transport without a completion"
-            );
+        // v31 single/last eligible candidate passthrough: the final candidate's real
+        // provider status/body reaches the client; a bare transport break stays legal
+        // only when no candidate produced a response at all. Neither branch may carry a
+        // proxy-generated envelope or a fabricated completion.
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                assert!(
+                    !status.is_success(),
+                    "exhausted refill must never fabricate a successful response"
+                );
+                assert!(
+                    (400..600).contains(&status.as_u16()),
+                    "the last candidate's real provider status must be passed through: {status}"
+                );
+                let body = response.text().await.unwrap_or_default();
+                let lowered = body.to_lowercase();
+                for forbidden in [
+                    "network_error",
+                    "transport break",
+                    "proxy_generated",
+                    "response.failed",
+                    "response.completed",
+                ] {
+                    assert!(
+                        !lowered.contains(forbidden),
+                        "no proxy-generated envelope may reach the exhausted client: {body}"
+                    );
+                }
+            }
+            Err(_) => {
+                // Detectable transport close with no candidate response to pass through.
+            }
         }
         None
     } else {
@@ -9601,9 +9272,23 @@ targets = [
         .iter()
         .map(|call| call["model"].as_str().unwrap())
         .collect();
+    // v31 (P0 unified recoverable-error policy + refill boundary): one provider
+    // failure does not hide an identity (3 consecutive failures are required before a
+    // 10s cooldown), so the refill round is a fresh selection pass over the visible
+    // pool and legitimately hits the highest-priority `wire-first` again instead of
+    // re-using the identity that produced the previous partial round. The retired
+    // behaviour was a request-local cooldown observation (`selected_provider_unavailable`,
+    // a diagnostic code with no remaining producer in `src`), which consumed an
+    // evidence slot without a wire attempt.
     assert_eq!(
         models,
-        ["wire-first", "wire-second", "wire-second", "wire-last"],
+        [
+            "wire-first",
+            "wire-second",
+            "wire-first",
+            "wire-second",
+            "wire-last"
+        ],
         "actual execution/recovery sequence: {calls:?}"
     );
     if let Some(body) = business {
@@ -9620,7 +9305,7 @@ targets = [
         .filter(|event| event["node_id"] == "V3Transport13ResponsesHttpRequest")
         .count();
     assert_eq!(
-        sends, 4,
+        sends, 5,
         "all actual round transport nodes must be published once: {logs}"
     );
     let attempts = evidence["attempts"].as_array().unwrap();
@@ -9645,29 +9330,18 @@ targets = [
             "{attempt}"
         );
         assert_eq!(attempt["status"], 503, "{attempt}");
-        if index == 1 {
-            // The refill plan first observes the original identity's cooldown.
-            // This is a distinct local selection failure, not a second wire attempt.
-            assert!(attempt["provider_status"].is_null(), "{attempt}");
-            assert_eq!(
-                attempt["diagnostic_source"]["code"], "selected_provider_unavailable",
-                "{attempt}"
-            );
-            assert!(
-                attempt["failed_attempt_evidence"]["provider_response"].is_null(),
-                "{attempt}"
-            );
-        } else {
-            assert_eq!(attempt["provider_status"], 503, "{attempt}");
-            assert_eq!(
-                attempt["diagnostic_source"]["code"], "provider_http_503",
-                "{attempt}"
-            );
-            assert_eq!(
-                attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
-                "{attempt}"
-            );
-        }
+        // v31: the request path has no local cooldown observation, so every recorded
+        // attempt is a real provider send with the provider's own status. No attempt may
+        // be a request-local selection failure.
+        assert_eq!(attempt["provider_status"], 503, "{attempt}");
+        assert_eq!(
+            attempt["diagnostic_source"]["code"], "provider_http_503",
+            "{attempt}"
+        );
+        assert_eq!(
+            attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+            "{attempt}"
+        );
     }
 }
 
@@ -9741,11 +9415,39 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         .send()
         .await;
     let business_response = if exhausted {
-        if let Ok(response) = response {
-            assert!(
-                response.text().await.is_err(),
-                "exhaustion must break the request transport"
-            );
+        // v31 single/last eligible candidate passthrough: when the final candidate fails,
+        // the client reads that candidate's real provider status/body. A bare transport
+        // break stays legal only when no candidate produced any response. What is
+        // forbidden in both branches is a proxy-generated envelope or fabricated success.
+        match response {
+            Ok(response) => {
+                let status = response.status();
+                assert!(
+                    !status.is_success(),
+                    "an exhausted request must never fabricate a successful response"
+                );
+                assert!(
+                    (400..600).contains(&status.as_u16()),
+                    "the last candidate's real provider status must be passed through: {status}"
+                );
+                let body = response.text().await.unwrap_or_default();
+                let lowered = body.to_lowercase();
+                for forbidden in [
+                    "network_error",
+                    "transport break",
+                    "proxy_generated",
+                    "response.failed",
+                    "response.completed",
+                ] {
+                    assert!(
+                        !lowered.contains(forbidden),
+                        "no proxy-generated envelope may reach the exhausted client: {body}"
+                    );
+                }
+            }
+            Err(_) => {
+                // Detectable transport close with no candidate response to pass through.
+            }
         }
         None
     } else if committed_failure {
@@ -10177,9 +9879,11 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
             .unwrap();
     let client = reqwest::Client::new();
 
-    // The last real upstream HTTP error is provider-side evidence only. The
-    // client boundary is the transport break, so the direct entry must not
-    // forward the provider status or body.
+    // v31 single/last eligible candidate passthrough: this route captures one
+    // candidate, so the direct entry answers the client with that identity's real
+    // Provider HTTP status and body verbatim. The provider's error payload stays
+    // out of every multi-candidate projection, and the proxy fabricates neither a
+    // replacement envelope nor a success for the failed attempt.
     let started = std::time::Instant::now();
     let response = client
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
@@ -10187,15 +9891,27 @@ async fn responses_direct_provider_http_error_never_reaches_the_client() {
         .header("thread-id", "direct-terminal-provider-error-no-wait")
         .json(&json!({"model":"test.test","input":"preserve provider HTTP error"}))
         .send()
-        .await;
-    assert!(
-        response.is_err(),
-        "a provider HTTP error must not fabricate a client HTTP response"
-    );
+        .await
+        .expect("the only candidate must answer the client with its real provider error");
     assert!(
         started.elapsed() < Duration::from_millis(750),
         "a terminal provider error must not wait for recovery admission: {:?}",
         started.elapsed()
+    );
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = response
+        .text()
+        .await
+        .expect("the provider's own error body must reach the client");
+    assert_eq!(body, r#"{"error":"controlled_unavailable"}"#);
+    assert!(
+        !body.contains("network_error"),
+        "no proxy error classification may replace the provider body: {body}"
+    );
+    assert!(
+        !body.contains("routecodex"),
+        "no proxy-generated error envelope may replace the provider body: {body}"
     );
     let capture = captures.recv().await.unwrap();
     assert_eq!(capture.body["model"], "wire-test");
@@ -10650,10 +10366,22 @@ async fn anthropic_messages_provider_failure_never_reaches_the_client() {
     )
     .await
     .expect("fresh JSON request must finish without a fabricated provider error");
-    assert!(
-        json_response.is_err(),
-        "a provider HTTP failure must not fabricate a client HTTP response"
-    );
+    // v31 single/last eligible candidate passthrough: the one candidate's real provider
+    // status/body reach the client verbatim; only a proxy-generated replacement envelope
+    // or a fabricated 200 is forbidden.
+    if let Ok(response) = json_response {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        assert!(
+            (400..600).contains(&status.as_u16()),
+            "a passed-through provider failure must keep the real provider status: {status} {body}"
+        );
+        let lowered = body.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("network_error") && !lowered.contains("transport break"),
+            "no proxy-generated replacement envelope may reach the client: {body}"
+        );
+    }
 
     std::env::remove_var("V3_P6_ANTHROPIC_KEY");
     json_handle.shutdown().await;
@@ -12789,9 +12517,9 @@ async fn responses_full_sampling_burst_does_not_drop_sample_writes() {
     let home_guard = TestHomeGuard::new("full-sampling-burst-no-drop");
     let (base_url, _captures, shutdown) = start_controlled_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-key");
-    // Sampling acceptance needs capacity for all 80 concurrent clients. Use a
-    // distinct auth identity so other tests' adaptive limits cannot affect it.
-    let mut manifest = p6_manifest_with_isolated_provider_capacity(&base_url, 80);
+    // Use a distinct auth identity so other tests' provider health state cannot
+    // affect this sampling acceptance run.
+    let mut manifest = p6_manifest_with_isolated_provider_identity(&base_url);
     manifest.debug.snapshots = true;
     manifest.debug.codex_samples = true;
     manifest.debug.full_codex_sampling = true;
@@ -15151,4 +14879,157 @@ async fn v3_listener_survives_real_accept_error_child_blackbox() {
     println!("V3_ACCEPT_ERROR_KEEPS_SERVING=ok");
 
     handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_request_reaches_provider_transport_immediately_without_capacity_wait() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-no-capacity-wait");
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, mut second_captures, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    let handle = spawn_v3_server_aggregate(two_provider_failover_manifest(&first_url, &second_url))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    // There is no provider concurrency ceiling left to saturate: the second
+    // independent request must reach provider transport while the first one is
+    // still resident upstream. No queue, no capacity wait, no busy refusal.
+    let first = spawn_responses_client(&endpoint, "no-capacity-wait-first");
+    timeout(Duration::from_secs(2), first_captures.recv())
+        .await
+        .expect("the first request must reach provider transport")
+        .expect("first provider capture");
+    let second_started = std::time::Instant::now();
+    let second = spawn_responses_client(&endpoint, "no-capacity-wait-second");
+    timeout(Duration::from_millis(750), first_captures.recv())
+        .await
+        .expect(
+            "a second independent request must reach provider transport immediately instead of \
+             queueing behind the resident request",
+        )
+        .expect("second provider capture");
+    assert!(
+        second_started.elapsed() < Duration::from_millis(750),
+        "the request must not spend time waiting for provider capacity: {:?}",
+        second_started.elapsed()
+    );
+    assert!(
+        second_captures.try_recv().is_err(),
+        "both requests must stay on the visible priority provider"
+    );
+
+    first_release.add_permits(4);
+    second_release.add_permits(4);
+    for task in [first, second] {
+        let (status, body) = timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body.contains("response.completed"), "{body}");
+        assert_responses_sse_delivered_business_text(&body, "held response released");
+    }
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+#[tokio::test]
+async fn responses_negative_control_fails_if_a_capacity_wait_or_busy_source_returns() {
+    let _test_guard = TEST_LOCK.lock().await;
+    std::env::set_var("V3_P6_TEST_KEY", "secret-no-capacity-wait-control");
+    let (first_url, mut first_captures, first_release, first_shutdown) =
+        start_controlled_held_upstream().await;
+    let (second_url, _second_captures, second_release, second_shutdown) =
+        start_controlled_held_upstream().await;
+    let handle = spawn_v3_server_aggregate(two_provider_failover_manifest(&first_url, &second_url))
+        .await
+        .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    // Negative control: this test is red if any capacity wait or capacity-busy
+    // projection comes back. The removed lanes waited for a business permit
+    // (seconds) before the provider transport saw the request, so the bound
+    // below cannot be met by a waiting implementation.
+    let started = std::time::Instant::now();
+    let request = spawn_responses_client(&endpoint, "no-capacity-wait-control");
+    timeout(Duration::from_millis(500), first_captures.recv())
+        .await
+        .expect("the request must reach provider transport without waiting for capacity")
+        .expect("provider capture");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "a reintroduced capacity wait would exceed the immediate-pass-through bound: {:?}",
+        started.elapsed()
+    );
+    let logs: Value = reqwest::Client::new()
+        .get(format!(
+            "http://{}/_routecodex/debug/logs",
+            handle.listeners[0].addr
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let logs = logs.to_string();
+    assert!(
+        !logs.contains("provider_concurrency_busy"),
+        "no capacity-busy projection may return to the request path: {logs}"
+    );
+
+    first_release.add_permits(4);
+    second_release.add_permits(4);
+    let (status, body) = timeout(Duration::from_secs(3), request)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_responses_sse_delivered_business_text(&body, "held response released");
+    handle.shutdown().await;
+    first_shutdown.send(()).unwrap();
+    second_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+}
+
+fn spawn_responses_client(
+    endpoint: &str,
+    session: &str,
+) -> tokio::task::JoinHandle<(StatusCode, String)> {
+    let endpoint = endpoint.to_string();
+    let session = session.to_string();
+    tokio::spawn(async move {
+        let response = reqwest::Client::new()
+            .post(endpoint)
+            .header("session-id", &session)
+            .header("thread-id", &session)
+            .json(&json!({"model":"client-test","input":"held","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        (status, response.text().await.unwrap())
+    })
+}
+
+async fn wait_for_concurrency_failure_source(samples_root: &std::path::Path) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-failed-attempts.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        return evidence;
+                    }
+                }
+            }
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!("provider failure source evidence must appear under {samples_root:?}");
 }

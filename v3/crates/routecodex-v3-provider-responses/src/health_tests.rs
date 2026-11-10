@@ -424,7 +424,7 @@ fn failures_in_other_session_share_provider_key_cooldown() {
             100,
         )
         .unwrap();
-    assert_eq!(first.state, "cooldown");
+    assert_eq!(first.state, "healthy");
     assert_eq!(first.failure_count, 1);
     let repeated = store
         .record_provider_failure_in_session(
@@ -436,8 +436,22 @@ fn failures_in_other_session_share_provider_key_cooldown() {
             101,
         )
         .unwrap();
-    assert_eq!(repeated.state, "cooldown");
+    assert_eq!(repeated.state, "healthy");
     assert_eq!(repeated.failure_count, 2);
+    // The third consecutive failure on the same complete identity commits the
+    // v29 cooldown, no matter which session observed it.
+    let committed = store
+        .record_provider_failure_in_session(
+            &session("session-b"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            102,
+        )
+        .unwrap();
+    assert_eq!(committed.state, "cooldown");
+    assert_eq!(committed.failure_count, 3);
     for (key, available) in [("key-a", false), ("key-b", true)] {
         assert_eq!(
             store
@@ -493,9 +507,11 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         )
         .unwrap();
     assert_eq!(second.state, "cooldown");
-    assert_eq!(second.cooldown_until_ms, Some(5_101));
+    // v31 fixes the ladder duration: the declared 1h does not extend the
+    // 10s commit for two consecutive failures.
+    assert_eq!(second.cooldown_until_ms, Some(10_101));
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(5_101).unwrap(),
+        store.provider_cooldown_probe_keys_due(10_101).unwrap(),
         vec![(
             "provider-a".to_string(),
             Some("key-a".to_string()),
@@ -506,11 +522,16 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         store
             .provider_cooldown_probe_next_deadline_ms("provider-a", Some("key-a"), Some("gpt-5.5"),)
             .unwrap(),
-        Some(5_101),
+        Some(10_101),
         "a model candidate must resolve the auth-key probe deadline"
     );
     let permit = store
-        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("gpt-5.5"), 5_101)
+        .acquire_provider_cooldown_probe_if_due(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            10_101,
+        )
         .unwrap()
         .expect("a model candidate must acquire the due exact identity probe");
     assert_eq!(permit.auth_alias(), Some("key-a"));
@@ -527,7 +548,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         "an in-flight probe must not expose its expired due time as a retry deadline"
     );
     store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 5_101)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 10_101)
         .unwrap();
     assert!(
         !store
@@ -975,7 +996,11 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                 100,
             )
             .unwrap();
-        assert_eq!(record.state, "cooldown");
+        assert_eq!(
+            record.state,
+            if index == 2 { "cooldown" } else { "healthy" },
+            "only the third consecutive failure commits the v29 cooldown"
+        );
         assert_eq!(record.failure_count, index as u32 + 1);
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
@@ -1103,7 +1128,7 @@ fn neutral_failure_action_preserves_real_success_streak_and_score() {
 }
 
 #[test]
-fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
+fn quota_and_diagnostics_are_provider_owned_inputs() {
     let store = V3ProviderHealthStore::default();
     store
         .update_quota_state(
@@ -1124,12 +1149,6 @@ fn quota_concurrency_and_diagnostics_are_provider_owned_inputs() {
     assert!(
         store
             .availability("provider-a", Some("key-a"), Some("other-model"), 101)
-            .available
-    );
-    store.update_concurrency_state("provider-b", 2, 2).unwrap();
-    assert!(
-        !store
-            .availability("provider-b", Some("key-a"), Some("gpt-5.5"), 101)
             .available
     );
     assert!(
@@ -1171,29 +1190,6 @@ fn legacy_quota_scope_migrates_to_default_interface_only() {
     );
     assert!(
         store
-            .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
-            .available
-    );
-}
-
-#[test]
-fn concurrency_budget_is_shared_across_interfaces() {
-    let store = V3ProviderHealthStore::default();
-    store.update_concurrency_state("provider-a", 2, 2).unwrap();
-
-    assert!(
-        !store
-            .availability_for_interface(
-                "provider-a",
-                "default",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                101,
-            )
-            .available
-    );
-    assert!(
-        !store
             .availability_for_interface("provider-a", "chat", Some("key-a"), Some("gpt-5.5"), 101,)
             .available
     );

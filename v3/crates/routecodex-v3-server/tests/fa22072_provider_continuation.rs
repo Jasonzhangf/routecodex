@@ -42,8 +42,6 @@ use tokio::time::timeout;
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
-#[path = "fa22072_provider_continuation/local_buffer_failure.rs"]
-mod local_buffer_failure;
 #[path = "support/fa22072_test_home.rs"]
 mod test_home;
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/test_ports.rs"]
@@ -798,17 +796,20 @@ fn validate_case_artifact(case: &CaseOutcome, failures: &mut Vec<String>) {
         failures.push(format!("{}: original transport cause was lost", case.name));
     }
     if case.name == "json_http_503" {
-        // The original Error01 link deliberately has no policy status assigned
-        // as upstream HTTP. The independently retained provider_status proves
-        // the real received head; preserve this original link without forging it.
+        // v27 typed-chain truthfulness (supersedes the retired "the link carries no
+        // upstream status at all" expectation): the original Error01 link keeps its
+        // classification and the provider's private cause verbatim AND carries the
+        // real received head, which the independently retained provider_status
+        // proves. The link may never be forged: no client-facing status, no
+        // reconstructed generic cause.
         let external = &source["external_error"];
-        if !external["status"].is_null()
+        if external["status"].as_u64() != expected_status
             || external["provider_id"].as_str() != Some("alpha")
             || external["code"].as_str() != Some("server_error")
             || external["message"].as_str() != Some(ALPHA_PRIVATE_CAUSE)
         {
             failures.push(format!(
-                "{}: original typed external link must survive unchanged, got {:?}",
+                "{}: original typed external link must survive unchanged with its real upstream head, got {:?}",
                 case.name, external
             ));
         }

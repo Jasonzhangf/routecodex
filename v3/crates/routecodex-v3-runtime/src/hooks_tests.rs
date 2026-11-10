@@ -90,8 +90,6 @@ fn direct_policy_with_models(
                 priority: 0,
                 weight: 1,
                 sse_first_frame_timeout_ms: None,
-                initial_concurrency_budget: 8,
-                concurrency_acquire_timeout_ms: 60_000,
                 compatibility_profile: None,
                 headers: Default::default(),
                 env_name: Some("TEST_KEY".to_string()),
@@ -182,7 +180,7 @@ fn responses_direct_error_hook_runs_sdk_02_through_05_and_returns_decision_proje
         "provider connection failed",
     );
     let (projection, decision) = registry
-        .run_error(source, V3ErrorActionScope::None, 0, false, false, None)
+        .run_error(source, V3ErrorActionScope::None, 0, false, None)
         .expect("registered Error hook must execute SDK Error02 through Error05");
 
     assert_eq!(
@@ -897,22 +895,7 @@ fn oauth_credential_error_branch_preserves_internal_runtime_identity() {
 }
 
 #[test]
-fn concurrency_and_client_disconnect_branches_preserve_source_kind() {
-    let concurrency = provider_error_source_for_test(
-        "V3Target10ConcreteProviderSelected",
-        V3ProviderError::ConcurrencyBusy {
-            request_id: "req-concurrency".to_string(),
-            provider_id: "provider-a".to_string(),
-        },
-    );
-    assert_eq!(
-        concurrency.source_kind,
-        V3ErrorSourceKind::TargetPoolExhausted
-    );
-    assert_eq!(concurrency.code, "provider_concurrency_busy");
-    assert!(concurrency.internal_error.is_none());
-    assert!(concurrency.external_error.is_none());
-
+fn client_disconnect_branch_preserves_source_kind() {
     let disconnect = provider_error_source_for_test(
         "V3Transport13ResponsesHttpRequest",
         V3ProviderError::ClientDisconnect {

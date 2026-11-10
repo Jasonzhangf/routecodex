@@ -28,6 +28,47 @@ impl ResponsesTransport for CaptureSelectedProvider {
     }
 }
 
+struct FailFirstThenSecond {
+    provider_ids: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl ResponsesTransport for FailFirstThenSecond {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let provider_id = request.provider_id().to_string();
+        self.provider_ids
+            .lock()
+            .expect("provider capture lock")
+            .push(provider_id.clone());
+        if provider_id == "first" {
+            return Err(V3ProviderError::HttpStatus {
+                response: Box::new(V3ProviderHttpFailure {
+                    request_id: request.request_id().to_string(),
+                    provider_id,
+                    status: 503,
+                    headers: Vec::new(),
+                    body: br#"{"error":{"type":"server_error","message":"first unavailable"}}"#
+                        .to_vec(),
+                    body_read_failure: None,
+                }),
+            });
+        }
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_second","output_text":"ok"}"#.to_vec(),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn direct_kernel_revalidates_preplanned_target_against_session_alternative() {
     let routing_group = "preplanned_target_session_race";
@@ -68,7 +109,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
             .expect("pre-send session failure");
     }
 
-    let transport = CaptureSelectedProvider {
+    let transport = FailFirstThenSecond {
         provider_ids: Mutex::new(Vec::new()),
     };
     let output = execute_v3_responses_direct_runtime_kernel_core(
@@ -100,7 +141,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
             .provider_ids
             .lock()
             .expect("provider capture lock"),
-        vec!["second"],
-        "cooled preplanned provider must not reach transport"
+        vec!["first", "second"],
+        "the captured preplanned provider must execute first; only a real failure may reselect the cooled session alternative"
     );
 }
