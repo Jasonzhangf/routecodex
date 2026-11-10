@@ -206,11 +206,14 @@ test.
 
 ### Terminal PR CI run (42864567365)
 
-This terminal-CI receipt applies to the pushed PR head `3999b5ec5c`, which is
-the tested ancestor of the current review head `1121a678c6`. The current head
-differs only by this report section and the public-entry success control, so
-the receipt has not been re-run on `1121a678c6`; CI will be re-run on the
-recombined candidate after the inherited baseline is fixed. Workflow run
+This terminal-CI receipt applies to the pushed PR head `3999b5ec5c`. The
+reviewed candidate is the tip of branch
+`codex/5dfae83-observability-ledger-dedup-20261110` (the commit under review);
+`3999b5ec5c` is an ancestor of it. The candidate-only changes since
+`3999b5ec5c` are this report section and the same-listener success control in
+the public-entry test. CI has not been re-run on the reviewed tip; it will be
+re-run on the recombined candidate after the inherited baseline is fixed.
+Workflow run
 https://github.com/Jasonzhangf/routecodex/actions/runs/42864567365:
 
 - `scope` and `repo-sanity` passed.
