@@ -212,6 +212,60 @@ fn classified_route_hits_pool_without_reclassifying_as_capability() {
     assert_eq!(plan.tiers[0].pool_id, "thinking");
 }
 
+#[test]
+fn classified_request_builds_pool_fallback_chain_with_default_last() {
+    let router = V3VirtualRouter::default();
+    let mut manifest = manifest(V3SelectionStrategy::Priority);
+    manifest.route_groups.get_mut("g").unwrap().pools.insert(
+        "thinking".into(),
+        V3RoutePoolManifest {
+            id: "thinking".into(),
+            selection: V3SelectionPolicy {
+                strategy: V3SelectionStrategy::Priority,
+            },
+            route_object: None,
+            match_rule: Some(V3RoutePoolMatchManifest {
+                precedence: 2,
+                entry_protocol: Some("responses".into()),
+                models: Vec::new(),
+                required_capabilities: vec!["thinking".into()],
+                min_input_tokens: None,
+                max_input_tokens: None,
+            }),
+            features: BTreeMap::new(),
+            targets: vec![target("thinking-target", 1, 1)],
+        },
+    );
+    let classified = router
+        .classify_request_with_facts(
+            &manifest,
+            "s",
+            "/v1/responses",
+            V3RouterRequestFacts {
+                entry_protocol: "responses".into(),
+                client_model: None,
+                capabilities: BTreeSet::from(["text".into()]),
+                input_tokens: 1,
+                current_turn_input_tokens: 1,
+                route_classification: test_route("thinking", &["thinking", "default"]),
+            },
+        )
+        .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .unwrap();
+    let pool_ids: Vec<&str> = plan
+        .tiers
+        .iter()
+        .map(|tier| tier.pool_id.as_str())
+        .collect();
+    assert_eq!(
+        pool_ids,
+        vec!["thinking", "default"],
+        "an ordinary classified request must fall back through its candidate pools and end at default"
+    );
+}
+
 fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
     RouteClassification {
         route_name: route.to_string(),
@@ -468,8 +522,8 @@ fn resolves_listener_default_and_hits_one_opaque_plan() {
 }
 
 #[test]
-fn matched_pool_is_single_pool_without_default_floor() {
-    // 红测：命中一个分类池后只交该池，不再追加 default 或其它分类池。
+fn matched_pool_keeps_precedence_and_appends_default_floor() {
+    // 红测：命中一个分类池后保留其优先级，并在末尾追加 default 最低池。
     let router = V3VirtualRouter::default();
     let manifest = manifest(V3SelectionStrategy::Priority);
     let classified = router
@@ -485,19 +539,23 @@ fn matched_pool_is_single_pool_without_default_floor() {
         .collect::<Vec<_>>();
     assert_eq!(
         tier_ids,
-        vec!["tools"],
-        "a single matched pool must not append default or any other pool"
+        vec!["tools", "default"],
+        "a matched pool must keep its precedence and append default as the floor"
     );
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "tools");
     // tools pool: a(priority 2), c(priority 1) -> priority order a then c.
+    // The fallback chain appends default with its own targets after tools.
     let ids = hit
         .target_plan
         .iter()
         .map(|entry| entry.target_id.as_deref())
         .collect::<Vec<_>>();
-    assert_eq!(ids, vec![Some("a"), Some("c")]);
-    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
+    assert_eq!(ids, vec![Some("a"), Some("c"), Some("a"), Some("b")]);
+    assert_eq!(hit.target_plan[0].pool_id, "tools");
+    assert_eq!(hit.target_plan[1].pool_id, "tools");
+    assert_eq!(hit.target_plan[2].pool_id, "default");
+    assert_eq!(hit.target_plan[3].pool_id, "default");
     assert_eq!(hit.hit_count, 1);
 }
 
@@ -788,7 +846,14 @@ fn candidate_order_hosted_websearch_precedes_multimodal() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
+    assert_eq!(plan.tiers.len(), 3);
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["web_search", "multimodal", "default"]
+    );
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
 
     assert_eq!(hit.pool_id, "web_search");
@@ -833,8 +898,13 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
-    assert_eq!(plan.tiers[0].pool_id, "coding");
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["coding", "thinking", "tools", "default"]
+    );
 
     // thinking active -> thinking wins over tools; web_search absent from
     // candidates, so declared capability cannot pull it in.
@@ -856,8 +926,13 @@ fn candidate_order_coding_precedes_thinking_and_websearch_precedes_all() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
-    assert_eq!(plan.tiers[0].pool_id, "thinking");
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["thinking", "tools", "default"]
+    );
 }
 
 #[test]
@@ -890,8 +965,13 @@ fn longcontext_candidate_selects_configured_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
-    assert_eq!(plan.tiers[0].pool_id, "longcontext");
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["longcontext", "multimodal", "default"]
+    );
 }
 
 #[test]
@@ -1056,13 +1136,20 @@ fn candidate_priority_skips_absent_or_empty_pools() {
         let plan = router
             .resolve_route_pool_plan(&manifest, classified)
             .unwrap();
+        let tier_ids = plan
+            .tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(
-            plan.tiers
-                .iter()
-                .map(|tier| tier.pool_id.as_str())
-                .collect::<Vec<_>>(),
-            vec![*expected],
-            "first configured non-empty candidate must win"
+            tier_ids.first().copied(),
+            Some(*expected),
+            "first configured non-empty candidate must lead the fallback chain: {tier_ids:?}"
+        );
+        assert_eq!(
+            tier_ids.last().copied(),
+            Some("default"),
+            "the required default pool must close the fallback chain: {tier_ids:?}"
         );
     }
 }
@@ -1160,7 +1247,7 @@ fn virtual_alias_and_auto_share_the_current_turn_classification_pool() {
         pool_ids(&alias),
         "the virtual alias must not hit a model-named pool that auto does not hit"
     );
-    assert_eq!(pool_ids(&alias), vec!["thinking_primary"]);
+    assert_eq!(pool_ids(&alias), vec!["thinking_primary", "default"]);
 
     // Without a configured pool for the current-turn signal both names must
     // land on the same required default pool, never on the model-named pool.
@@ -1675,8 +1762,8 @@ fn no_implicit_capability_pool_without_configured_pool() {
 }
 
 #[test]
-fn candidate_order_selects_first_configured_non_empty_pool() {
-    // 红测：按 classifier 给出的候选顺序命中第一个已配置非空池，且只交一池。
+fn candidate_order_leads_with_first_configured_non_empty_pool() {
+    // 红测：按 classifier 给出的候选顺序把第一个已配置非空池放在最前。
     let router = V3VirtualRouter::default();
     let mut manifest = manifest(V3SelectionStrategy::Priority);
     add_match_pool(&mut manifest, "thinking", 1, vec!["thinking"], None);
@@ -1702,8 +1789,13 @@ fn candidate_order_selects_first_configured_non_empty_pool() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1, "exactly one pool must be handed off");
-    assert_eq!(plan.tiers[0].pool_id, "coding");
+    assert_eq!(
+        plan.tiers
+            .iter()
+            .map(|tier| tier.pool_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["coding", "thinking", "tools", "default"]
+    );
 }
 
 #[test]
@@ -1743,8 +1835,8 @@ fn empty_configured_pool_is_skipped_for_next_candidate() {
     let plan = router
         .resolve_route_pool_plan(&manifest, classified)
         .unwrap();
-    assert_eq!(plan.tiers.len(), 1);
     assert_eq!(plan.tiers[0].pool_id, "coding");
+    assert_eq!(plan.tiers[1].pool_id, "default");
 }
 
 #[test]

@@ -333,11 +333,15 @@ impl V3VirtualRouter {
         // Ordinary request. The classifier hands over its current-turn
         // candidate signals in the fixed order (hosted web_search >
         // multimodal > longcontext > coding > thinking > search > tools >
-        // default). Take the first candidate that maps to a configured,
-        // non-empty classification pool and hand off exactly that one pool. Do
-        // not synthesize implicit capability pools and do not append default or
-        // any other pool after a hit.
-        let mut selected_pool: Option<&V3RoutePoolManifest> = None;
+        // default). Build one ordered plan tier per distinct, matching,
+        // non-empty pool in that same order, and always put the required
+        // non-empty default pool last. A request then iterates pools in
+        // declared precedence: when one pool has no remaining eligible
+        // candidate it hands the request to the next pool instead of ending
+        // while a fallback tier still exists. Do not synthesize implicit
+        // capability pools.
+        let mut plan_pools: Vec<&V3RoutePoolManifest> = Vec::new();
+        let mut planned_pool_ids = BTreeSet::new();
         for candidate in &classified.facts.route_classification.candidates {
             if candidate == DEFAULT_ROUTE {
                 continue;
@@ -349,20 +353,25 @@ impl V3VirtualRouter {
                 Some(candidate),
                 |pool_id, rule| pool_route_signal_matches(pool_id, rule, candidate),
             )? {
-                selected_pool = Some(pool);
-                break;
+                if planned_pool_ids.insert(pool.id.clone()) {
+                    plan_pools.push(pool);
+                }
             }
         }
         // Default is the unconditional floor: when no other pool is
         // configured, is empty, or does not satisfy the candidate signal, the
-        // request is served by the required non-empty default pool.
-        let selected_pool = selected_pool.unwrap_or(default_pool);
+        // request is served by the required non-empty default pool. It is
+        // always the last tier so earlier pools keep their precedence.
+        if planned_pool_ids.insert(DEFAULT_ROUTE.to_string()) {
+            plan_pools.push(default_pool);
+        }
+        let tiers = plan_pools.into_iter().map(build_plan_tier).collect();
 
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
             routing_group_id: classified.routing_group_id,
             facts: classified.facts,
-            tiers: vec![build_plan_tier(selected_pool)],
+            tiers,
         })
     }
 
