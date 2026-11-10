@@ -199,12 +199,18 @@ provider-error-exhaustion
 
 Those six failures belong to their existing owners and are outside this
 change. The earlier PR554 rustfmt failure was separate from that baseline. It
-was fixed in `3999b5ec5c` and pushed; the PR head, the local branch, and the
-remote branch now all point to that commit.
+was fixed in `3999b5ec5c`, which is pushed and is the current PR head. The
+local review branch is two commits ahead of that pushed head: this report's
+terminal-CI section and the same-listener success control in the public-entry
+test.
 
 ### Terminal PR CI run (42864567365)
 
-PR554 head `3999b5ec5c`, workflow run
+This terminal-CI receipt applies to the pushed PR head `3999b5ec5c`, which is
+the tested ancestor of the current review head `1121a678c6`. The current head
+differs only by this report section and the public-entry success control, so
+the receipt has not been re-run on `1121a678c6`; CI will be re-run on the
+recombined candidate after the inherited baseline is fixed. Workflow run
 https://github.com/Jasonzhangf/routecodex/actions/runs/42864567365:
 
 - `scope` and `repo-sanity` passed.
@@ -225,9 +231,10 @@ https://github.com/Jasonzhangf/routecodex/actions/runs/42864567365:
   SIGKILL after the grace period. The canonical command exited `86`. The cause
   of the post-assertion timeout was not independently established.
 
-Base control on the same focused test:
+Base control on the same focused test, run on the tested ancestor
+`3999b5ec5c` and on clean detached `origin/main` `1a01fc3fdd`:
 
-- Candidate `3999b5ec5c`: `0 passed; 1 failed` in 5.44s.
+- Candidate ancestor `3999b5ec5c`: `0 passed; 1 failed` in 5.44s.
 - Clean detached `origin/main` `1a01fc3fdd`: `0 passed; 1 failed` in 5.44s,
   same assertion.
 - The candidate diff changes only
