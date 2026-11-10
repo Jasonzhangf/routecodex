@@ -189,10 +189,48 @@ provider-error-exhaustion
 ```
 
 Those six failures belong to their existing owners and are outside this
-change. The PR554 rustfmt failure is separate from that baseline and is fixed
-only in the local worktree. The fix has not been pushed, so PR554 still points
-to the pre-fix head until the delivery owner is authorized to push and rerun
-CI.
+change. The earlier PR554 rustfmt failure was separate from that baseline. It
+was fixed in `3999b5ec5c` and pushed; the PR head, the local branch, and the
+remote branch now all point to that commit.
+
+### Terminal PR CI run (42864567365)
+
+PR554 head `3999b5ec5c`, workflow run
+https://github.com/Jasonzhangf/routecodex/actions/runs/42864567365:
+
+- `scope` and `repo-sanity` passed.
+- The `test` job failed inside `V3 canonical verification stack`. The stack
+  started at `2026-11-10T17:34:01Z` and ended at `18:38:14Z`.
+- First assertion failure at `2026-11-10T18:02:20Z`:
+
+  ```text
+  broker_terminal_validation_holds_active_recovery_lane_beyond_five_seconds
+  crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs:1415
+  active Broker recovery permit expired before validated terminal EOF
+  ```
+
+- After that assertion, the stack kept running until the last visibly running
+  test `malformed_non_terminal_and_post_terminal_sse_fail_explicitly`. At
+  `18:38:08Z` the cargo wrapper reported
+  `cargo timeout 2400000ms; sending SIGTERM to process group 37139`, then sent
+  SIGKILL after the grace period. The canonical command exited `86`. The cause
+  of the post-assertion timeout was not independently established.
+
+Base control on the same focused test:
+
+- Candidate `3999b5ec5c`: `0 passed; 1 failed` in 5.44s.
+- Clean detached `origin/main` `1a01fc3fdd`: `0 passed; 1 failed` in 5.44s,
+  same assertion.
+- The candidate diff changes only
+  `docs/architecture/v3-verification-map.yml`, this report,
+  `webui_observability.rs`, its unit test, and its public-entry test. It does
+  not touch the runtime test or the Broker recovery owner.
+
+Classification: inherited baseline red, not a regression from this change. The
+gap is routed to the existing board task
+`p0-gemini-broker-terminal-baseline-red-20261110` (revision 12, status
+`rework`, `needs_reassignment=true`, empty owner, executor Jack). This task
+does not repair that unrelated runtime failure.
 
 ## Unrelated suite hang
 
