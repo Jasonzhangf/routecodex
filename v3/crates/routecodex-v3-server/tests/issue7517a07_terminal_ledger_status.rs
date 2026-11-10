@@ -296,6 +296,11 @@ snapshots = true
 /// Two-candidate aggregate server: candidate A (`priority = 2`) is a real HTTP
 /// 502 peer, candidate B (`priority = 1`) is the existing behaviour-selectable
 /// Responses peer. Both upstream request streams are kept for assertions.
+fn is_advisory_probe(body: &Value) -> bool {
+    let text = body.to_string();
+    text.contains("ping; reply pong") || text.contains("Reply exactly OK. Do not call tools.")
+}
+
 struct MultiEntry {
     handle: V3ServerAggregateHandle,
     stop_a: oneshot::Sender<()>,
@@ -312,11 +317,15 @@ impl MultiEntry {
     }
 
     fn drain_a_requests(&mut self) -> Vec<Value> {
-        std::iter::from_fn(|| self.a_requests.try_recv().ok()).collect()
+        std::iter::from_fn(|| self.a_requests.try_recv().ok())
+            .filter(|body| !is_advisory_probe(body))
+            .collect()
     }
 
     fn drain_b_requests(&mut self) -> Vec<Value> {
-        std::iter::from_fn(|| self.b_requests.try_recv().ok()).collect()
+        std::iter::from_fn(|| self.b_requests.try_recv().ok())
+            .filter(|body| !is_advisory_probe(body))
+            .collect()
     }
 
     async fn stop(self) {
