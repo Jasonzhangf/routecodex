@@ -1451,6 +1451,7 @@ features:
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/responses_custom_tool_function_compat_blackbox.rs
+  - v3/crates/routecodex-v3-cli/tests/responses_strict_legacy_input_compat_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/provider_reasoning_effort_policy_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/opencode_zen_tcm_bridge_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/xcreate_glm_prompt_cache_public.rs

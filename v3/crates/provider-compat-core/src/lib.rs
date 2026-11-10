@@ -17,10 +17,12 @@ mod minimax_anthropic;
 pub mod namespace_identity;
 pub mod namespace_tools;
 pub mod opencode_zen_tcm;
+mod strict_legacy_input;
 
 pub use custom_tool_function::SseState as CustomToolFunctionSseState;
 pub use custom_tool_function::PROFILE as CUSTOM_TOOL_FUNCTION_PROFILE;
 pub use custom_tool_function::{compile_custom_tool_function_binding, CustomToolFunctionBinding};
+pub use strict_legacy_input::PROFILE as STRICT_LEGACY_INPUT_PROFILE;
 
 /// DeepSeek Console Go responses 网关的响应侧 custom/function 工具回射入口：
 /// 上游以 `function_call` 返回映射过的 function 工具（exec_command 等），客户端
@@ -291,6 +293,20 @@ pub fn run_req_outbound_stage3_compat(
         return Ok(build_compat_result(payload, None));
     }
 
+    if is_strict_legacy_input_profile(profile_id) {
+        if provider_protocol_matches(
+            adapter_context.provider_protocol.as_ref(),
+            "openai-responses",
+        ) {
+            return Ok(CompatResult {
+                payload: strict_legacy_input::apply_request_compat(payload)?,
+                applied_profile: Some(profile_id.to_string()),
+                native_applied: true,
+            });
+        }
+        return Ok(build_compat_result(payload, None));
+    }
+
     if is_gemini_profile(profile_id) {
         if provider_protocol_matches(adapter_context.provider_protocol.as_ref(), "gemini-chat") {
             return Ok(CompatResult {
@@ -424,6 +440,30 @@ pub fn run_resp_inbound_stage3_compat(
         return Ok(build_compat_result(input.payload, None));
     }
 
+    if is_strict_legacy_input_profile(profile_id) {
+        if provider_protocol_matches(
+            input.adapter_context.provider_protocol.as_ref(),
+            "openai-responses",
+        ) {
+            // The strict-legacy request composes the custom-tool-function
+            // projection, so the provider may return a wire function call that
+            // must be mapped back to the client's custom tool call.
+            return match input.adapter_context.custom_tool_function_binding.as_ref() {
+                Some(binding) => Ok(CompatResult {
+                    payload: custom_tool_function::apply_response_compat(input.payload, binding),
+                    applied_profile: Some(profile_id.to_string()),
+                    native_applied: true,
+                }),
+                None => Ok(CompatResult {
+                    payload: input.payload,
+                    applied_profile: Some(profile_id.to_string()),
+                    native_applied: false,
+                }),
+            };
+        }
+        return Ok(build_compat_result(input.payload, None));
+    }
+
     if is_cc_profile(profile_id) {
         if provider_protocol_matches(
             input.adapter_context.provider_protocol.as_ref(),
@@ -518,6 +558,10 @@ fn is_deepseek_console_go_profile(profile: &str) -> bool {
 
 fn is_custom_tool_function_profile(profile: &str) -> bool {
     profile_matches(profile, custom_tool_function::PROFILE)
+}
+
+fn is_strict_legacy_input_profile(profile: &str) -> bool {
+    profile_matches(profile, strict_legacy_input::PROFILE)
 }
 
 fn is_cc_profile(profile: &str) -> bool {

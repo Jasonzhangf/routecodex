@@ -536,6 +536,7 @@ features:
   - Explicit chat:opencode-zen-tcm binds the actual compatible executor and performs a reversible native bash/read to client executor to native-history conversion with unchanged call IDs and actual paired output/error content.
   - Original custom executor scripts and passable direct exec_command calls preserve complete UTF8 file contents, actual execution receipts and paired history through public Responses SSE entry.
   - Responses gateways that reject custom tool history accept the equivalent function-call wire shape, while public Responses JSON and SSE clients receive custom_tool_call items with unwrapped input.
+  - Responses gateways that reject `input[].type=reasoning` and `tools[].type=tool_search` accept the declared strict-legacy projection; the provider receives ordinary function tools and history while the public client keeps the original Responses request.
   required_negative:
   - Top-level semantics, processed, and processingMetadata fail at both request and response compat entrypoints.
   - Compat does not strip, reconstruct, or route control state and does not own Chat Process or SSE semantics.
@@ -547,6 +548,7 @@ features:
   - Zen TCM aliases are never added without the real compatible executor or when its new calls are disabled; native declarations/calls, ordinary executor scripts and incompatible entry/protocol paths are preserved.
   - Missing or malformed alias arguments reach the real client executor for error/correction; Compat never fabricates execution receipts or reconstructs capability controls from the executable codec.
   - Custom-tool compatibility never leaks routecodex_custom__ wire names or function_call_arguments events after an item becomes custom_tool_call; ordinary function calls remain unchanged.
+  - The strict-legacy Responses projection never applies to providers that do not declare `responses:strict-legacy-input`; other Responses providers preserve newer input and tool shapes unchanged.
   black_box_regression:
     command: npm run test:v3-goaichat-hosted-tool-history-blackbox
     test_ids:
@@ -583,6 +585,11 @@ features:
     - responses_custom_tool_function_compat_avoids_ordinary_wire_name_collision_publicly
     - responses_custom_tool_function_compat_keeps_long_wire_name_within_provider_limit_publicly
     - responses_custom_tool_function_compat_maps_allowed_tools_choice_publicly
+  strict_legacy_input_black_box_regression:
+    command: npm run test:v3-strict-legacy-input-compat-blackbox
+    test_ids:
+    - strict_legacy_input_red_before_profile_rejects_raw_shape
+    - strict_legacy_input_green_after_profile_projects_and_succeeds
   custom_tool_function_failure_modes:
   - A mapped custom tool's delta event is never returned to the client while its arguments remain on the function-call wire, including an empty delta that projects to no new input.
   - Named custom tool_choice stays on a declared provider tool instead of pointing at a custom name the provider never received.
@@ -598,6 +605,7 @@ features:
   - npm run test:v3-provider-compat-profile-loading
   - npm run test:v3-goaichat-hosted-tool-history-blackbox
   - npm run test:v3-custom-tool-function-compat-blackbox
+  - npm run test:v3-strict-legacy-input-compat-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-blackbox
   - npm run test:v3-provider-reasoning-effort-policy-config-failures
   - npm run test:v3-opencode-zen-tcm-bridge-blackbox

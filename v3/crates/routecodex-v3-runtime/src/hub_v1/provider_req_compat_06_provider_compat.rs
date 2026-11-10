@@ -13,6 +13,7 @@ use provider_compat_core::req_outbound_stage3_compat::{
 };
 use provider_compat_core::{
     compile_custom_tool_function_binding, CustomToolFunctionBinding, CUSTOM_TOOL_FUNCTION_PROFILE,
+    STRICT_LEGACY_INPUT_PROFILE,
 };
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -215,9 +216,12 @@ pub(crate) fn apply_v3_provider_req_compat_to_provider_payload(
     profile: &V3ProviderCompatProfileId,
 ) -> Result<(Value, Option<CustomToolFunctionBinding>), V3ProviderCompatError> {
     project_reasoning_effort_for_selected_target(&mut payload, selected, provider_protocol)?;
-    let custom_tool_function_binding = (profile
+    let custom_tool_function_binding = ((profile
         .as_str()
         .eq_ignore_ascii_case(CUSTOM_TOOL_FUNCTION_PROFILE)
+        || profile
+            .as_str()
+            .eq_ignore_ascii_case(STRICT_LEGACY_INPUT_PROFILE))
         && provider_protocol == V3HubProviderWireProtocol::Responses)
         .then(|| compile_custom_tool_function_binding(&payload));
     let provider_key = format!(
@@ -1627,6 +1631,34 @@ mod tests {
             .custom_tool_function_binding
             .as_ref()
             .expect("actual custom tool declaration must produce a typed binding");
+        assert_eq!(
+            binding.wire_name_for("apply_patch"),
+            Some("routecodex_custom__6170706c795f7061746368")
+        );
+    }
+
+    #[test]
+    fn strict_legacy_input_profile_retains_composed_custom_tool_binding() {
+        let mut selected = selected_candidate(V3HubProviderWireProtocol::Responses);
+        selected.compatibility_profile = Some(STRICT_LEGACY_INPUT_PROFILE.to_string());
+        let req07 = relay_req07_for_entry_with_candidate(
+            V3HubEntryProtocol::Responses,
+            json!({
+                "model": "client-route-alias",
+                "input": "hello",
+                "tools": [{"type": "custom", "name": "apply_patch"}]
+            }),
+            V3HubProviderWireProtocol::Responses,
+            selected,
+        )
+        .expect("strict legacy fixture must pass standard provider projection");
+
+        let req_compat = build_provider_req_compat_06_from_v3_hub_req_outbound_07(req07)
+            .expect("strict legacy profile must retain the composed custom tool binding");
+        let binding = req_compat
+            .custom_tool_function_binding
+            .as_ref()
+            .expect("strict legacy custom tool declaration must produce a typed binding");
         assert_eq!(
             binding.wire_name_for("apply_patch"),
             Some("routecodex_custom__6170706c795f7061746368")
