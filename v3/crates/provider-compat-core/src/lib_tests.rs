@@ -665,7 +665,7 @@ fn strict_legacy_input_profile_projects_rejected_responses_fields() {
             {"type": "function_call", "call_id": "call_1", "name": "tool_search", "arguments": "{}"}
         ],
         "tools": [
-            {"type": "tool_search", "name": "tool_search", "description": "Search tools", "parameters": {"type": "object"}}
+            {"type": "tool_search", "name": "tool_search", "description": "Search tools", "parameters": {"type": "object"}, "x_provider_extension": {"mode": "strict"}}
         ],
         "tool_choice": {"type": "tool_search", "name": "tool_search"}
     });
@@ -697,7 +697,8 @@ fn strict_legacy_input_profile_projects_rejected_responses_fields() {
             "type": "function",
             "name": "tool_search",
             "description": "Search tools",
-            "parameters": {"type": "object"}
+            "parameters": {"type": "object"},
+            "x_provider_extension": {"mode": "strict"}
         })
     );
     assert_eq!(

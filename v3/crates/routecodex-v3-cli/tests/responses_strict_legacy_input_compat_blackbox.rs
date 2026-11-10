@@ -200,7 +200,8 @@ fn strict_request() -> Value {
                 "type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]
             }},
             {"type": "tool_search", "name": "tool_search", "description": "Search tools",
-             "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}}
+             "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+             "x_qingyanx_extension": {"preserve": true}}
         ],
         "tool_choice": "auto",
         "input": [
@@ -320,6 +321,14 @@ async fn strict_legacy_input_green_after_profile_projects_and_succeeds() {
     assert!(
         tools.iter().any(|tool| tool["name"] == "tool_search"),
         "tool_search must be projected to a function tool"
+    );
+    assert_eq!(
+        tools
+            .iter()
+            .find(|tool| tool["name"] == "tool_search")
+            .unwrap()["x_qingyanx_extension"],
+        json!({"preserve": true}),
+        "unrelated tool_search fields must survive the strict-legacy projection"
     );
     assert!(
         tools

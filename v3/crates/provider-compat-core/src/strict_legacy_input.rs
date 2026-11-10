@@ -14,7 +14,7 @@
 //! backend rejects both the hosted `tool_search` shape and the newer
 //! `custom_tool_call` history shape together.
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 pub const PROFILE: &str = "responses:strict-legacy-input";
 
@@ -41,15 +41,9 @@ pub(crate) fn apply_request_compat(mut payload: Value) -> Result<Value, String> 
             if row.get("type").and_then(Value::as_str) != Some("tool_search") {
                 continue;
             }
-            let mut function = Map::new();
+            let mut function = row.clone();
             function.insert("type".to_string(), Value::String("function".to_string()));
             function.insert("name".to_string(), Value::String("tool_search".to_string()));
-            if let Some(description) = row.get("description") {
-                function.insert("description".to_string(), description.clone());
-            }
-            if let Some(parameters) = row.get("parameters") {
-                function.insert("parameters".to_string(), parameters.clone());
-            }
             *tool = Value::Object(function);
             projected_tool_search = true;
         }
