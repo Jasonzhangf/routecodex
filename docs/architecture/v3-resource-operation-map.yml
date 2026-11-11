@@ -445,10 +445,10 @@ resources:
       pool_selection: fixed_order_first_configured_non_empty_match
       classification_order: [web_search, multimodal, longcontext, coding, thinking, search, tools, default]
       longcontext_candidate: retained_current_turn_optional_pool
-      single_pool_plan: true
+      single_pool_plan: false
       optional_pools: absent_or_empty_skipped
       default_pool: required_non_empty
-      cross_pool_default_append: forbidden
+      cross_pool_default_append: declared_default_after_selected_pool
       implicit_capability_pool: forbidden
       priority_order: lower numeric priority tiers precede every higher numeric tier
       weighted_scope: SWRR applies only within one equal-priority tier
@@ -598,12 +598,12 @@ resources:
     owner_node: V3Config05ManifestPublished
     identity: [providerId, transportKind, websocketEndpoint, maxInFlight, acquireTimeoutMs, staleLeaseMs]
     semantic_contract:
-      source: provider concurrency maxInFlight bounds business admission; acquireTimeoutMs bounds target capacity and cooldown recovery waiting
-      propagation: Target carries the configured provider concurrency signal into the selected Provider transport target
-      admission: Runtime atomically acquires capacity for each selected provider+authAlias before transport; a full candidate is immediately excluded for this request and the next eligible candidate is selected
-      hard_limit: business admission cannot exceed the current adaptive budget or hard maximum; scheduled probes remain independently bounded
-      selection: capacity exclusions are temporary and health-neutral; all full candidates wait with increasing backoff inside the captured target before a final eligibility check
-      timeout: capacity/cooldown waits and their awaited exhaustion rescue probes share the declared acquisition budget; rate-limit transport retries retain the shared request residence deadline
+      source: legacy concurrency authoring may be read for compatibility; it imposes no business admission or candidate exclusion
+      propagation: selected target carries protocol transport declarations without creating a business capacity reservation
+      admission: parseable business requests proceed immediately without leases, permits, queues or concurrency rejection
+      probe_limit: background probe scheduling remains independently bounded
+      selection: scan declared tier and pool successors immediately without capacity, cooldown recovery or Deferred waits
+      timeout: preserve real transport timeouts and original request cancellation; no artificial residence sleep after an attempt count
       boundary: this control resource never enters request, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [V3Config05ManifestPublished]
     allowed_readers: [routecodex-v3-target, routecodex-v3-provider-responses, build_v3_provider_global_probe_target]
@@ -612,26 +612,19 @@ resources:
     may_enter_client_body: false
     binding_status: anchored
   - resource_id: v3.provider.adaptive_concurrency_admission
-    resource_kind: process_local_control_side_channel
-    lifecycle: v3.provider.admission_lease_lifecycle
+    resource_kind: legacy_compatibility_control
+    lifecycle: v3.provider.adaptive_background_observation
     owner_crate: routecodex-v3-provider-responses
     owner_node: V3AdaptiveConcurrencyController
     identity: [providerId, authAlias, interfaceId, modelId, lease]
     semantic_contract:
-      capacity: all leases share one provider+authAlias configured hard maximum; each interface+model identity has its own adaptive budget and scheduled probe state, never a shared dynamic contraction
-      budget_source: provider.concurrency.maxInFlight is only a static hard ceiling, defaulting to 40; the effective budget starts at that ceiling and is lowered from observed 429 watermarks
-      rate_limit_watermark: an HTTP 429 records the exact interface+model identity in-flight count at that moment, including the refused request before release, once per failed attempt; sibling identity counts are excluded
-      rate_limit_window: samples live in a trailing one-hour window; samples older than one hour are pruned before any budget update
-      rate_limit_smoothing: the budget ceiling implied by the window is the median refused watermark minus one slot, clamped to the range one through the hard maximum; an empty window implies the hard maximum
-      rate_limit_adjustment: an observed 429 lowers the budget to the smaller of the current budget and the smoothed ceiling, so the decrease follows the measured watermark instead of a fixed single-step decrement
-      recovery: the existing validated business-success owner or accepted probe restores one budget unit up to the hard maximum and clears saturation only for the matching interface+model identity; response headers alone do not authorize business recovery
-      acquisition: Runtime immediately skips a full provider+authAlias and selects the next eligible candidate without waiting or changing provider health
-      websocket_order: WebSocketV2 preserves a granted lease for an immediately available session slot and releases it before an actual slot wait; readmission after that wait is immediate and a losing capacity race returns typed ConcurrencyBusy to Runtime for reselect
-      handoff: Provider consumes a matching Runtime lease exactly once, including provider/auth/interface/model scope; identity comes from selected typed declarations and never from payload.model, URL, logs or metadata; a mismatched lease is released and rejected
-      release: Runtime admission drop, pre-acquired transport request drop, and Provider permit-guard drop release the lease exactly once on early exit, cancellation, transport failure, response completion, or stream drop
-      boundary: lease and capacity state remain typed process-local control state and never enter request, provider, client, MetadataCenter, or Debug payloads
-    allowed_writers: [V3AdaptiveConcurrencyController::ensure_initial_budget, V3AdaptiveConcurrencyController::try_acquire_business, V3AdaptiveConcurrencyController::try_acquire_business_scoped, V3AdaptiveConcurrencyController::try_acquire_scheduled_probe, V3AdaptiveConcurrencyController::release, V3AdaptiveConcurrencyController::complete_probe, V3AdaptiveConcurrencyController::observe_rate_limit, V3AdaptiveConcurrencyController::observe_rate_limit_scoped, V3AdaptiveConcurrencyController::observe_business_success, V3AdaptiveConcurrencyController::observe_business_success_scoped, V3RuntimeProviderAdmission::drop, V3PreAcquiredProviderAdmission::release, V3AdaptiveConcurrencyPermitGuard::drop]
-    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, V3AdaptiveConcurrencyController::snapshot_for_scope, V3AdaptiveConcurrencyController::wait_for_scoped_capacity_change, try_admit_v3_selected_target, V3ProviderResponsesTransport::send]
+      compatibility: legacy capacity fields may be parsed and retained only as configuration compatibility metadata
+      request_path: parseable business requests never acquire this resource, never wait for it, and are never rejected, excluded or deferred because of it
+      selection: declared tier, key and default-successor selection proceeds immediately without reading a business capacity budget
+      background: exact-identity rate-limit observations and scheduled probes may remain independently bounded and health-scoped
+      boundary: compatibility and background state never enter request, provider, client, MetadataCenter, or Debug payloads
+    allowed_writers: [V3AdaptiveConcurrencyController::observe_rate_limit, V3AdaptiveConcurrencyController::observe_rate_limit_scoped, V3AdaptiveConcurrencyController::observe_business_success, V3AdaptiveConcurrencyController::observe_business_success_scoped, V3AdaptiveConcurrencyController::complete_probe]
+    allowed_readers: [V3AdaptiveConcurrencyController::snapshot, V3AdaptiveConcurrencyController::snapshot_for_scope, V3ProviderResponsesTransport::send_probe]
     forbidden_writers: [routecodex-v3-server, routecodex-v3-virtual-router, routecodex-v3-error, request.normal_payload, provider.wire_payload, response.client_payload, MetadataCenter.payload, Debug.payload]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -1381,7 +1374,7 @@ resources:
       revival_rule: only a successful provider transport probe may remove cooldown state
       exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
       exhaustion_disposition: after rescue, wait with increasing backoff for due recovery inside the declared acquisition budget; perform a final health and eligibility check before internal exhaustion
-      healthy_rescue_initiation: immediately admit and poll an eligible guarded probe once before healthy later-tier commitment, then transfer pending work to the aggregate owner without awaiting DNS or transport completion
+      healthy_rescue_initiation: aggregate recovery owns eligible guarded probes independently; healthy later-tier commitment never depends on probe initiation or completion
       aggregate_probe_lifetime: one aggregate supervisor retains a recovery owner per listener; each polls its own due and transferred probes; shutdown and exec cancel and join every owner, aggregate drop aborts all; cancellation releases matching ownership without recording a provider failure
       generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until an HTTP 2xx probe or matching 429-owned business success removes the block
       in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
@@ -2092,24 +2085,21 @@ resources:
     required_gates: [npm run verify:v3-resource-map]
 
   - resource_id: v3.error.provider_action_gate
-    resource_kind: process_local_control_side_channel
+    resource_kind: process_local_background_observation
     lifecycle: v3.provider_action_gate.mainline
     owner_crate: routecodex-v3-runtime
-    owner_node: V3ProviderActionGateAdmission
+    owner_node: V3ProviderActionFailureRecorded
     semantic_contract:
-      rate_limit_scope: HTTP 429 families share an exact provider-runtime-identity lane across sessions within the owning listener; listeners keep separate mutable health and action resources
-      precool: Non429 failures with an eligible alternative register typed deferred health actions on the exact listener identity; existing action due gates one observation probe before health commit, and matching business success cancels pending commit
-      success: matching real business success wakes the global rate-limit lane as well as the original session lane without clearing unrelated key eligibility
-      candidate_admission: Target10 atomically reserves one due recovery attempt for the exact identity; blocked identities are skipped while another candidate can be admitted
-      waiting: only requests with no admissible alternative wait; waiting releases business capacity and does not escalate backoff merely because other waiters exist
-      request_independence: Business recovery remains request-local; different complete identities never share session/group admission, mutation, cancellation or terminal generations. Precool and429 retain their existing exact-identity owner.
+      rate_limit_scope: HTTP 429 observations remain exact provider-runtime-identity scoped within the owning listener; they never form a request admission lane
+      precool: Non429 failures with an eligible alternative may record typed background health evidence; current and fresh requests never wait for the observation
+      success: matching real business success records background success evidence and cannot clear unrelated key eligibility
+      request_path: request selection never reads a permit, waiter ticket, FIFO queue or terminal admission state from this resource
+      request_independence: different complete identities never share request mutation, cancellation or terminal generations; background probe state remains exact-identity scoped
+      terminal: terminal Error05 projection commits its internal disposition without waiting for this observation resource
     identity:
       - provider_action_scope
       - generation
-      - waiter_ticket
     allowed_writers:
-      - V3ProviderActionGate::abandon_admission
-      - V3ProviderActionGate::try_admit_exact_rate_limit
       - V3ProviderFailureRuntimeHealth::defer_provider_health_action
       - V3ProviderFailureRuntimeHealth::managed_precool_probe
       - V3ProviderActionGate::commit_terminal_admission
@@ -3029,10 +3019,10 @@ resources:
     identity: [requestId, executionId]
     semantic_contract:
       dimensions: [attempt_count, request_resident_bytes, process_resident_bytes, deadline_or_residence]
-      unsent_capacity: Runtime releases its pending transport-attempt reservation only on typed ConcurrencyBusy before wire transmission; real HTTP attempts and 429 sequence numbers remain counted.
-      recovery_wait: Repeated planning retains a request-local compiled 1s/3s/15s/35s/90s then steady 1s pool-recovery cursor and scheduled due time. Pool recovery is bounded by the immutable request residence deadline, distinct from individual candidate acquisition or probe budgets; health/capacity notifications recheck eligibility without advancing an unexpired interval. No wait holds business capacity or renews the original request deadline.
+      transport_attempts: count actual transport attempts for diagnostics without a send ceiling or rate-limit/unsent-attempt compensation
+      recovery: request planning continues immediately through declared successors; there is no request-bound recovery cursor, probe wait or sleep to residence deadline
       admission_order: Reserve byte/frame capacity before append or copy; release exactly once on seal, discard, cancellation, or terminal error.
-      request_scope: Provider transport admission and every Runtime-sealed client replay projection consume the same request-local budget instance; Server may only move the sealed replay and may not construct or reconstruct a budget.
+      request_scope: transport attempt diagnostics and every Runtime-sealed client replay projection use the same request-local accounting; Server moves the sealed replay without reconstructing a budget
       exhaustion_lane: LocalResourceExhausted in the internal Error chain; never provider ResponseBody and never provider health mutation.
     allowed_writers: [resident_request_controller, AttemptPayloadStore]
     allowed_readers: [resident_request_controller, AttemptPayloadStore, V3Error05ExecutionDecision]
@@ -3262,10 +3252,10 @@ resources:
     owner_node: V3OperationRunnerPlanExecution
     identity: [requestId, invocationId, attemptId]
     semantic_contract:
-      storage_owner: V3OperationRunnerPlanExecution persists one request-local exclusion set plus exact capacity-busy provenance; this is not a process-global store or a second admission controller
-      mutation_owner: typed Error action consumption adds non-capacity exclusions; capacity admission and post-transport ConcurrencyBusy readmission add only exact candidate keys proven busy before captured-target reselection
-      provenance_rule: busy evidence never comes from cooldown, capability mismatch, provider failure, an initial exclusion, or attempted_candidates
-      classification: pure all-busy requires a nonempty captured Target09 set, every captured key busy, and every exclusion busy; any other exclusion cause leaves generic mixed exhaustion
+      storage_owner: V3OperationRunnerPlanExecution persists one request-local failed-candidate exclusion set; this is not a process-global store or a second admission controller
+      mutation_owner: typed Error action consumption and real provider failures add only the exact attempted candidate keys for this request
+      provenance_rule: exclusion evidence never comes from capacity, permits, FIFO tickets, probes or Deferred state
+      classification: the request immediately scans declared successors after excluding attempted keys; there is no all-busy capacity classification
       request_boundary: exclusion and busy provenance never enter request, response, provider, client, MetadataCenter, or Debug payloads
     allowed_writers: [RuntimeErrorActionConsumed, V3OperationRunnerPlanExecution]
     allowed_readers: [V3OperationRunnerPlanExecution]

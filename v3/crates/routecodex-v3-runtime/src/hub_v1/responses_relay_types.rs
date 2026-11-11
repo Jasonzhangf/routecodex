@@ -398,7 +398,6 @@ pub(crate) struct V3ResponsesRelayProviderRetryState<'state> {
     pub(crate) same_candidate_retries: &'state mut BTreeMap<String, usize>,
     pub(crate) retry_selected:
         &'state mut Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
-    pub(crate) pending_recovery: &'state mut Option<V3Error05RecoveryAdmissionWitness>,
     pub(crate) provider_failure_events: &'state mut Vec<V3RuntimeProviderFailureObservation>,
     pub(crate) provider_failure_event_sink: Option<&'state V3RuntimeProviderFailureEventSink>,
     pub(crate) selected_observability: &'state V3RuntimeObservability,

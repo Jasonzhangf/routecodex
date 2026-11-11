@@ -271,7 +271,6 @@ impl V3TargetInterpreter {
                                 candidate.interface_id.clone(),
                                 candidate.auth_alias.clone(),
                                 candidate.model_id.clone(),
-                                candidate_satisfies_required_capabilities(&candidate),
                             );
                             if let Some(index) = candidate_indices.get(&key).copied() {
                                 merge_candidate_route_provenance(
@@ -330,7 +329,6 @@ impl V3TargetInterpreter {
                             candidate.interface_id.clone(),
                             candidate.auth_alias.clone(),
                             candidate.model_id.clone(),
-                            candidate_satisfies_required_capabilities(&candidate),
                         );
                         if let Some(index) = candidate_indices.get(&key).copied() {
                             merge_candidate_route_provenance(&mut candidates[index], &candidate);
@@ -455,19 +453,13 @@ impl V3TargetInterpreter {
             .is_none_or(|availability| availability.is_available_at(now_ms))
     }
 
-    /// A candidate is admitted when its declared capabilities match the
-    /// request and its provider-model availability window contains `now_ms`.
-    /// This is the single admission basis shared by Target10 selection, the
-    /// direct send gate, remaining-candidate accounting and recovery probes:
-    /// every consumer must agree on which candidates the route can actually
-    /// reach, or a candidate admitted by one stage is refused by another and a
-    /// provider that was never contacted receives a health failure.
+    /// Declared availability windows control route visibility. Capability
+    /// declarations are routing signals, never request admission constraints.
     pub fn candidate_admitted(candidate: &V3TargetCandidate, now_ms: u64) -> bool {
-        candidate_satisfies_required_capabilities(candidate)
-            && Self::candidate_in_availability_window(candidate, now_ms)
+        Self::candidate_in_availability_window(candidate, now_ms)
     }
 
-    /// Number of candidates admitted by capability and declared availability.
+    /// Number of candidates inside their declared availability windows.
     pub fn admitted_candidate_count(
         expanded: &V3Target09CandidateSetExpanded,
         now_ms: u64,
@@ -532,18 +524,10 @@ impl V3TargetInterpreter {
         // the main slot over; a request-local failure never does.
         let mut sticky_cooled = BTreeSet::new();
         let mut eligible = Vec::new();
-        // Automatic-cooldown exemption counts only candidates still admitted by
-        // capability and declared availability, so a window-inactive or
-        // capability-mismatched sibling cannot inflate the pool size.
+        // Window-inactive siblings cannot inflate the automatic-cooldown
+        // exemption's candidate count.
         let admitted_candidate_count = Self::admitted_candidate_count(&expanded, now_ms);
         for (index, candidate) in expanded.candidates.iter().enumerate() {
-            if !candidate_satisfies_required_capabilities(candidate) {
-                unavailable.push(format!(
-                    "{}:{}:{}:capability_mismatch",
-                    candidate.provider_id, candidate.auth_alias, candidate.model_id
-                ));
-                continue;
-            }
             // Availability is declared on the provider model and is not a
             // fallback tier: outside its windows the candidate is not eligible.
             if !Self::candidate_admitted(candidate, now_ms) {
@@ -1372,13 +1356,6 @@ fn merge_candidate_route_provenance(
         }
     }
     existing.default_pool_member |= duplicate.default_pool_member;
-}
-
-fn candidate_satisfies_required_capabilities(candidate: &V3TargetCandidate) -> bool {
-    candidate
-        .required_capabilities
-        .iter()
-        .all(|required| candidate_has_required_capability(&candidate.model_capabilities, required))
 }
 
 fn legacy_selection_sample(expanded: &V3Target09CandidateSetExpanded) -> u64 {

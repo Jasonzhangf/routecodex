@@ -46,8 +46,6 @@ pub(super) async fn acquire_connection_slot(
     let request_id = request_id.clone();
     let provider_id = provider_id.clone();
     let cancellation = cancellation.clone();
-    // Only an actual session wait releases an already granted capacity lease.
-    request.release_pre_acquired_admission();
     let lock = session.lock_owned();
     match cancellation.clone() {
         Some(cancellation) => {

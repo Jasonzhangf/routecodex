@@ -5,6 +5,69 @@ struct CaptureSelectedProvider {
     provider_ids: Mutex<Vec<String>>,
 }
 
+fn unavailable_protocol_admission_fixture(
+    routing_group: &str,
+) -> (
+    V3Config05ManifestPublished,
+    V3ProviderFailureRuntimeHealth,
+    V3Server03HttpRequestRaw,
+    u64,
+) {
+    let manifest = scoped_test_manifest(reselection_manifest(), routing_group);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+    let session = test_failure_session_scope_for(routing_group, "all-unavailable");
+    let now =
+        crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().unwrap();
+    for provider in ["first", "second"] {
+        for offset in 0..3 {
+            health
+                .record_provider_failure_record(
+                    &session,
+                    provider,
+                    Some("key"),
+                    Some("test"),
+                    Some("controlled unavailable identity"),
+                    now + offset,
+                )
+                .unwrap();
+        }
+    }
+    let raw = crate::nodes::build_v3_server_03_http_request_raw(
+        "test".to_string(),
+        session,
+        "req-finite-admission".to_string(),
+        "exec-finite-admission".to_string(),
+        "POST".to_string(),
+        "/v1/responses".to_string(),
+        json!({"model":"client-model","input":"hello"}),
+    );
+    (manifest, health, raw, now)
+}
+
+#[tokio::test]
+async fn protocol_admission_returns_immediately_when_all_candidates_unavailable() {
+    let (manifest, health, raw, now) =
+        unavailable_protocol_admission_fixture("e37891a_finite_protocol_admission");
+    let failure = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw.clone(),
+        health.clone(),
+        now,
+    )
+    .expect_err("both declared candidates must actually be unavailable");
+    assert!(failure.recovery_candidates.is_some());
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        plan_v3_responses_protocol_execution_with_recovery(&manifest, raw, health, now),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "protocol admission must return before waiting for recovery"
+    );
+    assert!(result.unwrap().is_err(), "selection must expose typed unavailability without a Deferred wait");
+}
+
 #[async_trait]
 impl ResponsesTransport for CaptureSelectedProvider {
     async fn send(

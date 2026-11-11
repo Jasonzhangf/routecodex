@@ -147,9 +147,6 @@ dry_run = false
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "key", priority = 100 }}, {{ kind = "provider_model", provider = "spare", model = "main", key = "key", priority = 1 }}]
-[route_groups.default.pools.independent]
-match = {{ models = ["independent"], precedence = 10 }}
-targets = [{{ kind = "provider_model", provider = "independent", model = "independent", key = "key", priority = 100 }}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -337,9 +334,14 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
     );
 
     // 4) An isolated identity is unaffected by the seeded cooldown.
-    let response = issue127_send(&client, &base, "independent", "issue127-isolated-healthy")
-        .await
-        .expect("an unseeded identity must stay reachable");
+    let response = issue127_send(
+        &client,
+        &base,
+        "independent.independent",
+        "issue127-isolated-healthy",
+    )
+    .await
+    .expect("an unseeded identity must stay reachable");
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.unwrap();
     assert!(body.contains("issue127-isolated-healthy"), "{body}");
@@ -390,7 +392,7 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
     let response = issue127_send(
         &client,
         &control_base,
-        "independent",
+        "independent.independent",
         "issue127-control-independent",
     )
     .await

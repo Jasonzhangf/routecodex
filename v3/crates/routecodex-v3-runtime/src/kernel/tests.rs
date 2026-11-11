@@ -87,8 +87,7 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
     .expect("first-byte timeout policy");
     let matches_reselect = matches!(
         result.decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
-            | V3Error05ExecutionAction::ReevaluateTarget
+        V3Error05ExecutionAction::Reselect | V3Error05ExecutionAction::ReevaluateTarget
     );
     if !matches_reselect {
         panic!(
@@ -213,11 +212,9 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     )
     .await
     .expect("typed Relay recovery");
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = result.decision.action else {
+    let V3Error05ExecutionAction::Reselect = result.decision.action else {
         panic!("expected reselection")
     };
-    assert_eq!(recovery.provider_runtime_identity(), key);
-    assert_eq!(recovery.failure_session_scope(), &scope);
     assert_eq!(failed, BTreeSet::from([key]));
     assert!(retries.is_empty());
     assert_eq!(
@@ -317,18 +314,12 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
     )
     .await
     .expect("response processing recovery");
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = &result.decision.action else {
+    let V3Error05ExecutionAction::Reselect = &result.decision.action else {
         panic!(
             "must reselect through Error05: {:?}",
             result.decision.action
         );
     };
-    assert_eq!(recovery.normalized_error_family(), source.code);
-    assert_eq!(recovery.failure_session_scope(), &scope);
-    assert_eq!(
-        recovery.provider_runtime_identity(),
-        candidate_key(&selected.candidate)
-    );
     assert_eq!(
         failed_candidates,
         BTreeSet::from([candidate_key(&selected.candidate)])

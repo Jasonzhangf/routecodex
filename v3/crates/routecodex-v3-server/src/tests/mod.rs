@@ -5233,7 +5233,7 @@ async fn responses_relay_json_error_returns_typed_no_response() {
 }
 
 #[tokio::test]
-async fn provider_terminal_external_http_never_projects_provider_response_to_client() {
+async fn provider_terminal_external_http_keeps_final_provider_error_internal() {
     let _home_lock = TEST_HOME_LOCK.lock().unwrap();
     let root = std::env::temp_dir().join(format!(
         "routecodex-v3-provider-terminal-external-http-{}",
@@ -5290,8 +5290,8 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
         ])
     );
     assert_eq!(evidence["body"], json!(raw_body));
-    // The provider's real status and headers are provider-private: the client boundary
-    // stays a transport break and never carries the upstream response.
+    // The real error remains available in internal evidence, but never crosses
+    // the client boundary.
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
     assert!(!response.headers().contains_key("retry-after"));
@@ -5300,14 +5300,10 @@ async fn provider_terminal_external_http_never_projects_provider_response_to_cli
     assert!(!response.headers().contains_key("content-length"));
     let error = to_bytes(response.into_body(), usize::MAX)
         .await
-        .expect_err("a streaming external provider terminal must break the client transport");
-    assert!(
-        error.to_string().contains("provider pool exhausted"),
-        "{error}"
-    );
+        .expect_err("a final provider HTTP error must end the client stream");
     assert!(
         !error.to_string().contains("rate_limit_error"),
-        "the provider body must not reach the client transport: {error}"
+        "provider error body must stay internal: {error}"
     );
 }
 

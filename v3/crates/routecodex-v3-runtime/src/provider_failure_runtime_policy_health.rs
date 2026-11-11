@@ -658,8 +658,7 @@ impl V3ProviderFailureRuntimeHealth {
             ),
         )?;
         self.action_gate
-            .record_provider_success(&provider_scope.clone().rate_limit_global())?;
-        self.action_gate.record_provider_success(&provider_scope)
+            .record_provider_success(&provider_scope)
     }
 
     /// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行：
@@ -964,63 +963,6 @@ impl V3ProviderFailureRuntimeHealth {
             &source.code,
         )?;
         Ok(())
-    }
-
-    pub(crate) async fn wait_for_error05_recovery(
-        &self,
-        witness: &V3Error05RecoveryAdmissionWitness,
-        selected: &V3Target10ConcreteProviderSelected,
-        deadline: std::time::Instant,
-    ) -> Result<V3ProviderActionRecoveryTransition, String> {
-        if witness.normalized_error_family() == "provider_pre_cool" {
-            let ticket =
-                crate::provider_action_gate::V3ProviderActionRecoveryTicket::from_recovery_witness(
-                    witness,
-                )?;
-            let identity = precool_identity(
-                &selected.candidate.provider_id,
-                &selected.candidate.interface_id,
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-            );
-            return tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
-                loop {
-                    let generation = self.target_availability_generation();
-                    let held = self
-                        .precool
-                        .lock()
-                        .map_err(|error| error.to_string())?
-                        .contains_key(&identity);
-                    if !held
-                        || witness.provider_runtime_identity()
-                            != v3_relay_provider_candidate_key(&selected.candidate)
-                    {
-                        return Ok(V3ProviderActionRecoveryTransition::Consumed(ticket));
-                    }
-                    self.wait_for_target_availability_change(generation).await?;
-                }
-            })
-            .await
-            .map_err(|_| {
-                "provider observation exceeded original request residence deadline".to_string()
-            })?;
-        }
-        let provider_scope = V3ProviderActionProviderScope::new(
-            witness.failure_session_scope(),
-            v3_relay_provider_candidate_key_parts(
-                &selected.candidate.provider_id,
-                Some(&selected.candidate.interface_id),
-                Some(&selected.candidate.auth_alias),
-                Some(&selected.candidate.model_id),
-            ),
-        )?;
-        tokio::time::timeout_at(
-            tokio::time::Instant::from_std(deadline),
-            self.action_gate
-                .wait_for_recovery_witness(witness, provider_scope),
-        )
-        .await
-        .map_err(|_| "provider action wait exceeded request residence deadline".to_string())?
     }
 
     pub(crate) fn try_admit_candidate_rate_limit(

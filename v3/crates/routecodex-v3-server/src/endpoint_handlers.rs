@@ -312,14 +312,14 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             Some(request_identity.pipeline_id.clone()),
             payload.clone(),
         );
-        let plan = match plan_v3_responses_protocol_execution_with_recovery(
+        let plan_result = plan_v3_responses_protocol_execution_with_recovery(
             &state.manifest,
             raw,
             state.provider_health.runtime_health(),
             current_epoch_ms(),
         )
-        .await
-        {
+        .await;
+        let plan = match plan_result {
             Ok((plan, control)) => {
                 responses_request_execution_control = Some(control);
                 plan

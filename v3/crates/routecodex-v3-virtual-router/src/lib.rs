@@ -334,9 +334,9 @@ impl V3VirtualRouter {
         // candidate signals in the fixed order (hosted web_search >
         // multimodal > longcontext > coding > thinking > search > tools >
         // default). Take the first candidate that maps to a configured,
-        // non-empty classification pool and hand off exactly that one pool. Do
-        // not synthesize implicit capability pools and do not append default or
-        // any other pool after a hit.
+        // non-empty classification pool, then capture its declared default
+        // successor. Do not synthesize implicit capability pools or append any
+        // other classification pool.
         let mut selected_pool: Option<&V3RoutePoolManifest> = None;
         for candidate in &classified.facts.route_classification.candidates {
             if candidate == DEFAULT_ROUTE {
@@ -357,12 +357,16 @@ impl V3VirtualRouter {
         // configured, is empty, or does not satisfy the candidate signal, the
         // request is served by the required non-empty default pool.
         let selected_pool = selected_pool.unwrap_or(default_pool);
+        let mut tiers = vec![build_plan_tier(selected_pool)];
+        if selected_pool.id != DEFAULT_ROUTE {
+            tiers.push(build_plan_tier(default_pool));
+        }
 
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
             routing_group_id: classified.routing_group_id,
             facts: classified.facts,
-            tiers: vec![build_plan_tier(selected_pool)],
+            tiers,
         })
     }
 
