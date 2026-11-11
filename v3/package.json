@@ -1,6 +1,6 @@
 {
   "name": "routecodex-v3",
-  "version": "0.90.4948",
+  "version": "0.90.4949",
   "private": true,
   "description": "RouteCodex V3 independent build domain",
   "type": "module",
@@ -68,6 +68,7 @@
     "verify:v3-provider-session-cooldown": "node scripts/architecture/verify-v3-provider-session-cooldown.mjs",
     "test:v3-provider-session-cooldown-red-fixtures": "node scripts/tests/v3-provider-session-cooldown-red-fixtures.mjs",
     "test:v3-provider-session-cooldown": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib health::tests -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_session_isolation_contract -- --nocapture && node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_without_failure_session_header_reaches_provider -- --nocapture",
+    "test:v3-provider-immediate-passthrough": "CARGO_NET_OFFLINE=true sh -c 'for t in responses_request_reaches_provider_transport_immediately_without_capacity_wait responses_negative_control_fails_if_a_capacity_wait_or_busy_source_returns; do o=$(node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server \"$t\" -- --exact --test-threads=1) || exit $?; printf \"%s\\n\" \"$o\"; printf \"%s\" \"$o\" | grep -q \"test result: ok\\. 1 passed\" || { echo \"VACUOUS GATE: $t matched no test (renamed or deleted)\"; exit 1; }; done'",
     "test:v3-provider-compat-profile-loading": "node scripts/run-v3-cargo-test.mjs -p provider-compat-core -- --nocapture && npm run test:v3-custom-tool-function-compat-blackbox && npm run test:v3-goaichat-hosted-tool-history-blackbox",
     "test:v3-provider-reasoning-effort-policy-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_reasoning_effort_policy_blackbox provider_reasoning_effort_policy_direct_relay_public_http -- --exact --nocapture",
     "test:v3-provider-reasoning-effort-policy-config-failures": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test provider_reasoning_effort_policy_blackbox provider_reasoning_effort_policy_config_failures -- --exact --nocapture",
@@ -147,7 +148,6 @@
     "test:v3-responses-process-execution-decision": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib responses_provider_process_ -- --nocapture",
     "test:v3-error-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-error --test error_chain_contract -- --nocapture",
     "test:v3-provider-health-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses health::tests -- --nocapture",
-    "test:v3-provider-adaptive-concurrency": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses adaptive_concurrency -- --test-threads=1",
     "test:v3-p5-server-blackbox": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server -- --nocapture",
     "test:v3-vr-full-function-cli": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-cli --test vr_full_function_controlled_replay -- --nocapture",
     "test:v3-foundation-runtime-contract": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime foundation --lib -- --nocapture",

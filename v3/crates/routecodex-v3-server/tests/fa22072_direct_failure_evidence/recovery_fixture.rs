@@ -77,9 +77,14 @@ pub(super) fn expected_relay_b() -> V3Error01SourceRaised {
         "V3ProviderReqOutbound09TransportRequest",
         "owned_b_503",
         "OWNED_B_503_PRIVATE",
+        // v27 typed-chain truthfulness: the external link carries the provider's
+        // real received head (503) together with the provider's own private code
+        // and message. The link is never forged into a client-facing status - the
+        // client boundary is asserted separately by the transport/passthrough
+        // checks - so "no status at all" is the retired expectation.
         V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
-            status: None,
+            status: Some(503),
             code: Some("owned_b_503".into()),
             provider_id: Some("beta".into()),
             upstream_request_id: None,

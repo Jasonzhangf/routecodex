@@ -6,7 +6,6 @@ use crate::{V3Error02Classified, V3ErrorSourceKind};
 pub enum V3ProviderRecoveryKind {
     IrrecoverableGlobalCooldown,
     RecoverableCounted,
-    HealthNeutralTransient,
     NotProviderHealth,
 }
 
@@ -85,24 +84,10 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
-    if status == Some(429) {
-        return V3ProviderFailureAction {
-            class_code: classified.source.code.clone(),
-            failure_fingerprint,
-            recovery: V3ProviderRecoveryKind::HealthNeutralTransient,
-            scope: V3ProviderHealthScope::None,
-            score_delta_milli: 0,
-            failure_threshold: 0,
-            cooldown_ms: 0,
-            long_probe_backoff: false,
-            advisory_probe: false,
-        };
-    }
     // Real recoverable failures count toward the shared repeat threshold.
     // Authentication/account failures retain their immediate typed boundary.
-    if status != Some(429)
-        && (matches!(status, Some(401..=403))
-            || is_irrecoverable_provider_failure_code(&classified.source.code))
+    if matches!(status, Some(401..=403))
+        || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
         let cooldown_ms = 5_000;
         return V3ProviderFailureAction {
@@ -188,10 +173,9 @@ pub fn build_v3_provider_global_error_fingerprint(
     let (class, normalized_status) = match status {
         401 | 403 => ("account_auth", 401),
         402 => ("account_billing", 402),
-        429 => ("recoverable_upstream", 429),
         // 保留真实上游状态作为身份的一部分：500 与 502 是两种可恢复错误，
         // 交替出现不会累计成同一条连续失败序列而误冷却 provider。
-        500..=599 => ("recoverable_upstream", status),
+        429 | 500..=599 => ("recoverable_upstream", status),
         _ => return Ok(None),
     };
     V3ProviderErrorFingerprint::new(class, class, normalized_status, class).map(Some)
@@ -200,9 +184,9 @@ pub fn build_v3_provider_global_error_fingerprint(
 /// Provider health policy per upstream status.
 ///
 /// Account/billing classes (`401..=403`) are the typed irrecoverable group and
-/// still cool on their first occurrence. Classification alone does not cool
-/// HTTP 429: the health Store owns its sustained rate-limit episode. Other
-/// recoverable classes use the shared threshold for the exact identity.
+/// still cool on their first occurrence. Every other recoverable status,
+/// including HTTP 429, uses the same shared threshold for the exact identity;
+/// only the raw upstream evidence differs.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
@@ -212,7 +196,7 @@ pub fn build_v3_provider_global_failure_policy(
             cooldown_ms: 5_000,
             probe_interval_ms: 5_000,
         }),
-        500..=599 => Some(V3ProviderGlobalFailurePolicy {
+        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             cooldown_ms: 5_000,
             probe_interval_ms: 5_000,
@@ -305,9 +289,13 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        // 503 is a recoverable class: the first same-identity failure cools,
-        // while the probe ladder still backs off.
-        assert_eq!(action.failure_threshold, 1);
+        // 503 is a recoverable class: the shared consecutive-failure threshold
+        // decides when the exact identity enters the cooldown pool, while the
+        // probe ladder still backs off.
+        assert_eq!(
+            action.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        );
         assert_eq!(action.cooldown_ms, 5_000);
         assert!(action.long_probe_backoff);
 
@@ -316,7 +304,10 @@ mod tests {
             "provider_connect_failed",
             500,
         ));
-        assert_eq!(ordinary.failure_threshold, 1);
+        assert_eq!(
+            ordinary.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        );
         assert_eq!(ordinary.cooldown_ms, 5_000);
         assert!(!ordinary.long_probe_backoff);
 
@@ -349,23 +340,35 @@ mod tests {
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(action.failure_threshold, 0);
 
-        for code in ["insufficient_quota", "rate_limit_error"] {
-            let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
-                "V3ProviderReqOutbound09TransportRequest",
-                code,
-                429,
-            ));
-            assert_eq!(
-                rate_limited.recovery,
-                V3ProviderRecoveryKind::HealthNeutralTransient,
-                "{code}: early 429 is capacity backpressure"
-            );
-            assert_eq!(rate_limited.scope, V3ProviderHealthScope::None);
-            assert_eq!(rate_limited.failure_threshold, 0);
-            assert_eq!(rate_limited.cooldown_ms, 0);
-            assert_eq!(rate_limited.score_delta_milli, 0);
-        }
-        assert!(build_v3_provider_global_failure_policy(429).is_none());
+        // A 429 whose body carries an account/quota code stays irrecoverable:
+        // status 429 no longer exempts it from the ordinary typed boundary.
+        let quota_429 = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "insufficient_quota",
+            429,
+        ));
+        assert_eq!(
+            quota_429.recovery,
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+        );
+        let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "rate_limit_error",
+            429,
+        ));
+        assert_eq!(
+            rate_limited.recovery,
+            V3ProviderRecoveryKind::RecoverableCounted,
+            "HTTP 429 takes the ordinary recoverable control path"
+        );
+        assert_eq!(rate_limited.scope, V3ProviderHealthScope::GlobalProviderKey);
+        assert_eq!(
+            rate_limited.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        );
+        assert_eq!(rate_limited.cooldown_ms, 5_000);
+        assert_eq!(rate_limited.score_delta_milli, -5);
+        assert!(build_v3_provider_global_failure_policy(429).is_some());
 
         for (code, status) in [("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -387,7 +390,10 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(
+            action.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        );
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -397,7 +403,10 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(
+            action.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        );
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -405,13 +414,13 @@ mod tests {
             "rate_limit_error",
             429,
         ));
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
         assert_eq!(
-            action.recovery,
-            V3ProviderRecoveryKind::HealthNeutralTransient
+            action.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
         );
-        assert_eq!(action.scope, V3ProviderHealthScope::None);
-        assert_eq!(action.failure_threshold, 0);
-        assert_eq!(action.score_delta_milli, 0);
+        assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -419,7 +428,10 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(
+            action.failure_threshold,
+            crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
+        );
     }
 
     #[test]
@@ -442,6 +454,57 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+    }
+
+    /// Latest decision: HTTP 429 is an ordinary recoverable upstream failure.
+    /// Only the raw status/body evidence differs from another recoverable
+    /// class; no health-neutral or rate-limit-specific recovery policy exists.
+    #[test]
+    fn http_429_shares_the_ordinary_recoverable_policy_unlike_special_rate_limit() {
+        let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "rate_limit_error",
+            429,
+        ));
+        let ordinary = build_v3_provider_failure_action_from_v3_error_02(&classified(
+            "V3ProviderReqOutbound09TransportRequest",
+            "provider_connect_failed",
+            500,
+        ));
+        assert_eq!(
+            rate_limited.recovery, ordinary.recovery,
+            "429 must use the ordinary recoverable control path"
+        );
+        assert_eq!(rate_limited.scope, ordinary.scope);
+        assert_eq!(rate_limited.failure_threshold, ordinary.failure_threshold);
+        assert_eq!(rate_limited.cooldown_ms, ordinary.cooldown_ms);
+        assert_eq!(rate_limited.long_probe_backoff, ordinary.long_probe_backoff);
+        assert_eq!(
+            rate_limited
+                .failure_fingerprint
+                .as_ref()
+                .map(|fp| fp.http_status),
+            Some(429),
+            "the raw upstream 429 stays in the typed failure identity"
+        );
+    }
+
+    /// v29 arbitration: the shared recoverable threshold is three consecutive
+    /// failures for the exact complete identity; every recoverable status
+    /// (429 | 500..=599) enters the cooldown pool through the same count.
+    /// Cooldown ladder durations are owned by the provider health store.
+    #[test]
+    fn v29_recoverable_threshold_is_three_consecutive_failures() {
+        assert_eq!(crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD, 3);
+        for status in [429u16, 500, 502, 503, 599] {
+            let policy = build_v3_provider_global_failure_policy(status)
+                .unwrap_or_else(|| panic!("status {status} must have a recoverable policy"));
+            assert_eq!(
+                policy.failure_threshold,
+                crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
+                "status {status} uses the shared recoverable threshold"
+            );
+        }
     }
 
     #[test]

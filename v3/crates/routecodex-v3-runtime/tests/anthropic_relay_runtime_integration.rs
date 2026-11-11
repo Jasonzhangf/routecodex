@@ -631,7 +631,9 @@ fn json_projection_accepts_live_responses_message_output_text_shape() {
     );
 }
 
-struct ErrorTransport;
+struct ErrorTransport {
+    sends: Mutex<usize>,
+}
 
 #[async_trait]
 impl ResponsesTransport for ErrorTransport {
@@ -639,6 +641,7 @@ impl ResponsesTransport for ErrorTransport {
         &self,
         request: V3Transport13ResponsesHttpRequest,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        *self.sends.lock().unwrap() += 1;
         Err(V3ProviderError::HttpStatus {
             response: Box::new(V3ProviderHttpFailure {
                 request_id: request.request_id().to_string(),
@@ -757,17 +760,11 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
 #[tokio::test]
 async fn provider_error_enters_error01_06_without_success_projection() {
     let scope = "anthropic_provider_terminal";
-    let mut manifest = manifest(scope);
-    manifest
-        .servers
-        .get_mut(scope)
-        .expect("anthropic relay test server")
-        .execution
-        .as_mut()
-        .expect("execution policy")
-        .attempt_store
-        .residence_timeout_ms = 500;
-    let error = execute_v3_anthropic_relay_runtime(
+    let manifest = manifest(scope);
+    let transport = ErrorTransport {
+        sends: Mutex::new(0),
+    };
+    let output = execute_v3_anthropic_relay_runtime(
         &manifest,
         V3AnthropicRelayRuntimeInput {
             server_id: scope.into(),
@@ -781,18 +778,55 @@ async fn provider_error_enters_error01_06_without_success_projection() {
             toolreason_observation_session_id: None,
             payload: json!({"model":"claude-client-alias","messages":[{"role":"user","content":"fail"}],"stream":false}),
         },
-        &ErrorTransport,
+        &transport,
     )
     .await
-    .expect_err("a 429-only pool must remain recoverable until the residence bound");
-    assert!(
-        matches!(
-            &error,
-            routecodex_v3_runtime::V3AnthropicRelayRuntimeError::Target(message)
-                if message.contains("provider action wait exceeded request residence deadline")
-        ),
-        "429 must wait for recovery and terminate only at the declared residence bound: {error}"
+    .expect("a 429-only pool must terminal immediately, never wait on lifecycle");
+
+    // 失败身份不得重发：同一个完整provider身份只发送一次，不等待、不重试。
+    assert_eq!(
+        *transport.sends.lock().unwrap(),
+        1,
+        "failed identity must not be re-sent"
     );
+
+    // 不伪造成功：client只得到transport break，没有业务content投射。
+    assert_eq!(output.status, 502);
+    assert_eq!(output.client_response["error"]["code"], "network_error");
+
+    // 原始429被原样保留为provider-private terminal证据，不吞原始status/body。
+    // Single-candidate pool = last eligible candidate: the v27/v31 passthrough
+    // disposition carries the original typed external HTTP error verbatim.
+    assert_eq!(
+        output.terminal_disposition,
+        Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(
+                routecodex_v3_error::V3ExternalHttpWitness::new(
+                    429,
+                    vec![],
+                    br#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#
+                        .to_vec(),
+                )
+            )
+        )
+    );
+
+    // 失败走typed Error链，不写health/precool/probe/wait。
+    assert!(
+        output
+            .error_chain
+            .as_deref()
+            .unwrap_or(&[])
+            .contains(&"V3Error06ClientProjected"),
+        "error chain must show typed client projection, not a wait: {:?}",
+        output.error_chain
+    );
+    assert_eq!(output.provider_failure_attempts.len(), 1);
+    let attempt = &output.provider_failure_attempts[0];
+    assert_eq!(attempt.status, 429);
+    assert_eq!(attempt.health_state, "last_candidate_terminal");
+    assert_eq!(attempt.action, "terminal_route_and_default_exhausted");
+    assert_eq!(attempt.wait_ms, None);
 }
 
 #[tokio::test]

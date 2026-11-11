@@ -214,7 +214,6 @@ fn provider_file_write_then_read_roundtrip() {
                 selection: None,
             },
             responses: None,
-            concurrency: None,
             compatibility_profile: None,
             models: Default::default(),
             v3: None,

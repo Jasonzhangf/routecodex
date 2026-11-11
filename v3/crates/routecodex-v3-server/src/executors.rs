@@ -288,7 +288,6 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
             routecodex_v3_runtime::default_responses_transport(),
             state.provider_health.runtime_health(),
             now_epoch_ms,
-            true,
             Some(&provider_failure_event_sink),
             Some(&route_selection_event_sink),
         )
@@ -621,7 +620,6 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         routecodex_v3_runtime::default_responses_transport(),
         state.provider_health.runtime_health(),
         now_epoch_ms,
-        true,
         Some(&failure_sink),
         Some(&selection_sink),
     )
@@ -826,7 +824,6 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         routecodex_v3_runtime::default_responses_transport(),
         state.provider_health.runtime_health(),
         now_epoch_ms,
-        true,
         Some(&failure_sink),
         Some(&selection_sink),
     )

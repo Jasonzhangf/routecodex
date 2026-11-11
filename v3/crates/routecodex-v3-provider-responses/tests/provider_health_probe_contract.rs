@@ -51,7 +51,9 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
             )
             .unwrap()
             .unwrap();
-        assert_eq!(due, 5_200);
+        // The deadline is the later of the cadence step (200+5s) and the
+        // committed v29 cooldown minimum (200+10s).
+        assert_eq!(due, 10_200);
         assert!(store
             .acquire_provider_cooldown_probe_if_due_for_interface(
                 "p",
@@ -145,46 +147,84 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
 }
 
 #[test]
-fn business_success_resets_early_429_window_without_count_based_cooling() {
+fn business_success_resets_early_429_cooldown_without_window() {
     let store = V3ProviderHealthStore::default();
     let action = real_http_failure_action(429, "rate_limit_error");
-    for time in [100, 101, 102, 60100] {
-        let projection = store
-            .record_provider_failure_action("p", "a", "m", &action, time)
+    // Below the shared consecutive threshold the 429s stay in precool
+    // observation: no cooldown entry is committed yet.
+    for (index, now) in [100_u64, 101, 102].into_iter().enumerate() {
+        let observed = store
+            .record_provider_failure_action("p", "a", "m", &action, now)
             .unwrap();
-        assert!(!projection.cooldown, "count alone cannot cool");
+        assert_eq!(
+            observed.cooldown,
+            index == 2,
+            "only the third consecutive 429 commits the ordinary cooldown"
+        );
     }
+    let failed = store
+        .scheduling_projection("p", "a", "m", 1, 1, 102)
+        .unwrap();
+    assert!(
+        !failed.available,
+        "429 uses the ordinary recoverable control path"
+    );
+    assert!(
+        store
+            .scheduling_projection("p", "sibling", "m", 1, 1, 101)
+            .unwrap()
+            .available,
+        "a sibling identity is not affected"
+    );
+
     let recovered = store
-        .record_provider_key_success("p", "a", "m", 60101)
+        .record_provider_key_success("p", "a", "m", 103)
         .unwrap();
     assert!(recovered.available);
     assert!(!recovered.cooldown);
     assert_eq!(recovered.success_streak, 1, "one real success counts once");
-    for time in [120100, 180100] {
-        assert!(
-            store
-                .record_provider_failure_action("p", "a", "m", &action, time)
-                .unwrap()
-                .available,
-            "matching success starts a new unresolved window"
-        );
-    }
+
+    // The matching success reset the consecutive count: the next 429 starts a
+    // fresh streak below the threshold instead of re-entering the cooldown.
+    let repeated = store
+        .record_provider_failure_action("p", "a", "m", &action, 104)
+        .unwrap();
     assert!(
-        store
-            .record_provider_failure_action("p", "a", "m", &action, 240100)
-            .unwrap()
-            .cooldown
+        repeated.available && !repeated.cooldown,
+        "matching success starts a fresh failure streak"
     );
+    store
+        .record_provider_failure_action("p", "a", "m", &action, 105)
+        .expect("second 429 of the fresh streak");
+    let recommitted = store
+        .record_provider_failure_action("p", "a", "m", &action, 106)
+        .expect("third 429 of the fresh streak");
+    assert!(recommitted.cooldown && !recommitted.available);
+    let permit = store
+        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
+        .expect("probe acquisition")
+        .expect("cooldown owns the probe slot");
+    store
+        .record_provider_key_success("p", "a", "m", 107)
+        .expect("matching business success");
+    store
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 108)
+        .expect("current probe completion");
+    let projection = store
+        .scheduling_projection("p", "a", "m", 1, 1, 108)
+        .expect("projection after recovery");
+    assert!(projection.available);
 }
 
 #[test]
-fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_probe() {
+fn consecutive_429_fingerprints_each_start_their_own_streak() {
     let store = V3ProviderHealthStore::default();
     let mut action = routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("429");
+    action.failure_threshold = 3;
     for (time, code) in [
         (100, "rate_limit"),
-        (60100, "insufficient_quota"),
-        (120100, "other"),
+        (101, "insufficient_quota"),
+        (102, "other"),
     ] {
         action.failure_fingerprint = Some(
             routecodex_v3_error::V3ProviderErrorFingerprint::new(
@@ -199,10 +239,13 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
             .record_provider_failure_action("p", "a", "m", &action, time)
             .unwrap();
         assert_eq!(
-            projection.failure_streak, 0,
-            "429 does not penalize transport health"
+            projection.failure_streak, 1,
+            "each typed 429 fingerprint starts its own streak"
         );
-        assert_eq!(projection.cooldown, time == 120100);
+        assert!(
+            !projection.cooldown,
+            "failure_threshold is 3 and these fingerprints do not add up"
+        );
         for (key, model) in [("a", "other-model"), ("sibling", "m")] {
             assert!(
                 store
@@ -211,36 +254,6 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
                     .available
             );
         }
-    }
-    let permit = store
-        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
-        .unwrap()
-        .unwrap();
-    let availability_generation = store.availability_generation();
-    store
-        .record_provider_key_success("p", "a", "m", 1920101)
-        .unwrap();
-    assert_ne!(store.availability_generation(), availability_generation);
-    store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 1920102)
-        .unwrap();
-    assert!(
-        store
-            .scheduling_projection("p", "a", "m", 1, 1, 1920103)
-            .unwrap()
-            .available
-    );
-    assert!(store
-        .provider_cooldown_probe_keys_due(2_000_000)
-        .unwrap()
-        .is_empty());
-    for time in [1920104, 1920105] {
-        assert!(
-            store
-                .record_provider_failure_action("p", "a", "m", &action, time)
-                .unwrap()
-                .available
-        );
     }
 }
 

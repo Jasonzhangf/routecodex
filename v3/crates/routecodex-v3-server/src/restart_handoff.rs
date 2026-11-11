@@ -1239,9 +1239,12 @@ impl AsyncWrite for V3FrontHttpIo {
         data: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
         if self.front_socket.is_closed() {
+            // Neutral wording: any close reaches this branch (client disconnect,
+            // runtime terminal, lifecycle closeout), so the message must not
+            // claim a specific cause such as an exec replacement.
             return std::task::Poll::Ready(Err(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
-                "front socket closed for exec replacement",
+                "front transport closed",
             )));
         }
         self.front_socket.closeout_state.mark_response_started();

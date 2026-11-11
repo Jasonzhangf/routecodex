@@ -17,7 +17,6 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators(
     scope: V3ErrorActionScope,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
 ) -> Result<(Value, V3Error05ExecutionDecision), OperationRunnerError> {
     run_v3_error_02_to_05_decision_operators_with_target_recovery(
@@ -26,7 +25,6 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators(
         scope,
         route_pool_remaining_after_exclusion,
         default_pool_available,
-        same_provider_retry_available,
         recovery,
         false,
     )
@@ -38,7 +36,6 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators_with_target_recovery(
     scope: V3ErrorActionScope,
     route_pool_remaining_after_exclusion: usize,
     default_pool_available: bool,
-    same_provider_retry_available: bool,
     recovery: Option<V3Error05RecoveryAdmissionWitness>,
     target_recovery_pending: bool,
 ) -> Result<(Value, V3Error05ExecutionDecision), OperationRunnerError> {
@@ -56,7 +53,6 @@ pub(crate) fn run_v3_error_02_to_05_decision_operators_with_target_recovery(
             action,
             route_pool_remaining_after_exclusion,
             default_pool_available,
-            same_provider_retry_available,
             target_recovery_pending,
         )?;
     execute_v3_operation_runner_error_err05_execution_decision(
@@ -134,7 +130,6 @@ mod tests {
             provider_scope(),
             1,
             false,
-            false,
             Some(witness.clone()),
         )
         .expect("Error02 through Error05 must compose through canonical SDK nodes");
@@ -146,7 +141,6 @@ mod tests {
         assert_eq!(recovery, witness);
         assert_eq!(decision.exhaustion.route_pool_remaining_after_exclusion, 1);
         assert!(!decision.exhaustion.default_pool_available);
-        assert!(!decision.exhaustion.same_provider_retry_available);
     }
 
     #[test]
@@ -159,7 +153,6 @@ mod tests {
             provider_scope(),
             0,
             false,
-            false,
             None,
             true,
         )
@@ -170,7 +163,6 @@ mod tests {
         );
         assert_eq!(decision.exhaustion.route_pool_remaining_after_exclusion, 0);
         assert!(!decision.exhaustion.default_pool_available);
-        assert!(!decision.exhaustion.same_provider_retry_available);
         assert!(decision.exhaustion.target_recovery_pending);
         assert!(!decision.exhaustion.target_exhausted);
         assert_eq!(decision.action, V3Error05ExecutionAction::ReevaluateTarget);
@@ -186,7 +178,6 @@ mod tests {
             source,
             provider_scope(),
             0,
-            false,
             false,
             None,
         )
@@ -220,7 +211,6 @@ mod tests {
             provider_scope(),
             1,
             false,
-            false,
             Some(witness),
         )
         .expect("recoverable composition must execute through canonical SDK nodes");
@@ -240,7 +230,6 @@ mod tests {
             source,
             provider_scope(),
             1,
-            false,
             false,
             None,
         )

@@ -48,7 +48,6 @@ fn provider_failure_with_route_capacity_is_typed_nonterminal_error05() {
             source_status: Some(502),
         },
         false,
-        false,
         Some(recovery_witness()),
     );
 
@@ -76,7 +75,6 @@ fn provider_failure_never_uses_same_provider_budget() {
             source_status: Some(502),
         },
         true,
-        true,
         Some(recovery_witness()),
     );
 
@@ -100,7 +98,6 @@ fn provider_failure_projects_only_with_route_and_default_exhaustion_proof() {
             candidates_remaining: 0,
             source_status: Some(502),
         },
-        false,
         false,
         None,
     );
@@ -166,7 +163,6 @@ fn recoverable_response_processing_runtime_failure_with_capacity_is_nonterminal_
             source_status: Some(200),
         },
         false,
-        false,
         Some(recovery_witness()),
     );
 
@@ -187,7 +183,6 @@ fn recoverable_response_processing_runtime_failure_with_capacity_is_nonterminal_
             candidates_remaining: 1,
             source_status: Some(200),
         },
-        false,
         false,
         Some(recovery_witness()),
     );
@@ -211,7 +206,6 @@ fn exhausted_unharvestable_tool_markup_runtime_failure_is_502_terminal() {
             candidates_remaining: 0,
             source_status: Some(200),
         },
-        false,
         false,
         None,
     );
@@ -246,7 +240,8 @@ fn exhausted_unharvestable_tool_markup_runtime_failure_is_502_terminal() {
 }
 
 #[test]
-fn recoverable_response_processing_runtime_failure_terminal_proof_rejects_same_provider_retry() {
+fn exhausted_recoverable_response_processing_runtime_failure_is_terminal_without_same_identity_retry(
+) {
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
             source: unharvestable_tool_markup_response_source(),
@@ -259,7 +254,6 @@ fn recoverable_response_processing_runtime_failure_terminal_proof_rejects_same_p
             source_status: Some(200),
         },
         false,
-        true,
         None,
     );
 
@@ -267,5 +261,5 @@ fn recoverable_response_processing_runtime_failure_terminal_proof_rejects_same_p
         decision.action,
         V3Error05ExecutionAction::ProjectTerminal
     ));
-    assert!(decision.try_into_terminal().is_err());
+    assert!(decision.try_into_terminal().is_ok());
 }

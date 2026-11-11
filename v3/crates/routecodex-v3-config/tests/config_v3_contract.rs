@@ -70,6 +70,32 @@ fn issue2f2ab62_rejects_retired_project_message_mode() {
     );
 }
 
+/// v34 (request-path concurrency/admission removal): the retired
+/// `[provider.concurrency]` table must fail loudly at authoring parse instead of
+/// silently defaulting to a blocking wait. This follows the repo precedent for
+/// retired authoring surface (`client_error_projection_policy`, `status`,
+/// `message_mode`): the strict `deny_unknown_fields` parse rejects the unknown
+/// table itself, so any wait knob a user config still places inside it is
+/// rejected with it rather than silently ignored.
+#[test]
+fn rejects_retired_provider_concurrency_table_loudly() {
+    let source = r#"version = 3
+route_groups = {}
+
+[providers.cc]
+default_model = "m"
+models = {}
+auth = { type = "api_key", entries = [{ alias = "k", env = "K" }] }
+concurrency = {}
+"#;
+    let error = parse_v3_config_02_authoring(source)
+        .expect_err("retired provider concurrency table must be rejected at authoring parse");
+    assert!(
+        error.to_string().contains("unknown field `concurrency`"),
+        "{error}"
+    );
+}
+
 const FULL_CONFIG: &str = r#"
 version = 3
 
@@ -109,7 +135,6 @@ base_url = "https://api.anyint.ai/openai/v1"
 default_model = "gpt-5.5"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "CC_API_KEY" }] }
 responses = { process = "chat", streaming = "always" }
-concurrency = { max_in_flight = 8, acquire_timeout_ms = 60000, stale_lease_ms = 300000 }
 health = { enabled = true, failure_threshold = 3, cooldown_ms = 900000 }
 provider_request_cleanup = { historical_fields = ["reasoning.encrypted_content"] }
 
@@ -790,11 +815,6 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
         .as_ref()
         .expect("compact native V3 authoring must derive closed server execution policy");
     assert_eq!(execution.allowed_modes, vec!["direct", "relay"]);
-    assert_eq!(execution.attempt_store.request_max_attempts, 8);
-    assert_eq!(execution.attempt_store.attempt_max_bytes, 64 * 1024 * 1024);
-    assert_eq!(execution.attempt_store.attempt_max_frames, 262_144);
-    assert_eq!(execution.attempt_store.request_max_bytes, 64 * 1024 * 1024);
-    assert_eq!(execution.attempt_store.process_max_bytes, 512 * 1024 * 1024);
     assert_eq!(execution.attempt_store.residence_timeout_ms, 600_000);
 }
 
@@ -840,7 +860,7 @@ fn explicit_same_protocol_relay_is_preserved() {
 fn server_execution_attempt_store_compiles_explicit_policy() {
     let explicit_execution = HUB_V1_SERVER_EXECUTION.replacen(
         "allowed_transports = [\"json\", \"sse\"]",
-        "allowed_transports = [\"json\", \"sse\"]\nattempt_store = { request_max_attempts = 7, attempt_max_bytes = 1024, attempt_max_frames = 16, request_max_bytes = 2048, process_max_bytes = 4096, residence_timeout_ms = 5000 }",
+        "allowed_transports = [\"json\", \"sse\"]\nattempt_store = { residence_timeout_ms = 5000 }",
         1,
     );
     let raw = format!(
@@ -855,26 +875,12 @@ fn server_execution_attempt_store_compiles_explicit_policy() {
         .expect("primary execution policy")
         .attempt_store;
 
-    assert_eq!(policy.request_max_attempts, 7);
-    assert_eq!(policy.attempt_max_bytes, 1024);
-    assert_eq!(policy.attempt_max_frames, 16);
-    assert_eq!(policy.request_max_bytes, 2048);
-    assert_eq!(policy.process_max_bytes, 4096);
     assert_eq!(policy.residence_timeout_ms, 5000);
 }
 
 #[test]
-fn server_execution_attempt_store_rejects_zero_and_inverted_limits() {
-    let invalid_policies = [
-        "attempt_store = { request_max_attempts = 0 }",
-        "attempt_store = { attempt_max_bytes = 0 }",
-        "attempt_store = { attempt_max_frames = 0 }",
-        "attempt_store = { request_max_bytes = 0 }",
-        "attempt_store = { process_max_bytes = 0 }",
-        "attempt_store = { residence_timeout_ms = 0 }",
-        "attempt_store = { attempt_max_bytes = 2048, request_max_bytes = 1024 }",
-        "attempt_store = { request_max_bytes = 4096, process_max_bytes = 2048 }",
-    ];
+fn server_execution_attempt_store_rejects_zero_residence() {
+    let invalid_policies = ["attempt_store = { residence_timeout_ms = 0 }"];
 
     for invalid_policy in invalid_policies {
         let execution = HUB_V1_SERVER_EXECUTION.replacen(
@@ -1622,7 +1628,7 @@ fn enforces_hook_resource_and_optional_contracts() {
 }
 
 #[test]
-fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope() {
+fn provider_response_error_policy_rejects_retry_same_path() {
     let raw = FULL_CONFIG.replace(
         "[[providers.cc.semantic_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
         "[[providers.cc.response_error_policy]]\npolicy_id = \"cc_200_diagnostic_zero_usage\"",
@@ -1639,15 +1645,22 @@ fn provider_response_error_policy_accepts_full_path_and_injects_provider_scope()
         "[providers.cc.semantic_error_policy.action]\nkind = \"periodic_recovery\"\nreason_code = \"provider_diagnostic_zero_usage\"\nretry_mode = \"reselect_before_client_projection\"\ncooldown_ms = 300000\ndisable_scope = \"provider_model\"",
         "[[providers.cc.response_error_policy.path]]\nstep = \"wait_retry\"\nretry_mode = \"retry_same\"\nmax_attempts = 3\nbackoff_ms = 1000\nbackoff_multiplier = 2\n\n[[providers.cc.response_error_policy.path]]\nstep = \"cooldown\"\nscope = \"provider_model\"\nduration_ms = 300000\n\n[[providers.cc.response_error_policy.path]]\nstep = \"project\"\nreason_code = \"provider_diagnostic_zero_usage\"\npublic_code = \"upstream_overloaded\"",
     );
-    let manifest = compile_v3_config_05_manifest(parse_v3_config_02_authoring(&raw).unwrap())
-        .expect("provider-local full path must compile");
+    let error = parse_v3_config_02_authoring(&raw)
+        .expect_err("same-identity retry must be rejected by configuration parsing");
+    assert!(error.to_string().contains("retry_same"), "{error}");
+
+    let supported = raw.replace("retry_same", "reselect_before_client_projection");
+    let manifest = compile_v3_config_05_manifest(
+        parse_v3_config_02_authoring(&supported).expect("supported reselection authoring"),
+    )
+    .expect("provider-local reselection path must compile");
     let policy = &manifest.error.provider_error_action_policy[0];
     assert_eq!(policy.scope.provider_id.as_deref(), Some("cc"));
     assert_eq!(policy.scope.provider_type.as_deref(), Some("responses"));
     assert!(matches!(
         policy.path.first(),
         Some(V3ProviderDispositionStepManifest::WaitRetry {
-            retry_mode: V3ProviderErrorRetryMode::RetrySame,
+            retry_mode: V3ProviderErrorRetryMode::ReselectBeforeClientProjection,
             max_attempts: 3,
             backoff_ms: 1000,
             backoff_multiplier: Some(2),

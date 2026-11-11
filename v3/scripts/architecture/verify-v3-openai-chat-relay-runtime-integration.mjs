@@ -56,7 +56,7 @@ for (const phrase of [
   'build_v3_provider_req_outbound_09_transport_from_wire',
   'provider_wire_protocol_for_selected_candidate',
   'bind_v3_selected_business_auth_kind',
-  'transport.send(transport_request)',
+  'transport.send_observed(transport_request, attempt_control)',
   'build_v3_provider_resp_inbound_01_raw',
   'build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01)',
   'build_v3_hub_resp_inbound_02_from_provider_resp_compat_02_with_chat_request',

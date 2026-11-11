@@ -140,6 +140,25 @@ targets = {targets}
             tasks: vec![a_task, b_task],
         }
     }
+    /// v27 single/last eligible candidate passthrough: the client receives the
+    /// provider's own status and body verbatim (the helper keeps only the body
+    /// text), never a proxy-generated replacement envelope and never a fabricated
+    /// success.
+    fn assert_passthrough(body: &str) {
+        assert!(
+            body.contains("controlled provider failure"),
+            "the provider's own failure body must pass through verbatim: {body}"
+        );
+        assert!(
+            !body.contains("BUSINESS_"),
+            "a failed attempt must never be fabricated as a business success: {body}"
+        );
+        assert!(
+            !body.contains("routecodex"),
+            "no proxy-generated error envelope may be fabricated: {body}"
+        );
+    }
+
     async fn request(&self) -> Result<String, reqwest::Error> {
         self.request_stream(true).await
     }
@@ -169,6 +188,33 @@ targets = {targets}
             .post(format!("{}/v1/messages", self.base))
             .json(&json!({"model":"client","max_tokens":100,"messages":[{"role":"user","content":"controlled request"}]}))
             .send().await?.text().await
+    }
+    /// The last eligible candidate passthrough is a real provider HTTP response,
+    /// so the client boundary keeps that response's status. Only a transport
+    /// break loses it.
+    async fn request_with_status(&self) -> Result<(u16, String), reqwest::Error> {
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+            .post(format!("{}/v1/responses", self.base))
+            .json(&json!({"model":"client","input":"controlled request","stream":true}))
+            .send()
+            .await?;
+        let status = response.status().as_u16();
+        Ok((status, response.text().await?))
+    }
+    async fn relay_request_with_status(&self) -> Result<(u16, String), reqwest::Error> {
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+            .post(format!("{}/v1/messages", self.base))
+            .json(&json!({"model":"client","max_tokens":100,"messages":[{"role":"user","content":"controlled request"}]}))
+            .send()
+            .await?;
+        let status = response.status().as_u16();
+        Ok((status, response.text().await?))
     }
     async fn stop(self) {
         self.handle.shutdown().await;
@@ -233,10 +279,12 @@ async fn i86_last_eligible_failure_is_terminal() {
         pool["entries"].as_array().unwrap().is_empty(),
         "last candidate must not acquire cooldown: {pool}"
     );
-    assert!(
-        replies.iter().all(Result::is_err),
-        "failed attempt must terminate transport, never return normal empty success"
-    );
+    for reply in &replies {
+        let body = reply
+            .as_ref()
+            .unwrap_or_else(|error| panic!("the single candidate must answer the client: {error}"));
+        Entry::assert_passthrough(body);
+    }
 }
 
 #[tokio::test]
@@ -245,8 +293,8 @@ async fn i86_multi_last_eligible_stays_routable() {
     let entry = Entry::start_with_b_failure(true, true).await;
     let added = reqwest::Client::new().post(format!("{}/_routecodex/health/cooldown-pool/add",entry.base)).json(&json!({"provider_id":"a","interface_id":"default","auth_alias":"key","model_id":"wire-a","kind":"probe","duration_ms":60000})).send().await.unwrap();
     assert!(added.status().is_success());
-    let one = entry.request().await;
-    let two = entry.request().await;
+    let one = entry.request_with_status().await.unwrap();
+    let two = entry.request_with_status().await.unwrap();
     let calls = (
         entry.a.calls.load(Ordering::SeqCst),
         entry.b.calls.load(Ordering::SeqCst),
@@ -258,7 +306,16 @@ async fn i86_multi_last_eligible_stays_routable() {
         (0, 2),
         "last eligible B must remain usable on the next request without retrying A"
     );
-    assert!(one.is_err() && two.is_err());
+    // A is untried but cooled, so it is not an alternative this request can use:
+    // B is the last eligible candidate and its real provider answer reaches the
+    // client instead of a proxy transport break.
+    for (status, body) in [&one, &two] {
+        assert_eq!(
+            *status, 503,
+            "the last eligible candidate's real provider status must pass through: {body}"
+        );
+        Entry::assert_passthrough(body);
+    }
     assert!(
         pool["entries"]
             .as_array()
@@ -267,6 +324,68 @@ async fn i86_multi_last_eligible_stays_routable() {
             .all(|item| item["provider_id"] != "b"),
         "B failure cannot create cooldown: {pool}"
     );
+}
+
+/// P1-2 (r3): the last-eligible predicate must be over the candidates that are
+/// still *eligible*, not over candidates merely absent from request-local
+/// failure state. Candidate B is the only eligible candidate; A is untried but
+/// cooled. A cooldown row is not an alternative this request can use, so B is the
+/// last eligible candidate and its real provider HTTP status/body pass through to
+/// the client verbatim on both execution lanes: exact status, exact body, no
+/// proxy-generated envelope, no fabricated success and no same-identity retry.
+#[tokio::test]
+async fn i86_untried_cooled_sibling_is_not_an_alternative() {
+    let _home = LOCK.lock().await;
+    for relay in [false, true] {
+        let lane = if relay { "relay" } else { "direct" };
+        let entry = Entry::start_with_b_failure(true, true).await;
+        let added = reqwest::Client::new()
+            .post(format!("{}/_routecodex/health/cooldown-pool/add", entry.base))
+            .json(&json!({"provider_id":"a","interface_id":"default","auth_alias":"key","model_id":"wire-a","kind":"probe","duration_ms":60000}))
+            .send()
+            .await
+            .unwrap();
+        assert!(added.status().is_success());
+        let (status, body) = if relay {
+            entry.relay_request_with_status().await.unwrap()
+        } else {
+            entry.request_with_status().await.unwrap()
+        };
+        let a_calls = entry.a.calls.load(Ordering::SeqCst);
+        let b_calls = entry.b.calls.load(Ordering::SeqCst);
+        entry.stop().await;
+        assert_eq!(
+            status, 503,
+            "{lane}: the last eligible candidate's real provider status must pass through: {body}"
+        );
+        let parsed = serde_json::from_str::<Value>(&body).unwrap_or_else(|error| {
+            panic!(
+                "{lane}: the provider's own error body must pass through verbatim: {error}: {body}"
+            )
+        });
+        assert_eq!(
+            parsed,
+            json!({"error":{"message":"controlled provider failure"}}),
+            "{lane}: the client body must be the provider's own error body"
+        );
+        assert!(
+            !body.contains("routecodex"),
+            "{lane}: no proxy-generated error envelope may replace the provider body: {body}"
+        );
+        assert!(
+            !body.contains("network_error"),
+            "{lane}: no proxy error classification may replace the provider body: {body}"
+        );
+        assert!(
+            !body.contains("BUSINESS_"),
+            "{lane}: a failed attempt must never be fabricated as a business success: {body}"
+        );
+        assert_eq!(
+            (a_calls, b_calls),
+            (0, 1),
+            "{lane}: the cooled untried sibling must not be contacted and the failed attempt must not retry"
+        );
+    }
 }
 
 #[tokio::test]
@@ -285,10 +404,12 @@ async fn i86_exhaustion_is_request_local() {
         entry.stop().await;
         sibling.stop().await;
         assert_eq!(calls, (1, 1), "each failed candidate is sent once");
-        assert!(
-            failed.is_err(),
-            "JSON/SSE exhaustion must be detectable transport termination"
-        );
+        {
+            let body = failed.as_ref().unwrap_or_else(|error| {
+                panic!("the last eligible candidate must answer the client: {error}")
+            });
+            Entry::assert_passthrough(body);
+        }
         assert!(
             healthy.unwrap().contains("BUSINESS_B"),
             "failure must not terminate an independent request"
@@ -327,7 +448,12 @@ async fn i86_relay_switch_and_last_terminal() {
         calls, 2,
         "Relay must send each new request once without terminal retry"
     );
-    assert!(one.is_err() && two.is_err());
+    for reply in [&one, &two] {
+        let body = reply.as_ref().unwrap_or_else(|error| {
+            panic!("the relay last candidate must answer the client: {error}")
+        });
+        Entry::assert_passthrough(body);
+    }
     assert!(
         pool["entries"].as_array().unwrap().is_empty(),
         "Relay last candidate cannot cool: {pool}"

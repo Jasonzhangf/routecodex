@@ -971,7 +971,6 @@ features:
   owner_files:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - v3/crates/routecodex-v3-config/src/provider_config.rs
-  - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/wire.rs
   - v3/crates/routecodex-v3-provider-responses/tests/support/wire_unit.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
@@ -4266,33 +4265,10 @@ features:
   mainline_bindings:
   - v3-provider-action-gate-01
   - v3-provider-action-gate-02
-  - v3-provider-action-gate-03
-  - v3-provider-action-gate-04
   - v3-provider-action-gate-05
-  - v3-provider-action-gate-06
-  - v3-provider-action-gate-07
-  - v3-provider-action-gate-08
-  - v3-provider-action-gate-10
-  - v3-provider-action-gate-11
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
   - v3-provider-action-gate-14
   - v3-provider-action-gate-15
   - v3-provider-action-gate-16
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-21
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-23
-  - v3-provider-action-gate-24
-  - v3-provider-action-gate-25
-  - v3-provider-action-gate-26
-  - v3-provider-action-gate-27
-  - v3-provider-action-gate-28
-  - v3-provider-action-gate-29
-  - v3-provider-action-gate-30
-  - v3-provider-action-gate-31
-  - v3-provider-action-gate-32
   - v3-provider-action-gate-33
   - v3-provider-action-gate-34
   - v3-provider-action-gate-35
@@ -4312,18 +4288,12 @@ features:
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
-  - v3-provider-action-gate-52
-  - v3-provider-action-gate-53
-  - v3-provider-action-gate-54
-  - v3-provider-action-gate-55
-  - v3-provider-action-gate-56
   entry_symbols:
   - V3ProviderActionGate
   - V3ProviderActionGate::try_admit_exact_rate_limit
   - V3ProviderFailureRuntimeHealth::defer_provider_health_action
   - V3ProviderFailureRuntimeHealth::managed_precool_probe
   - V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
-  - V3RuntimeProviderAdmission::take_rate_limit_control
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
   - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
   - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
@@ -4350,7 +4320,6 @@ features:
   - scripts/architecture/v3-provider-action-gate-lib.mjs
   required_gates:
   - npm run test:v3-provider-action-gate
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test provider_action_gate_contract isolated_terminal_projection_commits_without_waiting_for_provider_action_admission -- --exact --nocapture
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
   - npm run test:v3-provider-session-cooldown
@@ -4662,10 +4631,6 @@ features:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-provider-action-gate
   mainline_bindings:
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-27
   - v3-chat-direct-relay-handoff-02
   runtime_status: source_controlled_runtime_boundary_verified
 
@@ -4740,16 +4705,23 @@ features:
   owner_scope: Ordinary request classification no longer depends on destructive
     historical-image rewriting. The earlier latest-carrier placeholder rule must
     not be used to keep historical images out of current-turn classification or
-    to drop business history. If a target protocol cannot represent an image, the
-    projection stays at the adjacent ProviderReqCompat owner and keeps complete
-    opaque data. Current-turn image detection is owned by the route-classifier
-    current-turn fact builder.
+    to drop business history. Historical images reach the SELECTED provider
+    without placeholder rewriting whenever that provider declares it can
+    represent image content (`multimodal` or `vision`); the placeholder projection
+    is allowed only for a selected provider that genuinely cannot represent the
+    image, and it then keeps the exact placeholder bytes without touching the
+    latest carrier. Current-turn image detection is owned by the
+    route-classifier current-turn fact builder.
   owner_crates:
   - routecodex-v3-runtime
   owner_files:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/history_image_cleanup.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/req_outbound_07_provider_semantic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/provider_req_compat_06_provider_compat.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/relay_request.rs
   forbidden_paths:
@@ -4762,8 +4734,8 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib hooks::tests::direct_responses_projection_preserves_current_image_for_selected_target
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib multimodal_target_preserves_image_bytes_for_session_semantics
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib non_multimodal_target_preserves_representable_latest_image
-  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox
-  runtime_status: retired_no_active_runtime_path
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server image_input_blackbox::history_image_projection_follows_selected_target_capability
+  runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.direct_runtime_kernel_core
   status: active_skeleton
@@ -4802,9 +4774,6 @@ features:
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
   - collapse_direct_client_sse_to_json
   mainline_bindings:
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-24
   runtime_status: source_controlled_runtime_boundary_verified
 
 - feature_id: v3.provider_global_subscription_probe
@@ -4814,10 +4783,10 @@ features:
   cross_feature_extensions:
   - path: v3/crates/routecodex-v3-config/src/internal.rs
     owner_feature_id: v3.simplified_user_config
-    reason: Declares the internal typed429 observation, minimumcooldown and probe-required windows consumed by the provider health owner, without adding user configuration or runtime state.
+    reason: Declares the internal shared recoverable-failure statuses and pre-cooldown observation settings consumed by the provider health owner, without adding user configuration or runtime state.
   - path: v3/crates/routecodex-v3-config/src/internal.toml
     owner_feature_id: v3.simplified_user_config
-    reason: Single source for the user-authorized120000,1800000,3600000 millisecond policy declarations; data-plane payloads and public config remain unchanged.
+    reason: Single source for the internal recoverable and irrecoverable status, cooldown, and probe-interval declarations; data-plane payloads and public config remain unchanged.
   owner_crates:
   - routecodex-v3-error
   - routecodex-v3-provider-responses
@@ -4835,14 +4804,11 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/runtime_projection.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
-  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
-  - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
-  - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
   - v3/crates/routecodex-v3-provider-responses/src/error.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/tests.rs
@@ -4887,7 +4853,6 @@ features:
   - v3.provider.cooldown_probe_state
   - v3.config.published_manifest
   - v3.provider.responses_transport_capability
-  - v3.provider.adaptive_concurrency_admission
   mainline_bindings:
   - v3-zen-health-probe-compat
   - v3-rd-target-select-direct-admission-rescue
@@ -4935,34 +4900,15 @@ features:
   - V3ProviderFailureRuntimeHealth::managed_probe
   - complete_v3_provider_health_probe
   - classify_provider_probe_failure
-  - V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
   - V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface
   - V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit
   - V3ProviderFailureRuntimeHealth::run_exhaustion_rescue_probes
   - build_v3_provider_global_probe_target
-  - run_v3_plan_execution_operator_with_probes
+  - run_v3_plan_execution
+  - run_v3_plan_execution_operator
   - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
-  - step_v3_target_planning_with_admission_sync
-  - try_admit_v3_selected_target
-  - V3RuntimeProviderAdmission::into_lease
-  - V3RuntimeProviderAdmission::drop
-  - V3PreAcquiredProviderAdmission::release
-  - V3AdaptiveConcurrencyPermitGuard::drop
-  - V3AdaptiveConcurrencyController::observe_rate_limit
-  - V3AdaptiveConcurrencyController::observe_business_success
-  - V3AdaptiveConcurrencyController::observe_rate_limit_scoped
-  - V3AdaptiveConcurrencyController::observe_business_success_scoped
-  - V3AdaptiveConcurrencyController::try_acquire_business_scoped
-  - V3AdaptiveConcurrencyController::wait_for_scoped_capacity_change
-  - V3AdaptiveConcurrencyController::snapshot_for_scope
-  - V3ConcurrencyIdentityScope
-  - V3AdaptiveConcurrencyController::complete_probe
-  - V3AdaptiveConcurrencyController::process_shared
-  - V3AdaptiveConcurrencyController::snapshot
-  - V3_ADAPTIVE_CONCURRENCY_SAMPLE_WINDOW_MS
   - V3_DEFAULT_PROVIDER_MAX_IN_FLIGHT
-  - V3AdaptiveConcurrencyRateLimitSample
   - V3ProviderResponsesTransport::send
   - ProviderResponsesTransport::send_probe
   - execute_v3_anthropic_relay_runtime_inner
@@ -4977,15 +4923,12 @@ features:
   - v3/crates/routecodex-v3-provider-responses/src/health_tests.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/persistence.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/probe_schedule.rs
-  - v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
   - v3/crates/routecodex-v3-provider-responses/src/health/manual.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe.rs
   - v3/crates/routecodex-v3-provider-responses/src/probe_backoff.rs
   - v3/crates/routecodex-v3-provider-responses/src/provider_cooldown_probe.rs
-  - v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/probe.rs
-  - v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
   - v3/crates/routecodex-v3-provider-responses/src/error.rs
   - v3/crates/routecodex-v3-provider-responses/src/transport/tests.rs
@@ -5054,11 +4997,11 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_probe_fairness -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
-  - npm run test:v3-provider-adaptive-concurrency
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib saturated_provider_admission_without_preacquired_lease_does_not_wait -- --nocapture
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_request_reaches_provider_transport_immediately_without_capacity_wait -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_negative_control_fails_if_a_capacity_wait_or_busy_source_returns -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server sustained_429_window_blackbox::ordinary_429_exact_identity_direct_public_http -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server sustained_429_window_blackbox::ordinary_429_exact_identity_relay_public_http -- --exact --nocapture --test-threads=1
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling v29_arbitration_last_eligible_429_passes_original_typed_error_to_client -- --exact --nocapture --test-threads=1
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - cargo check --manifest-path v3/Cargo.toml -p routecodex-v3-server --no-default-features
   - npm run verify:v3-resource-map

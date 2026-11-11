@@ -79,7 +79,6 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
         }
     };
 
-    let max_refills = crate::hub_v1::v3_chat_process_refill_max_consecutive();
     let owned_plan = initial_plan.cloned();
     let mut payload = raw.body.clone();
     let mut accumulated_items: Vec<Value> = Vec::new();
@@ -124,6 +123,12 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
         }
         if let Some(plan) = plan_for_round.as_ref() {
             state = state.with_initial_plan(plan);
+            if rounds > 0 {
+                // Refill is a new execution in the captured route. Preserve
+                // route-policy ownership, but select from current visibility.
+                state.initial_selected_target = None;
+                state.initial_protocol_decision = None;
+            }
         }
 
         let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(
@@ -216,7 +221,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                         finalized,
                     )
                 {
-                    if control.deadline_unix_ms().is_ok() && control.try_admit_refill(max_refills) {
+                    if control.deadline_unix_ms().is_ok() {
                         control.begin_refill_execution();
                         crate::hub_v1::accumulate_v3_chat_process_refill_usage(
                             &mut accumulated_usage,

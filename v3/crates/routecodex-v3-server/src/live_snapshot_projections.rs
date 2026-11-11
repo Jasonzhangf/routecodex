@@ -130,12 +130,12 @@ pub(crate) fn project_v3_runtime_usage_debug(usage: &V3RuntimeUsageSummary) -> V
 
 /// Record the typed provider terminal as provider-private evidence.
 ///
-/// The client boundary must never project the provider's own status, headers, or
-/// body, so the only place that real upstream error stays readable is the
-/// provider-private evidence directory. This is the single owner of that
-/// artifact: the witness accessors exist for this record, and without it the
-/// witness would be built and carried across every attempt and reselection only
-/// to be discarded at the boundary. The artifact is separate from `error.json`
+/// Intermediate provider errors remain private. The v27 normal last-candidate
+/// exception may also return its complete real HTTP response to the client, but
+/// the witness stays readable here as provider-side evidence. This is the single
+/// owner of that artifact: the witness accessors exist for this record, and
+/// without it the witness would be built and carried across every attempt and
+/// reselection only to be discarded. The artifact is separate from `error.json`
 /// because the error-evidence pair has its own owner and lanes that already
 /// write it; two writers to one file would race.
 ///
@@ -160,9 +160,9 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
     disposition: &routecodex_v3_error::V3ProviderTerminalDisposition,
 ) {
     let payload = match disposition {
-        // The provider's real status, headers, and body are the error truth this
-        // artifact exists to keep: they are recorded losslessly here and never
-        // reach the client.
+        // The provider's real status, headers, and body are recorded losslessly
+        // here. `ExternalHttp` remains private; `LastCandidateExternalHttp` may
+        // produce the separately constrained v27 client error response above.
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => json!({
             "object": "routecodex.v3.provider_terminal_evidence",
             "kind": "external_http",
@@ -171,6 +171,16 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
             "body": witness.body(),
             "body_read_failure": witness.body_read_failure(),
         }),
+        routecodex_v3_error::V3ProviderTerminalDisposition::LastCandidateExternalHttp(witness) => {
+            json!({
+                "object": "routecodex.v3.provider_terminal_evidence",
+                "kind": "external_http",
+                "status": witness.status(),
+                "headers": witness.headers(),
+                "body": witness.body(),
+                "body_read_failure": witness.body_read_failure(),
+            })
+        }
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => json!({
             "object": "routecodex.v3.provider_terminal_evidence",
             "kind": "no_response",

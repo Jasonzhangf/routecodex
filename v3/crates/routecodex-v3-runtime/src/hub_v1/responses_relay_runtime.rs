@@ -1,13 +1,11 @@
 use super::common::V3ChatProcessRefillDisposition;
 use super::*;
-use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
     provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
-    V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
+    V3RelayProviderFailurePolicyState, V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
@@ -18,8 +16,8 @@ use routecodex_v3_config::{
 };
 use routecodex_v3_debug::V3DebugError;
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness,
-    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3ErrorActionScope,
+    V3ErrorHandlingCenter, V3ErrorHandlingCenterInput, V3ErrorSourceKind,
     V3ProviderFailureSessionScope, V3_ERROR_CHAIN_NODE_IDS,
 };
 use routecodex_v3_provider_responses::{
@@ -106,6 +104,14 @@ impl V3ResponsesRelayProviderHealthHandle {
         self.runtime_health.clone()
     }
 
+    /// Read-only snapshot of pending pre-cool observation holds, for server
+    /// observability of the cooldown-pool substates. Pure read.
+    pub fn pending_precool_observations(
+        &self,
+    ) -> Vec<crate::provider_failure_runtime_policy::V3PendingPrecoolObservation> {
+        self.runtime_health.pending_precool_observations()
+    }
+
     pub fn flush_persistence(&self) -> Result<(), String> {
         self.runtime_health.store().flush_persistence()
     }
@@ -153,11 +159,13 @@ pub async fn execute_v3_responses_relay_runtime<T: ResponsesTransport>(
     input: V3ResponsesRelayRuntimeInput,
     transport: &T,
 ) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_with_retry_policy(
+    let provider_health =
+        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
+    execute_v3_responses_relay_runtime_with_transport_health(
         manifest,
         input,
         transport,
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
+        &provider_health,
     )
     .await
 }
@@ -173,8 +181,6 @@ pub async fn execute_v3_responses_relay_runtime_with_transport_health<T: Respons
         input,
         transport,
         provider_health.runtime_health(),
-        V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-        true,
         None,
         None,
         None,
@@ -204,7 +210,6 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
         None => crate::nodes::V3RequestExecutionControl::from_manifest(manifest, &input.server_id)
             .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))?,
     };
-    let max_refills = v3_chat_process_refill_max_consecutive();
     // One request-scoped projection state survives the refill rounds: a round
     // that committed its first business frames keeps them, and the final round
     // seals the single tail over the merged response.
@@ -247,8 +252,6 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
             execution_input,
             &transport,
             provider_health.runtime_health(),
-            V3ResponsesRelayRetryPolicy::from_manifest(manifest),
-            true,
             provider_failure_event_sink.clone(),
             route_selection_event_sink.clone(),
             initial_selected_target.clone(),
@@ -278,11 +281,8 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                     // independent cancel flag, so the residence deadline is the
                     // only one. An expired deadline delivers the current real
                     // result instead of launching another execution.
-                    if control.deadline_unix_ms().is_ok() && control.try_admit_refill(max_refills) {
-                        // A refill is a new execution of the Runtime mainline:
-                        // it owns its own provider transport attempt allowance
-                        // while the request-scoped refill budget and residence
-                        // deadline stay unchanged.
+                    if control.deadline_unix_ms().is_ok() {
+                        // Refill keeps the original deadline and transport sequence.
                         control.begin_refill_execution();
                         accumulated_items
                             .extend(collect_v3_chat_process_business_output_items(finalized));
@@ -380,57 +380,6 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     }
 }
 
-pub async fn execute_v3_responses_relay_runtime_with_retry_policy<T: ResponsesTransport>(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
-    retry_policy: V3ResponsesRelayRetryPolicy,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    let provider_health =
-        V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(manifest);
-    execute_v3_responses_relay_runtime_inner(
-        manifest,
-        input,
-        transport,
-        provider_health.runtime_health(),
-        retry_policy,
-        true,
-        None,
-        None,
-        None,
-        None,
-        BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds::default(),
-    )
-    .await
-}
-
-pub async fn execute_v3_responses_relay_runtime_with_health_and_retry_policy<
-    T: ResponsesTransport,
->(
-    manifest: &V3Config05ManifestPublished,
-    input: V3ResponsesRelayRuntimeInput,
-    transport: &T,
-    provider_health: &V3ResponsesRelayProviderHealthHandle,
-    retry_policy: V3ResponsesRelayRetryPolicy,
-) -> Result<V3ResponsesRelayRuntimeOutput, V3ResponsesRelayRuntimeError> {
-    execute_v3_responses_relay_runtime_inner(
-        manifest,
-        input,
-        transport,
-        provider_health.runtime_health(),
-        retry_policy,
-        true,
-        None,
-        None,
-        None,
-        None,
-        BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds::default(),
-    )
-    .await
-}
-
 async fn handle_v3_responses_relay_provider_failure(
     context: &V3RelayProviderFailurePolicyContext<'_>,
     selected: routecodex_v3_target::V3Target10ConcreteProviderSelected,
@@ -440,7 +389,7 @@ async fn handle_v3_responses_relay_provider_failure(
     if failure.terminal_projection.is_some() || failure.error_operator_fault.is_some() {
         return Ok(Some(failure));
     }
-    let result = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source(
+    let policy_outcome = match crate::provider_failure_runtime_policy::run_v3_relay_provider_failure_policy_with_response_source(
         context,
         selected,
         failure.source_stage,
@@ -455,7 +404,6 @@ async fn handle_v3_responses_relay_provider_failure(
             .map(V3ProviderFailureDirective::policy),
         &mut V3RelayProviderFailurePolicyState {
             failed_candidates: state.failed_candidates,
-            same_candidate_retries: state.same_candidate_retries,
             trace: state.trace,
             last_external_http: state.last_external_http,
         },
@@ -466,6 +414,11 @@ async fn handle_v3_responses_relay_provider_failure(
     )
     .await
     {
+        Ok(result) => Ok(result),
+        Err(Ok(error)) => Err(Ok(error)),
+        Err(Err(fault)) => Err(Err(fault)),
+    };
+    let result = match policy_outcome {
         Ok(result) => result,
         Err(Ok(error)) => return Err(V3ResponsesRelayRuntimeError::ProviderHealth(error)),
         Err(Err(fault)) => {
@@ -489,27 +442,10 @@ async fn handle_v3_responses_relay_provider_failure(
     match result.decision.action {
         V3Error05ExecutionAction::ReevaluateTarget => {
             *state.retry_selected = None;
-            *state.pending_recovery = None;
             Ok(None)
         }
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::WaitThenReselect { .. } => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *state.pending_recovery = Some(recovery);
-            } else {
-                *state.pending_recovery = None;
-            }
-            Ok(None)
-        }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
-            *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *state.pending_recovery = Some(recovery);
-            } else {
-                *state.pending_recovery = None;
-            }
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {
@@ -1304,8 +1240,6 @@ pub(crate) fn provider_target(
         provider_request_cleanup: selected.provider_request_cleanup.clone(),
         request_timeout_ms: provider.request_timeout_ms,
         sse_first_frame_timeout_ms: provider.sse_first_frame_timeout_ms,
-        initial_concurrency_budget: selected.initial_concurrency_budget,
-        concurrency_acquire_timeout_ms: selected.concurrency_acquire_timeout_ms,
     })
 }
 
@@ -1392,22 +1326,17 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             captured_target_09: None,
             failure_session_scope: failure_session_scope.clone(),
             provider_health: &health,
-            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
             deterministic_sample: 0,
         };
         let mut last_external_http = None;
         let mut failed_candidates = BTreeSet::new();
-        let mut same_candidate_retries = BTreeMap::new();
         let mut retry_selected = None;
-        let mut pending_recovery = None;
         let mut provider_failure_events = Vec::new();
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
         let mut state = V3ResponsesRelayProviderRetryState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             retry_selected: &mut retry_selected,
-            pending_recovery: &mut pending_recovery,
             provider_failure_events: &mut provider_failure_events,
             provider_failure_event_sink: None,
             selected_observability: &selected_observability,
@@ -1456,9 +1385,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         );
         assert!(output.error_operator_fault.is_none());
         assert_eq!(failed_candidates.len(), 1);
-        assert!(same_candidate_retries.is_empty());
         assert!(retry_selected.is_none());
-        assert!(pending_recovery.is_none());
         assert_eq!(provider_failure_events.len(), 1);
         assert!(
             health
@@ -1529,22 +1456,17 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             captured_target_09: None,
             failure_session_scope: failure_session_scope.clone(),
             provider_health: &health,
-            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
             deterministic_sample: 0,
         };
         let mut last_external_http = None;
         let mut failed_candidates = BTreeSet::new();
-        let mut same_candidate_retries = BTreeMap::new();
         let mut retry_selected = None;
-        let mut pending_recovery = None;
         let mut provider_failure_events = Vec::new();
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
         let mut state = V3ResponsesRelayProviderRetryState {
             failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
             retry_selected: &mut retry_selected,
-            pending_recovery: &mut pending_recovery,
             provider_failure_events: &mut provider_failure_events,
             provider_failure_event_sink: None,
             selected_observability: &selected_observability,
@@ -1564,9 +1486,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             "seeded operator fault must not become a client projection"
         );
         assert!(failed_candidates.is_empty());
-        assert!(same_candidate_retries.is_empty());
         assert!(retry_selected.is_none());
-        assert!(pending_recovery.is_none());
         assert!(provider_failure_events.is_empty());
         assert!(trace.is_empty());
         assert!(

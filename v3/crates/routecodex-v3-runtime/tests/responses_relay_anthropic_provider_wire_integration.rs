@@ -5,8 +5,7 @@ use routecodex_v3_provider_responses::{
     V3Transport13ResponsesHttpRequest,
 };
 use routecodex_v3_runtime::{
-    execute_v3_responses_relay_runtime, execute_v3_responses_relay_runtime_with_retry_policy,
-    V3ResponsesRelayClientBody, V3ResponsesRelayRetryPolicy, V3ResponsesRelayRuntimeInput,
+    execute_v3_responses_relay_runtime, V3ResponsesRelayClientBody, V3ResponsesRelayRuntimeInput,
 };
 use serde_json::{json, Value};
 use std::sync::Mutex;
@@ -685,7 +684,7 @@ async fn responses_relay_anthropic_cyber_refusal_sse_preserves_business_terminal
     let transport = AnthropicCyberRefusalThenSuccessTransport {
         attempts: Mutex::new(0),
     };
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &claude_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "anthropic_v3_10000".into(),
@@ -704,9 +703,6 @@ async fn responses_relay_anthropic_cyber_refusal_sse_preserves_business_terminal
             }),
         },
         &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 1,
-        },
     )
     .await
     .unwrap();
@@ -731,7 +727,7 @@ async fn responses_relay_anthropic_cyber_refusal_json_preserves_business_termina
     let transport = AnthropicCyberRefusalJsonTransport {
         attempts: Mutex::new(0),
     };
-    let output = execute_v3_responses_relay_runtime_with_retry_policy(
+    let output = execute_v3_responses_relay_runtime(
         &claude_manifest(),
         V3ResponsesRelayRuntimeInput {
             server_id: "anthropic_v3_10000".into(),
@@ -750,9 +746,6 @@ async fn responses_relay_anthropic_cyber_refusal_json_preserves_business_termina
             }),
         },
         &transport,
-        V3ResponsesRelayRetryPolicy {
-            same_candidate_retries: 1,
-        },
     )
     .await
     .unwrap();
@@ -1577,7 +1570,6 @@ compatibility_profile = "chat:minimax"
 auth = { type = "api_key", entries = [{ alias = "key1", env = "MINIMAX_TEST_KEY" }] }
 # This suite checks Anthropic wire projection; keep parallel tests outside the
 # provider admission path they are not intended to exercise.
-concurrency = { max_in_flight = 32, acquire_timeout_ms = 5000, stale_lease_ms = 300000 }
 
 [providers.minimax.models.MiniMax-M3]
 wire_name = "MiniMax-M3"

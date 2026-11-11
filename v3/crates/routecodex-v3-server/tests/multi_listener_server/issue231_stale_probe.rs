@@ -292,9 +292,27 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         Ok(Err(join_error)) => panic!("exhausted request task must not fail: {join_error}"),
         Ok(Ok(ClientOutcome::TransportBreak)) => {}
         Ok(Ok(ClientOutcome::Response(response))) => {
+            // v27 single/last eligible candidate passthrough: with one captured
+            // candidate there is nothing to switch to, so the client receives the
+            // provider's own status and body verbatim - no proxy-generated
+            // replacement envelope and no fabricated success. Reaching this arm
+            // promptly is exactly the evidence that the request did not wait for
+            // any future recovery.
             let status = response.status();
             let text = response.text().await.expect("unexpected response body");
-            panic!("exhaustion must close transport, got {status}: {text}");
+            assert_eq!(
+                status.as_u16(),
+                503,
+                "the provider's own status must pass through verbatim: {text}"
+            );
+            assert!(
+                text.contains("issue231 owned cooled failure"),
+                "the provider's own body must pass through verbatim: {text}"
+            );
+            assert!(
+                !text.contains("routecodex"),
+                "no proxy-generated error envelope may be fabricated: {text}"
+            );
         }
     }
 
