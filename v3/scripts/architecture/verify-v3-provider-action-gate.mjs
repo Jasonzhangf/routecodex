@@ -530,7 +530,7 @@ assertRustTest(
 assertRustTest(
   text.geminiTests,
   files.geminiTests,
-  'provider_error_enters_error01_06_without_success_projection',
+  'final_provider_error_stays_health_neutral_and_terminal',
 );
 assertRustTest(
   text.responsesRelayTests,
