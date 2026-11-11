@@ -3138,9 +3138,7 @@ data: [DONE]
     );
     assert_eq!(independent.status, 200);
     assert!(
-        independent
-            .node_trace
-            .contains(&"V3TargetLocalReselected"),
+        independent.node_trace.contains(&"V3TargetLocalReselected"),
         "the independent request must reselect and proceed: {:?}",
         independent.node_trace
     );
