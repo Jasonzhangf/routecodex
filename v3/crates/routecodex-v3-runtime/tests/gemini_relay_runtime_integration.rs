@@ -511,20 +511,10 @@ impl ResponsesTransport for MalformedErrorTransport {
 }
 
 #[tokio::test]
-async fn provider_error_enters_error01_06_without_success_projection() {
+async fn final_provider_error_stays_health_neutral_and_terminal() {
     let server_id = "gemini_provider_error_projection";
-    let mut manifest = manifest_for_action_gate_scope(server_id);
-    manifest
-        .servers
-        .get_mut(server_id)
-        .expect("gemini relay test server")
-        .execution
-        .as_mut()
-        .expect("execution policy")
-        .attempt_store
-        .residence_timeout_ms = 500;
-    let error = execute_v3_gemini_relay_runtime(
-        &manifest,
+    let output = execute_v3_gemini_relay_runtime(
+        &manifest_for_action_gate_scope(server_id),
         V3GeminiRelayRuntimeInput {
             server_id: server_id.into(),
             failure_session_scope: routecodex_v3_error::V3ProviderFailureSessionScope::new(
@@ -543,14 +533,31 @@ async fn provider_error_enters_error01_06_without_success_projection() {
         &ErrorTransport,
     )
     .await
-    .expect_err("a 429-only Gemini pool must remain recoverable until the residence bound");
+    .expect("a final eligible Gemini provider failure must terminate without recovery wait");
+    assert_eq!(output.provider_failure_attempts.len(), 1);
+    let failure = output
+        .provider_failure_attempts
+        .first()
+        .expect("the final provider attempt must be recorded");
+    assert_eq!(failure.status, 429);
+    assert_eq!(failure.health_state, "last_candidate_terminal");
+    assert!(failure.cooldown_until_ms.is_none());
+    assert!(failure.next_provider_key.is_none());
+    assert!(failure.wait_ms.is_none());
     assert!(
         matches!(
-            &error,
-            routecodex_v3_runtime::V3GeminiRelayRuntimeError::Target(message)
-                if message.contains("provider action wait exceeded request residence deadline")
+            output.terminal_disposition,
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(ref witness))
+                if witness.status() == 429
         ),
-        "provider failure must wait for recovery and terminate only at the declared residence bound: {error}"
+        "the real provider 429 must remain typed terminal evidence at the runtime boundary"
+    );
+    assert!(
+        output
+            .error_chain
+            .as_ref()
+            .is_some_and(|chain| chain.contains(&"V3Error06ClientProjected")),
+        "the runtime must keep the typed provider failure in the Error chain for the server boundary"
     );
 }
 
