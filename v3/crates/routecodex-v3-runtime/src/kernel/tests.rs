@@ -1,6 +1,6 @@
 include!("../../tests/support/kernel_unit.rs");
 
-async fn assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
     source_stage: &'static str,
     code: &'static str,
 ) {
@@ -101,16 +101,16 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         .and_then(|event| event.next_provider_key.clone())
         .expect("first-byte timeout must publish the concrete next candidate");
     assert_eq!(
-        retry_key, other_provider_key,
-        "{code} must skip the same provider's sibling auth key"
+        retry_key, sibling_key,
+        "{code} must continue to the same provider's untried sibling auth key"
     );
     assert!(
         failed_candidates.contains(&selected_key),
         "the failed exact key stays request-local excluded"
     );
     assert!(
-        failed_candidates.contains(&sibling_key),
-        "the same provider's sibling auth key is excluded for this request"
+        !failed_candidates.contains(&sibling_key),
+        "the same provider's untried sibling auth key stays eligible for this request"
     );
     assert!(
         !failed_candidates.contains(&other_provider_key),
@@ -119,8 +119,8 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
 }
 
 #[tokio::test]
-async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn transport_hang_preserves_same_provider_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         "V3Transport13ResponsesHttpRequest",
         routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE,
     )
@@ -128,8 +128,8 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
 }
 
 #[tokio::test]
-async fn sse_first_event_timeout_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn sse_first_event_timeout_preserves_same_provider_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         "V3ProviderResp14Raw",
         "provider_response_sse_first_event_timeout",
     )

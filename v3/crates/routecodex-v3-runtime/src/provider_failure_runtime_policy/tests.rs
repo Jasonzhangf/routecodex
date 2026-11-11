@@ -1405,12 +1405,11 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
         .expect("transport failure must reselect");
     assert_eq!(reselected.candidate.provider_id, "first");
     assert_eq!(reselected.candidate.auth_alias, "key2");
-    // An ordinary transport failure is owned by typed observation and health;
-    // it must not become a permanent request-local exclusion.
+    // The failed exact identity is excluded for this request while typed
+    // observation and health still own the recovery policy.
     assert_eq!(
-        state.failed_candidates.len(),
-        0,
-        "transport failure must not add a permanent request-local exclusion"
+        *state.failed_candidates,
+        BTreeSet::from(["first:default:key1:gpt-test".to_string()])
     );
     assert!(!state
         .failed_candidates

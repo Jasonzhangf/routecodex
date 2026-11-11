@@ -148,10 +148,10 @@ const cases = [
     name: 'Gemini fresh request starts consuming an unrelated recovery lane',
     path: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
-      'validated_terminal_sse_releases_action_lane_for_a_fresh_request',
-      'validated_terminal_sse_blocks_a_fresh_request',
+      'malformed_then_terminal_sse_keeps_fresh_request_immediate',
+      'malformed_then_terminal_sse_waits_for_a_fresh_request',
     ),
-    diagnostic: /missing active Rust test validated_terminal_sse_releases_action_lane_for_a_fresh_request/u,
+    diagnostic: /missing active Rust test malformed_then_terminal_sse_keeps_fresh_request_immediate/u,
   },
   {
     name: 'OpenAI active recovery loses explicit permit duration coverage',

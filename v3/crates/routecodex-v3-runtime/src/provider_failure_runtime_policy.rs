@@ -1044,6 +1044,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 )));
             }
             {
+                state.failed_candidates.insert(candidate_key.clone());
                 let (decision_projection, decision) = build_v3_relay_provider_error_05_decision(
                     &selected,
                     attempt_source_projection.clone(),
@@ -1055,9 +1056,6 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                     false,
                 )
                 .map_err(Err)?;
-                if is_request_local_compat_failure {
-                    state.failed_candidates.insert(candidate_key);
-                }
                 state.trace.push("V3TargetLocalReselected");
                 return Ok(V3RelayProviderFailurePolicyResult {
                     terminal_projection: terminal_projection_for(

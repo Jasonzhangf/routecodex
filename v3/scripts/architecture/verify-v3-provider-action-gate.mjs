@@ -518,7 +518,7 @@ for (const token of [
 }
 for (const testName of [
   'sse_client_disconnect_is_health_neutral_and_never_enters_action_wait',
-  'validated_terminal_sse_releases_action_lane_for_a_fresh_request',
+  'malformed_then_terminal_sse_keeps_fresh_request_immediate',
 ]) {
   assertRustTest(text.geminiTests, files.geminiTests, testName);
 }
