@@ -137,12 +137,12 @@ async fn wait_receipt(rx: &mut mpsc::UnboundedReceiver<(String, bool)>, expected
 }
 
 #[tokio::test]
-async fn health_neutral_429_then_manual_probe_2xx_restores_exact_key() {
+async fn health_neutral_429_keeps_exact_key_routable_without_probe() {
     automatic_recovery(false, false).await;
 }
 
 #[tokio::test]
-async fn in_flight_business_success_wakes_exact_429_gate_before_backoff() {
+async fn in_flight_business_success_keeps_exact_key_routable_after_429() {
     automatic_recovery(true, false).await;
 }
 
@@ -321,13 +321,20 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
         assert!(business(&client, &managed).await.contains("spare-secret"));
         assert_eq!(*failures.lock().await, 1);
     }
-    let mut refused_at = tokio::time::Instant::now();
     let refused_count = *failures.lock().await;
-    assert!(business(&client, &managed).await.contains("spare-secret"));
+    let fresh = business(&client, &managed).await;
+    if !late_business_failure && refusal_status == 429 {
+        assert!(
+            fresh.contains("controlled-secret"),
+            "429 must not gate the exact identity: {fresh}"
+        );
+    } else {
+        assert!(fresh.contains("spare-secret"));
+    }
     assert_eq!(
         *failures.lock().await,
         refused_count,
-        "fresh must skip gated identity"
+        "a fresh request must not be gated by the previous observation"
     );
     assert!(
         pool_entries(&client, managed.pool_url())
@@ -345,11 +352,23 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
                 .all(|entry| entry["provider_id"] != provider_id || entry["auth_alias"] != "key"),
             "an in-flight observation must not create a cooldown"
         );
+        let next = business(&client, &managed).await;
         assert!(
-            business(&client, &managed).await.contains("spare-secret"),
+            next.contains("spare-secret"),
             "the observation must not block a healthy sibling key"
         );
-        refused_at = tokio::time::Instant::now();
+    }
+    if refusal_status == 429 {
+        refusal_phase.store(false, std::sync::atomic::Ordering::SeqCst);
+        if let Some(request) = held_success {
+            success_release.add_permits(1);
+            assert!(request.await.unwrap().contains("controlled-secret"));
+        }
+        managed.finish().await;
+        task.abort();
+        let _ = task.await;
+        env::remove_var("V3_COOLDOWN_BINARY_SPARE_KEY");
+        return;
     }
     refusal_phase.store(false, std::sync::atomic::Ordering::SeqCst);
     if let Some(request) = held_success {
@@ -439,28 +458,16 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
             tokio::spawn(
                 async move { business_at(&client_wait, &base, "waiting exact key").await },
             );
-        sleep(Duration::from_millis(100)).await;
-        if waiting.is_finished() {
-            panic!(
-                "no-alternative request completed before matching success: {:?}",
-                waiting.await
-            );
-        }
+        let waiting_body = timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("exact request must not wait for the observation or a probe")
+            .unwrap();
         assert!(
-            refused_at.elapsed() < Duration::from_millis(500),
-            "fixture missed backoff window"
+            waiting_body.contains("spare-secret"),
+            "the request must proceed through the healthy fallback: {waiting_body}"
         );
         success_release.add_permits(1);
         assert!(request.await.unwrap().contains("controlled-secret"));
-        assert!(timeout(Duration::from_millis(500), waiting)
-            .await
-            .expect("matching success must wake exact waiter before backoff")
-            .unwrap()
-            .contains("controlled-secret"));
-        assert!(
-            refused_at.elapsed() < Duration::from_millis(900),
-            "natural expiry is not success wakeup"
-        );
         assert!(business(&client, &managed)
             .await
             .contains("controlled-secret"));
