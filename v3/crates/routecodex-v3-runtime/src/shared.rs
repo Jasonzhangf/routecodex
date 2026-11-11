@@ -1666,6 +1666,120 @@ mod tests {
     }
 
     #[test]
+    fn direct_sse_registered_response_metadata_extension_is_not_a_commit_or_failure() {
+        // `response.metadata` (provider devsail) is a provider-owned metadata
+        // frame with no client-visible output. On the DIRECT precommit guard it
+        // must classify as a registered extension: no
+        // `provider_response_sse_event_invalid`, and no StartClientStream
+        // commit authority (metadata alone cannot certify a first frame).
+        let frame = b"event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":6,\"response_id\":\"resp_x\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{}}}}\n\n";
+        let action = expect_direct_value(direct_sse_frame_provider_failure_source(
+            "devsail",
+            routecodex_v3_sse::SseIncrementalDecoder::new(
+                routecodex_v3_sse::SseTransportLimits::default(),
+            )
+            .push(build_v3_sse_transport_in_01_raw_chunk(frame))
+            .expect("test frame must decode")
+            .into_iter()
+            .next()
+            .expect("test frame must produce one SSE frame")
+            .frame()
+            .fields(),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        ));
+        assert_eq!(action, DirectSseInitialFrameAction::ContinueBuffering);
+    }
+
+    #[tokio::test]
+    async fn direct_sse_registered_response_metadata_extension_is_replayed_verbatim() {
+        // Transparent-passthrough lock for the DIRECT path: a stream whose first
+        // frame is the registered `response.metadata` extension followed by real
+        // output must replay the buffered metadata frame byte-for-byte when the
+        // first real output frame commits the client stream, and must not report
+        // a provider failure. The real devsail order is exercised in the relay
+        // integration test.
+        let expected = concat!(
+            "event: response.metadata\n",
+            "data: {\"type\":\"response.metadata\",\"sequence_number\":6,\"response_id\":\"resp_x\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{}}}}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+        )
+        .as_bytes()
+        .to_vec();
+        let source: V3ProviderSseStream = Box::pin(stream::iter([Ok(expected.clone())]));
+        let mut accepted = guard_initial_direct_sse_provider_failure_with_timeout(
+            "devsail",
+            source,
+            std::time::Duration::from_secs(1),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await
+        .expect("registered response.metadata extension must not surface a provider failure");
+        let first = accepted.next().await.unwrap().unwrap();
+        assert_eq!(
+            first, expected,
+            "the buffered registered extension frame must be replayed verbatim"
+        );
+        assert!(accepted.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn direct_sse_unregistered_responses_event_still_fails_closed() {
+        // Fail-closed lock for DIRECT: registering `response.metadata` must not
+        // admit unregistered `response.*` siblings or private namespaces.
+        for frame in [
+            b"event: response.metadat\ndata: {\"type\":\"response.metadat\",\"sequence_number\":6}\n\n".as_slice(),
+            b"event: provider_private.websocket_timing\ndata: {\"type\":\"provider_private.websocket_timing\",\"elapsed_ms\":12}\n\n".as_slice(),
+        ] {
+            let source: V3ProviderSseStream =
+                Box::pin(stream::iter([Ok(frame.to_vec())]));
+            let error = expect_ordinary_source(
+                guard_initial_direct_sse_provider_failure_with_timeout(
+                    "provider",
+                    source,
+                    std::time::Duration::from_secs(1),
+                    None,
+                    crate::hub_v1::V3HubProviderWireProtocol::Responses,
+                )
+                .await,
+            );
+            assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+            assert_eq!(error.source_stage, "V3ProviderResp14Raw");
+            assert_eq!(error.code, "provider_response_sse_event_invalid");
+            assert!(
+                error.message.contains("is not registered"),
+                "unexpected message: {}",
+                error.message
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn direct_sse_response_metadata_only_stream_does_not_fabricate_success() {
+        // A metadata-only stream carries no client output and no terminal. It
+        // must not manufacture a successful response: the precommit guard keeps
+        // buffering and reports the explicit empty-stream failure.
+        let source: V3ProviderSseStream = Box::pin(stream::iter([Ok(
+            b"event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":6,\"metadata\":{\"openai_chatgpt_moderation_metadata\":{}}}\n\n"
+                .to_vec(),
+        )]));
+        let error = expect_ordinary_source(
+            guard_initial_direct_sse_provider_failure_with_timeout(
+                "devsail",
+                source,
+                std::time::Duration::from_secs(1),
+                None,
+                crate::hub_v1::V3HubProviderWireProtocol::Responses,
+            )
+            .await,
+        );
+        assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
+        assert_eq!(error.code, "provider_response_sse_empty");
+    }
+
+    #[test]
     fn direct_sse_frame_interval_timeout_uses_provider_cold_start_budget() {
         assert_eq!(
             v3_direct_sse_frame_interval_timeout(Some(900_000)),
@@ -1936,6 +2050,69 @@ mod tests {
         let error = expect_ordinary_source(project_provider_raw_to_client_payload(raw).await);
         assert_eq!(error.source_kind, V3ErrorSourceKind::ProviderFailure);
         assert_eq!(error.code, "provider_response_sse_empty");
+    }
+
+    #[tokio::test]
+    async fn direct_sse_devsail_response_metadata_stream_projects_complete_response() {
+        // Full public-entry DIRECT lock for the real devsail stream order:
+        // created, in_progress, output_item.added, content_part.added,
+        // output_text.delta, response.metadata, output_text.done,
+        // content_part.done, output_item.done, completed. The registered
+        // `response.metadata` extension must be forwarded verbatim and the
+        // attempt must complete as a normal successful SSE body, never as a
+        // `provider_response_sse_event_invalid` provider failure.
+        let metadata_frame = "event: response.metadata\ndata: {\"type\":\"response.metadata\",\"sequence_number\":6,\"response_id\":\"resp_devsail\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{}}}}\n\n";
+        let raw = V3ProviderResp14Raw::from_sse(
+            "req".to_string(),
+            "devsail".to_string(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(stream::iter(vec![Ok::<Vec<u8>, V3ProviderError>(concat!(
+                "event: response.created\n",
+                "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_devsail\",\"status\":\"in_progress\"}}\n\n",
+                "event: response.in_progress\n",
+                "data: {\"type\":\"response.in_progress\",\"sequence_number\":1,\"response\":{\"id\":\"resp_devsail\",\"status\":\"in_progress\"}}\n\n",
+                "event: response.output_item.added\n",
+                "data: {\"type\":\"response.output_item.added\",\"sequence_number\":2,\"output_index\":0,\"item\":{\"id\":\"msg_devsail\",\"type\":\"message\",\"status\":\"in_progress\",\"content\":[]}}\n\n",
+                "event: response.content_part.added\n",
+                "data: {\"type\":\"response.content_part.added\",\"sequence_number\":3,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n",
+                "event: response.output_text.delta\n",
+                "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":4,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"delta\":\"ok\"}\n\n",
+                "event: response.metadata\n",
+                "data: {\"type\":\"response.metadata\",\"sequence_number\":6,\"response_id\":\"resp_devsail\",\"metadata\":{\"openai_chatgpt_moderation_metadata\":{\"prompt\":{}}}}\n\n",
+                "event: response.output_text.done\n",
+                "data: {\"type\":\"response.output_text.done\",\"sequence_number\":7,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"text\":\"ok\"}\n\n",
+                "event: response.content_part.done\n",
+                "data: {\"type\":\"response.content_part.done\",\"sequence_number\":8,\"item_id\":\"msg_devsail\",\"output_index\":0,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"ok\"}}\n\n",
+                "event: response.output_item.done\n",
+                "data: {\"type\":\"response.output_item.done\",\"sequence_number\":9,\"output_index\":0,\"item\":{\"id\":\"msg_devsail\",\"type\":\"message\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
+                "event: response.completed\n",
+                "data: {\"type\":\"response.completed\",\"sequence_number\":10,\"response\":{\"id\":\"resp_devsail\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg_devsail\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n",
+            )
+            .as_bytes()
+            .to_vec())])),
+        );
+
+        let projection = project_provider_raw_to_client_payload(raw)
+            .await
+            .expect("response.metadata must not fail an otherwise valid devsail DIRECT stream");
+        match projection.attempt_payload.body {
+            V3ProviderAttemptBody::Sse(mut stream) => {
+                let chunk = stream.next().await.unwrap().unwrap();
+                let text = std::str::from_utf8(&chunk).unwrap();
+                assert!(
+                    text.contains(metadata_frame),
+                    "registered response.metadata frame must be forwarded verbatim: {text}"
+                );
+                assert!(text.contains("\"delta\":\"ok\""), "{text}");
+                assert!(text.contains("response.completed"), "{text}");
+                assert!(stream.next().await.is_none());
+            }
+            other => panic!("expected direct SSE body, got {other:?}"),
+        }
     }
 
     #[tokio::test]

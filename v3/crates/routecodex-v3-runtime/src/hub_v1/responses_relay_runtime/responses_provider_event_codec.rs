@@ -228,6 +228,18 @@ fn is_supported_typed_responses_event(event_type: &str) -> bool {
             | "response.requires_action"
             | "response.done"
     ) || !event_type.starts_with("response.")
+        // Provider-owned `response.*` events registered in the provider
+        // response event table (for example devsail's standard
+        // `response.metadata`) are carried as data-plane extensions exactly
+        // like `codex.response.metadata`; unregistered `response.*` types stay
+        // unsupported.
+        || crate::protocol_tables::map_value(
+            crate::protocol_tables::V3TableKind::ProviderResponseEvent,
+            "responses",
+            event_type,
+            crate::protocol_tables::V3TableDirection::Inbound,
+        )
+        .is_ok_and(|registered| registered.is_some())
 }
 
 fn build_typed_responses_terminal_response(

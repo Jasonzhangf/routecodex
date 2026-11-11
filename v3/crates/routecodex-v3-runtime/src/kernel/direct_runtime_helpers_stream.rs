@@ -576,11 +576,21 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
         });
         return sealed;
     }
-    Err(crate::shared::direct_plain_error(
+    Err(crate::shared::direct_external_error(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderResp14Raw",
         "provider_response_sse_stream",
-        "provider SSE ended without a protocol terminal",
+        "provider response SSE stream ended without a terminal semantic event",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: None,
+            code: Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string()),
+            provider_id: None,
+            upstream_request_id: None,
+            message: Some(
+                "provider response SSE stream ended without a terminal semantic event".to_string(),
+            ),
+        },
     ))
 }
 
