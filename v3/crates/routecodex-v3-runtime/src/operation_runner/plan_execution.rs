@@ -3,13 +3,16 @@ use crate::hub_v1::{V3HubEntryProtocol, V3HubExecutionMode};
 use crate::nodes::V3Execution11ProtocolDecisionMode;
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_candidates_from_opaque_hit, select_v3_target_with_session_then_global,
-    V3ProviderFailureRuntimeHealth,
+    v3_provider_concurrency_key_parts, V3ProviderFailureRuntimeHealth,
 };
 use pipeline_runtime::{Operator, OperatorContext, ValueType};
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     build_v3_error_01_source_raised, V3Error01SourceRaised, V3ErrorSourceKind,
     V3ProviderFailureSessionScope,
+};
+use routecodex_v3_provider_responses::adaptive_concurrency::{
+    V3AdaptiveConcurrencyController, V3ConcurrencyIdentityScope,
 };
 use routecodex_v3_target::{
     V3Target09CandidateSetExpanded, V3Target10ConcreteProviderSelected, V3TargetExhaustion,
@@ -170,6 +173,43 @@ impl PlanExecutionOperator {
         .map_err(crate::nodes::raise_v3_execution_11_protocol_decision_failure)
     }
 
+    fn prefer_capacity_available_candidate(
+        &self,
+        expanded: &V3Target09CandidateSetExpanded,
+        first: V3Target10ConcreteProviderSelected,
+    ) -> V3Target10ConcreteProviderSelected {
+        let mut selected = first.clone();
+        let mut busy = BTreeSet::new();
+        let session_availability = self
+            .provider_health
+            .session_bound_availability(&self.failure_session_scope);
+
+        while candidate_concurrency_is_full(&selected) {
+            let busy_key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+                &selected.candidate,
+            );
+            if !busy.insert(busy_key) {
+                return first;
+            }
+            let mut excluded = self.request_local_excluded_candidates.clone();
+            excluded.extend(busy.iter().cloned());
+            let Ok(next) = select_v3_target_with_session_then_global(
+                &V3TargetInterpreter::default(),
+                expanded.clone(),
+                &self.failure_session_scope,
+                &session_availability,
+                &self.provider_health,
+                &excluded,
+                self.now_ms,
+                self.deterministic_sample,
+            ) else {
+                return first;
+            };
+            selected = next;
+        }
+        selected
+    }
+
     fn execute_plan(&self) -> PlanExecutionOperatorOutput {
         let expanded = match &self.target_source {
             V3PlanExecutionTargetSource::Expanded(expanded) => expanded.clone(),
@@ -221,6 +261,12 @@ impl PlanExecutionOperator {
                 }
             },
         };
+        let selected = match self.phase {
+            V3PlanExecutionPhase::AdmitAtExecution => {
+                self.prefer_capacity_available_candidate(&expanded, selected)
+            }
+            V3PlanExecutionPhase::PreplanWithoutAdmission => selected,
+        };
         let decision = match self.decide_execution_mode(selected) {
             Ok(decision) => decision,
             Err(Ok(source)) => return PlanExecutionOperatorOutput::Failed(source),
@@ -243,6 +289,30 @@ impl PlanExecutionOperator {
             },
         }
     }
+}
+
+fn candidate_concurrency_is_full(selected: &V3Target10ConcreteProviderSelected) -> bool {
+    let controller = V3AdaptiveConcurrencyController::process_shared();
+    let provider_key = v3_provider_concurrency_key_parts(
+        &selected.candidate.provider_id,
+        &selected.candidate.auth_alias,
+    );
+    if controller
+        .ensure_initial_budget(&provider_key, selected.candidate.initial_concurrency_budget)
+        .is_err()
+    {
+        return false;
+    }
+    let scope = V3ConcurrencyIdentityScope {
+        interface_id: selected.candidate.interface_id.clone(),
+        model_id: selected.candidate.model_id.clone(),
+    };
+    controller
+        .snapshot_for_scope(&provider_key, Some(&scope))
+        .is_some_and(|snapshot| {
+            snapshot.in_flight >= snapshot.budget
+                || snapshot.total_provider_in_flight >= snapshot.hard_max_in_flight
+        })
 }
 
 impl Operator for PlanExecutionOperator {
