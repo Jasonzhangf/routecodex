@@ -2272,7 +2272,10 @@ mod tests {
                     "type": "reasoning",
                     "id": "rs_gaaaa",
                     "encrypted_content": "gAAAA_cipher",
-                    "content": [{"type": "reasoning_text", "text": "visible"}]
+                    "content": [
+                        {"type": "reasoning_text", "text": "visible"},
+                        {"type": "encrypted_content", "data": "typed-reasoning-cipher"}
+                    ]
                 },
                 {
                     "type": "reasoning",
@@ -2296,9 +2299,15 @@ mod tests {
                     "type": "function_call_output",
                     "call_id": "call_1",
                     "encrypted_content": "tool-output-business-value",
-                    "output": [{
-                        "encrypted_content": "nested-tool-output-business-value"
-                    }]
+                    "output": [
+                        {
+                            "encrypted_content": "nested-tool-output-business-value"
+                        },
+                        {
+                            "type": "encrypted_content",
+                            "data": "typed-tool-output-business-value"
+                        }
+                    ]
                 },
                 {
                     "type": "function_call",
@@ -2329,6 +2338,14 @@ mod tests {
                     "arguments": {
                         "encrypted_content": "tool-search-argument-business-value"
                     }
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "message visible"},
+                        {"type": "encrypted_content", "data": "typed-message-cipher"}
+                    ]
                 }
             ]
         });
@@ -2352,11 +2369,23 @@ mod tests {
             "opaque cipher must be stripped"
         );
         assert!(
+            !payload.to_string().contains("typed-reasoning-cipher"),
+            "typed reasoning content part must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("typed-message-cipher"),
+            "typed message content part must be stripped"
+        );
+        assert!(
             !payload.to_string().contains("anthropic-signature-value"),
             "cipher shape must not infer an Anthropic source"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
+        assert_eq!(
+            payload["output"][1]["content"].as_array().unwrap().len(),
+            1
+        );
         assert_eq!(payload["output"][2]["summary"][0]["text"], "uuid visible");
         assert_eq!(payload["output"][3]["summary"][0]["text"], "opaque visible");
         assert_eq!(
@@ -2367,6 +2396,14 @@ mod tests {
             payload["output"][5]["output"][0]["encrypted_content"],
             "nested-tool-output-business-value",
             "the complete function_call_output business subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][1]["type"], "encrypted_content",
+            "typed content inside a tool business result must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][1]["data"],
+            "typed-tool-output-business-value"
         );
         assert_eq!(
             payload["output"][6]["arguments"]["encrypted_content"],
@@ -2393,6 +2430,12 @@ mod tests {
             "tool-search-argument-business-value",
             "tool_search_call arguments are business data"
         );
+        assert_eq!(
+            payload["output"][10]["content"].as_array().unwrap().len(),
+            1,
+            "typed message content part must not consume the visible message"
+        );
+        assert_eq!(payload["output"][10]["content"][0]["text"], "message visible");
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});

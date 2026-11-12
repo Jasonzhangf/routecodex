@@ -831,12 +831,12 @@ where
         let selected_target_model_id = selected.candidate.model_id.clone();
         let selected_target_compatibility_profile =
             selected.candidate.compatibility_profile.clone();
-        // VR 路由决策时一次性算出"是否保留响应密文"标记：仅 gpt 模型且目标计划只有
-        // 单一 provider 候选时为 true（Codex 客户端需要 gpt 官方密文重建 reasoning
+        // VR 路由决策时一次性算出"是否保留响应密文"标记：仅 gpt 模型且完整展开后
+        // 只有单一具体候选时为 true（Codex 客户端需要 gpt 官方密文重建 reasoning
         // 历史；跨 provider 或非 gpt 场景一律不保留）。该标记经 codec 写入响应侧
         // Resp03 profile，响应侧只消费此结果，不重复判定。
         let retain_response_cipher = is_v3_retain_response_cipher(
-            selected.route.target_plan.len(),
+            retained_expanded.candidates.len(),
             &selected.candidate.model_id,
         );
         let provider_wire_protocol = match C::wire_protocol(&selected.candidate) {

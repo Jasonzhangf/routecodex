@@ -392,7 +392,8 @@ fn build_responses_wire_payload_with_registry(
 /// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
 /// `preserve_anthropic_signature=true` 仅由 typed Anthropic provider source
 /// 派生，保留 Anthropic thinking/redacted thinking signature。其余场景递归删除
-/// 非工具业务子树中的 `encrypted_content`，保证跨 provider 密文不进入客户端。
+/// 非工具业务子树中的 `encrypted_content` 字段和 Responses `content` 数组中的
+/// `type=encrypted_content` 协议 part，保证跨 provider 密文不进入客户端。
 /// 工具调用与工具结果可能携带结构化参数或业务字段，必须完整保留。响应侧是密文
 /// 治理的唯一入口；本 hook 只消费判定结果。
 pub fn apply_v3_response_cipher_policy(
@@ -418,6 +419,10 @@ pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_respons
 /// 形状判定，删除所有非工具 `encrypted_content`；`strip_all=false`（Chat wire）
 /// 只删除 Codex 本地密文前缀。工具调用与工具结果属于业务数据，必须原样保留。
 fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bool) {
+    strip_v3_response_encrypted_fields(value, strip_all, false);
+}
+
+fn strip_v3_response_encrypted_fields(value: &mut Value, strip_all: bool, in_content_array: bool) {
     match value {
         Value::Object(map) => {
             if map
@@ -437,13 +442,19 @@ fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bo
             if remove {
                 map.remove("encrypted_content");
             }
-            for child in map.values_mut() {
-                strip_v3_response_encrypted_fields_recursive(child, strip_all);
+            for (key, child) in map.iter_mut() {
+                let child_is_content_array = key == "content" && matches!(child, Value::Array(_));
+                strip_v3_response_encrypted_fields(child, strip_all, child_is_content_array);
             }
         }
         Value::Array(items) => {
+            if strip_all && in_content_array {
+                items.retain(|item| {
+                    item.get("type").and_then(Value::as_str) != Some("encrypted_content")
+                });
+            }
             for item in items {
-                strip_v3_response_encrypted_fields_recursive(item, strip_all);
+                strip_v3_response_encrypted_fields(item, strip_all, false);
             }
         }
         _ => {}

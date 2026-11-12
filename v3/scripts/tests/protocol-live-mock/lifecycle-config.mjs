@@ -102,6 +102,7 @@ export async function generateRccConfig(options = {}) {
       wireModel: candidate.wireModel,
       model: candidate.model,
       token: candidate.token,
+      authEntries: candidate.authEntries,
       providerConcurrency,
     });
     writeFileSync(providerPath, text);
@@ -114,6 +115,7 @@ export async function generateRccConfig(options = {}) {
       model: candidate.model,
       wire_model: candidate.wireModel,
       token: candidate.token,
+      auth_entries: candidate.authEntries,
     };
   });
   if (providerFiles.length !== plan.candidates.length) {
@@ -162,6 +164,7 @@ tiers = ${renderDefaultTier(plan.candidates)}
       wire_model: file.wire_model,
       provider_path: file.path,
       auth_token: file.token,
+      auth_entries: file.auth_entries,
       authorization: `Bearer ${file.token}`,
       declared: true,
     })),
@@ -184,6 +187,7 @@ tiers = ${renderDefaultTier(plan.candidates)}
       text: file.text,
       model: file.model,
       wire_model: file.wire_model,
+      auth_entries: file.auth_entries,
     })),
     candidate_identity_receipts: candidateIdentityReceipts,
     mock_port: mockPort,
@@ -244,6 +248,7 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
         model: defaultModel,
         wireModel: defaultWireModel,
         token: FAKE_TASK_TOKEN,
+        authEntries: [{ alias: 'key1', token: FAKE_TASK_TOKEN }],
       }],
     };
   }
@@ -253,6 +258,7 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
   }
   const declaredModel = runtimeSetup.model ?? defaultModel;
   const declaredWireModel = runtimeSetup.wire_model ?? defaultWireModel;
+  const authAliases = normalizeAuthAliases(runtimeSetup.auth_aliases);
   const parsed = rawCandidates.map((raw) => {
     const parts = String(raw).split('/');
     if (parts.length !== 2 || parts.some((part) => !part)) {
@@ -275,8 +281,15 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
         ...only,
         wireModel: declaredWireModel,
         token: FAKE_TASK_TOKEN,
+        authEntries: authAliases?.map((alias, index) => ({
+          alias,
+          token: `${FAKE_TASK_TOKEN}-${only.providerId}-${index + 1}`,
+        })) ?? [{ alias: 'key1', token: FAKE_TASK_TOKEN }],
       }],
     };
+  }
+  if (authAliases !== null) {
+    throw new Error('runtimeSetup.auth_aliases is supported only with one provider/model target');
   }
   const seenProviders = new Set();
   for (const entry of parsed) {
@@ -294,6 +307,7 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
       ...entry,
       wireModel: declaredWireModel,
       token: `${FAKE_TASK_TOKEN}-${entry.providerId}`,
+      authEntries: [{ alias: 'key1', token: `${FAKE_TASK_TOKEN}-${entry.providerId}` }],
     })),
   };
 }
@@ -304,9 +318,14 @@ function renderProviderFile({
   baseURL,
   wireModel,
   model,
-  token,
+  authEntries,
   providerConcurrency,
 }) {
+  const authBody = authEntries.length === 1
+    ? `apiKey = "${authEntries[0].token}"`
+    : `entries = [\n${authEntries
+      .map((entry) => `  { alias = "${entry.alias}", apiKey = "${entry.token}" }`)
+      .join(',\n')}\n]`;
   const concurrency = providerConcurrency
     ? `\n[provider.concurrency]\n${PROVIDER_CONCURRENCY_KEYS
       .filter((key) => providerConcurrency[key] !== undefined)
@@ -326,7 +345,7 @@ ${concurrency}
 
 [provider.auth]
 type = "apikey"
-apiKey = "${token}"
+${authBody}
 
 [provider.models."${model}"]
 wireName = "${wireModel}"
@@ -414,12 +433,30 @@ function validateProviderFile(path, candidate) {
     `providerId = "${candidate.providerId}"`,
     `[provider.models."${candidate.model}"]`,
     `wireName = "${candidate.wireModel}"`,
-    `apiKey = "${candidate.token}"`,
   ];
+  if (candidate.authEntries.length === 1) {
+    required.push(`apiKey = "${candidate.authEntries[0].token}"`);
+  } else {
+    for (const entry of candidate.authEntries) {
+      required.push(`alias = "${entry.alias}"`, `apiKey = "${entry.token}"`);
+    }
+  }
   const missing = required.filter((needle) => !text.includes(needle));
   if (missing.length > 0) {
     throw new Error(`generated provider file ${path} is missing ${missing.join(', ')}`);
   }
+}
+
+function normalizeAuthAliases(raw) {
+  if (raw === undefined) return null;
+  if (!Array.isArray(raw) || raw.length !== 2 || raw.some((alias) => typeof alias !== 'string' || alias.trim() === '')) {
+    throw new Error('runtime_setup.auth_aliases must declare exactly two non-empty aliases');
+  }
+  const aliases = raw.map((alias) => alias.trim());
+  if (new Set(aliases).size !== aliases.length) {
+    throw new Error('runtime_setup.auth_aliases must be unique');
+  }
+  return aliases;
 }
 
 function requireProtocol(value) {
