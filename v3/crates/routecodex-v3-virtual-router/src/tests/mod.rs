@@ -451,7 +451,7 @@ fn direct_unknown_model_falls_back_to_normal_pool_routing() {
 }
 
 #[test]
-fn direct_media_mismatch_fails_without_reroute() {
+fn direct_pin_preserves_provider_despite_media_capability_label() {
     let router = V3VirtualRouter::default();
     let manifest = manifest_with_direct_provider();
     let classified = router
@@ -462,13 +462,19 @@ fn direct_media_mismatch_fails_without_reroute() {
             direct_facts("prov.model-x", BTreeSet::from(["vision".into()])),
         )
         .unwrap();
+    let plan = router
+        .resolve_route_pool_plan(&manifest, classified)
+        .expect("a capability label must not reject an explicit provider.model pin");
+    let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
+
+    assert_eq!(hit.pool_id, "direct");
     assert_eq!(
-        router.resolve_route_pool_plan(&manifest, classified),
-        Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
-            provider: "prov".into(),
-            model: "model-x".into(),
-            capability: "vision".into(),
-        })
+        hit.target_plan[0].direct_provider_model,
+        Some(("prov".into(), "model-x".into()))
+    );
+    assert!(
+        hit.request_capabilities.contains("vision"),
+        "the label remains available as routing evidence without filtering the pin"
     );
 }
 

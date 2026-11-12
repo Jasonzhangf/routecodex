@@ -2263,8 +2263,9 @@ features:
     first `.` is an enabled provider id that declares that model or one of its aliases.
     Every other client model string — no dot, an unknown provider segment, or an enabled
     provider that declares no such model — falls back to normal classification, the same
-    path `auto` and virtual catalog entry names take. Only a resolved direct model that
-    cannot serve the request media requirement fails explicitly without rerouting.'
+    path `auto` and virtual catalog entry names take. A resolved direct model remains the
+    declared provider pin; capability labels select route pools and never reject or
+    filter that pin.'
   - Explicit `provider.model` is a direct target handoff, not a classification; it cannot
     be reshaped by historical policy, sticky state, or the current-turn classification order.
   - The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in
@@ -4043,6 +4044,8 @@ features:
   - write_front_response_frame
   - V3_FRONT_CLOSE_FLUSH
   allowed_paths:
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/tests/client_cancel_terminal_public.rs
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
@@ -4184,6 +4187,8 @@ features:
   status: active
   owner_crate: routecodex-v3-runtime
   owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
@@ -4224,6 +4229,9 @@ features:
   - v3-runtime-timing-13
   - v3-runtime-timing-14
   allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-server/tests/refill_timing_public.rs
   - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -5006,7 +5014,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - npm run test:v3-provider-adaptive-concurrency
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_does_not_exclude_declared_candidate -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib saturated_provider_admission_without_preacquired_lease_does_not_wait -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture

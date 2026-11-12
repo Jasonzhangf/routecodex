@@ -1502,6 +1502,15 @@ features:
     - final_provider_final_key_429_stays_health_neutral_and_ends_transport
     - remaining_same_provider_key_is_attempted_after_first_key_failure
     - last_of_two_failing_keys_keep_errors_internal_and_end_transport
+  jenny_sse_nonblocking_blackbox:
+    command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e37891a_jenny_sse -- --nocapture --test-threads=1
+    test_ids:
+    - healthy_stream_returns_metadata_and_completion
+    - same_session_stream_progresses_while_r1_is_held
+    - held_probe_stream_reaches_healthy_declared_successor
+    - all_unavailable_held_probe_release_characterization
+    - all_unavailable_held_probe_ends_without_waiting
+    - capability_labels_choose_pool_without_filtering_provider
   change_risk: high
   owner_kind: rust_project_v3
   owner_scope: P5 one-hit Virtual Router plus recursive Target Interpreter with read-only Provider availability
@@ -1620,7 +1629,7 @@ features:
     and every other model string uses current-turn classification without Target
     requested-model alias matching
   - '`provider.model` direct routing follows V2 semantics: the client model splits on its first dot into an existing enabled provider id (unknown provider falls back to normal classification), aliases resolve
-    to the canonical model id (an enabled provider that declares no such model also falls back to normal classification), unmet vision/multimodal requirements fail fast, health cooldowns are reported but never veto the pin while request-local
+    to the canonical model id (an enabled provider that declares no such model also falls back to normal classification), capability labels remain routing evidence and never reject or filter the declared pin, health cooldowns are reported but never veto the pin while request-local
     exclusions still block, and /v1/models exposes every enabled provider model as a provider.model direct id'
   required_contract:
   - Ordinary classification selects the first configured non-empty pool in the fixed
@@ -2885,6 +2894,7 @@ features:
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
+  - Direct refill contributes every completed round exactly once to final Runtime timing in both output and stream snapshot; Server projection and repeated snapshot merges retain that total, while a single round remains unchanged (337deea).
   - Direct SSE successful complete-attempt collection and sealing precede publication of typed runtime_total, external, and internal timing.
   - Direct SSE frame terminal or clean EOF closes only external time; a failed collector preserves the original typed source and leaves Runtime timing open for retry/reselection.
   - compact_direct_projected_stream_reaches_collector_without_loopback preserves exact compact message output through the Direct typed SSE tree and collector; empty_direct_attempt_keeps_original_error_and_timing_open_for_recovery locks the demonstrated terminal-timing masking regression.
@@ -2897,6 +2907,7 @@ features:
   - Direct SSE malformed tail or [DONE] without response.completed does not publish successful Runtime timing.
   - Server must not synthesize Runtime internal/external timing or emit unreported placeholders on success.
   integration:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test refill_timing_public -- --nocapture --test-threads=1
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime runtime_timing --lib -- --nocapture
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_ --lib -- --nocapture
   smoke:
@@ -2995,6 +3006,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   - docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml
   required_contract:
+  - A real client disconnect while the outcome remains pending records one cancelled terminal before aborting only that request, including when only headers or keepalives have been delivered (7a07d21).
   - The Server commits the client SSE transport channel and its transport-only keepalives; the Runtime still buffers the full provider attempt before any provider payload byte is projected.
   - An outcome that arrives inside one keepalive interval keeps the exact runtime status, headers, and body; the committed channel carries only transport framing.
   - The committed channel carries the projected client payload with SSE transport framing only; the transport module reads the HTTP status and content type and never parses, reclassifies, or rewrites the payload.
@@ -3010,6 +3022,7 @@ features:
   - A committed channel never closes the connection cleanly in place of the typed transport break.
   required_blackbox:
   - The real /v1/chat/completions entry returns a 200 text/event-stream head plus a keepalive comment while the controlled provider attempt is still gated.
+  - client_cancel_terminal_public covers Responses Direct, Responses Relay, and OpenAI Chat Direct. Responses Direct and Relay prove one cancelled terminal before first business output, one after a committed business prefix, and no cancelled terminal after a resolved normal outcome. OpenAI Chat Direct proves the shared recorder for a buffered whole-attempt mode through cancellation before first business output and a resolved normal outcome; it must not fabricate a business prefix before the provider terminal.
   - The buffered provider payload and the runtime terminal still stream through the committed channel once the provider is released.
   - A non-SSE client on the same entry receives no committed channel and still receives the runtime JSON outcome.
   - An SSE client whose released provider returns a complete JSON document receives that successful payload by SSE transport framing with no transport failure and no error frame.
@@ -3019,6 +3032,7 @@ features:
   - borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse proves borrowed-preflight cancellation restores queued provider dispatch after keepalive reuse and preserves complete pending SSE.
   - p0_restart_interrupts_backpressured_json_transport and p0_restart_interrupts_backpressured_sse_transport enter public HTTP and official CLI with twelve MiB responses; restart completes while the client pauses reading, interruption stays detectable without a fabricated terminal, and client retries receive complete output.
   required_gates:
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test client_cancel_terminal_public -- --nocapture --test-threads=1
   - npm run test:v3-client-sse-head-commit
   - npm run test:v3-client-transport-boundary
   - npm run verify:v3-client-sse-head-commit
@@ -3325,6 +3339,7 @@ features:
   required_gates:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e37891a_admission_nonblocking -- --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e37891a_jenny_sse -- --test-threads=1
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test multi_listener_server issue44cc3af_first_byte_stall_keeps_sibling_requests_independent
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-cli --test managed_lifecycle inactive_recovery_requests_do_not_block_sigint_exit
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib responses_direct_transport_header_timeout_keeps_120_second_budget
@@ -3395,7 +3410,7 @@ features:
   - Early HTTP429 is exact-identity capacity backpressure; cross-session admission coordinates only that identity. A real two-minute unresolved episode commits30minute minimum and a real one-hour unresolved episode requires a current non429 probe. Matching business success clears only an unlocked observation and cannot shorten the minimum or replace a required probe.
   - private-profile probes preserve provider-specific request compatibility and accept HTTP 2xx before a successful next business request
   - a provider-declared terminal that carries a legal business result is forwarded as-is and never becomes a provider failure even without visible text: Responses incomplete content_filter, Anthropic refusal, and the OpenAI Chat empty-content content_filter finish; a complete attempt with no deliverable business content at all (empty end_turn/stop terminal with no text/tool/refusal/reasoning) is instead classified as an internal typed 502 for the Error chain
-  - A completely received upstream HTTP502 or truncated2xx body at the last candidate through Direct or Relay does not create cooldown, retry or a recovery probe for that identity. The request waits its original captured-pool recovery budget without business capacity; only final cancellation/deadline/eligibility exhaustion ends its own transport detectably.
+  - A completely received upstream HTTP502 or truncated2xx body at the last candidate through Direct or Relay does not create cooldown, retry or a recovery probe for that identity. Declared successors are checked immediately; actual exhaustion ends only that request transport detectably without a provider error payload, fabricated success, or recovery wait.
   - a Relay client disconnect after a partial provider frame stays health-neutral, releases the request-local attempt, reaches the public Server boundary, and starts no additional provider attempt
   - Direct and Relay perform one immediate declared-successor scan; an unavailable preferred candidate is skipped by exact-identity background visibility and the next eligible tier/key is selected without a capacity wait or Router reentry.
   - A held provider probe or a full tier cannot delay an accepted request; healthy concurrent work completes while another request is held, and empty/ineligible tiers continue declared successors.
@@ -3405,11 +3420,11 @@ features:
   - Real client cancellation, actual transport timeout, and original deadline remain true terminal inputs; no artificial residence sleep or attempt-limit wait is applied.
   - A provider HTTP429 is exact-identity background health/cooldown evidence only; current and fresh requests use healthy alternatives without joining that identity's wait lane.
   - A received HTTP429 constrains only its exact identity; current and fresh requests immediately use healthy alternatives without joining that identity's wait lane, and unrelated keys/models retain their configured parallelism
-  - Post-attempt failure with only cooled peers remaining uses typed Error04 target_recovery_pending and Error05 ReevaluateTarget before bounded captured-target planning; the eight failed_attempt public cases cover Direct/Relay recovery, acquisition-budget exhaustion, whole-request residence deadline and client cancellation without retrying excluded A or forwarding its error payload
-  - issue44cc3af_all_tried_transport_failure_waits_for_recovered_peer and its native Direct counterpart prove real pre-header transport failures on every candidate do not immediately close the client; matching successful probe restores only the earlier failed peer, the last failed candidate is not cooled or retried, and the original business request completes through the recovered peer without an error payload
-  - A full preferred candidate does not disable the caller-authorized semantic recovery of another eligible cooled candidate in Direct or Relay
-  - Direct Chat and Messages precommit SSE failures consume ReevaluateTarget and recover on a cooled peer; live Responses initial protocol preplanning shares one residence deadline with subsequent Direct or Relay execution
-  - Business leases remain bounded and release after completion, error, cancellation, or stream drop; due scheduled probes retain their separate bounded admission
+  - Post-attempt failure scans declared successors once without awaiting cooled peers, probes, capacity, acquisition budgets or a residence deadline. When no candidate remains, typed Error records exhaustion and the client transport ends detectably without an error payload.
+  - Public held-probe SSE regressions prove exhausted requests return without waiting for a probe and subsequent requests can use the independently recovered exact identity.
+  - A saturated local capacity snapshot does not exclude the declared preferred candidate in Direct or Relay
+  - Direct Chat and Messages precommit SSE failures select an available declared successor immediately; Responses initial protocol preplanning never waits for target recovery.
+  - Business requests acquire no capacity lease or permit. Scheduled probes retain their separate background admission and cannot delay business requests.
   required_negative:
   - stale successful or failed probe generations cannot mutate newer provider health state
   - Non-2xx probe responses and connection failures preserve cooldown; business response parsing is unaffected by status-only probes
@@ -3807,6 +3822,7 @@ features:
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
+  - A pending Direct SSE request disconnected before or after its first business frame reaches cancelled; an already completed request cannot gain another cancellation terminal, and sibling requests remain independent.
   - Every accepted lifecycle event appends one typed row to the per-listener JSONL store.
   - Folded reader returns the latest lifecycle row per request_key; raw reader preserves every lifecycle row so failed provider attempts stay visible.
   - Each listener writes its own isolated request-records file and never leaks another listener's port.

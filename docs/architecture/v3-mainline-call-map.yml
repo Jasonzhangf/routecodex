@@ -6697,6 +6697,23 @@ chains:
       side_channel_reads:
       - v3.runtime.responses_timing_observability
       side_channel_writes: []
+  - step_id: v3-runtime-timing-refill-summary
+    from_node: V3RuntimeTimingTerminal
+    to_node: V3RuntimeTimingStreamObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    callee_symbol: merge_snapshot
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_contract:
+      - Completed refill executions contribute typed timing exactly once to the request summary; output and final stream snapshot publish the same total.
+      - Snapshot publication replaces a summary and never sums repeated snapshots; Server remains a read-only consumer.
+    resource_flow:
+      consumes: [v3.runtime.responses_timing_observability]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.runtime.responses_timing_observability]
+      side_channel_writes: [v3.runtime.responses_observability]
 - chain_id: v3.responses_session_admission
   owner_feature_id: v3.responses_session_inflight_admission
   summary: Parsed requests independently enter Runtime regardless of matching session or conversation. Explicit maintenance controls new dispatch; each response retains its own activity and front-flush custody.
@@ -6813,6 +6830,24 @@ chains:
       produces: []
       side_channel_reads: [v3.front.request_activity_gate]
       side_channel_writes: [v3.front.request_activity_gate]
+
+  - step_id: v3-client-pending-disconnect-terminal
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3Front08ClientTerminalOrError
+    caller_symbol: record_disconnect
+    caller_file: v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+    callee_symbol: record_v3_transport_disconnect_cancelled
+    callee_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    status: anchored
+    owner_feature_id: v3.client_sse_head_commit
+    semantic_contract:
+      - The recorder is installed before protocol planning for every SSE mode. A pending-outcome disconnect runs it once, including when the transport drops before installation, then aborts only the owned task.
+      - A resolved outcome retains its finalizer; cancellation does not change sibling requests or Provider health.
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.server.internal_observability_projection]
 
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate

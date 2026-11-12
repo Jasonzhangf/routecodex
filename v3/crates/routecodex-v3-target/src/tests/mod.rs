@@ -1861,7 +1861,7 @@ fn optional_candidate_preserves_matched_and_default_provenance() {
 }
 
 #[test]
-fn multimodal_route_skips_text_only_candidate_even_when_text_candidate_is_available() {
+fn multimodal_route_preserves_declared_priority_without_capability_filtering() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1921,7 +1921,7 @@ targets = [
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
 
-    let vision_first = target
+    let preferred = target
         .select_available(
             expanded.clone(),
             &Availability {
@@ -1929,9 +1929,9 @@ targets = [
             },
             0,
         )
-        .expect("an available vision candidate serves the multimodal request");
-    assert_eq!(vision_first.candidate.provider_id, "vision");
-    assert_eq!(vision_first.route.pool_id, "default");
+        .expect("the highest-priority declared candidate serves the multimodal request");
+    assert_eq!(preferred.candidate.provider_id, "text");
+    assert_eq!(preferred.route.pool_id, "default");
 
     let selected = target
         .select_available(
@@ -1973,8 +1973,7 @@ targets = [
 
 #[test]
 fn multimodal_pool_exhaustion_uses_declared_default_pool() {
-    // A routed multimodal pool that only contains an incapable candidate must
-    // exhaust itself, then continue to the declared default successor.
+    // Health exclusion exhausts the matched pool; capability labels do not.
     let source = r#"
 version = 3
 [servers.s]
@@ -2040,11 +2039,11 @@ targets = [
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::new(),
+                blocked: BTreeSet::from(["text:default:key:m".into()]),
             },
             0,
         )
-        .expect("the capable default successor serves after the matched pool exhausts");
+        .expect("the default successor serves after the matched pool is health-excluded");
     assert_eq!(selected.candidate.provider_id, "vision");
     assert_eq!(selected.route.pool_id, "default");
 }

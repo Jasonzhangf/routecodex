@@ -1250,3 +1250,35 @@ pub enum V3ResponsesRelayRuntimeError {
         message: String,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::V3RuntimeTimingSummary;
+    use std::time::Duration;
+
+    #[test]
+    fn repeated_final_snapshot_merge_replaces_timing_without_growth_or_regression() {
+        let observation = V3RuntimeStreamObservation::default();
+        let final_round = V3RuntimeTimingSummary {
+            runtime_total: Duration::from_millis(120),
+            external: Duration::from_millis(100),
+            internal: Duration::from_millis(20),
+        };
+        let request_total = V3RuntimeTimingSummary {
+            runtime_total: Duration::from_millis(320),
+            external: Duration::from_millis(300),
+            internal: Duration::from_millis(20),
+        };
+        observation.record_timing(final_round).unwrap();
+
+        let final_snapshot = V3RuntimeStreamObservationSnapshot {
+            timing: Some(request_total),
+            ..Default::default()
+        };
+        observation.merge_snapshot(&final_snapshot).unwrap();
+        observation.merge_snapshot(&final_snapshot).unwrap();
+
+        assert_eq!(observation.snapshot().unwrap().timing, Some(request_total));
+    }
+}

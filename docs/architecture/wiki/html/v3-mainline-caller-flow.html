@@ -275,7 +275,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>92 functional paths</span>
-        <span>542 caller edges</span>
+        <span>544 caller edges</span>
       </div>
     </header>
 
@@ -468,7 +468,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>15</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>439</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>441</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -693,9 +693,9 @@ flowchart TD
           </a>
 <a class="branch-card" href="#chain-v3_runtime_timing_observability_mainline">
             <span class="chain-id">v 3.runtime_timing_observability.mainline</span>
-            <span>V3RuntimeTimingStart → V3RuntimeTimingExternalAttempt</span>
+            <span>V3RuntimeTimingStart → V3RuntimeTimingStreamObservation</span>
             <span><code>v3.runtime_timing_observability.mainline</code></span>
-            <span>14 edges · 2 resources · v3-runtime, v3-runtime::hub_v1, v3-server</span>
+            <span>15 edges · 2 resources · v3-runtime, v3-runtime::hub_v1, v3-server</span>
           </a>
 <a class="branch-card" href="#chain-v3_responses_session_admission">
             <span class="chain-id">v 3.responses_session_admission</span>
@@ -713,7 +713,7 @@ flowchart TD
             <span class="chain-id">v 3.client_sse_head_commit</span>
             <span>V3ServerSseHeadCommit01ClientHead → V3Front08ClientTerminalOrError</span>
             <span><code>v3.client_sse_head_commit</code></span>
-            <span>3 edges · 4 resources · v3-server</span>
+            <span>4 edges · 5 resources · v3-server</span>
           </a>
 <a class="branch-card" href="#chain-v3_provider_action_gate_mainline">
             <span class="chain-id">v 3.provider_action_gate.mainline</span>
@@ -4139,8 +4139,8 @@ flowchart TD
     <details class="branch-detail" id="chain-v3_runtime_timing_observability_mainline" >
       <summary>
         <span class="summary-main">v 3.runtime_timing_observability.mainline</span>
-        <span class="summary-sub">V3RuntimeTimingStart → V3RuntimeTimingExternalAttempt</span>
-        <span class="summary-sub">14 edges · <code>v3.runtime_timing_observability.mainline</code> · V3RuntimeTimingStart → V3RuntimeTimingExternalAttempt</span>
+        <span class="summary-sub">V3RuntimeTimingStart → V3RuntimeTimingStreamObservation</span>
+        <span class="summary-sub">15 edges · <code>v3.runtime_timing_observability.mainline</code> · V3RuntimeTimingStart → V3RuntimeTimingStreamObservation</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Responses Direct/Relay Runtime starts one monotonic state, accumulates every provider attempt, publishes only at successful whole-attempt closeout, and exposes a read-only Server projection. Direct SSE frame terminals close external time without finalizing the runtime before collector admission and sealing.</p>
@@ -4176,6 +4176,7 @@ flowchart TD
   n_v3_runtime_timing_observability_mainline_3 --&gt;|v3-runtime-timing-12&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_runtime_timing_observability_mainline_4
   n_v3_runtime_timing_observability_mainline_2 --&gt;|v3-runtime-timing-13&lt;br/&gt;v3-runtime → v3-runtime| n_v3_runtime_timing_observability_mainline_7
   n_v3_runtime_timing_observability_mainline_7 --&gt;|v3-runtime-timing-14&lt;br/&gt;v3-server → v3-runtime::hub_v1| n_v3_runtime_timing_observability_mainline_1
+  n_v3_runtime_timing_observability_mainline_3 --&gt;|v3-runtime-timing-refill-summary&lt;br/&gt;v3-runtime → v3-runtime::hub_v1| n_v3_runtime_timing_observability_mainline_4
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   class n_v3_runtime_timing_observability_mainline_0,n_v3_runtime_timing_observability_mainline_1,n_v3_runtime_timing_observability_mainline_2,n_v3_runtime_timing_observability_mainline_3,n_v3_runtime_timing_observability_mainline_4,n_v3_runtime_timing_observability_mainline_5,n_v3_runtime_timing_observability_mainline_6,n_v3_runtime_timing_observability_mainline_7 node;</pre>
@@ -4197,6 +4198,7 @@ flowchart TD
 <tr><td><code>v3-runtime-timing-12</code></td><td><code>V3RuntimeTimingTerminal</code><br/>→ <code>V3RuntimeTimingStreamObservation</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.runtime.responses_observability</code></div></td><td><code>finish_v3_direct_runtime_timing</code><br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs</small></td><td><code>record_timing</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small></td></tr>
 <tr><td><code>v3-runtime-timing-13</code></td><td><code>V3RuntimeTimingExternalComplete</code><br/>→ <code>V3RuntimeTimingProtocolHandoff</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.runtime.responses_timing_observability</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel_core</code><br/><small>routecodex-v3-runtime/src/kernel.rs</small></td><td><code>with_additional_attempts</code><br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small></td></tr>
 <tr><td><code>v3-runtime-timing-14</code></td><td><code>V3RuntimeTimingProtocolHandoff</code><br/>→ <code>V3RuntimeTimingExternalAttempt</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_timing_observability</code></div></td><td><code>execute_responses_direct_server_outcome_inner</code><br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small></td><td><code>execute_v3_responses_relay_runtime_with_default_transport_health</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small></td></tr>
+<tr><td><code>v3-runtime-timing-refill-summary</code></td><td><code>V3RuntimeTimingTerminal</code><br/>→ <code>V3RuntimeTimingStreamObservation</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.runtime.responses_observability</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.runtime.responses_timing_observability</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.runtime.responses_observability</code></div></td><td><code>execute_v3_responses_direct_runtime_kernel_with_refill</code><br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small></td><td><code>merge_snapshot</code><br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small></td></tr>
 </tbody>
 </table>
       </div>
@@ -4277,14 +4279,14 @@ flowchart TD
       <summary>
         <span class="summary-main">v 3.client_sse_head_commit</span>
         <span class="summary-sub">V3ServerSseHeadCommit01ClientHead → V3Front08ClientTerminalOrError</span>
-        <span class="summary-sub">3 edges · <code>v3.client_sse_head_commit</code> · V3ServerSseHeadCommit01ClientHead → V3Front08ClientTerminalOrError</span>
+        <span class="summary-sub">4 edges · <code>v3.client_sse_head_commit</code> · V3ServerSseHeadCommit01ClientHead → V3Front08ClientTerminalOrError</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">A streamed client request commits the HTTP SSE response head and transport keepalives at the Server boundary while the Runtime still buffers the full provider attempt. Exec replacement pauses new dispatch without draining accepted business responses; replacement may interrupt their transports detectably without fabricated completion or RCC replay.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.client_sse_head_commit</code></span>
           <span>modules: <code>v3-server</code></span>
-          <span>resources: <code>4</code></span>
+          <span>resources: <code>5</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.client_sse_head_commit.mainline.yml</code></span>
 
         </div>
@@ -4298,6 +4300,7 @@ flowchart TD
   n_v3_client_sse_head_commit_0 --&gt;|v3-client-sse-head-commit-01&lt;br/&gt;v3-server → v3-server| n_v3_client_sse_head_commit_1
   n_v3_client_sse_head_commit_1 --&gt;|v3-client-body-eof-front-held&lt;br/&gt;v3-server → v3-server| n_v3_client_sse_head_commit_2
   n_v3_client_sse_head_commit_2 --&gt;|v3-client-front-flush-completed&lt;br/&gt;v3-server → v3-server| n_v3_client_sse_head_commit_3
+  n_v3_client_sse_head_commit_1 --&gt;|v3-client-pending-disconnect-terminal&lt;br/&gt;v3-server → v3-server| n_v3_client_sse_head_commit_3
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
   class n_v3_client_sse_head_commit_0,n_v3_client_sse_head_commit_1,n_v3_client_sse_head_commit_2,n_v3_client_sse_head_commit_3 node;</pre>
@@ -4308,6 +4311,7 @@ flowchart TD
 <tr><td><code>v3-client-sse-head-commit-01</code></td><td><code>V3ServerSseHeadCommit01ClientHead</code><br/>→ <code>V3ServerRespOutbound06ClientFrame</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.sse.direct.accept_skeleton</code> <code>v3.sse.transport_encoded_chunk</code> <code>v3.config.http_sse_keepalive_interval</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.front.request_activity_gate</code></div></td><td><code>pending_model_request</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>accept_v3_client_sse_transport</code><br/><small>routecodex-v3-server/src/client_sse_transport.rs</small></td></tr>
 <tr><td><code>v3-client-body-eof-front-held</code></td><td><code>V3ServerRespOutbound06ClientFrame</code><br/>→ <code>V3FrontClientBodyEofHeld</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>control reads:</strong> <code>v3.front.request_activity_gate</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.front.request_activity_gate</code></div></td><td><code>hold_response_body_request_activity_permit</code><br/><small>routecodex-v3-server/src/session_admission.rs</small></td><td><code>V3StableFrontSocket::hold_activity_until_flush</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td></tr>
 <tr><td><code>v3-client-front-flush-completed</code></td><td><code>V3FrontClientBodyEofHeld</code><br/>→ <code>V3Front08ClientTerminalOrError</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>control reads:</strong> <code>v3.front.request_activity_gate</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.front.request_activity_gate</code></div></td><td><code>V3StableFrontSocket::spawn</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td><td><code>write_front_command</code><br/><small>routecodex-v3-server/src/restart_handoff.rs</small></td></tr>
+<tr><td><code>v3-client-pending-disconnect-terminal</code></td><td><code>V3ServerRespOutbound06ClientFrame</code><br/>→ <code>V3Front08ClientTerminalOrError</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>control writes:</strong> <code>v3.server.internal_observability_projection</code></div></td><td><code>record_disconnect</code><br/><small>routecodex-v3-server/src/client_sse_transport.rs</small></td><td><code>record_v3_transport_disconnect_cancelled</code><br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small></td></tr>
 </tbody>
 </table>
       </div>

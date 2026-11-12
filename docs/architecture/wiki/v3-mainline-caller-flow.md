@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 92 functional paths, 542 caller edges.
+Generated view: 92 functional paths, 544 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -73,7 +73,7 @@ flowchart TD
   module_v3_runtime -->|8 edges / 5 paths| module_v3_error
   module_v3_runtime -->|23 edges / 8 paths| module_v3_provider_responses
   module_v3_runtime -->|60 edges / 21 paths| module_v3_runtime
-  module_v3_runtime -->|44 edges / 13 paths| module_v3_runtime__hub_v1
+  module_v3_runtime -->|45 edges / 13 paths| module_v3_runtime__hub_v1
   module_v3_runtime -->|3 edges / 1 paths| module_v3_target
   module_v3_runtime -->|6 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
@@ -82,7 +82,7 @@ flowchart TD
   module_v3_server -->|2 edges / 2 paths| module_v3_error
   module_v3_server -->|8 edges / 6 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|47 edges / 20 paths| module_v3_server
+  module_v3_server -->|48 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_target -->|1 edges / 1 paths| module_v3_target
@@ -130,7 +130,7 @@ flowchart TD
 | v3-runtime | v3-error | 8 | `v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.hub_relay.response_failure_entry`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.route_policy.condition_evaluation` |
 | v3-runtime | v3-provider-responses | 23 | `v3.debug_error_foundation.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_key_health_model_granularity`<br/>`v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.selected_provider_model_binding` |
 | v3-runtime | v3-runtime | 60 | `v3.console_human_readable_layering.mainline`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.direct.request_key_hooks`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.execution_control_payload_architecture`<br/>`v3.memory_raw_capture`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.operation_runner.dagpipe.response`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_declared_successor_selection`<br/>`v3.provider_global_subscription_probe`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.provider_tool_markup.direct_parser_binding`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_direct_full_attempt_commit`<br/>`v3.route_policy.condition_evaluation`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.selected_provider_model_binding`<br/>`v3.sse_error_and_direct_consumer_pre_wiring`<br/>`v3.target.session_global_selection`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
-| v3-runtime | v3-runtime::hub_v1 | 44 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
+| v3-runtime | v3-runtime::hub_v1 | 45 | `v3.error.raw_wire_evidence`<br/>`v3.hub_pipeline.v1.hook_registry_compile`<br/>`v3.hub_pipeline.v1.relay_payload_copy_runtime_probes`<br/>`v3.protocol.anthropic.characterization`<br/>`v3.protocol.gemini.characterization`<br/>`v3.protocol.openai_chat.characterization`<br/>`v3.protocol_conversion_field_parity`<br/>`v3.protocol_normalization_tool_governance_boundary`<br/>`v3.provider_action_gate.mainline`<br/>`v3.provider_response_error_policy_closeout`<br/>`v3.resp03_tool_governance_gap_closeout`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.tool_thinking_hook_skeleton.mainline` |
 | v3-runtime | v3-target | 3 | `v3.responses_direct.required_mainline` |
 | v3-runtime | v3-virtual-router | 6 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
@@ -139,7 +139,7 @@ flowchart TD
 | v3-server | v3-error | 2 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 8 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup`<br/>`v3.target.session_global_selection` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 47 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 48 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3-target | v3-target | 1 | `v3.provider_oauth_credentials.mainline` |
@@ -2538,11 +2538,13 @@ flowchart TD
     c_60_v3_runtime_timing_observability_mainline_10["v3-runtime<br/>wrap_direct_sse_provider_event_json_observation_stream<br/><small>routecodex-v3-runtime/src/kernel.rs</small>"]
     c_60_v3_runtime_timing_observability_mainline_11["v3-runtime<br/>finish_v3_direct_runtime_timing<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs</small>"]
     c_60_v3_runtime_timing_observability_mainline_12["v3-runtime<br/>with_additional_attempts<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small>"]
+    c_60_v3_runtime_timing_observability_mainline_15["v3-runtime<br/>execute_v3_responses_direct_runtime_kernel_with_refill<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small>"]
   end
   subgraph c_60_v3_runtime_timing_observability_mainline_m_v3_runtime__hub_v1["v3-runtime::hub_v1"]
     c_60_v3_runtime_timing_observability_mainline_0["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_inner<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs</small>"]
     c_60_v3_runtime_timing_observability_mainline_4["v3-runtime::hub_v1<br/>record_timing<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
     c_60_v3_runtime_timing_observability_mainline_14["v3-runtime::hub_v1<br/>execute_v3_responses_relay_runtime_with_default_transport_health<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small>"]
+    c_60_v3_runtime_timing_observability_mainline_16["v3-runtime::hub_v1<br/>merge_snapshot<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small>"]
   end
   subgraph c_60_v3_runtime_timing_observability_mainline_m_v3_server["v3-server"]
     c_60_v3_runtime_timing_observability_mainline_5["v3-server<br/>complete_relay_sse<br/><small>routecodex-v3-server/src/console/impl_bulk.rs</small>"]
@@ -2565,6 +2567,7 @@ flowchart TD
   c_60_v3_runtime_timing_observability_mainline_11 -->|v3-runtime-timing-12<br/>V3RuntimeTimingTerminal → V3RuntimeTimingStreamObservation| c_60_v3_runtime_timing_observability_mainline_4
   c_60_v3_runtime_timing_observability_mainline_7 -->|v3-runtime-timing-13<br/>V3RuntimeTimingExternalComplete → V3RuntimeTimingProtocolHandoff| c_60_v3_runtime_timing_observability_mainline_12
   c_60_v3_runtime_timing_observability_mainline_13 -->|v3-runtime-timing-14<br/>V3RuntimeTimingProtocolHandoff → V3RuntimeTimingExternalAttempt| c_60_v3_runtime_timing_observability_mainline_14
+  c_60_v3_runtime_timing_observability_mainline_15 -->|v3-runtime-timing-refill-summary<br/>V3RuntimeTimingTerminal → V3RuntimeTimingStreamObservation| c_60_v3_runtime_timing_observability_mainline_16
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2583,6 +2586,7 @@ flowchart TD
 | `v3-runtime-timing-12` | `V3RuntimeTimingTerminal` → `V3RuntimeTimingStreamObservation` | anchored | finish_v3_direct_runtime_timing<br/><small>routecodex-v3-runtime/src/kernel/direct_runtime_timing.rs</small> | record_timing<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-13` | `V3RuntimeTimingExternalComplete` → `V3RuntimeTimingProtocolHandoff` | anchored | execute_v3_responses_direct_runtime_kernel_core<br/><small>routecodex-v3-runtime/src/kernel.rs</small> | with_additional_attempts<br/><small>routecodex-v3-runtime/src/runtime_timing.rs</small> | `v3.runtime_timing_observability` |
 | `v3-runtime-timing-14` | `V3RuntimeTimingProtocolHandoff` → `V3RuntimeTimingExternalAttempt` | anchored | execute_responses_direct_server_outcome_inner<br/><small>routecodex-v3-server/src/responses_direct_server_outcome.rs</small> | execute_v3_responses_relay_runtime_with_default_transport_health<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs</small> | `v3.runtime_timing_observability` |
+| `v3-runtime-timing-refill-summary` | `V3RuntimeTimingTerminal` → `V3RuntimeTimingStreamObservation` | anchored | execute_v3_responses_direct_runtime_kernel_with_refill<br/><small>routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs</small> | merge_snapshot<br/><small>routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs</small> | `v3.runtime_timing_observability` |
 
 ## v3.responses_session_admission
 
@@ -2642,10 +2646,13 @@ flowchart TD
     c_63_v3_client_sse_head_commit_3["v3-server<br/>V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_63_v3_client_sse_head_commit_4["v3-server<br/>V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
     c_63_v3_client_sse_head_commit_5["v3-server<br/>write_front_command<br/><small>routecodex-v3-server/src/restart_handoff.rs</small>"]
+    c_63_v3_client_sse_head_commit_6["v3-server<br/>record_disconnect<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small>"]
+    c_63_v3_client_sse_head_commit_7["v3-server<br/>record_v3_transport_disconnect_cancelled<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small>"]
   end
   c_63_v3_client_sse_head_commit_0 -->|v3-client-sse-head-commit-01<br/>V3ServerSseHeadCommit01ClientHead → V3ServerRespOutbound06ClientFrame| c_63_v3_client_sse_head_commit_1
   c_63_v3_client_sse_head_commit_2 -->|v3-client-body-eof-front-held<br/>V3ServerRespOutbound06ClientFrame → V3FrontClientBodyEofHeld| c_63_v3_client_sse_head_commit_3
   c_63_v3_client_sse_head_commit_4 -->|v3-client-front-flush-completed<br/>V3FrontClientBodyEofHeld → V3Front08ClientTerminalOrError| c_63_v3_client_sse_head_commit_5
+  c_63_v3_client_sse_head_commit_6 -->|v3-client-pending-disconnect-terminal<br/>V3ServerRespOutbound06ClientFrame → V3Front08ClientTerminalOrError| c_63_v3_client_sse_head_commit_7
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -2653,6 +2660,7 @@ flowchart TD
 | `v3-client-sse-head-commit-01` | `V3ServerSseHeadCommit01ClientHead` → `V3ServerRespOutbound06ClientFrame` | anchored | pending_model_request<br/><small>routecodex-v3-server/src/lib.rs</small> | accept_v3_client_sse_transport<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small> | `v3.client_sse_head_commit` |
 | `v3-client-body-eof-front-held` | `V3ServerRespOutbound06ClientFrame` → `V3FrontClientBodyEofHeld` | anchored | hold_response_body_request_activity_permit<br/><small>routecodex-v3-server/src/session_admission.rs</small> | V3StableFrontSocket::hold_activity_until_flush<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
 | `v3-client-front-flush-completed` | `V3FrontClientBodyEofHeld` → `V3Front08ClientTerminalOrError` | anchored | V3StableFrontSocket::spawn<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | write_front_command<br/><small>routecodex-v3-server/src/restart_handoff.rs</small> | `v3.client_sse_head_commit` |
+| `v3-client-pending-disconnect-terminal` | `V3ServerRespOutbound06ClientFrame` → `V3Front08ClientTerminalOrError` | anchored | record_disconnect<br/><small>routecodex-v3-server/src/client_sse_transport.rs</small> | record_v3_transport_disconnect_cancelled<br/><small>routecodex-v3-server/src/endpoint_handlers.rs</small> | `v3.client_sse_head_commit` |
 
 ## v3.provider_action_gate.mainline
 

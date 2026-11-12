@@ -626,24 +626,9 @@ impl V3TargetInterpreter {
                 ));
             }
         }
-        // The attempt budget includes the text candidates that become
-        // selectable after the available vision candidates fail.
+        // Capability labels select route pools; they never remove a declared
+        // provider from the selected pool or override its priority.
         let candidate_count = eligible.len().max(1);
-        // A text-only default candidate may project images only after every
-        // captured, available vision candidate has been exhausted.
-        if expanded
-            .route
-            .request_capabilities
-            .iter()
-            .any(|capability| matches!(capability.as_str(), "multimodal" | "vision"))
-            && eligible.iter().any(|(_, candidate, _, _, _, _)| {
-                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-            })
-        {
-            eligible.retain(|(_, candidate, _, _, _, _)| {
-                candidate_has_required_capability(&candidate.model_capabilities, "multimodal")
-            });
-        }
         // A route pool can encode its configured tiers as target priority.
         // Plan tier index orders separate pools; scheduled priority orders the
         // tiers inside one pool. Near-limit is only a same-tier demotion, so it
@@ -1418,15 +1403,6 @@ fn scaled_context_input_tokens(candidate: &V3TargetCandidate, request_input_toke
         + 9_999)
         / 10_000)
         .min(u128::from(u64::MAX)) as u64
-}
-
-fn candidate_has_required_capability(capabilities: &[String], required: &str) -> bool {
-    let has = |wanted: &str| capabilities.iter().any(|capability| capability == wanted);
-    match required {
-        "search" | "web_search" => has("web_search"),
-        "multimodal" | "vision" => has("multimodal") || has("vision"),
-        _ => true,
-    }
 }
 
 fn format_candidate_availability_unavailable(
