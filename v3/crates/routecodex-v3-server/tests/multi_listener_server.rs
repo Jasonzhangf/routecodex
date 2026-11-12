@@ -964,6 +964,22 @@ supports_thinking = true
 thinking = "ultra"
 max_tokens = 64000
 max_context_tokens = 200000
+[providers.test.models."gpt-6.1-terra"]
+wire_name = "gpt-6.1-terra"
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "ultra"
+max_tokens = 64000
+max_context_tokens = 200000
+[providers.test.models."gpt-6-astra"]
+wire_name = "gpt-6-astra"
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+supports_thinking = true
+thinking = "ultra"
+max_tokens = 64000
+max_context_tokens = 200000
 [providers.test.models.offroute]
 wire_name = "offroute-wire"
 aliases = ["offroute-test"]
@@ -1009,7 +1025,7 @@ bind = "127.0.0.1"
 port = {port_a}
 routing_group = "default"
 endpoints = ["responses"]
-expose_models = ["gpt-5.5", "auto", "client-test"]
+expose_models = ["gpt-5.5", "auto", "client-test", "gpt-6.1-terra"]
 [servers.b]
 bind = "127.0.0.1"
 port = {port_b}
@@ -1037,6 +1053,12 @@ capabilities = ["text", "tools"]
 supports_streaming = true
 max_tokens = 2048
 max_context_tokens = 64000
+[providers.test.models."gpt-6.1-terra"]
+wire_name = "gpt-6.1-terra"
+capabilities = ["text", "reasoning", "tools"]
+supports_streaming = true
+max_tokens = 64000
+max_context_tokens = 200000
 [debug]
 log_console = false
 snapshots = true
@@ -3720,7 +3742,16 @@ async fn p6_models_endpoint_projects_manifest_catalog_with_alias_capabilities() 
             .any(|model| model["id"] == "test.test"),
         "routed models must also appear under their provider.model direct id"
     );
-    for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+    for id in [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.7",
+        "gpt-6.1-terra",
+        "gpt-6-astra",
+        "test.gpt-6.1-terra",
+        "test.gpt-6-astra",
+    ] {
         assert!(
             response["data"]
                 .as_array()
@@ -3795,6 +3826,13 @@ async fn p6_models_endpoint_expose_models_publishes_entry_names_and_keeps_direct
             "{suppressed} is a routed visible id outside expose_models and must stay suppressed"
         );
     }
+    // 隐藏的未来模型即使进入 expose_models 白名单也不得作为入口名暴露：
+    // gpt-6.1-terra 对应 provider 模型但不属于任何 route pool，默认会被当作
+    // 客户端入口名发布；hidden_models 版本下限必须把它裁掉。
+    assert!(
+        find("gpt-6.1-terra").is_none(),
+        "hidden gpt-6.1-terra must not be published as an expose_models entry even when whitelisted"
+    );
 
     // 直连面（provider.model）不受 `expose_models` 裁剪。
     for direct_id in ["test.test", "test.offroute"] {
@@ -3877,7 +3915,14 @@ async fn p6_models_endpoint_lists_gpt55_without_gpt56_catalog() {
         "gpt-5.5 must not force code_mode_only; Codex hides first-class tools behind exec/wait when this is set"
     );
     assert_eq!(gpt55["input_modalities"], json!(["text", "image"]));
-    for id in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+    for id in [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.7",
+        "gpt-6.1-terra",
+        "gpt-6-astra",
+    ] {
         assert!(
             data.iter().all(|model| model["id"] != id),
             "{id} must not be listed before the gpt-5.6 client surface is enabled"
