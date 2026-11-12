@@ -407,6 +407,46 @@ impl NamespaceToolIdentityRegistry {
         Ok(())
     }
 
+    /// Native Responses already consumes additional_tools declarations. Keep
+    /// their original carrier and remove only their promoted root duplicates.
+    pub fn preserve_native_additional_tool_declarations(
+        &self,
+        body: &mut Value,
+    ) -> Result<(), String> {
+        let mut additional_names = BTreeSet::new();
+        for item in body
+            .get("input")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if item.get("type").and_then(Value::as_str) != Some("additional_tools") {
+                continue;
+            }
+            let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+                continue;
+            };
+            let additional = Self::from_tools(tools)?;
+            for key in additional.by_identity.keys() {
+                if let Some(identity) = self.by_identity.get(key) {
+                    additional_names.insert(identity.actual_wire_name.as_str());
+                }
+            }
+        }
+        if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
+            tools.retain(|tool| {
+                !matches!(
+                    tool.get("type").and_then(Value::as_str),
+                    Some("function" | "custom")
+                ) || !tool
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| additional_names.contains(name))
+            });
+        }
+        Ok(())
+    }
+
     /// Project each retained discovery surface with the complete request's
     /// binding. A discovered declaration and its promoted top-level declaration
     /// must use the same wire name, kind and schema.
@@ -1305,6 +1345,40 @@ mod tests {
             registry.wire_name_for_client(None, "functions.exec", ToolKind::Custom),
             Some("functions__exec")
         );
+    }
+
+    #[test]
+    fn responses_additional_tools_are_not_duplicated_in_top_level_declarations() {
+        let mut request = json!({
+            "tools": [{"type":"function","name":"ordinary","parameters":{"type":"object"}}],
+            "input": [{"type":"additional_tools","role":"developer","opaque":"keep",
+                "tools":[{"type":"namespace","name":"functions","tools":[
+                    {"type":"function","name":"wait","description":"wait for a task",
+                     "parameters":{"type":"object","properties":{"task":{"type":"string"}}}}
+                ]}]}]
+        });
+        let registry =
+            NamespaceToolIdentityRegistry::from_request(&request, "openai-responses").unwrap();
+        registry
+            .project_request(&mut request, "openai-responses")
+            .unwrap();
+        registry
+            .preserve_native_additional_tool_declarations(&mut request)
+            .unwrap();
+        let root = request["tools"].as_array().unwrap();
+        let additional = request["input"][0]["tools"].as_array().unwrap();
+        assert_eq!(
+            root.len(),
+            1,
+            "additional declarations must not also be promoted to root tools"
+        );
+        assert_eq!(root[0]["name"], "ordinary");
+        assert_eq!(additional[0]["name"], "functions");
+        assert_eq!(
+            additional[0]["tools"][0]["parameters"]["properties"]["task"]["type"],
+            "string"
+        );
+        assert_eq!(request["input"][0]["opaque"], "keep");
     }
 
     #[test]

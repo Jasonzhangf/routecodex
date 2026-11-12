@@ -11447,10 +11447,31 @@ fn namespace_public_tool_description(tool: &Value) -> Option<&str> {
 }
 
 fn namespace_public_provider_tools(body: &Value) -> Vec<Value> {
-    body.get("tools")
+    fn collect(tools: &[Value], prefix: &str, output: &mut Vec<Value>) {
+        for tool in tools {
+            if tool["type"] == "namespace" {
+                let namespace = format!("{prefix}{}__", tool["name"].as_str().unwrap());
+                collect(tool["tools"].as_array().unwrap(), &namespace, output);
+            } else {
+                let mut tool = tool.clone();
+                if let Some(name) = tool["name"].as_str() {
+                    tool["name"] = json!(format!("{prefix}{name}"));
+                }
+                output.push(tool);
+            }
+        }
+    }
+    let mut tools = body
+        .get("tools")
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for item in body["input"].as_array().into_iter().flatten() {
+        if item["type"] == "additional_tools" {
+            collect(item["tools"].as_array().unwrap(), "", &mut tools);
+        }
+    }
+    tools
 }
 
 async fn namespace_public_upstream(
