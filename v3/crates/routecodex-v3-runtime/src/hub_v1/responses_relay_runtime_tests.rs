@@ -1,5 +1,4 @@
 use super::*;
-use crate::execution_control::V3AttemptStoreError;
 use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use serde_json::json;
@@ -306,13 +305,6 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
     manifest
         .servers
         .get_mut("test")
-        .and_then(|server| server.execution.as_mut())
-        .expect("test server execution policy")
-        .attempt_store
-        .request_max_attempts = 1;
-    manifest
-        .servers
-        .get_mut("test")
         .unwrap()
         .execution
         .as_mut()
@@ -326,72 +318,14 @@ async fn execution_control_payload_architecture_responses_relay_handoff_does_not
         .attempt_budget()
         .admit_transport_attempt()
         .expect("Direct attempt before Relay handoff");
-    let rejection = request_execution_control
+    let second_count = request_execution_control
         .attempt_budget()
-        .admit_transport_attempt();
-    assert!(
-        matches!(&rejection, Err(V3AttemptStoreError::TransportAttemptsExhausted(message))
-        if message.contains("limit 1")),
-        "the original attempt ceiling applies before handoff: {rejection:?}"
-    );
-    let transport = RecordingChatTransport {
-        provider_ids: Mutex::new(Vec::new()),
-    };
-
-    let error = execute_v3_responses_relay_runtime_inner(
-        &manifest,
-        V3ResponsesRelayRuntimeInput {
-            server_id: "test".to_string(),
-            failure_session_scope: V3ProviderFailureSessionScope::new(
-                "test",
-                "default",
-                "shared-attempt-budget-session",
-            )
-            .expect("session scope"),
-            request_id: "req-shared-attempt-budget".to_string(),
-            payload: json!({
-                "model": "client-model",
-                "input": "hello",
-                "store": true
-            }),
-        },
-        &transport,
-        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
-        V3ResponsesRelayRetryPolicy::default(),
-        false,
-        None,
-        None,
-        None,
-        None,
-        BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds {
-            request_execution_control: Some(request_execution_control.clone()),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect_err("the configured attempt ceiling must reject the exhausted handoff");
-
-    assert!(matches!(
-        error,
-        V3ResponsesRelayRuntimeError::ExecutionControl(message)
-            if message.contains("transport attempt limit 1 exhausted")
-    ));
+        .admit_transport_attempt()
+        .expect("no attempt ceiling: Relay handoff attempt admitted");
     assert_eq!(
-        transport.provider_ids.lock().expect("provider ids").len(),
-        0,
-        "the configured ceiling must prevent an additional transport attempt"
+        second_count, 2,
+        "transport attempt count must persist across Direct to Relay handoff, not reset"
     );
-    assert_eq!(
-        request_execution_control.transport_attempts(),
-        1,
-        "the handoff must retain the first attempt and reject the second"
-    );
-    let rejection = request_execution_control
-        .attempt_budget()
-        .admit_transport_attempt();
-    assert!(matches!(&rejection, Err(V3AttemptStoreError::ResidenceDeadlineExceeded(_))),
-        "after pending reaches the original residence deadline it takes precedence over the exhausted attempt ceiling: {rejection:?}");
 }
 
 #[test]

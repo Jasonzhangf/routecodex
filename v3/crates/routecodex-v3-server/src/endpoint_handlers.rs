@@ -5,9 +5,8 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Record the terminal row for a client that disconnected after the committed
-/// client SSE channel already delivered business bytes but before the runtime
-/// outcome existed.
+/// Record the terminal row for a client that disconnected while the runtime
+/// outcome was pending, including before any business frame was delivered.
 ///
 /// The transport owns this disconnect fact: only it sees the committed channel
 /// drop, and its pending runtime task is aborted before the runtime closeout can
@@ -21,13 +20,13 @@ fn record_v3_transport_disconnect_cancelled(
     endpoint: &str,
     request_id: &str,
     entry_protocol: &str,
-    console_context: &V3ConsoleEmissionContext,
+    identity: &V3ConsoleLogIdentity,
 ) {
     let source = routecodex_v3_error::build_v3_error_01_source_raised(
         V3ErrorSourceKind::ClientDisconnect,
         "V3ServerRespOutbound06ClientFrame",
         "client_disconnect",
-        "client disconnected after the committed prefix was delivered",
+        "client disconnected while the runtime outcome was pending",
     );
     if let Err(error) = crate::webui_observability::record_v3_webui_error_projection(
         &state.webui_observability,
@@ -35,8 +34,8 @@ fn record_v3_transport_disconnect_cancelled(
         request_id,
         endpoint,
         entry_protocol,
-        console_context.identity.project_path.as_deref(),
-        Some(&console_context.identity.session_id),
+        identity.project_path.as_deref(),
+        Some(&identity.session_id),
         499,
         None,
         crate::webui_observability::V3ObsErrorProjection {
@@ -49,7 +48,7 @@ fn record_v3_transport_disconnect_cancelled(
             ..Default::default()
         },
     ) {
-        emit_v3_webui_projection_failure(console_context, &error);
+        eprintln!("[webui-observability] req={request_id} error={error}");
     }
 }
 
@@ -183,15 +182,31 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
         Err(response) => return *response,
     };
     let request_id = request_identity.request_id.clone();
+    let request_console_identity =
+        resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id);
+    if let Some(client_disconnect_slot) = &client_disconnect_slot {
+        let recorder_state = Arc::clone(&state);
+        let recorder_request_id = request_id.clone();
+        let recorder_endpoint = path.clone();
+        let recorder_entry_protocol = entry_protocol.clone();
+        let recorder_identity = request_console_identity.clone();
+        client_disconnect_slot.set(Box::new(move || {
+            record_v3_transport_disconnect_cancelled(
+                &recorder_state,
+                &recorder_endpoint,
+                &recorder_request_id,
+                &recorder_entry_protocol,
+                &recorder_identity,
+            );
+        }));
+    }
     // One allocation: every terminal branch records this same request identity.
     let terminal_evidence = V3ProviderTerminalEvidence {
         entry_protocol: &entry_protocol,
         endpoint: &path,
         request_id: &request_id,
     };
-    let toolreason_observation_session_id =
-        resolve_v3_console_log_identity_from_parts(&request_headers, &payload, &request_id)
-            .session_id;
+    let toolreason_observation_session_id = request_console_identity.session_id.clone();
     let responses_entry_facts =
         (entry_protocol == "responses").then(|| V3ResponsesEntryFacts::project(&payload));
     let requested_stream = v3_request_wants_sse(&request_headers, &payload)
@@ -312,14 +327,14 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             Some(request_identity.pipeline_id.clone()),
             payload.clone(),
         );
-        let plan = match plan_v3_responses_protocol_execution_with_recovery(
+        let plan_result = plan_v3_responses_protocol_execution_with_recovery(
             &state.manifest,
             raw,
             state.provider_health.runtime_health(),
             current_epoch_ms(),
         )
-        .await
-        {
+        .await;
+        let plan = match plan_result {
             Ok((plan, control)) => {
                 responses_request_execution_control = Some(control);
                 plan
@@ -775,22 +790,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             &request_headers,
             &console_payload,
         );
-        if let Some(client_disconnect_slot) = client_disconnect_slot {
-            let recorder_state = Arc::clone(&state);
-            let recorder_request_id = request_id.clone();
-            let recorder_endpoint = path.clone();
-            let recorder_entry_protocol = entry_protocol.clone();
-            let client_disconnect_console_context = console_context.clone();
-            client_disconnect_slot.set(Box::new(move || {
-                record_v3_transport_disconnect_cancelled(
-                    &recorder_state,
-                    &recorder_endpoint,
-                    &recorder_request_id,
-                    &recorder_entry_protocol,
-                    &client_disconnect_console_context,
-                );
-            }));
-        }
         let provider_failure_event_sink = build_v3_provider_failure_event_sink(&console_context);
         let route_selection_event_sink = build_v3_route_selection_event_sink(&console_context);
         let outcome = execute_responses_direct_server_outcome(

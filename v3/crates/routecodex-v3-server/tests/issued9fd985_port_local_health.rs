@@ -109,8 +109,10 @@ impl Drop for EnvGuard {
 
 struct UpstreamState {
     business: AtomicUsize,
+    sibling_business: AtomicUsize,
     probes: AtomicUsize,
     probe_success: AtomicBool,
+    rate_limit_once: AtomicBool,
     hold_probe: AtomicBool,
     probe_entered: Semaphore,
     probe_release: Semaphore,
@@ -121,8 +123,10 @@ impl UpstreamState {
     fn new(fail_main: bool, probe_success: bool) -> Self {
         Self {
             business: AtomicUsize::new(0),
+            sibling_business: AtomicUsize::new(0),
             probes: AtomicUsize::new(0),
             probe_success: AtomicBool::new(probe_success),
+            rate_limit_once: AtomicBool::new(false),
             hold_probe: AtomicBool::new(false),
             probe_entered: Semaphore::new(0),
             probe_release: Semaphore::new(0),
@@ -182,6 +186,23 @@ fn failure_body() -> Response<Body> {
         .expect("build failure response")
 }
 
+fn rate_limit_body() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "error": {
+                    "type": "rate_limit_error",
+                    "code": "insufficient_quota",
+                    "message": "controlled provider rate limit"
+                }
+            })
+            .to_string(),
+        ))
+        .expect("build rate limit response")
+}
+
 fn is_probe(body: &Value) -> bool {
     body["input"]
         .as_array()
@@ -220,8 +241,16 @@ async fn upstream(
         .get("authorization")
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
+    if authorization.contains(SIBLING_SECRET) {
+        state.sibling_business.fetch_add(1, Ordering::SeqCst);
+    }
     let is_cross_port_isolation_request = body["input"].as_str() == Some("other-port-same-key");
     if model == "main"
+        && authorization.contains(KEY_SECRET)
+        && state.rate_limit_once.swap(false, Ordering::SeqCst)
+    {
+        rate_limit_body()
+    } else if model == "main"
         && state.fail_main
         && authorization.contains(KEY_SECRET)
         && !is_cross_port_isolation_request
@@ -511,6 +540,10 @@ async fn id9_failure_cooldown_is_port_local() {
         "the spare candidate must answer the switched attempts"
     );
 
+    wait_until("port A exact cooldown", || async {
+        exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some()
+    })
+    .await;
     let entries_a = cooldown_entries(&client, &base_a).await;
     let exact = exact_primary_entry(&entries_a).expect("port A exact cooldown must exist");
     assert!(
@@ -533,7 +566,7 @@ async fn id9_failure_cooldown_is_port_local() {
 
     let primary_before_other = primary.business_count();
     let (status, body) =
-        business_request(&client, &base_a, "other-test", "other model isolation").await;
+        business_request(&client, &base_a, "primary.other", "other model isolation").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
@@ -543,14 +576,20 @@ async fn id9_failure_cooldown_is_port_local() {
     );
 
     let primary_before_sibling = primary.business_count();
+    let sibling_before = primary.sibling_business.load(Ordering::SeqCst);
     let (status, body) =
-        business_request(&client, &base_a, "sibling-test", "sibling key isolation").await;
+        business_request(&client, &base_a, "primary.main", "sibling key isolation").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
         primary.business_count(),
         primary_before_sibling + 1,
         "the sibling auth key must still reach the primary provider"
+    );
+    assert_eq!(
+        primary.sibling_business.load(Ordering::SeqCst),
+        sibling_before + 1,
+        "the sibling auth key must be selected, not the cooled key"
     );
 
     let primary_before_b = primary.business_count();
@@ -602,9 +641,10 @@ async fn id9_probe_outcomes_are_port_local() {
         cooldown_entries(&client, &base_b).await
     );
 
+    let probes_before_manual = primary.probe_count();
     trigger_probe(&client, &base_a).await;
     wait_until("port A failed probe", || async {
-        primary.probe_count() >= 1
+        primary.probe_count() > probes_before_manual
     })
     .await;
     wait_until("port A failed probe health", || async {
@@ -618,10 +658,11 @@ async fn id9_probe_outcomes_are_port_local() {
         cooldown_entries(&client, &base_b).await
     );
 
+    let probes_before_recovery = primary.probe_count();
     primary.probe_success.store(true, Ordering::SeqCst);
     trigger_probe(&client, &base_a).await;
     wait_until("port A recovery probe", || async {
-        primary.probe_count() >= 2
+        primary.probe_count() > probes_before_recovery
     })
     .await;
     wait_until("port A recovery", || async {
@@ -635,7 +676,7 @@ async fn id9_probe_outcomes_are_port_local() {
     );
     assert_eq!(
         primary.probe_count(),
-        2,
+        probes_before_manual + 2,
         "each manual trigger must create exactly one probe on its own port"
     );
 
@@ -684,7 +725,7 @@ async fn id9_exact_identity_isolation() {
 
     let primary_before_other = primary.business_count();
     let (status, body) =
-        business_request(&client, &base_a, "other-test", "same-port-other-model").await;
+        business_request(&client, &base_a, "primary.other", "same-port-other-model").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
@@ -694,14 +735,20 @@ async fn id9_exact_identity_isolation() {
     );
 
     let primary_before_sibling = primary.business_count();
+    let sibling_before = primary.sibling_business.load(Ordering::SeqCst);
     let (status, body) =
-        business_request(&client, &base_a, "sibling-test", "same-port-other-key").await;
+        business_request(&client, &base_a, "primary.main", "same-port-other-key").await;
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("upstream-ok"), "{body}");
     assert_eq!(
         primary.business_count(),
         primary_before_sibling + 1,
         "the sibling auth key on the failing port must remain dispatchable"
+    );
+    assert_eq!(
+        primary.sibling_business.load(Ordering::SeqCst),
+        sibling_before + 1,
+        "the sibling auth key on the failing port must be selected, not the cooled key"
     );
 
     let primary_before_port_b = primary.business_count();
@@ -728,6 +775,65 @@ async fn id9_exact_identity_isolation() {
     assert!(
         cooldown_entries(&client, &base_b).await.is_empty(),
         "port B must not inherit the exact identity failure"
+    );
+
+    handle.shutdown().await;
+    let _ = primary_shutdown.send(());
+    let _ = spare_shutdown.send(());
+}
+
+#[tokio::test]
+async fn id9_429_visibility_is_port_local() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("rate-limit-visibility");
+    let _key = EnvGuard::set(KEY_ENV, KEY_SECRET);
+    let _sibling = EnvGuard::set(SIBLING_ENV, SIBLING_SECRET);
+    let (primary_base, primary, primary_shutdown) = start_upstream(false, true).await;
+    let (spare_base, spare, spare_shutdown) = start_upstream(false, true).await;
+    primary.rate_limit_once.store(true, Ordering::SeqCst);
+    let handle = spawn_v3_server_aggregate(port_manifest(
+        free_port(),
+        free_port(),
+        &primary_base,
+        &spare_base,
+    ))
+    .await
+    .expect("spawn two-listener aggregate");
+    let base_a = listener_base(&handle, "a");
+    let base_b = listener_base(&handle, "b");
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("build listener-local rate limit client");
+
+    let primary_before_a = primary.business_count();
+    let (status, body) = business_request(&client, &base_a, "client-test", "port-a-429").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("upstream-ok"), "{body}");
+    assert_eq!(
+        primary.business_count(),
+        primary_before_a + 1,
+        "listener A must attempt the primary identity before switching"
+    );
+    assert!(
+        spare.business_count() > 0,
+        "listener A must complete the request through the healthy spare"
+    );
+
+    let primary_before_b = primary.business_count();
+    let spare_before_b = spare.business_count();
+    let (status, body) = business_request(&client, &base_b, "client-test", "port-b-same-key").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("upstream-ok"), "{body}");
+    assert_eq!(
+        primary.business_count(),
+        primary_before_b + 1,
+        "listener B must not inherit listener A's 429 visibility block"
+    );
+    assert_eq!(
+        spare.business_count(),
+        spare_before_b,
+        "listener B must remain on the primary identity"
     );
 
     handle.shutdown().await;

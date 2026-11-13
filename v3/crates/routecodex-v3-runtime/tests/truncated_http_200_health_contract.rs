@@ -1,6 +1,7 @@
 //! db1f482 regression: a truncated provider HTTP 200 body is a typed provider
-//! transport failure. It must cool only the exact `provider.interface.auth.key.model`
-//! identity and must not cool untried keys, other models, or other providers.
+//! transport failure. Its declared health effect (a pre-cool observation on the
+//! exact `provider.interface.auth.key.model` identity) must bind only that
+//! identity and must not touch untried keys, other models, or other providers.
 
 use async_trait::async_trait;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
@@ -193,7 +194,7 @@ impl ResponsesTransport for CompleteHttp502Transport {
 }
 
 #[tokio::test]
-async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities() {
+async fn truncated_http_200_records_precool_on_exact_identity_and_isolates_other_identities() {
     let server_id = "truncated_200_identity";
     let manifest = manifest(server_id);
     let provider_health =
@@ -242,17 +243,21 @@ async fn truncated_http_200_cools_exact_identity_and_isolates_other_identities()
     assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
     assert_eq!(event.status, 502);
     assert_eq!(event.action, "switch_provider");
-    assert_eq!(event.failure_count, 1);
-    assert_eq!(event.health_state, "cooldown");
-    assert!(event.cooldown_until_ms.is_some());
+    // The failure is owned by the declared pre-cool observation threshold, not
+    // an immediate cooldown: one observed truncated transport failure records a
+    // pre_cool_observation with no cooldown_until, exactly like every other
+    // ordinary non429 failure.
+    assert_eq!(event.failure_count, 0);
+    assert_eq!(event.health_state, "pre_cool_observation");
+    assert_eq!(event.cooldown_until_ms, None);
 
     let now = u64::MAX;
     assert!(
-        !provider_health
+        provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), now)
             .available,
-        "the exact failed identity must be cooled"
+        "the exact failed identity must stay routable during pre-cool observation"
     );
     assert!(
         provider_health

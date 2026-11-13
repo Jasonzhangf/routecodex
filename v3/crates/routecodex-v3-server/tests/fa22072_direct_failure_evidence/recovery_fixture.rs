@@ -79,7 +79,7 @@ pub(super) fn expected_relay_b() -> V3Error01SourceRaised {
         "OWNED_B_503_PRIVATE",
         V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
-            status: None,
+            status: Some(503),
             code: Some("owned_b_503".into()),
             provider_id: Some("beta".into()),
             upstream_request_id: None,

@@ -144,12 +144,6 @@ pub enum V3VirtualRouterError {
     PoolMatchMissing { group_id: String, pool_id: String },
     #[error("routing facts entry protocol is empty or does not match endpoint {0}")]
     InvalidRoutingFacts(String),
-    #[error("direct route {provider}.{model} cannot serve this request: model lacks {capability}")]
-    DirectModelMediaUnsatisfied {
-        provider: String,
-        model: String,
-        capability: String,
-    },
 }
 
 #[derive(Debug, Default)]
@@ -334,9 +328,9 @@ impl V3VirtualRouter {
         // candidate signals in the fixed order (hosted web_search >
         // multimodal > longcontext > coding > thinking > search > tools >
         // default). Take the first candidate that maps to a configured,
-        // non-empty classification pool and hand off exactly that one pool. Do
-        // not synthesize implicit capability pools and do not append default or
-        // any other pool after a hit.
+        // non-empty classification pool, then capture its declared default
+        // successor. Do not synthesize implicit capability pools or append any
+        // other classification pool.
         let mut selected_pool: Option<&V3RoutePoolManifest> = None;
         for candidate in &classified.facts.route_classification.candidates {
             if candidate == DEFAULT_ROUTE {
@@ -357,12 +351,16 @@ impl V3VirtualRouter {
         // configured, is empty, or does not satisfy the candidate signal, the
         // request is served by the required non-empty default pool.
         let selected_pool = selected_pool.unwrap_or(default_pool);
+        let mut tiers = vec![build_plan_tier(selected_pool)];
+        if selected_pool.id != DEFAULT_ROUTE {
+            tiers.push(build_plan_tier(default_pool));
+        }
 
         Ok(V3Router06RoutePoolResolved {
             server_id: classified.server_id,
             routing_group_id: classified.routing_group_id,
             facts: classified.facts,
-            tiers: vec![build_plan_tier(selected_pool)],
+            tiers,
         })
     }
 
@@ -504,8 +502,9 @@ where
 /// entirely. Every other model string — no dot, an unknown provider segment, or
 /// an enabled provider that declares no such model — falls back to normal
 /// classification (returns None), which is the same path the `auto` and virtual
-/// entry names take. Only a resolved direct model that cannot serve the
-/// request's media requirement fails explicitly without rerouting.
+/// entry names take. A resolved direct model remains a declared pin regardless
+/// of media capability labels; those labels select route pools and never remove
+/// that pin.
 /// Provider/model interpretation stays in the config layer
 /// (`resolve_direct_provider_model`); the router only consumes the resolution.
 fn resolve_v3_direct_model_plan(
@@ -513,28 +512,15 @@ fn resolve_v3_direct_model_plan(
     classified: &V3Router05RequestClassified,
 ) -> Option<Result<V3Router06RoutePoolResolved, V3VirtualRouterError>> {
     let requested = classified.facts.client_model.as_deref()?;
-    let (direct_provider_id, direct_model_id, model_capabilities) =
+    let (direct_provider_id, direct_model_id) =
         match manifest.resolve_direct_provider_model(requested) {
             V3DirectModelResolution::NotDirect => return None,
             V3DirectModelResolution::Resolved {
                 provider_id,
                 model_id,
-                model_capabilities,
-            } => (provider_id, model_id, model_capabilities),
+                ..
+            } => (provider_id, model_id),
         };
-    for media_capability in ["vision", "multimodal"] {
-        if classified.facts.capabilities.contains(media_capability)
-            && !model_capabilities
-                .iter()
-                .any(|capability| capability == "vision" || capability == "multimodal")
-        {
-            return Some(Err(V3VirtualRouterError::DirectModelMediaUnsatisfied {
-                provider: direct_provider_id,
-                model: direct_model_id,
-                capability: media_capability.to_string(),
-            }));
-        }
-    }
     let mut facts = classified.facts.clone();
     // Rewrite to the bare canonical model so downstream requested-model
     // filtering matches the provider's visible model ids.

@@ -527,13 +527,11 @@ pub(crate) struct V3ProviderTerminalEvidence<'a> {
 /// Project a provider-terminal outcome onto the client boundary.
 ///
 /// The client entry is never coupled to a provider. A provider terminal is either
-/// absorbed by a remaining candidate (the runtime keeps rotating before it reaches
-/// this point) or becomes a client transport break. The provider's own status,
-/// headers, and body are provider-private: they are recorded as provider-terminal
-/// evidence, they stay in the typed Error chain, and they must not be projected as
-/// a client response. The disposition is matched exhaustively so a new terminal
-/// shape has to state its client boundary explicitly instead of inheriting
-/// provider passthrough.
+/// absorbed by a remaining candidate or becomes a client transport break. The
+/// provider's status, headers, and body stay in the typed Error chain and
+/// provider-terminal evidence; they are never projected as a client response.
+/// Matching dispositions exhaustively makes each terminal shape use the same
+/// client boundary.
 pub(crate) fn provider_terminal_response(
     state: &Arc<V3ListenerState>,
     connection: Option<V3FrontConnectionIdentity>,

@@ -674,9 +674,246 @@
         "version": 1
       },
       "version": 25
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我们不应该有任何请求等待，请求准入的问题，包括 tier 空，池空，都不应该断开，也不该等待准入",
+          "role": "user",
+          "source": "Current Codex chat, explicit user correction on 2026-11-10 America/Los_Angeles"
+        },
+        "base_version": 0,
+        "operation": "create",
+        "project_id": "routecodex",
+        "request_id": "user-20261110-no-request-admission-wait",
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "text": "请求准入必须立即推进。任何请求都不能因准入条件等待，包括 tier 空、池空。tier 空或池空都不能导致已接收请求断开连接，也不能使请求停在准入等待。此最新指令覆盖此前将 tier 空或池空作为等待准入或关闭已接收连接依据的规则。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我们不应该有任何请求等待，请求准入的问题，包括 tier 空，池空，都不应该断开，也不该等待准入",
+          "role": "user",
+          "source": "Current Codex chat, explicit user correction on 2026-11-10 America/Los_Angeles"
+        },
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "status": "active",
+        "text": "请求准入必须立即推进。任何请求都不能因准入条件等待，包括 tier 空、池空。tier 空或池空都不能导致已接收请求断开连接，也不能使请求停在准入等待。此最新指令覆盖此前将 tier 空或池空作为等待准入或关闭已接收连接依据的规则。",
+        "version": 1
+      },
+      "version": 26
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我们没有容量这个说法；我说了，没有并发准入；准入不做限制；你看下项目记忆的 requirements.md；如果我写的不清楚，就补充清楚",
+          "role": "user",
+          "source": "Current Codex chat, 2026-11-10 America/Los_Angeles, with user-supplied routecodex-request-storm-only-20261110/plan-task.md and existing request-path-unrestrict project memory"
+        },
+        "base_version": 1,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261110-no-admission-limits-clarification",
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "text": "请求准入不做限制。对已接收且可解析的请求，移除 capacity、自适应并发、max_in_flight、业务 lease、permit/FIFO 排队、Server/session admission、capability_mismatch 等本地准入限制。它们不得拒绝请求、延迟请求、排除候选或把请求转入 Deferred 等待。不得通过调大上限、换名、搬到 Runtime 或后台排队保留同一限制。普通请求立即进入声明的路由及 transport；错误进入统一 typed Error 链，按声明 tier 和 pool 后继立即切换，不能等待冷却、探测或恢复。移除人为请求尝试次数上限以及达到上限或缺少 terminal 后睡到 residence deadline 的分支。唯一允许的人为请求延迟是同一 session 多次叠加且尚未解决的错误，在该失败尝试的 Error 处理链内固定延迟两秒，然后继续处理；首次错误和正常请求不延迟，真实成功重置，不阻塞同 session 的其他新请求或其他 session。真实网络传输失败、客户端取消和实际传输超时保留真实语义；字节内存记账不属于本条删除对象。Provider 健康、冷却及后台恢复拥有独立状态，只改变 VR 候选可见性。空 tier 或空池不能作为准入等待或切断已接收请求的理由。此条覆盖旧容量上限、并发准入、permit 队列和 Deferred 容量等待条款。最后候选的真实失败处置须沿单独适用的客户端错误合同，不从本条虚构成功或错误响应。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我们没有容量这个说法；我说了，没有并发准入；准入不做限制；你看下项目记忆的 requirements.md；如果我写的不清楚，就补充清楚",
+          "role": "user",
+          "source": "Current Codex chat, 2026-11-10 America/Los_Angeles, with user-supplied routecodex-request-storm-only-20261110/plan-task.md and existing request-path-unrestrict project memory"
+        },
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "status": "active",
+        "text": "请求准入不做限制。对已接收且可解析的请求，移除 capacity、自适应并发、max_in_flight、业务 lease、permit/FIFO 排队、Server/session admission、capability_mismatch 等本地准入限制。它们不得拒绝请求、延迟请求、排除候选或把请求转入 Deferred 等待。不得通过调大上限、换名、搬到 Runtime 或后台排队保留同一限制。普通请求立即进入声明的路由及 transport；错误进入统一 typed Error 链，按声明 tier 和 pool 后继立即切换，不能等待冷却、探测或恢复。移除人为请求尝试次数上限以及达到上限或缺少 terminal 后睡到 residence deadline 的分支。唯一允许的人为请求延迟是同一 session 多次叠加且尚未解决的错误，在该失败尝试的 Error 处理链内固定延迟两秒，然后继续处理；首次错误和正常请求不延迟，真实成功重置，不阻塞同 session 的其他新请求或其他 session。真实网络传输失败、客户端取消和实际传输超时保留真实语义；字节内存记账不属于本条删除对象。Provider 健康、冷却及后台恢复拥有独立状态，只改变 VR 候选可见性。空 tier 或空池不能作为准入等待或切断已接收请求的理由。此条覆盖旧容量上限、并发准入、permit 队列和 Deferred 容量等待条款。最后候选的真实失败处置须沿单独适用的客户端错误合同，不从本条虚构成功或错误响应。",
+        "version": 2
+      },
+      "version": 27
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我们现在 provider 在只有最后一个的时候，不要做任何特殊的处理，所有冷却准入等对它都无效：\n1. 如果出错就出错，也不冷却，也不做任何阻塞\n2. 也就是所有冷却和请求的准入之类的处理都只有超过一个可以用的 provider 时才有效\n3. 列出所有的请求会做的等待，冷却策略，并且做成一张表给我呈现",
+          "role": "user",
+          "source": "Direct user instruction in current Codex chat 01a1adf9-d7ba-7483-b9d3-2d74ca5141eb on 2026-11-06; supersedes the 2026-10-26 pending-wait portion of routecodex-last-provider-failure-terminal-policy v2"
+        },
+        "base_version": 2,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261106-last-provider-no-special-handling",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "text": "当本次请求的 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，不得做任何特殊处理：所有冷却、准入、等待、观察或恢复阻塞对该身份无效。该身份出错时保留原始 typed Error 并结束当前请求；不新增冷却、探测、准入等待、目标恢复等待或自动业务重试，也不把请求挂起等待其他身份恢复。所有冷却、准入与请求阻塞策略仅在同 target 内存在超过一个可用 provider candidate 时才生效；多 candidate 场景继续按完整 provider/interface/model/key 身份应用既有健康策略并立即切换。客户端与 provider 错误解耦契约不变：客户端不接收 provider 错误正文、代理错误状态或伪造成功。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我们现在 provider 在只有最后一个的时候，不要做任何特殊的处理，所有冷却准入等对它都无效：\n1. 如果出错就出错，也不冷却，也不做任何阻塞\n2. 也就是所有冷却和请求的准入之类的处理都只有超过一个可以用的 provider 时才有效\n3. 列出所有的请求会做的等待，冷却策略，并且做成一张表给我呈现",
+          "role": "user",
+          "source": "Direct user instruction in current Codex chat 01a1adf9-d7ba-7483-b9d3-2d74ca5141eb on 2026-11-06; supersedes the 2026-10-26 pending-wait portion of routecodex-last-provider-failure-terminal-policy v2"
+        },
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "status": "active",
+        "text": "当本次请求的 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，不得做任何特殊处理：所有冷却、准入、等待、观察或恢复阻塞对该身份无效。该身份出错时保留原始 typed Error 并结束当前请求；不新增冷却、探测、准入等待、目标恢复等待或自动业务重试，也不把请求挂起等待其他身份恢复。所有冷却、准入与请求阻塞策略仅在同 target 内存在超过一个可用 provider candidate 时才生效；多 candidate 场景继续按完整 provider/interface/model/key 身份应用既有健康策略并立即切换。客户端与 provider 错误解耦契约不变：客户端不接收 provider 错误正文、代理错误状态或伪造成功。",
+        "version": 3
+      },
+      "version": 28
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "5 是错误的，出错时返回错误到客户端，错误透传到客户端。",
+          "role": "user",
+          "source": "Direct user correction in Codex chat 01a1b118-a6d6-7a60-9a19-8e67440c2783 on 2026-11-06; supersedes the client no-error wording for the last eligible provider candidate"
+        },
+        "base_version": 3,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261106-last-provider-error-passthrough",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "text": "当本次请求的 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，不施加冷却、准入、等待、观察或恢复阻塞。该身份出错时保留原始 typed Error，并将错误返回、透传到客户端，不伪造成功。不新增冷却、探测、准入等待、目标恢复等待或自动业务重试。多 candidate 场景继续按完整 provider/interface/model/key 身份应用既有健康策略并立即切换。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "5 是错误的，出错时返回错误到客户端，错误透传到客户端。",
+          "role": "user",
+          "source": "Direct user correction in Codex chat 01a1b118-a6d6-7a60-9a19-8e67440c2783 on 2026-11-06; supersedes the client no-error wording for the last eligible provider candidate"
+        },
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "status": "active",
+        "text": "当本次请求的 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，不施加冷却、准入、等待、观察或恢复阻塞。该身份出错时保留原始 typed Error，并将错误返回、透传到客户端，不伪造成功。不新增冷却、探测、准入等待、目标恢复等待或自动业务重试。多 candidate 场景继续按完整 provider/interface/model/key 身份应用既有健康策略并立即切换。",
+        "version": 4
+      },
+      "version": 29
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "3. 单可用 provider 原始错误入库，不冷却，不卡准入，不等待，直接透传，只有可用后续大于 1 生效，只有一个候选时只做协议转换",
+          "role": "user",
+          "source": "Direct user Chinese audit in Codex chat 01a1b118-a6d6-7a60-9a19-8e67440c2783 on 2026-11-07; narrows the single/last eligible candidate case of routecodex-client-provider-error-decoupling"
+        },
+        "base_version": 6,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261107-single-candidate-error-passthrough-narrow-exception",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。\n\n文本中的工具调用收割后，必须从可见正文剥离对应工具段，保留周围文字，并使用目标协议的工具调用终止语义：Chat finish_reason=tool_calls；Responses 返回原生 function/custom_tool_call 及其合法终态，内部或原有显式 finish reason 与工具调用一致，不添加非标准的 Responses 字段。必须验证完整参数、call_id 配对、实际安全工具执行及后续 turn。\n\n本条“provider 错误不返回客户端”仅适用于多候选/普通场景。当本次请求 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，按 routecodex-last-provider-failure-terminal-policy 处理：保留原始 typed Error 并直接向客户端透传真实 provider status/body，不伪造成功、不生成代理替代错误；该场景只执行必要的协议转换。该单候选例外由用户 2026-11-07 中文审计再次确认。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "3. 单可用 provider 原始错误入库，不冷却，不卡准入，不等待，直接透传，只有可用后续大于 1 生效，只有一个候选时只做协议转换",
+          "role": "user",
+          "source": "Direct user Chinese audit in Codex chat 01a1b118-a6d6-7a60-9a19-8e67440c2783 on 2026-11-07; narrows the single/last eligible candidate case of routecodex-client-provider-error-decoupling"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须中止或关闭该请求的客户端连接，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。\n\n文本中的工具调用收割后，必须从可见正文剥离对应工具段，保留周围文字，并使用目标协议的工具调用终止语义：Chat finish_reason=tool_calls；Responses 返回原生 function/custom_tool_call 及其合法终态，内部或原有显式 finish reason 与工具调用一致，不添加非标准的 Responses 字段。必须验证完整参数、call_id 配对、实际安全工具执行及后续 turn。\n\n本条“provider 错误不返回客户端”仅适用于多候选/普通场景。当本次请求 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，按 routecodex-last-provider-failure-terminal-policy 处理：保留原始 typed Error 并直接向客户端透传真实 provider status/body，不伪造成功、不生成代理替代错误；该场景只执行必要的协议转换。该单候选例外由用户 2026-11-07 中文审计再次确认。",
+        "version": 7
+      },
+      "version": 30
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "我们现在的请求就是当前的请求，遇到任何错误，它的选择就是切 provider。下一个请求也是路由到下一个新的 provider，所以第一个请求与第二个请求之间是没有耦合的。第二个请求没有等待，错误了也不等待。这几个问题你要搞清楚，确保没有这些傻逼问题。另外一个很重要的事情是，我强调了很多遍，我们池内的 tier 它只是优先级，高优先级的先命中，低优先级的后命中。所以 tier 空了没有任何问题，它可以继续命中下一个 provider，去下一个 tier 命中。如果一个请求路由的池空了，就会直接路由到 default，除非 default 也空了。到最后一个 provider 时，客户端是看不到任何错误的；而且只有到了最后一个 provider 的最后一个 key 时，才会出现错误透传的情况。",
+          "role": "user",
+          "source": "Current Codex chat, explicit corrections 2026-11-10 America/Los_Angeles"
+        },
+        "base_version": 2,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261110-request-independent-immediate-provider-switch",
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "text": "准入不做任何限制。每个请求有独立的执行、错误与候选选择状态。当前请求遇到任何错误，立即沿声明路径切换下一个可尝试 provider/key。后续请求独立完成新选路、立即发送；不等待前一请求，不因前一请求的错误、重试、session 状态、容量、lease、permit、FIFO 或锁而阻塞。后续请求自己遇到错误也立即切换，不做错误节流或固定两秒等待。本条取代此前同 session 连续错误两秒延迟解释。Provider 健康和冷却按完整身份独立维护，只改变候选可见性，不能成为任何请求的恢复等待或共享准入门。池内 tier 只表示优先级：高优先级先命中，无可尝试候选就立即进入下一 tier；命中池空则立即进入声明的 default，只有 default 也空才到真实路由耗尽边界。可尝试的同 provider 其他 key 必须继续尝试，不能因某 key 失败整批排除未尝试 key。最后一个 provider 仍有未尝试 key 时，其错误继续在 RCC 内部处理，客户端看不到错误。仅在声明路径上最后一个 provider 的最后一个可尝试 key 也失败时，透传该次真实 provider 错误及实际状态，不伪造代理错误或成功。可解析请求不因 capability、Server/session admission、自适应并发、max_in_flight、本地业务 lease、permit 或尝试次数上限被拒绝或等待；删除 Deferred、等待冷却或探测、sleep 到 residence deadline 等替代排队。保留真实客户端取消、实际网络传输超时、必要协议转换和字节内存记账。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "我们现在的请求就是当前的请求，遇到任何错误，它的选择就是切 provider。下一个请求也是路由到下一个新的 provider，所以第一个请求与第二个请求之间是没有耦合的。第二个请求没有等待，错误了也不等待。这几个问题你要搞清楚，确保没有这些傻逼问题。另外一个很重要的事情是，我强调了很多遍，我们池内的 tier 它只是优先级，高优先级的先命中，低优先级的后命中。所以 tier 空了没有任何问题，它可以继续命中下一个 provider，去下一个 tier 命中。如果一个请求路由的池空了，就会直接路由到 default，除非 default 也空了。到最后一个 provider 时，客户端是看不到任何错误的；而且只有到了最后一个 provider 的最后一个 key 时，才会出现错误透传的情况。",
+          "role": "user",
+          "source": "Current Codex chat, explicit corrections 2026-11-10 America/Los_Angeles"
+        },
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "status": "active",
+        "text": "准入不做任何限制。每个请求有独立的执行、错误与候选选择状态。当前请求遇到任何错误，立即沿声明路径切换下一个可尝试 provider/key。后续请求独立完成新选路、立即发送；不等待前一请求，不因前一请求的错误、重试、session 状态、容量、lease、permit、FIFO 或锁而阻塞。后续请求自己遇到错误也立即切换，不做错误节流或固定两秒等待。本条取代此前同 session 连续错误两秒延迟解释。Provider 健康和冷却按完整身份独立维护，只改变候选可见性，不能成为任何请求的恢复等待或共享准入门。池内 tier 只表示优先级：高优先级先命中，无可尝试候选就立即进入下一 tier；命中池空则立即进入声明的 default，只有 default 也空才到真实路由耗尽边界。可尝试的同 provider 其他 key 必须继续尝试，不能因某 key 失败整批排除未尝试 key。最后一个 provider 仍有未尝试 key 时，其错误继续在 RCC 内部处理，客户端看不到错误。仅在声明路径上最后一个 provider 的最后一个可尝试 key 也失败时，透传该次真实 provider 错误及实际状态，不伪造代理错误或成功。可解析请求不因 capability、Server/session admission、自适应并发、max_in_flight、本地业务 lease、permit 或尝试次数上限被拒绝或等待；删除 Deferred、等待冷却或探测、sleep 到 residence deadline 等替代排队。保留真实客户端取消、实际网络传输超时、必要协议转换和字节内存记账。",
+        "version": 3
+      },
+      "version": 31
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "2 秒的保留，其他的 relay 的 recovery gate 等待移除",
+          "role": "user",
+          "source": "Direct user correction in current RouteCodex emergency repair chat, 2026-11-10"
+        },
+        "base_version": 3,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261110-keep-two-second-remove-relay-recovery",
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "text": "保留本条已有的无请求准入限制、独立请求、完整 provider/key 身份隔离和声明 tier/default 顺序。将 v3 中禁止固定两秒等待的描述替换为：唯一允许的人为请求延迟是同一 session 多次叠加且未解决错误后的固定两秒防风暴延迟。首次错误立即继续；第二次及以后只在该失败尝试的 typed Error 链中等待两秒，不增长、不串行化其他请求。真实业务成功重置序列并解除旧等待。正常新请求、其他 session 和其他 listener 不等待。移除其他 Direct/Relay recovery gate 等待，包括最后候选429重试等待、target recovery、冷却或probe等待、Deferred、尝试次数上限和sleep到residence deadline。保留真实网络超时、客户端取消、必要协议转换和字节内存记账。错误响应的客户端边界遵循当前项目透明代理合同。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "2 秒的保留，其他的 relay 的 recovery gate 等待移除",
+          "role": "user",
+          "source": "Direct user correction in current RouteCodex emergency repair chat, 2026-11-10"
+        },
+        "requirement_id": "routecodex-no-request-admission-wait",
+        "status": "active",
+        "text": "保留本条已有的无请求准入限制、独立请求、完整 provider/key 身份隔离和声明 tier/default 顺序。将 v3 中禁止固定两秒等待的描述替换为：唯一允许的人为请求延迟是同一 session 多次叠加且未解决错误后的固定两秒防风暴延迟。首次错误立即继续；第二次及以后只在该失败尝试的 typed Error 链中等待两秒，不增长、不串行化其他请求。真实业务成功重置序列并解除旧等待。正常新请求、其他 session 和其他 listener 不等待。移除其他 Direct/Relay recovery gate 等待，包括最后候选429重试等待、target recovery、冷却或probe等待、Deferred、尝试次数上限和sleep到residence deadline。保留真实网络超时、客户端取消、必要协议转换和字节内存记账。错误响应的客户端边界遵循当前项目透明代理合同。",
+        "version": 4
+      },
+      "version": 32
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "补充当前用户提供的项目合同：Provider HTTP error response 一律不返回客户端，包括 final provider/final key；记录 typed Error 和精确身份 health 后结束请求 transport，不转发错误 payload，不伪造成功。SSE 已提交后同样不得向已提交通道注入错误正文/错误帧；已交付 frame 不可撤回或重放。handoff-prompt、旧 note 和 public last-key passthrough gate 属旧语义，不能继续作为 e37891a 的完成条件。请把现有最后一 key 透传测试改写为当前合同：两个 key 都实际尝试、无替代时内部 typed error 收口且客户端无 provider error payload/正常空成功；保留真实取消、原始 deadline、transport 结束、工具历史无损和健康可见性。若这改变当前已完成 gate，记录失效并重跑受影响验证。继续唯一 writer，不 merge/push/install/restart。",
+          "role": "user",
+          "source": "Jenny master contract correction m1794311805686-2243 on 2026-11-10, relaying the current user-provided RouteCodex project contract"
+        },
+        "base_version": 7,
+        "operation": "replace",
+        "project_id": "routecodex",
+        "request_id": "user-20261110-provider-http-never-client-decoupling-v8",
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "text": "客户端与 provider 解耦。Provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。此规则无最后候选例外：包括 final provider 和 final key，Provider HTTP error response 一律不得返回客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须记录原始 typed Error 和精确 provider/interface/model/key 身份 health，然后结束该请求的 transport，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。SSE 已提交后同样不得注入错误正文或错误帧，已交付 frame 不可撤回、改写、抑制或重放；只可检测地结束 transport。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。\n\n文本中的工具调用收割后，必须从可见正文剥离对应工具段，保留周围文字，并使用目标协议的工具调用终止语义：Chat finish_reason=tool_calls；Responses 返回原生 function/custom_tool_call 及其合法终态，内部或原有显式 finish reason 与工具调用一致，不添加非标准的 Responses 字段。必须验证完整参数、call_id 配对、实际安全工具执行及后续 turn。"
+      },
+      "result": {
+        "authorization": {
+          "original_text": "补充当前用户提供的项目合同：Provider HTTP error response 一律不返回客户端，包括 final provider/final key；记录 typed Error 和精确身份 health 后结束请求 transport，不转发错误 payload，不伪造成功。SSE 已提交后同样不得向已提交通道注入错误正文/错误帧；已交付 frame 不可撤回或重放。handoff-prompt、旧 note 和 public last-key passthrough gate 属旧语义，不能继续作为 e37891a 的完成条件。请把现有最后一 key 透传测试改写为当前合同：两个 key 都实际尝试、无替代时内部 typed error 收口且客户端无 provider error payload/正常空成功；保留真实取消、原始 deadline、transport 结束、工具历史无损和健康可见性。若这改变当前已完成 gate，记录失效并重跑受影响验证。继续唯一 writer，不 merge/push/install/restart。",
+          "role": "user",
+          "source": "Jenny master contract correction m1794311805686-2243 on 2026-11-10, relaying the current user-provided RouteCodex project contract"
+        },
+        "requirement_id": "routecodex-client-provider-error-decoupling",
+        "status": "active",
+        "text": "客户端与 provider 解耦。Provider 的 HTTP/error-channel 错误只进入 RCC 内部 typed Error 处理、重试、冷却与诊断，不返回给客户端。此规则无最后候选例外：包括 final provider 和 final key，Provider HTTP error response 一律不得返回客户端。RCC 只能向客户端交付 provider 已作为业务/模型内容返回、且客户端协议可忠实表示的响应；若没有可用 provider，或所有候选均无法产生可交付响应，必须记录原始 typed Error 和精确 provider/interface/model/key 身份 health，然后结束该请求的 transport，不返回 provider 错误、代理生成的替代错误、HTTP 错误状态、SSE error payload 或伪造成功。SSE 已提交后同样不得注入错误正文或错误帧，已交付 frame 不可撤回、改写、抑制或重放；只可检测地结束 transport。内部路由、冷却、重试、provider 状态与诊断信息不得进入 client payload。\n\n上游整次响应没有任何可交付业务内容时，RCC 将该尝试判为内部 502 错误，进入现有 typed Error 链，按已声明政策重试或重选；不能把它作为正常 completed 空响应交付。空响应判定基于完整尝试的业务内容，不依赖 usage 或 output_tokens；tool-call-only、refusal、reasoning、content_filter 等实际业务结果不算空响应。该 502 只用于 RCC 内部分类、恢复和诊断，不返回客户端；恢复耗尽后仍按本条中止或关闭该请求的传输，不伪造成功。\n\n请求路径错误直接进入 Error 链，不因严重程度退出该请求的错误主线，也不继续构造成功响应。上游原本返回 200，但 RCC 响应处理过程产生内部 599 错误时，也进入 Error 链。请求路径错误、响应处理错误和空响应保留各自 typed 来源、内部分类及上游实际状态，统一由现有 Error 链决定恢复、重试或终止；不得旁路、吞错或把错误包装为成功空响应。\n\nResponses Direct 的已证实协议标签或控制包裹不作为客户端可见的业务正文。治理由唯一注册的 Direct response hook 执行：清理已证实的独立 DSML/analysis 标记，忠实保留普通正文、工具标识、参数、call_id、配对结果以及实际 reasoning、refusal、content_filter 等业务内容；明确的 thinking 包裹内容应保留为可表示的 reasoning，不泄露为可见 output_text。此规则不授权删除引用、代码示例或具有无法无损重关联的 opaque 数据。\n\n若完成全部已声明治理后，整次 provider 响应只有可移除的文本协议标签，没有其他可交付业务内容，则丢弃整次尝试，形成现有内部 provider_response_empty/502，进入 typed Error 链并切换其他 eligible provider。原上游状态保留为内部证据，不将标签、内部错误或伪造的空成功返回客户端；候选耗尽后，仅可检测地中止该请求传输。\n\n文本标记治理按用户明确策略执行：完整的工具、reasoning 或文本包裹应在唯一文本治理 owner 中收割为可忠实表示的协议内容。残缺标记只允许剥离和有限收割；若已识别工具执行 turn 却无法还原工具调用，则丢弃本次 provider attempt，进入现有内部 typed Error/传输失败恢复链重试或重选，即使同时有普通正文也不得将残缺工具当正常响应交付。若工具完整，仅 thinking 或文本标签残缺，则清理这些标签并保留完整工具及前后文字。reasoning 残缺且无法定位起始时按文本保留；孤立结束标记只移除标记，保留前后文字。不得猜测缺失参数、工具身份或 reasoning 起点，不以业务参数无效为代理失败理由。Relay 的文本治理仍由 Chat Process 持有；Direct 的文本治理仅由注册 Direct hook 持有。\n\n文本中的工具调用收割后，必须从可见正文剥离对应工具段，保留周围文字，并使用目标协议的工具调用终止语义：Chat finish_reason=tool_calls；Responses 返回原生 function/custom_tool_call 及其合法终态，内部或原有显式 finish reason 与工具调用一致，不添加非标准的 Responses 字段。必须验证完整参数、call_id 配对、实际安全工具执行及后续 turn。",
+        "version": 8
+      },
+      "version": 33
+    },
+    {
+      "request": {
+        "authorization": {
+          "original_text": "Provider HTTP error response 一律不返回客户端，包括 final provider/final key；记录 typed Error 和精确身份 health 后结束请求 transport，不转发错误 payload，不伪造成功。handoff-prompt、旧 note 和 public last-key passthrough gate 属旧语义，不能继续作为 e37891a 的完成条件。",
+          "role": "user",
+          "source": "Jenny master contract correction m1794311805686-2243 on 2026-11-10, relaying the current user-provided RouteCodex project contract"
+        },
+        "base_version": 4,
+        "operation": "revoke",
+        "project_id": "routecodex",
+        "request_id": "user-20261110-retire-last-provider-error-passthrough",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy"
+      },
+      "result": {
+        "previous_text": "当本次请求的 captured target 内只有一个可用 provider candidate，或当前已是最后一个可尝试的 eligible candidate 时，不施加冷却、准入、等待、观察或恢复阻塞。该身份出错时保留原始 typed Error，并将错误返回、透传到客户端，不伪造成功。不新增冷却、探测、准入等待、目标恢复等待或自动业务重试。多 candidate 场景继续按完整 provider/interface/model/key 身份应用既有健康策略并立即切换。",
+        "requirement_id": "routecodex-last-provider-failure-terminal-policy",
+        "status": "revoked",
+        "version": 5
+      },
+      "version": 34
     }
   ],
   "project_id": "routecodex",
   "schema_version": 1,
-  "version": 25
+  "version": 34
 }
