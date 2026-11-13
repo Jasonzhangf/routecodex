@@ -160,25 +160,10 @@ mod tests {
         .expect("recoverable Error05 must execute through the canonical SDK node");
 
         assert_eq!(projection, serde_json::to_value(&decision).unwrap());
-        let V3Error05ExecutionAction::WaitThenReselect { recovery } = &decision.action else {
+        let V3Error05ExecutionAction::Reselect = &decision.action else {
             panic!("candidate capacity must produce target-local reselection");
         };
-        assert_eq!(recovery.server_id(), "server-a");
-        assert_eq!(recovery.routing_group(), "group-a");
-        assert_eq!(recovery.session_id(), "session-a");
-        assert_eq!(
-            recovery.failure_session_scope().transport_handoff_scope(),
-            Some(("pipeline-a", 4444, 17))
-        );
-        assert_eq!(
-            recovery.provider_runtime_identity(),
-            "provider-a:key-a:model-a"
-        );
-        assert_eq!(
-            recovery.normalized_error_family(),
-            "provider_transport_failure"
-        );
-        assert_eq!(recovery.generation(), 41);
+        assert!(decision.action.recovery_witness().is_none());
         assert!(decision.try_into_terminal().is_err());
     }
 

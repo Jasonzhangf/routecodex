@@ -6,12 +6,12 @@
 //! entries (`/v1/responses` and `/v1/chat/completions`) against a real loopback
 //! upstream. It asserts three externally observable facts:
 //!
-//! 1. routing success: the request model selects the matched route pool and the
-//!    ordered provider candidate inside it actually receives the request with
-//!    the correct target wire model;
+//! 1. routing success: the request capability selects the matched route pool
+//!    and the ordered provider candidate inside it actually receives the
+//!    request with the correct target wire model;
 //! 2. payload transparency: the complete exec command, apply_patch string, MCP
 //!    argument blob and paired `call_id` tool history survive the round trip;
-//! 3. a reachable route/selection failure is observed through the typed Error
+//! 3. reachable provider exhaustion is observed through the typed Error
 //!    evidence, never as a client error response.
 //!
 //! It mirrors the frozen req09 consumer's public build entry and loopback
@@ -116,6 +116,8 @@ struct ProviderCapture {
 struct CaptureState {
     provider: &'static str,
     captures: mpsc::UnboundedSender<ProviderCapture>,
+    status: StatusCode,
+    response_body: Value,
 }
 
 async fn capture_provider_request(
@@ -130,29 +132,10 @@ async fn capture_provider_request(
         })
         .expect("capture receiver remains live");
     Response::builder()
-        .status(StatusCode::OK)
+        .status(state.status)
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_vec(&json!({
-                "id": "chatcmpl-req03-opaque-route",
-                "object": "chat.completion",
-                "created": 0,
-                "model": "chat-wire",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": "req03 opaque route fidelity ok"
-                    },
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 3,
-                    "completion_tokens": 2,
-                    "total_tokens": 5
-                }
-            }))
-            .unwrap(),
+            serde_json::to_vec(&state.response_body).unwrap(),
         ))
         .unwrap()
 }
@@ -164,12 +147,50 @@ async fn start_capture_upstream(
     provider: &'static str,
     captures: mpsc::UnboundedSender<ProviderCapture>,
 ) -> (String, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    start_capture_upstream_with_response(
+        provider,
+        captures,
+        StatusCode::OK,
+        json!({
+            "id": "chatcmpl-req03-opaque-route",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "chat-wire",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "req03 opaque route fidelity ok"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 3,
+                "completion_tokens": 2,
+                "total_tokens": 5
+            }
+        }),
+    )
+    .await
+}
+
+async fn start_capture_upstream_with_response(
+    provider: &'static str,
+    captures: mpsc::UnboundedSender<ProviderCapture>,
+    status: StatusCode,
+    response_body: Value,
+) -> (String, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let app = Router::new()
         .route("/v1/chat/completions", post(capture_provider_request))
-        .with_state(Arc::new(CaptureState { provider, captures }));
+        .with_state(Arc::new(CaptureState {
+            provider,
+            captures,
+            status,
+            response_body,
+        }));
     let task = tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
@@ -183,17 +204,17 @@ async fn start_capture_upstream(
 
 /// Aggregate manifest with two providers and two explicit route pools.
 ///
-/// * `responses_route` matches `entry_protocol = "responses"` + model
-///   `req03-responses`; its targets are ordered `alpha` then `beta`.
-/// * `chat_route` matches `entry_protocol = "openai_chat"` + model
-///   `req03-chat`; its targets are ordered `beta` then `alpha`.
+/// * `responses_route` matches `entry_protocol = "responses"` + capability
+///   `tools`; its targets are ordered `alpha` then `beta`.
+/// * `chat_route` matches `entry_protocol = "openai_chat"` + capability
+///   `tools`; its targets are ordered `beta` then `alpha`.
 ///
 /// Pool target priority is descending numeric (higher number first), so the
 /// `priority = 2` target is the primary candidate in each pool.
 ///
-/// `max_context_tokens` supplies advisory estimates. Selection failure uses
-/// declared search capability exhaustion with enabled providers, not a local
-/// context-window rejection.
+/// `max_context_tokens` supplies advisory estimates. The failure case uses
+/// real provider HTTP errors from both declared candidates, not local
+/// context-window rejection or capability-based candidate filtering.
 fn req03_opaque_route_manifest(
     server_port: u16,
     alpha_base_url: &str,
@@ -219,7 +240,7 @@ type = "openai_chat"
 base_url = "{alpha_base_url}"
 default_model = "alpha-wire"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{REQ03_KEY_ENV}" }}] }}
-health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 2, cooldown_ms = 5000 }}
 [providers.alpha.models.alpha-wire]
 wire_name = "alpha-wire"
 aliases = ["req03-responses"]
@@ -232,7 +253,7 @@ type = "openai_chat"
 base_url = "{beta_base_url}"
 default_model = "beta-wire"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{REQ03_KEY_ENV}" }}] }}
-health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 2, cooldown_ms = 5000 }}
 [providers.beta.models.beta-wire]
 wire_name = "beta-wire"
 aliases = ["req03-chat"]
@@ -247,11 +268,11 @@ dry_run = false
 retention = {{ raw_requests = 8, raw_responses = 8, events = 64 }}
 [route_groups.req03.pools.responses_route]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["req03-responses"] }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["tools"] }}
 targets = [{{ kind = "provider_model", provider = "alpha", model = "alpha-wire", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "beta", model = "beta-wire", key = "key", priority = 1 }}]
 [route_groups.req03.pools.chat_route]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["req03-chat"] }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", required_capabilities = ["tools"] }}
 targets = [{{ kind = "provider_model", provider = "beta", model = "beta-wire", key = "key", priority = 2 }}, {{ kind = "provider_model", provider = "alpha", model = "alpha-wire", key = "key", priority = 1 }}]
 [route_groups.req03.pools.default]
 selection = {{ strategy = "priority" }}
@@ -438,8 +459,9 @@ async fn req03_opaque_route_selects_ordered_provider_and_preserves_tool_payload_
     let addr = handle.listeners[0].addr;
     let client = reqwest::Client::new();
 
-    // --- Entry 1: Responses. The model selects the `responses_route` pool; the
-    //     higher-priority alpha candidate must win over beta.
+    // --- Entry 1: Responses. The `tools` capability selects the
+    //     `responses_route` pool; the higher-priority alpha candidate must win
+    //     over beta.
     let responses_payload = req03_tool_fidelity_payload();
     let responses = client
         .post(format!("http://{addr}/v1/responses"))
@@ -481,7 +503,7 @@ async fn req03_opaque_route_selects_ordered_provider_and_preserves_tool_payload_
         .expect("provider capture channel remains live");
     assert_eq!(
         alpha_capture.provider, "alpha",
-        "the Responses model must route to the alpha candidate: {alpha_capture:?}"
+        "the Responses tools request must route to the alpha candidate: {alpha_capture:?}"
     );
     assert_eq!(
         alpha_capture.body["model"], "alpha-wire",
@@ -494,8 +516,9 @@ async fn req03_opaque_route_selects_ordered_provider_and_preserves_tool_payload_
     );
     assert_chat_payload_fidelity(&alpha_capture.body, &responses_payload);
 
-    // --- Entry 2: Chat Completions. The model selects the `chat_route` pool; the
-    //     higher-priority beta candidate must win over alpha.
+    // --- Entry 2: Chat Completions. The `tools` capability selects the
+    //     `chat_route` pool; the higher-priority beta candidate must win over
+    //     alpha.
     let chat_payload = req03_tool_fidelity_payload();
     let chat = client
         .post(format!("http://{addr}/v1/chat/completions"))
@@ -549,7 +572,7 @@ async fn req03_opaque_route_selects_ordered_provider_and_preserves_tool_payload_
         .expect("provider capture channel remains live");
     assert_eq!(
         beta_capture.provider, "beta",
-        "the Chat Completions model must route to the beta candidate: {beta_capture:?}"
+        "the Chat Completions tools request must route to the beta candidate: {beta_capture:?}"
     );
     assert_eq!(
         beta_capture.body["model"], "beta-wire",
@@ -595,45 +618,32 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
 
     let request_marker = "REQ03_OPAQUE_ROUTE_SELECTION_FAILURE_MARKER";
     let client = reqwest::Client::new();
-    let long_input = format!(
-        "{request_marker} {}",
-        "context window exhaustion probe ".repeat(600)
-    );
-    let call_id = "call_req03_declared_search";
-    let search_arguments = r#"{"query":"route","path":"src"}"#;
+    // The current-turn classifier selects the `tools` route pool on a tool
+    // continuation, not on a bare tool declaration. Carry a paired tool
+    // call/result so this request selects `responses_route` (alpha then beta),
+    // which is the candidate set the provider-exhaustion case must exercise.
+    let continuation = req03_tool_fidelity_payload();
     let request_payload = json!({
         "model": "req03-responses",
         "input": [
-            {"role": "user", "content": long_input},
+            {"role": "user", "content": format!("{request_marker} continue the tool round trip")},
             {
                 "type": "function_call",
-                "name": "search_files",
-                "call_id": call_id,
-                "arguments": search_arguments
+                "call_id": continuation.call_id,
+                "name": "exec_command",
+                "arguments": continuation.tool_arguments
             },
             {
                 "type": "function_call_output",
-                "call_id": call_id,
-                "output": "src/lib.rs"
+                "call_id": continuation.call_id,
+                "output": continuation.tool_result
             }
         ],
-        "tools": [{
-            "type": "function",
-            "name": "search_files",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "path": {"type": "string"}
-                },
-                "required": ["query", "path"]
-            }
-        }],
+        "tools": continuation.tools,
         "stream": false
     });
 
-    // The same business history succeeds without a declared search requirement.
-    // Both providers remain enabled and context estimates remain advisory.
+    // The same business request succeeds while both providers remain enabled.
     let control_manifest =
         req03_opaque_route_manifest(free_port(), &alpha_base_url, &beta_base_url, 2_000);
     let control_handle = spawn_v3_server_aggregate(control_manifest).await.unwrap();
@@ -668,13 +678,7 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
             .contains(request_marker),
         "the original marker must reach the control upstream"
     );
-    let control_call = find_chat_tool_call(&control_capture.body, call_id)
-        .expect("the paired search call must reach the control upstream");
-    assert_eq!(control_call["function"]["name"], "search_files");
-    assert_eq!(control_call["function"]["arguments"], search_arguments);
-    let control_result = find_chat_tool_result(&control_capture.body, call_id)
-        .expect("the paired search result must reach the control upstream");
-    assert_eq!(control_result["content"], "src/lib.rs");
+    assert_chat_payload_fidelity(&control_capture.body, &continuation);
     assert!(
         captures_rx.try_recv().is_err(),
         "the control must produce exactly one provider request"
@@ -687,21 +691,37 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
         "control sample persistence failures: {control_failures:?}"
     );
 
-    // Target10 rejects all expanded candidates, including the default tier,
-    // because neither model declares the required search capability.
-    let mut manifest =
-        req03_opaque_route_manifest(free_port(), &alpha_base_url, &beta_base_url, 2_000);
-    manifest
-        .route_groups
-        .get_mut("req03")
-        .unwrap()
-        .pools
-        .get_mut("responses_route")
-        .unwrap()
-        .match_rule
-        .as_mut()
-        .unwrap()
-        .required_capabilities = vec!["search".into()];
+    // Both declared candidates return a real provider HTTP error. The runtime
+    // must exclude each exact failed candidate and then terminate this request
+    // through the typed Error chain instead of returning either provider body.
+    let provider_error = json!({
+        "error": {
+            "message": "controlled req03 provider exhaustion",
+            "type": "server_error"
+        }
+    });
+    let (failure_alpha_base_url, failure_alpha_shutdown, failure_alpha_task) =
+        start_capture_upstream_with_response(
+            "alpha",
+            captures_tx.clone(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            provider_error.clone(),
+        )
+        .await;
+    let (failure_beta_base_url, failure_beta_shutdown, failure_beta_task) =
+        start_capture_upstream_with_response(
+            "beta",
+            captures_tx.clone(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            provider_error,
+        )
+        .await;
+    let manifest = req03_opaque_route_manifest(
+        free_port(),
+        &failure_alpha_base_url,
+        &failure_beta_base_url,
+        2_000,
+    );
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let addr = handle.listeners[0].addr;
     let client_observation = timeout(
@@ -724,10 +744,19 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
         "the client must never receive a projected HTTP error status: {client_error}"
     );
 
-    // No candidate was admitted, so no provider transport happened.
+    let first_failure_capture = timeout(Duration::from_secs(5), captures_rx.recv())
+        .await
+        .expect("the first failed provider must be reached before the deadline")
+        .expect("provider capture channel remains live");
+    assert_eq!(first_failure_capture.provider, "alpha");
+    let second_failure_capture = timeout(Duration::from_secs(5), captures_rx.recv())
+        .await
+        .expect("the second failed provider must be reached before the deadline")
+        .expect("provider capture channel remains live");
+    assert_eq!(second_failure_capture.provider, "beta");
     assert!(
         captures_rx.try_recv().is_err(),
-        "a selection-time route failure must not contact any provider"
+        "provider exhaustion must contact each declared candidate exactly once"
     );
 
     // Typed Error public observation: the projection stays provider-private
@@ -744,8 +773,18 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
             .contains(request_marker),
         "the request artifact must bind the failing request: {request_json}"
     );
-    let error_json =
-        read_json_file(&sample_dir.join("error.json")).expect("error.json must be parseable");
+    let error_json = {
+        let error_path = sample_dir.join("error.json");
+        let mut parsed = None;
+        for _ in 0..400 {
+            if let Some(error_json) = read_json_file(&error_path) {
+                parsed = Some(error_json);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        parsed.expect("error.json must appear and be parseable")
+    };
     assert_eq!(
         error_json["object"], "routecodex.v3.error_evidence",
         "the failure must persist typed Error evidence: {error_json}"
@@ -778,6 +817,12 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
     );
     alpha_shutdown.send(()).expect("alpha shutdown receiver");
     beta_shutdown.send(()).expect("beta shutdown receiver");
+    failure_alpha_shutdown
+        .send(())
+        .expect("failure alpha shutdown receiver");
+    failure_beta_shutdown
+        .send(())
+        .expect("failure beta shutdown receiver");
     timeout(Duration::from_secs(5), alpha_task)
         .await
         .expect("alpha shutdown must complete")
@@ -786,4 +831,12 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
         .await
         .expect("beta shutdown must complete")
         .expect("beta task must succeed");
+    timeout(Duration::from_secs(5), failure_alpha_task)
+        .await
+        .expect("failure alpha shutdown must complete")
+        .expect("failure alpha task must succeed");
+    timeout(Duration::from_secs(5), failure_beta_task)
+        .await
+        .expect("failure beta shutdown must complete")
+        .expect("failure beta task must succeed");
 }

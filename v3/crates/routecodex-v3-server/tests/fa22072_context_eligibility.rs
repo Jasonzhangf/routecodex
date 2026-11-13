@@ -156,7 +156,7 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
 }
 
 #[tokio::test]
-async fn context_estimate_exceeded_reaches_provider_for_route_and_pin() {
+async fn context_estimate_exceeded_reaches_default_provider_for_alias_and_model() {
     let _home_guard = TestHomeGuard::new("fa22072-context-eligibility");
     std::env::set_var("FA22072_CONTEXT_NORMAL_KEY", "secret-route");
     std::env::set_var("FA22072_CONTEXT_PINNED_KEY", "secret-pin");
@@ -301,7 +301,9 @@ async fn context_estimate_exceeded_reaches_provider_for_route_and_pin() {
     }
     let captures = captured.lock().unwrap().clone();
     assert_eq!(captures.len(), 2);
-    assert_eq!(captures[0]["model"], json!("wire-client"));
+    // A non-provider.model alias is not an inbound pool selector. Both
+    // ordinary requests use the declared default target and its wire model.
+    assert_eq!(captures[0]["model"], json!("wire-test"));
     assert_eq!(captures[1]["model"], json!("wire-test"));
     assert!(captures.iter().all(|body| body["input"] == json!(input)));
 }

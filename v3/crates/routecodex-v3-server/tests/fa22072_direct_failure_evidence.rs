@@ -2,7 +2,7 @@
 //!
 //! Stable test IDs:
 //! - `fa22072_pinned_direct_step5_known_failure_evidence_public_entry`
-//! - `fa22072_direct_attempt_zero_original_source_public_entry`
+//! - `fa22072_direct_capability_label_does_not_reject_declared_pin_public_entry`
 //!
 //! This target only wires the owned fixture and the two public HTTP entry
 //! cases. Shared helpers live here; each case lives in its own submodule so

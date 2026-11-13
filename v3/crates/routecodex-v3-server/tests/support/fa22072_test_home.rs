@@ -22,6 +22,15 @@ pub struct TestHomeGuard {
 }
 
 impl TestHomeGuard {
+    pub fn codex_samples_root(&self, port: u16) -> PathBuf {
+        self.path
+            .join(".rcc")
+            .join("codex-samples")
+            .join("openai-responses")
+            .join("ports")
+            .join(port.to_string())
+    }
+
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
             "fa22072-boundary-{}-{}",
