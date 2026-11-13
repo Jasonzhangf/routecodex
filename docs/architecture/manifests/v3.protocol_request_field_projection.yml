@@ -54,6 +54,7 @@ payload_semantics:
   - request.reasoning_display_policy
   - request.reasoning_thinking_mode
   - request.tools.custom_declaration
+  - request.tools.declaration_business_members
   - request.tool_choice.named_custom
   - request.messages.tool_calls.custom
   - request.messages.tool_result.extra_fields
@@ -182,6 +183,14 @@ semantic_registry:
       responses: mapped_exact
       openai_chat: mapped_exact_native_custom
       anthropic: mapped_compatible_registered:v3.custom_tool.anthropic_string_input_wrapper.v1
+      gemini: unsupported
+  - semantic_id: request.tools.declaration_business_members
+    chat_storage: tools[].members_beside_known_name_description_parameters_kind
+    type: opaque_business_object_per_declaration
+    projections:
+      responses: source_roundtrip_only
+      openai_chat: source_roundtrip_only
+      anthropic: mapped_exact_identity_scoped_roundtrip
       gemini: unsupported
   - semantic_id: request.tool_choice.named_custom
     chat_storage: tool_choice.type_custom_and_exact_name
