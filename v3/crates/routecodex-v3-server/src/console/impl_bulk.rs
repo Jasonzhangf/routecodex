@@ -1094,6 +1094,17 @@ impl V3SseConsoleFinalizer {
 }
 
 impl V3DirectSseConsoleFinalizer {
+    fn semantic_terminal(
+        &self,
+    ) -> Result<Option<routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal>, String> {
+        Ok(self
+            .stream_observation
+            .as_ref()
+            .map(routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservation::semantic_terminal)
+            .transpose()?
+            .flatten())
+    }
+
     pub(crate) fn complete(mut self) {
         if let Err(error) = self.merge_stream_observation() {
             emit_v3_runtime_observability_contract_failure(
@@ -1103,6 +1114,47 @@ impl V3DirectSseConsoleFinalizer {
             );
             return;
         }
+        let terminal = match self.semantic_terminal() {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                emit_v3_runtime_observability_contract_failure(
+                    &self.context,
+                    &self.observability,
+                    error,
+                );
+                return;
+            }
+        };
+        let Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Success) = terminal
+        else {
+            // A transport EOF and [DONE] are not a semantic terminal. The
+            // collector rejects this before commit; a late no-observability
+            // closeout must retain the same truthful failure instead of
+            // fabricating request.completed/success.
+            let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+                routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderResp14Raw",
+                "provider_response_sse_stream",
+                "provider response SSE stream ended without a terminal semantic event",
+                routecodex_v3_error::V3ExternalErrorLink {
+                    kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                    status: None,
+                    code: Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string()),
+                    provider_id: None,
+                    upstream_request_id: None,
+                    message: Some(
+                        "provider response SSE stream ended without a terminal semantic event"
+                            .to_string(),
+                    ),
+                },
+            );
+            let result =
+                routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+                    source, 599,
+                );
+            self.emit_direct_sse_failure_console_line(result);
+            return;
+        };
         self.emit_direct_sse_complete_console_lines();
     }
 
@@ -1142,13 +1194,8 @@ impl V3DirectSseConsoleFinalizer {
             );
             return;
         }
-        let semantic_terminal = match self
-            .stream_observation
-            .as_ref()
-            .map(routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservation::semantic_terminal)
-            .transpose()
-        {
-            Ok(terminal) => terminal.flatten(),
+        let semantic_terminal = match self.semantic_terminal() {
+            Ok(terminal) => terminal,
             Err(error) => {
                 emit_v3_runtime_observability_contract_failure(
                     &self.context,
@@ -1838,7 +1885,10 @@ mod direct_sse_observability_none_tests {
         }
     }
 
-    fn live_sse_frame(body: V3Server16Body) -> V3Server16HttpFrame {
+    fn live_sse_frame_with_observation(
+        body: V3Server16Body,
+        stream_observation: V3RuntimeStreamObservation,
+    ) -> V3Server16HttpFrame {
         V3Server16HttpFrame {
             status: 200,
             content_type: "text/event-stream".to_string(),
@@ -1851,8 +1901,25 @@ mod direct_sse_observability_none_tests {
             diagnostic_cause: None,
             node_trace: vec!["V3DirectResp15ClientPayloadReady"],
             observability: None,
-            stream_observation: Some(V3RuntimeStreamObservation::default()),
+            stream_observation: Some(stream_observation),
         }
+    }
+
+    fn live_sse_frame(body: V3Server16Body) -> V3Server16HttpFrame {
+        live_sse_frame_with_observation(body, V3RuntimeStreamObservation::default())
+    }
+
+    fn success_observation() -> V3RuntimeStreamObservation {
+        let observation = V3RuntimeStreamObservation::default();
+        observation
+            .merge_snapshot(
+                &routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservationSnapshot {
+                    response_status: Some("completed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .expect("test observation must accept a completed response status");
+        observation
     }
 
     fn delta_stream() -> V3ClientSseStream {
@@ -1865,9 +1932,9 @@ mod direct_sse_observability_none_tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_eof_without_observability_records_completed_terminal() {
+    async fn direct_sse_clean_eof_without_semantic_terminal_records_failed_terminal() {
         let state = test_listener_state(7777);
-        let request_id = "req-direct-sse-no-observability-eof";
+        let request_id = "req-direct-sse-no-observability-missing-terminal";
         let context = test_context(&state, request_id);
         let frame = live_sse_frame(V3Server16Body::Sse(delta_stream()));
 
@@ -1890,6 +1957,48 @@ mod direct_sse_observability_none_tests {
         let row = rows
             .get(&build_v3_obs_request_key(7777, request_id))
             .expect("clean EOF must record a terminal ledger row");
+        assert_eq!(
+            row.event_type, "request.failed",
+            "a clean EOF without a semantic terminal must not record success: {}",
+            row.event_type
+        );
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert_ne!(
+            row.meta.provider_status,
+            Some(502),
+            "a missing semantic terminal must not fabricate a provider HTTP 502"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_clean_eof_with_semantic_terminal_records_completed_terminal() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-eof";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            success_observation(),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        assert!(
+            finalizer.is_some(),
+            "Direct SSE must keep a terminal owner when observability is absent"
+        );
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+        assert!(stream.next().await.is_none(), "stream must reach EOF");
+
+        let rows = state.webui_observability.rows().unwrap();
+        assert_eq!(rows.len(), 1, "one request must fold to one terminal row");
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("clean EOF after a semantic terminal must record a terminal ledger row");
         assert_eq!(row.event_type, "request.completed", "{}", row.event_type);
         assert_eq!(row.result.as_deref(), Some("success"));
     }
