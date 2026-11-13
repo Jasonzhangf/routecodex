@@ -543,9 +543,7 @@ pub enum V3Error05ExecutionAction {
     WaitThenRetrySame {
         recovery: V3Error05RecoveryAdmissionWitness,
     },
-    WaitThenReselect {
-        recovery: V3Error05RecoveryAdmissionWitness,
-    },
+    Reselect,
     ProjectTerminal,
     ClientDisconnected,
     RejectNonProviderError,
@@ -556,7 +554,7 @@ impl V3Error05ExecutionAction {
         match self {
             Self::ReevaluateTarget => "target_recovery_pending",
             Self::WaitThenRetrySame { .. } => "retry_same_provider",
-            Self::WaitThenReselect { .. } => "target_local_reselect",
+            Self::Reselect => "target_local_reselect",
             Self::ProjectTerminal | Self::RejectNonProviderError => "project_client_error",
             Self::ClientDisconnected => "project_client_disconnect",
         }
@@ -571,10 +569,9 @@ impl V3Error05ExecutionAction {
 
     pub fn recovery_witness(&self) -> Option<&V3Error05RecoveryAdmissionWitness> {
         match self {
-            Self::WaitThenRetrySame { recovery } | Self::WaitThenReselect { recovery } => {
-                Some(recovery)
-            }
+            Self::WaitThenRetrySame { recovery } => Some(recovery),
             Self::ReevaluateTarget
+            | Self::Reselect
             | Self::ProjectTerminal
             | Self::ClientDisconnected
             | Self::RejectNonProviderError => None,
@@ -1152,19 +1149,13 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
             }
         }
         V3ErrorSourceKind::ProviderFailure if alternatives_available => {
-            V3Error05ExecutionAction::WaitThenReselect {
-                recovery: recovery
-                    .expect("reselect Error05 requires an exact recovery admission witness"),
-            }
+            V3Error05ExecutionAction::Reselect
         }
         V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,
         V3ErrorSourceKind::RuntimeFailure
             if recoverable_response_processing && alternatives_available =>
         {
-            V3Error05ExecutionAction::WaitThenReselect {
-                recovery: recovery
-                    .expect("reselect Error05 requires an exact recovery admission witness"),
-            }
+            V3Error05ExecutionAction::Reselect
         }
         V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
             V3Error05ExecutionAction::ProjectTerminal

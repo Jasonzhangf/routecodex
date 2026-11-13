@@ -85,6 +85,8 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
     let mut accumulated_items: Vec<Value> = Vec::new();
     let mut accumulated_usage: Option<crate::hub_v1::V3RuntimeUsageSummary> = None;
     let mut accumulated_attempts: Option<usize> = None;
+    let mut accumulated_timing: Option<crate::V3RuntimeTimingSummary> = None;
+    let mut timing_complete = true;
     let mut accumulated_node_trace = Vec::new();
     let mut accumulated_failures = Vec::new();
     let mut delivered_sse_frames: Vec<Vec<u8>> = Vec::new();
@@ -136,6 +138,35 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             shared_state.debug_node_publication,
         )
         .await;
+
+        if let Some(timing) = output
+            .observability
+            .as_ref()
+            .and_then(|observability| observability.timing)
+        {
+            accumulated_timing = match accumulated_timing {
+                Some(accumulated) => match (
+                    accumulated.runtime_total.checked_add(timing.runtime_total),
+                    accumulated.external.checked_add(timing.external),
+                    accumulated.internal.checked_add(timing.internal),
+                ) {
+                    (Some(runtime_total), Some(external), Some(internal)) => {
+                        Some(crate::V3RuntimeTimingSummary {
+                            runtime_total,
+                            external,
+                            internal,
+                        })
+                    }
+                    _ => {
+                        timing_complete = false;
+                        None
+                    }
+                },
+                None => Some(timing),
+            };
+        } else {
+            timing_complete = false;
+        }
 
         if let Some(attempts) = output
             .observability
@@ -388,6 +419,24 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                 }
                 if accumulated_attempts.is_some() {
                     observability.attempts = accumulated_attempts;
+                }
+            }
+            if timing_complete {
+                if let Some(timing) = accumulated_timing {
+                    if let Some(observability) = output.observability.as_mut() {
+                        observability.timing = Some(timing);
+                    }
+                    if let Some(stream_observation) = output.stream_observation.as_ref() {
+                        let snapshot = crate::hub_v1::V3RuntimeStreamObservationSnapshot {
+                            timing: Some(timing),
+                            ..Default::default()
+                        };
+                        if let Err(error) = stream_observation.merge_snapshot(&snapshot) {
+                            // Timing is diagnostic. Preserve the completed business
+                            // result and its original error/handoff disposition.
+                            eprintln!("V3 refill timing observation failed: {error}");
+                        }
+                    }
                 }
             }
         }

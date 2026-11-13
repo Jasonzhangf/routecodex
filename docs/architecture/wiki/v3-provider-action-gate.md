@@ -3,12 +3,12 @@
 Canonical implementation plan:
 `docs/goals/direct-relay-cross-request-error-storm-control-plan.md`.
 
-Each request retains its own cancellation, attempts, exclusions and original
-deadline. A real session is never a business action lock. Distinct complete
-provider/interface/model/key identities cannot change each other's action delay,
-generation, permit or terminal disposition. Waiter count is not a new failure.
-Only the declared exact429 and health observation owners coordinate recovery
-within their listener. Normal provider capacity limits remain effective.
+This resource is background observation only. Request selection, transport,
+retry, reselection, cancellation, and deadline handling never read or wait on a
+provider-action permit, queue, recovery ticket, or admission lane. Provider
+HTTP 429 remains exact provider-runtime-identity health evidence. A request
+continues through its declared successors without waiting for background
+cooldown, probe, or recovery work.
 
 ```mermaid
 flowchart TD
@@ -17,13 +17,7 @@ flowchart TD
   E01[V3Error01SourceRaised]
   E05[V3Error05ExecutionDecision]
   E06[V3Error06ClientProjected]
-  Witness[V3Error05RecoveryWitness]
-  Gate[V3ProviderActionGateAdmission]
-  TerminalAdmission[V3ProviderActionGateTerminalAdmission]
   TerminalCommit[V3ProviderActionGateTerminalCommitted]
-  Permit[V3ProviderActionPermitInFlight]
-  AbandonRequest[V3ProviderActionPermitAbandonRequested]
-  Abandoned[V3ProviderActionPermitAbandoned]
   SuccessObserved[V3ProviderActionSuccessObserved]
   FailureObserved[V3ProviderActionFailureObserved]
   SuccessFinalize[V3ProviderActionSuccessFinalize]
@@ -32,142 +26,54 @@ flowchart TD
   ProviderRaw[V3ProviderRespInbound01Raw]
   ProviderCodec[V3ProviderResponsesEventCodec]
   ProviderOutcome[V3ProviderResponsesTerminalOrFailureObserved]
-  Success[V3 Provider Success]
-  Terminal[V3 Terminal Exhaustion]
-  Reevaluate[V3SelectionAndError05Reevaluation]
 
   Compat -->|v3-provider-action-gate-01| E05
   Wire -->|v3-provider-action-gate-02| E05
-  E05 -->|v3-provider-action-gate-03| Witness
-  Witness -->|v3-provider-action-gate-04| Gate
   E05 -->|v3-provider-action-gate-05| E06
-  TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit
-  Wire -->|v3-provider-action-gate-07| Witness
-  Witness -->|v3-provider-action-gate-08| Gate
-  Witness -->|v3-provider-action-gate-10| Gate
-  Witness -->|v3-provider-action-gate-11| Gate
-  Witness -->|v3-provider-action-gate-12| Gate
-  Witness -->|v3-provider-action-gate-13| Gate
+  E05 -->|v3-provider-action-gate-06| TerminalCommit
   E01 -->|v3-provider-action-gate-14| E05
   E01 -->|v3-provider-action-gate-15| E05
   E01 -->|v3-provider-action-gate-16| E05
-  Gate -->|v3-provider-action-gate-19| Permit
-  Gate -->|v3-provider-action-gate-20| Permit
-  Gate -->|v3-provider-action-gate-21| Permit
-  Gate -->|v3-provider-action-gate-22| Permit
-  Gate -->|v3-provider-action-gate-23| Permit
-  Permit -->|v3-provider-action-gate-24| AbandonRequest
-  Permit -->|v3-provider-action-gate-25| AbandonRequest
-  Permit -->|v3-provider-action-gate-26| AbandonRequest
-  Permit -->|v3-provider-action-gate-27| AbandonRequest
-  Permit -->|v3-provider-action-gate-28| AbandonRequest
-  Permit -->|v3-provider-action-gate-29| AbandonRequest
-  Permit -->|v3-provider-action-gate-30| AbandonRequest
-  Permit -->|v3-provider-action-gate-31| AbandonRequest
-  AbandonRequest -->|v3-provider-action-gate-32| Abandoned
-  Permit -->|v3-provider-action-gate-33| SuccessObserved
+  ProviderRaw -->|v3-provider-action-gate-33| SuccessObserved
   SuccessObserved -->|v3-provider-action-gate-34| SuccessRecorded
-  Abandoned -->|v3-provider-action-gate-35| FailureObserved
   FailureObserved -->|v3-provider-action-gate-36| FailureRecorded
-  Permit -->|v3-provider-action-gate-37| SuccessObserved
+  ProviderRaw -->|v3-provider-action-gate-37| SuccessObserved
   SuccessObserved -->|v3-provider-action-gate-38| SuccessRecorded
-  Permit -->|v3-provider-action-gate-39| FailureObserved
-  Abandoned -->|v3-provider-action-gate-40| FailureRecorded
-  Permit -->|v3-provider-action-gate-41| SuccessObserved
-  SuccessObserved -->|v3-provider-action-gate-42| SuccessRecorded
-  Permit -->|v3-provider-action-gate-43| FailureObserved
-  Abandoned -->|v3-provider-action-gate-44| FailureRecorded
-  Permit -->|v3-provider-action-gate-45| SuccessRecorded
-  Permit -->|v3-provider-action-gate-46| SuccessFinalize
+  ProviderRaw -->|v3-provider-action-gate-46| SuccessFinalize
   SuccessFinalize -->|v3-provider-action-gate-47| SuccessRecorded
   ProviderRaw -->|v3-provider-action-gate-48| ProviderCodec
   ProviderCodec -->|v3-provider-action-gate-49| ProviderOutcome
   ProviderRaw -->|v3-provider-action-gate-50| ProviderCodec
   ProviderCodec -->|v3-provider-action-gate-51| ProviderOutcome
-  Wire -->|v3-provider-action-gate-52| Witness
-  Wire -->|v3-provider-action-gate-53| Witness
-  Wire -->|v3-provider-action-gate-54| Witness
-  Wire -->|v3-provider-action-gate-55| Witness
-  Wire -->|v3-provider-action-gate-56| Witness
-  Success -->|reset scoped failure state| Gate
-  Terminal -->|advance sustained generation| Gate
-  Gate -->|typed terminal wake, no provider send| Reevaluate
 ```
-
-The gate is a process-local control side channel keyed by server, routing group,
-session, provider runtime identity, and normalized error family. Received HTTP 429
-uses an exact-identity lane shared across sessions and listeners. It does not enter request,
-response, metadata, continuation, snapshot, or persistent provider-health truth.
 
 Review locks:
 
-- First isolated provider failure waits at least 1 second.
-- A second failure before success or an overlapping waiter promotes the scope to
-  sustained mode and waits at least 5 seconds.
-- Switching provider runtime identity or normalized error family inside the same active
-  server/routing-group lane remains sustained and cannot restart the one-second floor.
-- One generation admits exactly one retry or reselect action.
-- Fresh normal requests do not consume an unrelated Error05 recovery lane. Only the
-  current request's typed retry/reselect transition enables its next gate wait.
-- Admission returns a Rust-owned `V3ProviderActionPermit`. Elapsed wall-clock time never
-  releases an owned provider action, including a legal lazy SSE longer than five
-  seconds.
-- Provider success, provider failure, terminal commit, or permit drop/explicit abandon
-  releases ownership. Abandon is health-neutral and starts a new sustained five-second
-  floor without incrementing consecutive failures.
-- A caller that observes provider failure releases its admitted permit before awaiting
-  Error05 retry/reselect/terminal policy. Holding that permit across terminal admission
-  is a self-deadlock because terminal admission cannot become the permit's own release
-  signal.
-- Provider success resets the matching state.
-- When success releases a queued recovery waiter, the typed transition carries the
-  exact retained key and new generation. Direct and every Relay runtime must re-arm
-  that ticket and wait through the sustained five-second floor before provider send;
-  success is not permission for the released waiter to bypass the gate.
-- A same-group success from an unrelated provider runtime identity cannot reset an owned
-  permit or its matching failure state.
-- Missing gate state or notification-channel closure fails explicitly; neither can be
-  wrapped as provider success.
-- Streaming success is recorded only after protocol terminal evidence and clean EOF.
-  For provider Responses SSE, only `response.completed` is semantic terminal truth;
-  Responses 协议没有 `response.done` 事件，`[DONE]` 是 Chat Completions 的终止符，
-  不得出现在 Responses 客户端边界。
-  Malformed events, premature EOF, provider stream errors, `response.failed`, and
-  post-terminal parse failures record provider failure and leave the next action gated.
-- Terminal exhaustion is not success: old waiters re-evaluate selection/Error05, and
-  the next provider action remains serialized behind a new five-second generation.
-  Terminal handling never authorizes a model-client error response; AGENTS.md's
-  mandatory all-entry no-client-error contract applies even on exhaustion. A concurrent
-  routing-group success cannot turn a stale failure into client output.
-- A fresh request reads the active exact-identity HTTP 429 lane before sending and
-  enters its typed recovery witness. It releases business capacity before waiting,
-  then reacquires it and retains the admitted action permit through the send.
-  A request residence deadline bounds gate queueing, including retry waits.
-  Unrelated identities and non-429 session-local lanes retain their isolation.
-- Client disconnect is health-neutral and does not enter this gate.
-- SSE transport/decode/malformed-event/EOF/hang is also provider-health-neutral. Before
-  business-byte commit it uses the existing retry/reselect path; after commit it only
-  closes the request-scoped action lane and fails the stream explicitly. It never writes
-  provider consecutive failures, cooldown, probes, or cross-session blacklist state.
-- FIFO waiter tickets preserve deterministic order; cancelling one waiter removes only
-  that ticket.
-- Only a typed terminal Error05 exhaustion decision may construct Error06.
-- Terminal Error06 projection records and commits its failure generation without
-  waiting for provider action admission. The commit advances the lane group so later
-  provider actions retain the storm-control delay.
-- Runtime does not pass that commit result as a typed witness into
-  `terminal_projection_for`. The machine map therefore stops at
-  `V3ProviderActionGateTerminalCommitted` and does not fabricate a
-  `TerminalCommitted -> V3Error05TerminalDecision/Error06` edge. Typed Error05-to-Error06
-  projection remains owned by `routecodex-v3-error`.
-- Responses Relay `ProviderReqCompat06ProviderCompat` and
-  `V3ProviderReqOutbound08WirePayload` failures enter
-  `handle_v3_responses_relay_provider_failure`, then
-  `run_v3_relay_provider_failure_policy`; they cannot return directly as provider-bound
-  request errors or bypass typed Error05 admission.
-- The machine gate requires the exact frozen edge set, resolves every declared symbol in
-  its declared source, verifies each caller body invokes its callee, and compares every
-  map edge endpoint/status/symbol/source field with this lifecycle manifest.
-- Traffic Governor saturation is a separate typed admission-backpressure lane. Its
-  blocking acquire runs off the Node event loop and never enters provider health,
-  Error05 retry/reselect, or provider 429 projection.
+- No request path calls `wait_for_error05_recovery`, acquires a provider action
+  permit, joins a FIFO queue, or enters a deferred admission state.
+- Provider selection scans the declared tier order, same-tier keys, and
+  declared default successor immediately. Empty or cooled candidates continue
+  to the next declared successor without a capacity, probe, or recovery wait.
+- Each request retains its own cancellation, attempts, exclusions, and original
+  deadline. A session is never a business action lock.
+- Provider HTTP 429 observations remain exact provider-runtime-identity scoped
+  within the owning listener. They are health and cooldown evidence, not a
+  request admission lane.
+- Background probes remain independently bounded. Probe scheduling, backlog,
+  and in-flight state never gate request selection or transport.
+- Provider success and failure observations update only their exact background
+  health scope. An unrelated provider success cannot clear another identity's
+  health state.
+- Terminal Error05 projection commits its internal generation immediately. It
+  never waits for background observation or request admission.
+- Only a typed terminal Error05 decision may construct Error06. Provider HTTP
+  errors and proxy-generated failures never become client success or error
+  payloads.
+- Streaming success is recorded only after protocol terminal evidence and a
+  clean EOF. For provider Responses SSE, only `response.completed` is semantic
+  terminal truth. Malformed events, premature EOF, provider stream errors,
+  `response.failed`, and post-terminal parse failures record background failure.
+- The machine gate requires the exact frozen edge set, resolves each declared
+  symbol in its declared source, verifies each caller invokes its callee, and
+  compares every edge endpoint, status, symbol, and source field with this
+  lifecycle manifest.

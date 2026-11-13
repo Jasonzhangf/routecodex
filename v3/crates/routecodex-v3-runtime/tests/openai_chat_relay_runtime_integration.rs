@@ -701,7 +701,7 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
         [primary.as_str(), secondary.as_str()],
-        "an untyped disconnect after partial content must cool primary and use the eligible secondary"
+        "an untyped disconnect after partial content must switch provider and use the eligible secondary"
     );
     assert_eq!(output.status, 200);
     assert!(
@@ -722,15 +722,16 @@ async fn partial_content_with_untyped_disconnect_cools_and_reselects_counterexam
         diagnostic.source_stage, "V3ProviderReqOutbound09TransportRequest",
         "the partial frame must be observed as business content before the untyped failure"
     );
-    let primary_availability = provider_health.store().availability(
-        primary.as_str(),
-        Some(primary.as_str()),
-        Some("chat-wire-model"),
-        probe_now_ms(),
+    // The failure is owned by the declared pre-cool observation threshold, not
+    // an immediate cooldown: one observed failure records a pre_cool_observation
+    // with no cooldown_until, exactly like every other ordinary non429 failure.
+    assert_eq!(
+        failure.health_state, "pre_cool_observation",
+        "an untyped disconnect after partial content must enter the declared pre-cool observation"
     );
-    assert!(
-        !primary_availability.available,
-        "an untyped disconnect after partial content must cool the failed primary"
+    assert_eq!(
+        failure.cooldown_until_ms, None,
+        "an untyped disconnect after partial content must not immediately cool the failed primary"
     );
     let secondary_availability = provider_health.store().availability(
         secondary.as_str(),
@@ -1589,7 +1590,6 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
     let transport = ReselectTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
-    let started = Instant::now();
     let output = execute_v3_openai_chat_relay_runtime(
         &manifest_with_two_providers_for_scope(server_id, false),
         V3OpenAiChatRelayRuntimeInput {
@@ -1617,10 +1617,6 @@ async fn provider_http_failure_reselects_next_candidate_before_client_projection
     assert_eq!(
         transport.provider_ids.lock().unwrap().as_slice(),
         [primary.as_str(), secondary.as_str()]
-    );
-    assert!(
-        started.elapsed() >= Duration::from_millis(1_000),
-        "the first provider failure must block the reselected provider action for at least one second"
     );
     assert_eq!(output.status, 200);
     assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
@@ -3041,7 +3037,7 @@ data: [DONE]
 }
 
 #[tokio::test]
-async fn active_recovery_sse_blocks_a_second_recovery_beyond_five_seconds() {
+async fn active_recovery_sse_lets_a_second_recovery_proceed_independently() {
     use futures_util::StreamExt;
     let server_id = "openai_chat_active_recovery";
     const FAILURE_SESSION_ID: &str = "openai-chat-active-recovery-session";
@@ -3128,10 +3124,23 @@ data: [DONE]
         )
         .await
     });
-    tokio::time::sleep(Duration::from_millis(5_200)).await;
+    // The first recovery stream stays open. The second healthy request must not
+    // wait for that terminal: it runs through the same failure session and
+    // completes independently, proving the retired admission wait is gone.
+    let independent = tokio::time::timeout(Duration::from_secs(3), waiter)
+        .await
+        .expect("the held recovery action blocked a second healthy request")
+        .expect("independent recovery task panicked")
+        .expect("independent recovery action failed");
     assert!(
-        !waiter.is_finished(),
-        "active recovery permit expired by wall clock before terminal success"
+        !first.is_finished(),
+        "the first recovery stream must still be held while the second request completes"
+    );
+    assert_eq!(independent.status, 200);
+    assert!(
+        independent.node_trace.contains(&"V3TargetLocalReselected"),
+        "the independent request must reselect and proceed: {:?}",
+        independent.node_trace
     );
 
     drop(terminal_sender);
@@ -3141,8 +3150,9 @@ data: [DONE]
         .expect("first recovery task panicked")
         .expect("first recovery action failed");
     assert!(
-        first.node_trace.contains(&"V3ProviderActionGateAdmission"),
-        "the first request must enter Error05 recovery"
+        first.node_trace.contains(&"V3TargetLocalReselected"),
+        "the first request must reselect its recovery provider: {:?}",
+        first.node_trace
     );
     let first_stream = match first.client_body {
         V3OpenAiChatRelayClientBody::Sse(stream) => stream,
@@ -3155,18 +3165,6 @@ data: [DONE]
         .map(|frame| String::from_utf8(frame).unwrap())
         .collect::<String>();
     assert!(first_text.contains("done"), "{first_text}");
-    let released = tokio::time::timeout(Duration::from_secs(6), waiter)
-        .await
-        .expect("clean EOF did not release the queued recovery action")
-        .expect("queued recovery task panicked")
-        .expect("queued recovery action failed");
-    assert_eq!(released.status, 200);
-    assert!(
-        released
-            .node_trace
-            .contains(&"V3ProviderActionGateAdmission"),
-        "the competing request must also enter Error05 recovery"
-    );
 }
 
 #[tokio::test]
@@ -4197,14 +4195,17 @@ targets = [{ kind = "provider_model", provider = "__TEXT_PROVIDER__", model = "d
 }
 
 #[tokio::test]
-async fn model_pool_wins_over_default_even_with_custom_tool_declaration() {
+async fn multimodal_pool_wins_over_default_even_with_custom_tool_declaration() {
     let manifest = manifest_with_model_pool_and_custom_tools();
     let transport = AnthropicWireCaptureTransport {
         captured_url: Mutex::new(None),
     };
     let payload = json!({
         "model": "MiniMax-M3",
-        "messages": [{"role": "user", "content": "hi"}],
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "what is this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,BBBB"}}
+        ]}],
         "tools": [{
             "type": "custom",
             "name": "apply_patch",
@@ -4238,7 +4239,7 @@ async fn model_pool_wins_over_default_even_with_custom_tool_declaration() {
         .expect("provider request must be captured");
     assert!(
         url.contains("/v1/messages"),
-        "client model pool must win over default pool, got {url}"
+        "the multimodal capability pool must win over the default pool, got {url}"
     );
     assert_eq!(output.status, 200);
     let V3OpenAiChatRelayClientBody::Json(client) = output.client_body else {
@@ -4285,7 +4286,7 @@ wire_name = "deepseek-v4-flash"
 capabilities = ["text", "tools"]
 [route_groups.model_pool.pools.minimax_m3]
 selection = { strategy = "priority" }
-match = { precedence = 15, models = ["MiniMax-M3"] }
+match = { precedence = 15, required_capabilities = ["multimodal"] }
 targets = [{ kind = "provider_model", provider = "mm", model = "MiniMax-M3", key = "key1", priority = 1 }]
 [route_groups.model_pool.pools.default]
 selection = { strategy = "priority" }

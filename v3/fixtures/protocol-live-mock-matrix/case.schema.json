@@ -92,7 +92,42 @@
             "process_max_bytes": {"type": "integer", "minimum": 1},
             "residence_timeout_ms": {"type": "integer", "minimum": 1}
           }
+        },
+        "process": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "failure_threshold": {"type": "integer", "minimum": 1},
+            "cooldown_ms": {"type": "integer", "minimum": 1},
+            "probe_interval_ms": {"type": "integer", "minimum": 1},
+            "advisory_probe": {"type": "boolean"}
+          }
         }
+      }
+    },
+    "request_independence_replay": {
+      "type": "object",
+      "required": ["kind", "shape", "typed_error_codes_must_not"],
+      "properties": {
+        "kind": {"const": "provider_request_independence"},
+        "shape": {"enum": ["held_concurrent_requests", "failure_isolation"]},
+        "typed_error_codes_must_not": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "concurrent_client_requests": {"type": "array"},
+        "expected_concurrent_client": {"type": "object"},
+        "expected_upstream_business_sends": {"type": "integer", "minimum": 1},
+        "failed_client_request": {"type": "object"},
+        "post_recovery_client_request": {"type": "object"},
+        "expected_failed_client": {"type": "object"},
+        "expected_post_recovery_client": {"type": "object"},
+        "failure_isolation": {"type": "object"}
       }
     },
     "turns": {"type": "array"},

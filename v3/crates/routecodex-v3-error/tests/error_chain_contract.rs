@@ -211,7 +211,7 @@ fn provider_failure_builds_adjacent_action_and_keeps_error_polarity() {
         build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, Some(recovery_witness()));
     assert!(matches!(
         execution.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
+        V3Error05ExecutionAction::Reselect
     ));
     assert!(
         execution.try_into_terminal().is_err(),
@@ -224,7 +224,6 @@ fn recoverable_response_processing_runtime_failure_reselects_health_neutral() {
     let source = unharvestable_tool_markup_response_source();
     let expected_source = source.clone();
     let witness = recovery_witness();
-    let expected_witness = witness.clone();
 
     let decision = V3ErrorHandlingCenter::decide_provider(
         V3ErrorHandlingCenterInput {
@@ -244,9 +243,9 @@ fn recoverable_response_processing_runtime_failure_reselects_health_neutral() {
 
     assert!(matches!(
         decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
+        V3Error05ExecutionAction::Reselect
     ));
-    assert_eq!(decision.action.recovery_witness(), Some(&expected_witness));
+    assert!(decision.action.recovery_witness().is_none());
     assert_eq!(
         decision.exhaustion.local_action.classified.class,
         "runtime_failure"

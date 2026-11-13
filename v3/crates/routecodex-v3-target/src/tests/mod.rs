@@ -14,6 +14,17 @@ fn test_route(route: &str, candidates: &[&str]) -> RouteClassification {
         required_capabilities: Vec::new(),
     }
 }
+
+fn assert_target_plan_pool_order(route: &V3Router07OpaqueTargetHitOnce, expected: &[&str]) {
+    let mut grouped = Vec::new();
+    for entry in &route.target_plan {
+        if grouped.last() != Some(&entry.pool_id.as_str()) {
+            grouped.push(entry.pool_id.as_str());
+        }
+    }
+    assert_eq!(grouped, expected, "unexpected captured route-plan order");
+}
+
 use routecodex_v3_virtual_router::{V3RouterRequestFacts, V3VirtualRouter};
 
 struct Availability {
@@ -1564,10 +1575,10 @@ fn nested_forwarder_expands_and_reselects_inside_same_route_hit() {
 }
 
 #[test]
-fn optional_exhaustion_continues_inside_selected_pool_tiers() {
+fn selected_pool_tiers_exhaust_before_declared_default_successor() {
     // The request hits one pool. Inside that pool the provider tiers keep the
-    // user-confirmed order: an unavailable higher tier continues to the next
-    // tier, and the selected pool is never left for another pool.
+    // user-confirmed order, then admission continues to the declared default
+    // successor only after the selected pool has no eligible candidate.
     let mut manifest = manifest();
     let pool = manifest
         .route_groups
@@ -1632,21 +1643,16 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.hit_count, 1);
     assert_eq!(hit.pool_id, "tools");
-    assert!(hit.target_plan.iter().all(|entry| entry.pool_id == "tools"));
+    assert_target_plan_pool_order(&hit, &["tools", "default"]);
 
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    assert_eq!(expanded.candidates.len(), 2);
     assert!(expanded
         .candidates
         .iter()
-        .all(|candidate| candidate.pool_ids == vec!["tools".to_string()]));
-    assert!(expanded
-        .candidates
-        .iter()
-        .all(|candidate| candidate.provider_id != "c"));
+        .any(|candidate| candidate.provider_id == "c" && candidate.pool_ids == vec!["default"]));
 
     let selected = target
         .select_available(
@@ -1664,7 +1670,7 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
     assert_eq!(selected.candidate.path[0], "pool:tools");
     assert_eq!(selected.attempts, 2, "the lower tier is the next attempt");
 
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -1672,15 +1678,9 @@ fn optional_exhaustion_continues_inside_selected_pool_tiers() {
             },
             0,
         )
-        .expect_err("the selected pool must never fall through to another pool");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "b:default:kb:m:availability(b:default:kb:m)".to_string(),
-            "a:default:ka:m:availability(a:default:ka:m)".to_string(),
-        ],
-        "exhaustion reports only the candidates of the selected pool"
-    );
+        .expect("the declared default successor serves after the selected pool exhausts");
+    assert_eq!(selected.candidate.provider_id, "c");
+    assert_eq!(selected.route.pool_id, "default");
 }
 
 #[test]
@@ -1710,7 +1710,7 @@ fn streaming_is_not_a_candidate_capability_filter() {
     candidate.model_capabilities = vec!["text".into(), "tools".into()];
 
     assert!(
-        candidate_satisfies_required_capabilities(&candidate),
+        V3TargetInterpreter::candidate_admitted(&candidate, 0),
         "stream is a transport intent and must not make an otherwise valid candidate unavailable"
     );
 }
@@ -1727,13 +1727,13 @@ fn tools_are_route_signals_not_target_capability_filters() {
     candidate.model_capabilities = vec!["text".into()];
 
     assert!(
-        candidate_satisfies_required_capabilities(&candidate),
+        V3TargetInterpreter::candidate_admitted(&candidate, 0),
         "tools are a request/route/protocol surface, not a provider model hard capability"
     );
 }
 
 #[test]
-fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
+fn declared_capabilities_do_not_restrict_request_admission() {
     let expanded = expanded_tools();
     let mut search_candidate = expanded
         .candidates
@@ -1744,8 +1744,8 @@ fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
     search_candidate.model_capabilities = vec!["text".into()];
 
     assert!(
-        !candidate_satisfies_required_capabilities(&search_candidate),
-        "web_search/search requires an explicit model/provider capability because the model may not have search"
+        V3TargetInterpreter::candidate_admitted(&search_candidate, 0),
+        "declared search capability cannot reject a forwardable request"
     );
 
     let mut vision_candidate = search_candidate.clone();
@@ -1753,8 +1753,8 @@ fn web_search_and_vision_are_the_only_target_hard_capability_filters() {
     vision_candidate.model_capabilities = vec!["text".into(), "web_search".into()];
 
     assert!(
-        !candidate_satisfies_required_capabilities(&vision_candidate),
-        "vision/multimodal requires an explicit model/provider capability because the model may not read images"
+        V3TargetInterpreter::candidate_admitted(&vision_candidate, 0),
+        "declared vision capability cannot reject a forwardable request"
     );
 }
 
@@ -1775,7 +1775,7 @@ fn no_image_reasoning_request_does_not_make_text_tool_candidate_capability_misma
     candidate.model_capabilities = vec!["text".into(), "tools".into(), "web_search".into()];
 
     assert!(
-        candidate_satisfies_required_capabilities(&candidate),
+        V3TargetInterpreter::candidate_admitted(&candidate, 0),
         "reasoning/thinking is a soft proxy compatibility request for no-image traffic; only hard execution semantics such as tools and vision should make a candidate unavailable"
     );
 }
@@ -1840,30 +1840,28 @@ fn default_floor_does_not_reselect_request_local_failed_candidate() {
 }
 
 #[test]
-fn optional_candidate_keeps_only_selected_pool_provenance() {
+fn optional_candidate_preserves_matched_and_default_provenance() {
     let expanded = expanded_tools();
     let first = expanded
         .candidates
         .first()
         .expect("tools route must keep first candidate");
     assert_eq!(first.provider_id, "a");
-    // Provider `a` is also declared in the default pool, but the request hit the
-    // tools pool. Provenance must describe the selected pool only: no default
-    // floor membership may leak into the candidate.
-    assert_eq!(first.pool_ids, vec!["tools".to_string()]);
-    assert!(
-        !first.default_pool_member,
-        "a candidate reached through another pool must not carry default pool membership"
+    // Provider `a` is declared in both captured tiers. Dedupe preserves both
+    // pool memberships while keeping the matched tier first.
+    assert_eq!(
+        first.pool_ids,
+        vec!["tools".to_string(), "default".to_string()]
     );
-    assert!(expanded
-        .route
-        .target_plan
-        .iter()
-        .all(|entry| entry.pool_id == "tools"));
+    assert!(
+        first.default_pool_member,
+        "default provenance must be preserved when the same candidate is captured there"
+    );
+    assert_target_plan_pool_order(&expanded.route, &["tools", "default"]);
 }
 
 #[test]
-fn multimodal_route_skips_text_only_candidate_even_when_text_candidate_is_available() {
+fn multimodal_route_preserves_declared_priority_without_capability_filtering() {
     let source = r#"
 version = 3
 [servers.s]
@@ -1923,7 +1921,7 @@ targets = [
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
 
-    let vision_first = target
+    let preferred = target
         .select_available(
             expanded.clone(),
             &Availability {
@@ -1931,9 +1929,9 @@ targets = [
             },
             0,
         )
-        .expect("an available vision candidate serves the multimodal request");
-    assert_eq!(vision_first.candidate.provider_id, "vision");
-    assert_eq!(vision_first.route.pool_id, "default");
+        .expect("the highest-priority declared candidate serves the multimodal request");
+    assert_eq!(preferred.candidate.provider_id, "text");
+    assert_eq!(preferred.route.pool_id, "default");
 
     let selected = target
         .select_available(
@@ -1974,9 +1972,8 @@ targets = [
 }
 
 #[test]
-fn multimodal_pool_exhaustion_never_falls_back_to_default_pool() {
-    // A routed multimodal pool that only contains an incapable candidate must
-    // exhaust itself and never cross into another pool for service.
+fn multimodal_pool_exhaustion_uses_declared_default_pool() {
+    // Health exclusion exhausts the matched pool; capability labels do not.
     let source = r#"
 version = 3
 [servers.s]
@@ -2032,36 +2029,23 @@ targets = [
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "multimodal");
-    assert!(hit
-        .target_plan
-        .iter()
-        .all(|entry| entry.pool_id == "multimodal"));
+    assert_target_plan_pool_order(&hit, &["multimodal", "default"]);
 
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
         .unwrap();
-    assert!(
-        expanded
-            .candidates
-            .iter()
-            .all(|candidate| candidate.provider_id != "vision"),
-        "the incapable-by-capability default pool must not be expanded at all"
-    );
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
-                blocked: BTreeSet::new(),
+                blocked: BTreeSet::from(["text:default:key:m".into()]),
             },
             0,
         )
-        .expect_err("a multimodal pool without a capable candidate exhausts itself");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec!["text:key:m:capability_mismatch".to_string()],
-        "exhaustion stays inside the selected multimodal pool"
-    );
+        .expect("the default successor serves after the matched pool is health-excluded");
+    assert_eq!(selected.candidate.provider_id, "vision");
+    assert_eq!(selected.route.pool_id, "default");
 }
 
 #[test]
@@ -2141,17 +2125,14 @@ targets = [{ kind = "forwarder", id = "live_like", priority = 1 }]
             },
             0,
         )
-        .expect("image-bearing longcontext request must skip text-only candidates");
+        .expect("image-bearing longcontext request retains its declared candidates");
 
     assert_eq!(selected.candidate.provider_id, "vision");
-    assert_eq!(
-        selected.unavailable_candidates,
-        vec!["text:key:m:capability_mismatch"]
-    );
+    assert!(selected.unavailable_candidates.is_empty());
 }
 
 #[test]
-fn cooled_hosted_search_tier_exhausts_without_crossing_to_default_pool() {
+fn cooled_hosted_search_tier_exhausts_to_declared_default_pool() {
     let source = r#"
 version = 3
 [servers.s]
@@ -2213,10 +2194,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         .unwrap();
     let hit = router.hit_opaque_target_plan_once(plan, 0).unwrap();
     assert_eq!(hit.pool_id, "web_search");
-    assert!(hit
-        .target_plan
-        .iter()
-        .all(|entry| entry.pool_id == "web_search"));
+    assert_target_plan_pool_order(&hit, &["web_search", "default"]);
     let target = V3TargetInterpreter::default();
     let expanded = target
         .expand_candidates(&manifest, target.classify_kind(hit), 0)
@@ -2240,7 +2218,7 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         .iter()
         .any(|reason| reason == "search:default:key:m:availability(search:default:key:m)"));
 
-    let exhausted = target
+    let selected = target
         .select_available(
             expanded,
             &Availability {
@@ -2251,20 +2229,16 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
             },
             0,
         )
-        .expect_err("a fully cooled web_search pool must not cross into the default pool");
-    assert_eq!(
-        exhausted.attempted_candidates,
-        vec![
-            "search2:default:key:m:availability(search2:default:key:m)".to_string(),
-            "search:default:key:m:availability(search:default:key:m)".to_string(),
-        ]
-    );
+        .expect("a fully cooled web_search pool continues to its declared default successor");
+    assert_eq!(selected.candidate.provider_id, "text");
+    assert_eq!(selected.route.pool_id, "default");
 }
 
 #[test]
-fn cooled_single_search_candidate_keeps_its_pool_recovery_opportunity() {
-    // The pool has one provider and a recovery opportunity. Target must keep
-    // that provider selectable instead of terminating or crossing to default.
+fn all_captured_candidates_cooled_exhausts_without_waiting() {
+    // The selected pool and its declared default successor are both cooled.
+    // Target must return typed exhaustion immediately so Runtime can defer the
+    // accepted request without an admission wait.
     let source = r#"
 version = 3
 [servers.s]
@@ -2341,13 +2315,16 @@ targets = [{ kind = "provider_model", provider = "text", model = "m", key = "key
         }
     }
 
-    let selected = target
+    let exhausted = target
         .select_available(expanded, &AutomaticCooldown, 0)
-        .expect("a pool with a recovery opportunity keeps its provider selectable");
-    assert_eq!(selected.candidate.provider_id, "search");
+        .expect_err("all captured candidates are cooled");
     assert_eq!(
-        selected.route.pool_id, "web_search",
-        "the recovery opportunity stays inside the selected pool"
+        exhausted.attempted_candidates,
+        vec![
+            "search:default:key:m:availability(provider_key_health_cooldown)".to_string(),
+            "text:default:key:m:availability(provider_key_health_cooldown)".to_string(),
+        ],
+        "both captured tiers are reported without an admission wait"
     );
 }
 

@@ -717,8 +717,8 @@ async fn gemini_sse_complete_attempt_buffering_and_late_error_public() {
         }
     }
     assert!(
-        late_error_started.elapsed() >= Duration::from_millis(2500),
-        "the failed last attempt cannot bypass its original recovery budget"
+        late_error_started.elapsed() < Duration::from_millis(2500),
+        "the failed last attempt must not wait for the retired recovery budget"
     );
     for capture in capture_all(&mut captures).await {
         violations.extend(captured_violations(&capture));

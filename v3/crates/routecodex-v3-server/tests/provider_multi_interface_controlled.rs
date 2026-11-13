@@ -111,8 +111,10 @@ async fn controlled_openai_chat_upstream(
 
 const INVALID_TOOL_ARGUMENTS: &str = r#"{"q":"unterminated"#;
 const TOOL_NAMESPACE: &str = "functions";
-const TOOL_NAME: &str = "lookup";
-const CHAT_PROVIDER_TOOL_NAME: &str = "functions__lookup";
+const DIRECT_TOOL_NAME: &str = "lookup";
+const RELAY_TOOL_NAME: &str = "request_user_input";
+const DIRECT_PROVIDER_TOOL_NAME: &str = "functions__lookup";
+const RELAY_PROVIDER_TOOL_NAME: &str = "functions__request_user_input";
 
 fn controlled_json_response(value: Value) -> Response<Body> {
     Response::builder()
@@ -158,7 +160,7 @@ async fn controlled_responses_tool_upstream(
             "id": "fc_direct_invalid_arguments",
             "call_id": "call_direct_invalid_arguments",
             "namespace": TOOL_NAMESPACE,
-            "name": TOOL_NAME,
+            "name": DIRECT_TOOL_NAME,
             "arguments": INVALID_TOOL_ARGUMENTS
         }]
     }))
@@ -208,7 +210,7 @@ async fn controlled_openai_chat_tool_upstream(
                     "id": "call_relay_invalid_arguments",
                     "type": "function",
                     "function": {
-                        "name": CHAT_PROVIDER_TOOL_NAME,
+                        "name": RELAY_PROVIDER_TOOL_NAME,
                         "arguments": INVALID_TOOL_ARGUMENTS
                     }
                 }]
@@ -284,6 +286,7 @@ async fn responses_entry_routes_pinned_interfaces_to_independent_endpoints() {
         free_port(),
         responses_addr.port(),
         chat_addr.port(),
+        "chat",
     ))
     .await
     .unwrap();
@@ -291,11 +294,30 @@ async fn responses_entry_routes_pinned_interfaces_to_independent_endpoints() {
     let chat_endpoint = format!("http://{}/v1/chat/completions", handle.listeners[0].addr);
     let client = reqwest::Client::new();
 
+    let default_response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model": "direct-client",
+            "input": "plain request"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(default_response.status(), StatusCode::OK);
+    let default_body: Value = default_response.json().await.unwrap();
+    assert_eq!(default_body["output_text"], "relay-interface");
+    let default_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
+        .await
+        .expect("default interface request must reach the chat endpoint")
+        .unwrap();
+    assert_eq!(default_capture.path, "/v1/chat/completions");
+
     let direct_response = client
         .post(&endpoint)
         .json(&json!({
             "model": "direct-client",
-            "input": "direct request"
+            "input": "search the web for the direct request",
+            "tools": [{"type": "web_search"}]
         }))
         .send()
         .await
@@ -450,17 +472,32 @@ async fn responses_entry_reselects_sibling_interface_and_preserves_sibling_healt
         .unwrap();
     assert_eq!(success_capture.path, "/v1/responses");
 
-    let pool: Value = client
-        .get(format!(
-            "http://{}/_routecodex/health/cooldown-pool",
-            handle.listeners[0].addr
-        ))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
+    let pool_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let pool: Value = loop {
+        let pool: Value = client
+            .get(format!(
+                "http://{}/_routecodex/health/cooldown-pool",
+                handle.listeners[0].addr
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let entries = pool["entries"].as_array().expect("cooldown entries");
+        if entries
+            .iter()
+            .any(|entry| entry["provider_id"] == "multi" && entry["interface_id"] == "failure")
+        {
+            break pool;
+        }
+        assert!(
+            tokio::time::Instant::now() < pool_deadline,
+            "the failed interface must be committed to the cooldown pool: {pool}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
     let entries = pool["entries"].as_array().expect("cooldown entries");
     assert!(
         entries
@@ -504,10 +541,13 @@ async fn responses_entry_reselects_sibling_interface_and_preserves_sibling_healt
         .expect("the healthy sibling must serve the second request")
         .unwrap();
     assert_eq!(second_success.path, "/v1/responses");
-    assert!(
-        failure_rx.try_recv().is_err(),
-        "the cooled sibling interface must not be retried on the next request"
-    );
+    while let Ok(capture) = failure_rx.try_recv() {
+        let is_probe = capture.body["input"][0]["content"][0]["text"] == "ping; reply pong";
+        assert!(
+            is_probe,
+            "the cooled sibling interface must not receive a second business request: {capture:?}"
+        );
+    }
 
     handle.shutdown().await;
     failure_shutdown_tx.send(()).unwrap();
@@ -669,6 +709,7 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
         free_port(),
         responses_addr.port(),
         chat_addr.port(),
+        "responses",
     ))
     .await
     .unwrap();
@@ -710,24 +751,40 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
     ];
 
     for (label, model, stream, expected_path, call_id, expected_final_text) in cases {
+        let input = if expected_path == "/v1/responses" {
+            "search the web and execute the declared tool"
+        } else {
+            "execute the declared tool"
+        };
         let first = client
             .post(&endpoint)
             .json(&json!({
                 "model": model,
-                "input": "execute the declared tool",
+                "input": input,
                 "stream": stream,
                 "tools": [{
                     "type": "namespace",
                     "name": TOOL_NAMESPACE,
-                    "tools": [{
-                        "type": "function",
-                        "name": TOOL_NAME,
-                        "parameters": {
-                            "type": "object",
-                            "properties": {"q": {"type": "string"}},
-                            "required": ["q"]
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": DIRECT_TOOL_NAME,
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"q": {"type": "string"}},
+                                "required": ["q"]
+                            }
+                        },
+                        {
+                            "type": "function",
+                            "name": RELAY_TOOL_NAME,
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"questions": {"type": "array"}},
+                                "required": ["questions"]
+                            }
                         }
-                    }]
+                    ]
                 }]
             }))
             .send()
@@ -746,7 +803,8 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
                 })
                 .unwrap_or_else(|| panic!("{label} SSE must expose the provider tool call: {body}"))
         } else {
-            let body: Value = first.json().await.unwrap();
+            let body_text = first.text().await.unwrap();
+            let body: Value = serde_json::from_str(&body_text).unwrap();
             body["output"]
                 .as_array()
                 .and_then(|items| {
@@ -761,7 +819,17 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
         };
         assert_eq!(call["type"], "function_call", "{label}: {call}");
         assert_eq!(call["namespace"], TOOL_NAMESPACE, "{label}: {call}");
-        assert_eq!(call["name"], TOOL_NAME, "{label}: {call}");
+        let expected_tool_name = if expected_path == "/v1/responses" {
+            DIRECT_TOOL_NAME
+        } else {
+            RELAY_TOOL_NAME
+        };
+        let expected_provider_tool_name = if expected_path == "/v1/responses" {
+            DIRECT_PROVIDER_TOOL_NAME
+        } else {
+            RELAY_PROVIDER_TOOL_NAME
+        };
+        assert_eq!(call["name"], expected_tool_name, "{label}: {call}");
         assert_eq!(call["call_id"], call_id, "{label}: {call}");
         assert_eq!(
             call["arguments"], INVALID_TOOL_ARGUMENTS,
@@ -784,18 +852,34 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
         assert_eq!(first_capture.path, expected_path, "{label}");
         assert_eq!(first_capture.body["model"], "wire-model", "{label}");
         if expected_path == "/v1/responses" {
+            let provider_tool = first_capture.body["tools"]
+                .as_array()
+                .and_then(|tools| {
+                    tools
+                        .iter()
+                        .find(|tool| tool["name"] == expected_provider_tool_name)
+                })
+                .unwrap_or_else(|| {
+                    panic!("{label}: Responses provider wire must retain the flattened tool: {first_capture:?}")
+                });
             assert_eq!(
-                first_capture.body["tools"][0]["type"], "function",
+                provider_tool["type"], "function",
                 "{label}: Responses provider wire must use the flattened function tool"
             );
-            assert_eq!(
-                first_capture.body["tools"][0]["name"], CHAT_PROVIDER_TOOL_NAME,
-                "{label}: Responses provider wire must retain the flattened tool name"
-            );
         } else {
+            let provider_tool = first_capture.body["tools"]
+                .as_array()
+                .and_then(|tools| {
+                    tools
+                        .iter()
+                        .find(|tool| tool["function"]["name"] == expected_provider_tool_name)
+                })
+                .unwrap_or_else(|| {
+                    panic!("{label}: relay interface must flatten the namespace for Chat wire: {first_capture:?}")
+                });
             assert_eq!(
-                first_capture.body["tools"][0]["function"]["name"], CHAT_PROVIDER_TOOL_NAME,
-                "{label}: relay interface must flatten the namespace for Chat wire"
+                provider_tool["type"], "function",
+                "{label}: relay interface must keep the flattened function tool"
             );
         }
 
@@ -836,7 +920,10 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
                 .unwrap_or_else(|| {
                     panic!("{label}: provider follow-up must retain the call: {input:?}")
                 });
-            assert_eq!(provider_call["name"], CHAT_PROVIDER_TOOL_NAME, "{label}");
+            assert_eq!(
+                provider_call["name"], expected_provider_tool_name,
+                "{label}"
+            );
             assert_eq!(
                 provider_call["arguments"], INVALID_TOOL_ARGUMENTS,
                 "{label}: provider follow-up must retain invalid arguments"
@@ -861,7 +948,7 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
                     panic!("{label}: chat follow-up must retain the call: {messages:?}")
                 });
             assert_eq!(
-                provider_call["function"]["name"], CHAT_PROVIDER_TOOL_NAME,
+                provider_call["function"]["name"], expected_provider_tool_name,
                 "{label}"
             );
             assert_eq!(
@@ -910,6 +997,7 @@ fn manifest(
     server_port: u16,
     responses_port: u16,
     chat_port: u16,
+    default_interface: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let relay_binding = r#"{ entry_protocol = "openai_chat", endpoint_patterns = ["/v1/chat/completions"], execution_mode = "relay", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "OpenAI Chat endpoint must not fall through to Responses Direct or pending runtime.", runtime_owner_symbol = "execute_v3_openai_chat_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs" }"#;
     let hub_v1_declaration = hub_v1_test_declaration().replace(
@@ -952,22 +1040,22 @@ base_url = "http://127.0.0.1:{chat_port}/v1"
 
 [route_groups.controlled.pools.direct_client]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["direct-client"] }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["web_search"] }}
 targets = [{{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "responses", priority = 1 }}]
 
 [route_groups.controlled.pools.relay_client]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["relay-client"] }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", required_capabilities = ["thinking"] }}
 targets = [{{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "chat", priority = 1 }}]
 
 [route_groups.controlled.pools.relay_client_from_responses]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["relay-client"] }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["thinking"] }}
 targets = [{{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "chat", priority = 1 }}]
 
 [route_groups.controlled.pools.default]
 selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "responses", priority = 1 }}]
+targets = [{{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "{default_interface}", priority = 1 }}]
 "#,
         hub_v1_declaration = hub_v1_declaration,
         server_execution = hub_v1_server_execution("controlled"),
@@ -1018,7 +1106,7 @@ responses = {{ process = "chat", streaming = "never" }}
 
 [route_groups.controlled.pools.direct_client]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["direct-client"] }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["thinking"] }}
 targets = [
   {{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "failure", priority = 2 }},
   {{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "success", priority = 1 }}
@@ -1079,7 +1167,7 @@ responses = {{ process = "chat", streaming = "never" }}
 
 [route_groups.controlled.pools.relay_client]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["relay-client"] }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["thinking"] }}
 targets = [
   {{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "chat", priority = 2 }},
   {{ kind = "provider_model", provider = "multi", model = "wire-model", key = "key", interface = "sibling", priority = 1 }}

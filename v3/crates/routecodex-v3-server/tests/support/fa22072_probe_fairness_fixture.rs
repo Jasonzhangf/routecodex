@@ -27,8 +27,15 @@ pub struct Peer {
     pub holders_release: Semaphore,
     pub fifth_entered: Semaphore,
     pub fifth_release: Semaphore,
+    pub sibling_probes_entered: Semaphore,
+    pub sibling_probes_release: Semaphore,
     pub ready: AtomicBool,
 }
+
+/// Width of the current-turn input-token band that makes each fairness identity
+/// pool selectable on its own. Request `index` carries `index` bands of filler
+/// so exactly one identity pool window matches it.
+pub const FAIRNESS_BAND_TOKENS: u64 = 512;
 
 pub fn business(model: &str) -> Value {
     json!({"id":"fairness-complete", "object":"chat.completion", "model":model,
@@ -67,10 +74,22 @@ async fn serve(
     }
     if marker == "ping; reply pong" {
         assert_eq!(body["model"], "recovery");
-        assert_eq!(
-            index, 4,
-            "the four earlier provider/auth budgets must remain held"
-        );
+        if index != 4 {
+            // The request path no longer carries a capacity permit, so a probe
+            // is not gated by another transport holding the same identity. Keep
+            // this sibling's probe open for as long as its transport is held:
+            // the free fifth identity must still receive its own admitted probe.
+            peer.sibling_probes_entered.add_permits(1);
+            peer.sibling_probes_release
+                .acquire()
+                .await
+                .unwrap()
+                .forget();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"error":{"message":"held sibling probe released"}})),
+            );
+        }
         peer.fifth_entered.add_permits(1);
         peer.fifth_release.acquire().await.unwrap().forget();
         return (StatusCode::OK, Json(json!({"actual":"2xx probe success"})));
@@ -88,6 +107,8 @@ pub async fn peer() -> (Arc<Peer>, String, JoinHandle<()>) {
         holders_release: Semaphore::new(0),
         fifth_entered: Semaphore::new(0),
         fifth_release: Semaphore::new(0),
+        sibling_probes_entered: Semaphore::new(0),
+        sibling_probes_release: Semaphore::new(0),
         ready: AtomicBool::new(false),
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -114,8 +135,7 @@ type = "openai_chat"
 base_url = "{base}/{index}/v1"
 default_model = "recovery"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "FA22072_FAIRNESS_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
-concurrency = {{ max_in_flight = 1, acquire_timeout_ms = 60000, stale_lease_ms = 120000 }}
+health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 500, probe_interval_ms = 3000 }}
 [providers.{id}.models.recovery]
 wire_name = "recovery"
 capabilities = ["text", "tools"]
@@ -143,12 +163,17 @@ max_context_tokens = 1000000
 "#
     ));
     // Cooldown setup needs an eligible alternative. A singleton pin failure is
-    // deliberately health-neutral under the last-candidate contract.
-    for id in &ids {
+    // deliberately health-neutral under the last-candidate contract. A declared
+    // `match.models` name is not an ordinary-request selector, so every identity
+    // pool is selected by the plain user-turn `thinking` signal together with a
+    // disjoint current-turn input-token band that the caller pins per request.
+    for (index, id) in ids.iter().enumerate() {
+        let low = index as u64 * FAIRNESS_BAND_TOKENS;
+        let high = low + FAIRNESS_BAND_TOKENS - 1;
         source.push_str(&format!(r#"
 [route_groups.fairness.pools.{id}]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 20, models = ["{id}-failure"] }}
+match = {{ precedence = 20, required_capabilities = ["thinking"], min_input_tokens = {low}, max_input_tokens = {high} }}
 targets = [{{ kind = "provider_model", provider = "{id}", model = "recovery", key = "key", priority = 10 }}, {{ kind = "provider_model", provider = "fairness_spare", model = "recovery", key = "key", priority = 1 }}]
 "#));
     }
