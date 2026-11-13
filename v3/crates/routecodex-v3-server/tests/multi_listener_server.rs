@@ -5943,10 +5943,58 @@ async fn responses_relay_anthropic_dsml_complete_text_does_not_attempt_fallback(
 }
 
 #[tokio::test]
+async fn responses_relay_anthropic_dsml_control_frame_is_not_client_output_text() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let frame = "\u{3c}thinking>internal plan\n\u{3c}\u{2f}\u{ff5c}DSML\u{ff5c}parameter>\n\u{3c}\u{2f}\u{ff5c}DSML\u{ff5c}invoke>\n\u{3c}\u{2f}\u{ff5c}DSML\u{ff5c}tool_calls>";
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_text_fixture(frame, false),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert!(
+        !body.contains("\u{ff5c}DSML\u{ff5c}") && !body.contains("\u{3c}thinking>"),
+        "control frame leaked to client: {body}"
+    );
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
 async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordinary_prose() {
     let _test_guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
     let cases = [
+        (
+            "<thinking>\n</\u{FF5C}DSML\u{FF5C}parameter>\n</\u{FF5C}DSML\u{FF5C}invoke>\n</\u{FF5C}DSML\u{FF5C}tool_calls>",
+            true,
+            "",
+            "",
+        ),
         (
             "<thinking>internal plan\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
             true,
@@ -5958,6 +6006,12 @@ async fn responses_relay_anthropic_control_text_preserves_native_call_and_ordina
             "<thinking>private<\u{2f}thinking>Visible answer\n\"<\u{2f}｜DSML｜parameter>\"\n\"<\u{2f}｜DSML｜invoke>\"\n\"<\u{2f}｜DSML｜tool_calls>\"",
             false,
             "Visible answer\n\"</｜DSML｜parameter>\"\n\"</｜DSML｜invoke>\"\n\"</｜DSML｜tool_calls>\"",
+            "private",
+        ),
+        (
+            "<thinking>private</thinking>Visible answer\n</\u{FF5C}DSML\u{FF5C}parameter>\n</\u{FF5C}DSML\u{FF5C}invoke>\n</\u{FF5C}DSML\u{FF5C}tool_calls>",
+            true,
+            "Visible answer",
             "private",
         ),
         ("Quoted \"<thinking>literal</thinking>\" text", false, "Quoted \"<thinking>literal</thinking>\" text", ""),
@@ -6081,6 +6135,150 @@ async fn responses_relay_suspect_anthropic_text_is_preserved_without_reselection
     std::env::remove_var("V3_P6_TEST_KEY");
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body.contains("unfinished ｜DSML｜invoke"), "{body}");
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_dsml_quoted_control_frame_is_not_client_output_text() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let frame = "<thinking>internal plan\n\
+        \"</｜DSML｜parameter>\"\n\
+        \"</｜DSML｜invoke>\"\n\
+        \"</｜DSML｜tool_calls>\"";
+    let (provider_base_url, mut captures, shutdown) = start_controlled_terminal_upstream_with_body(
+        StatusCode::OK,
+        "text/event-stream",
+        anthropic_sse_text_fixture(frame, false),
+    )
+    .await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        provider_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        None,
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    assert!(captures.recv().await.is_some());
+    handle.shutdown().await;
+    shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let events: Vec<Value> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str(data).ok())
+        .collect();
+    let visible_text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .filter_map(|event| event["item"]["content"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    let reasoning_text: String = events
+        .iter()
+        .filter(|event| event["type"] == "response.output_item.done")
+        .filter(|event| event["item"]["type"] == "reasoning")
+        .filter_map(|event| event["item"]["summary"].as_array())
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect();
+    assert!(
+        !body.contains("｜DSML｜"),
+        "control-only Anthropic frame leaked into the client stream: {body}"
+    );
+    assert!(
+        !body.contains("<thinking>"),
+        "thinking opener leaked into the client stream: {body}"
+    );
+    assert!(
+        visible_text.is_empty(),
+        "control-only frame became visible output text: {visible_text:?}"
+    );
+    assert!(
+        reasoning_text.is_empty(),
+        "control-only frame became reasoning summary text: {reasoning_text:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event["type"] != "response.completed"),
+        "control-only frame must enter typed empty-attempt recovery, not publish a normal completion: {body}"
+    );
+}
+
+#[tokio::test]
+async fn responses_relay_anthropic_dsml_failure_reselects_valid_provider() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let frame = "\u{3c}thinking>internal plan\n\u{3c}/\u{ff5c}DSML\u{ff5c}parameter>\n\u{3c}/\u{ff5c}DSML\u{ff5c}invoke>\n\u{3c}/\u{ff5c}DSML\u{ff5c}tool_calls>";
+    let (primary_base_url, mut primary_captures, primary_shutdown) =
+        start_controlled_terminal_upstream_with_body(
+            StatusCode::OK,
+            "text/event-stream",
+            anthropic_sse_text_fixture(frame, false),
+        )
+        .await;
+    let (fallback_base_url, mut fallback_captures, fallback_shutdown) =
+        start_controlled_responses_relay_upstream().await;
+    std::env::set_var("V3_P6_TEST_KEY", "dsml-controlled-key");
+    let manifest = responses_relay_provider_protocol_manifest(
+        free_port(),
+        free_port(),
+        primary_base_url.trim_end_matches("/v1"),
+        "anthropic",
+        Some(&fallback_base_url),
+    );
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap()
+        .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+        .header("accept", "text/event-stream")
+        .json(&json!({"model":"client-test","input":"hello","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    assert!(
+        primary_captures.recv().await.is_some(),
+        "control-only attempt must reach the first provider"
+    );
+    assert!(
+        timeout(Duration::from_secs(15), fallback_captures.recv())
+            .await
+            .expect("fallback candidate must receive the reselected attempt")
+            .is_some(),
+        "control-only first attempt must reselect the valid provider"
+    );
+    handle.shutdown().await;
+    primary_shutdown.send(()).unwrap();
+    fallback_shutdown.send(()).unwrap();
+    std::env::remove_var("V3_P6_TEST_KEY");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        !body.contains("\u{ff5c}DSML\u{ff5c}") && !body.contains("\u{3c}thinking>"),
+        "control-only frame leaked while reselecting: {body}"
+    );
+    assert!(
+        body.contains("relay sse final text"),
+        "valid second provider response was not delivered: {body}"
+    );
 }
 
 #[tokio::test]
