@@ -75,6 +75,8 @@ export const REQUIRED_EXECUTION_MODES = Object.freeze({
   'issue-3192e71-missing-optional-preserved': 'relay',
   'issue-745f6e9-provider-concurrency-all-busy-direct': 'direct',
   'issue-745f6e9-provider-concurrency-all-busy-relay': 'relay',
+  'issue-745f6e9-provider-concurrency-mixed-exclusion-direct': 'direct',
+  'issue-745f6e9-provider-concurrency-mixed-exclusion-relay': 'relay',
 });
 
 /**
