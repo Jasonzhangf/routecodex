@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct V3AttemptStorePolicyAuthoringConfig {
-    #[serde(default = "default_request_max_attempts")]
-    pub request_max_attempts: usize,
+    // Accept existing authoring without carrying its retired send ceiling into Runtime.
+    #[serde(default, rename = "request_max_attempts", skip_serializing)]
+    legacy_request_max_attempts: Option<usize>,
     #[serde(default = "default_attempt_max_bytes")]
     pub attempt_max_bytes: usize,
     #[serde(default = "default_attempt_max_frames")]
@@ -21,7 +22,7 @@ pub struct V3AttemptStorePolicyAuthoringConfig {
 impl Default for V3AttemptStorePolicyAuthoringConfig {
     fn default() -> Self {
         Self {
-            request_max_attempts: default_request_max_attempts(),
+            legacy_request_max_attempts: None,
             attempt_max_bytes: default_attempt_max_bytes(),
             attempt_max_frames: default_attempt_max_frames(),
             request_max_bytes: default_request_max_bytes(),
@@ -33,7 +34,6 @@ impl Default for V3AttemptStorePolicyAuthoringConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct V3AttemptStorePolicyManifest {
-    pub request_max_attempts: usize,
     pub attempt_max_bytes: usize,
     pub attempt_max_frames: usize,
     pub request_max_bytes: usize,
@@ -45,8 +45,7 @@ pub(crate) fn compile_attempt_store_policy(
     server_id: &str,
     authoring: V3AttemptStorePolicyAuthoringConfig,
 ) -> Result<V3AttemptStorePolicyManifest, V3ConfigError> {
-    if authoring.request_max_attempts == 0
-        || authoring.attempt_max_bytes == 0
+    if authoring.attempt_max_bytes == 0
         || authoring.attempt_max_frames == 0
         || authoring.request_max_bytes == 0
         || authoring.process_max_bytes == 0
@@ -65,17 +64,12 @@ pub(crate) fn compile_attempt_store_policy(
     }
 
     Ok(V3AttemptStorePolicyManifest {
-        request_max_attempts: authoring.request_max_attempts,
         attempt_max_bytes: authoring.attempt_max_bytes,
         attempt_max_frames: authoring.attempt_max_frames,
         request_max_bytes: authoring.request_max_bytes,
         process_max_bytes: authoring.process_max_bytes,
         residence_timeout_ms: authoring.residence_timeout_ms,
     })
-}
-
-fn default_request_max_attempts() -> usize {
-    8
 }
 
 fn default_attempt_max_bytes() -> usize {

@@ -1,13 +1,13 @@
 use super::common::V3ChatProcessRefillDisposition;
 use super::*;
-use crate::provider_action_gate::{V3ProviderActionPermit, V3ProviderActionRecoveryTransition};
+use crate::provider_action_gate::V3ProviderActionRecoveryTransition;
 use crate::provider_failure_runtime_policy::{
     expand_v3_relay_target_plan_for_selected, project_v3_client_disconnect,
     provider_runtime_failure_stage, run_v3_relay_provider_failure_policy,
     v3_relay_provider_policy_now_epoch_ms, v3_relay_provider_target_selection_sample,
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailurePolicyContext,
     V3RelayProviderFailurePolicyState, V3RelayProviderFailureRetryPolicy,
-    V3RelayProviderTargetResolutionInput, V3RuntimeProviderAdmission,
+    V3RelayProviderTargetResolutionInput,
 };
 use crate::runtime_timing::{V3RuntimeObservabilityAccumulator, V3RuntimeTimingSummary};
 use crate::{project_v3_debug_failure, V3ResponsesProtocolExecutionPlan};
@@ -489,27 +489,14 @@ async fn handle_v3_responses_relay_provider_failure(
     match result.decision.action {
         V3Error05ExecutionAction::ReevaluateTarget => {
             *state.retry_selected = None;
-            *state.pending_recovery = None;
             Ok(None)
         }
-        V3Error05ExecutionAction::WaitThenReselect { recovery } => {
+        V3Error05ExecutionAction::Reselect => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            if result.event.wait_ms.is_some() {
-                *state.pending_recovery = Some(recovery);
-            } else {
-                *state.pending_recovery = None;
-            }
             Ok(None)
         }
-        V3Error05ExecutionAction::WaitThenRetrySame { recovery } => {
+        V3Error05ExecutionAction::WaitThenRetrySame { .. } => {
             *state.retry_selected = result.retry_selected.map(|selected| *selected);
-            // 瞬态重试（request-local recovery witness，wait_ms=None）不经过
-            // provider action gate：无 health 记录可等，立即重发。
-            if result.event.wait_ms.is_some() {
-                *state.pending_recovery = Some(recovery);
-            } else {
-                *state.pending_recovery = None;
-            }
             Ok(None)
         }
         V3Error05ExecutionAction::ProjectTerminal => {
@@ -1399,7 +1386,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let mut failed_candidates = BTreeSet::new();
         let mut same_candidate_retries = BTreeMap::new();
         let mut retry_selected = None;
-        let mut pending_recovery = None;
         let mut provider_failure_events = Vec::new();
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
@@ -1407,7 +1393,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             retry_selected: &mut retry_selected,
-            pending_recovery: &mut pending_recovery,
             provider_failure_events: &mut provider_failure_events,
             provider_failure_event_sink: None,
             selected_observability: &selected_observability,
@@ -1458,7 +1443,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         assert_eq!(failed_candidates.len(), 1);
         assert!(same_candidate_retries.is_empty());
         assert!(retry_selected.is_none());
-        assert!(pending_recovery.is_none());
         assert_eq!(provider_failure_events.len(), 1);
         assert!(
             health
@@ -1536,7 +1520,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         let mut failed_candidates = BTreeSet::new();
         let mut same_candidate_retries = BTreeMap::new();
         let mut retry_selected = None;
-        let mut pending_recovery = None;
         let mut provider_failure_events = Vec::new();
         let selected_observability = V3RuntimeObservability::default();
         let mut trace = Vec::new();
@@ -1544,7 +1527,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             failed_candidates: &mut failed_candidates,
             same_candidate_retries: &mut same_candidate_retries,
             retry_selected: &mut retry_selected,
-            pending_recovery: &mut pending_recovery,
             provider_failure_events: &mut provider_failure_events,
             provider_failure_event_sink: None,
             selected_observability: &selected_observability,
@@ -1566,7 +1548,6 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         assert!(failed_candidates.is_empty());
         assert!(same_candidate_retries.is_empty());
         assert!(retry_selected.is_none());
-        assert!(pending_recovery.is_none());
         assert!(provider_failure_events.is_empty());
         assert!(trace.is_empty());
         assert!(

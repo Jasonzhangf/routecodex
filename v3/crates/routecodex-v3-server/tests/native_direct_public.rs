@@ -338,7 +338,7 @@ async fn anthropic_default_direct_recovers_native_http_and_sse_errors_then_prese
     let follow_up = client
         .post(&endpoint)
         .json(&json!({
-            "model":"anthropic-ok-client",
+            "model":"anthropic_success.anthropic-success-wire",
             "max_tokens":1024,
             "messages":[
                 {"role":"user","content":"Call native_add with 17 and 25"},
@@ -839,23 +839,13 @@ aliases = ["anthropic-recover-client", "anthropic-ok-client"]
 supports_streaming = true
 capabilities = ["text", "tools"]
 
-[route_groups.anthropic_native.pools.recover]
+[route_groups.anthropic_native.pools.default]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-recover-client"] }}
 targets = [
   {{ kind = "provider_model", provider = "anthropic_http_failure", model = "anthropic-http-failure-wire", key = "native", priority = 3 }},
   {{ kind = "provider_model", provider = "anthropic_sse_failure", model = "anthropic-sse-failure-wire", key = "native", priority = 2 }},
   {{ kind = "provider_model", provider = "anthropic_success", model = "anthropic-success-wire", key = "native", priority = 1 }}
 ]
-
-[route_groups.anthropic_native.pools.follow_up]
-selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-ok-client"] }}
-targets = [{{ kind = "provider_model", provider = "anthropic_success", model = "anthropic-success-wire", key = "native", priority = 1 }}]
-
-[route_groups.anthropic_native.pools.default]
-selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "anthropic_success", model = "anthropic-success-wire", key = "native", priority = 1 }}]
 "#,
         hub_v1_declaration = NATIVE_HUB_DECLARATION,
         server_execution = hub_v1_server_execution("anthropic_native"),

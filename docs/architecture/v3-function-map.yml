@@ -1183,8 +1183,8 @@ features:
     never set the web_search route or capability.
   - Ordinary route classification consumes only the current turn and evaluates configured
     non-empty pools in the fixed order hosted web_search, multimodal, longcontext, coding, thinking,
-    search, tools, default. The first matching pool is the only captured pool; no implicit
-    capability pool is built and no default or other pool is appended after it.
+    search, tools, default. Capture the first matching pool and its declared default
+    successor in that order, without synthesizing other capability pools.
   - Absent or empty optional pools are skipped without rejecting the request; the default
     pool remains required and non-empty. The longcontext capability is retained and
     its pool is skipped when absent or empty.
@@ -1201,7 +1201,8 @@ features:
     in the same route tier, and still outranks every lower route tier inside the captured
     pool. Explicit direct pins remain eligible only inside their resolved direct plan;
     Provider availability/health and request-local provider-failure exclusion remain
-    explicit switch inputs and no default-pool floor is appended after a matched pool.
+    explicit switch inputs. The declared default successor is considered only after
+    every currently executable candidate in the matched pool has been considered.
   - Tools, tool_outputs, reasoning/thinking, coding, and
     local_materialization are route/protocol signals; they may steer pool choice but
     must not mark a candidate as capability_mismatch.
@@ -1209,9 +1210,12 @@ features:
     capability or provider-selection signal.
   - OpenAI Responses request.reasoning is also exposed as the thinking route fact
     so configs using either vocabulary route the same request.
-  - Target candidate dedupe preserves pool provenance and required capabilities inside
-    the single captured pool; no default floor is appended after a matched pool and no
-    recovery or health change crosses into another classification pool.
+  - Target candidate dedupe preserves pool provenance and required capabilities across
+    the captured matched-pool and declared-default plan. Recovery and health changes
+    do not introduce another classification pool.
+  - Request admission performs one immediate nonblocking scan. Empty tiers and temporarily
+    unavailable pools continue to declared successors. Probes, capacity and recovery timers
+    cannot block admission; an accepted request never enters a capacity or Deferred wait.
   - Target09-to-Target10 selection first reads the session-scoped availability projection
     and request-local Error03 candidate exclusions; global availability may revive
     a multi-candidate plan only after no nonfailed session alternative remains.
@@ -2259,8 +2263,9 @@ features:
     first `.` is an enabled provider id that declares that model or one of its aliases.
     Every other client model string — no dot, an unknown provider segment, or an enabled
     provider that declares no such model — falls back to normal classification, the same
-    path `auto` and virtual catalog entry names take. Only a resolved direct model that
-    cannot serve the request media requirement fails explicitly without rerouting.'
+    path `auto` and virtual catalog entry names take. A resolved direct model remains the
+    declared provider pin; capability labels select route pools and never reject or
+    filter that pin.'
   - Explicit `provider.model` is a direct target handoff, not a classification; it cannot
     be reshaped by historical policy, sticky state, or the current-turn classification order.
   - The stable gpt-5.5 Codex client surface remains a capability/priority-routed built-in
@@ -4040,6 +4045,8 @@ features:
   - write_front_response_frame
   - V3_FRONT_CLOSE_FLUSH
   allowed_paths:
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+  - v3/crates/routecodex-v3-server/tests/client_cancel_terminal_public.rs
   - v3/crates/routecodex-v3-server/src/client_sse_transport.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-server/src/frame_builders.rs
@@ -4181,6 +4188,8 @@ features:
   status: active
   owner_crate: routecodex-v3-runtime
   owner_files:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
   - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
   - v3/crates/routecodex-v3-runtime/src/kernel/direct_state.rs
@@ -4221,6 +4230,9 @@ features:
   - v3-runtime-timing-13
   - v3-runtime-timing-14
   allowed_paths:
+  - v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+  - v3/crates/routecodex-v3-server/tests/refill_timing_public.rs
   - v3/crates/routecodex-v3-runtime/src/runtime_timing.rs
   - v3/crates/routecodex-v3-runtime/src/lib.rs
   - v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -4256,7 +4268,7 @@ features:
   - npm run verify:v3-architecture-docs
   runtime_status: source_active_live_verification_required
 - feature_id: v3.provider_action_gate
-  status: active
+  status: background_observation_only
   runtime_status: source_active_live_verification_required
   owner_crate: routecodex-v3-runtime
   owner_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
@@ -4267,70 +4279,30 @@ features:
   mainline_bindings:
   - v3-provider-action-gate-01
   - v3-provider-action-gate-02
-  - v3-provider-action-gate-03
-  - v3-provider-action-gate-04
   - v3-provider-action-gate-05
   - v3-provider-action-gate-06
-  - v3-provider-action-gate-07
-  - v3-provider-action-gate-08
-  - v3-provider-action-gate-10
-  - v3-provider-action-gate-11
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
   - v3-provider-action-gate-14
   - v3-provider-action-gate-15
   - v3-provider-action-gate-16
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
-  - v3-provider-action-gate-21
-  - v3-provider-action-gate-22
-  - v3-provider-action-gate-23
-  - v3-provider-action-gate-24
-  - v3-provider-action-gate-25
-  - v3-provider-action-gate-26
-  - v3-provider-action-gate-27
-  - v3-provider-action-gate-28
-  - v3-provider-action-gate-29
-  - v3-provider-action-gate-30
-  - v3-provider-action-gate-31
-  - v3-provider-action-gate-32
   - v3-provider-action-gate-33
   - v3-provider-action-gate-34
-  - v3-provider-action-gate-35
   - v3-provider-action-gate-36
   - v3-provider-action-gate-37
   - v3-provider-action-gate-38
-  - v3-provider-action-gate-39
-  - v3-provider-action-gate-40
-  - v3-provider-action-gate-41
-  - v3-provider-action-gate-42
-  - v3-provider-action-gate-43
-  - v3-provider-action-gate-44
-  - v3-provider-action-gate-45
   - v3-provider-action-gate-46
   - v3-provider-action-gate-47
   - v3-provider-action-gate-48
   - v3-provider-action-gate-49
   - v3-provider-action-gate-50
   - v3-provider-action-gate-51
-  - v3-provider-action-gate-52
-  - v3-provider-action-gate-53
-  - v3-provider-action-gate-54
-  - v3-provider-action-gate-55
-  - v3-provider-action-gate-56
   entry_symbols:
   - V3ProviderActionGate
   - V3ProviderActionGate::try_admit_exact_rate_limit
   - V3ProviderFailureRuntimeHealth::defer_provider_health_action
   - V3ProviderFailureRuntimeHealth::managed_precool_probe
-  - V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
-  - V3RuntimeProviderAdmission::take_rate_limit_control
   - V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure
   - provider_failure_runtime_policy::tests::post_commit_response_stream_failure_updates_global_key_health
   - provider_failure_runtime_policy::tests::post_commit_transient_stream_failures_count_toward_global_cooldown
-  - V3ProviderActionAdmission::take_permit
-  - V3ProviderActionPermit::drop
-  - V3ProviderActionGate::abandon_admission
   - V3ProviderActionGate::commit_terminal_admission
   - V3ProviderActionGate::record_failure_and_commit_terminal_projection
   allowed_paths:
@@ -4663,9 +4635,6 @@ features:
   - npm run verify:v3-architecture-ci
   - npm run verify:v3-provider-action-gate
   mainline_bindings:
-  - v3-provider-action-gate-12
-  - v3-provider-action-gate-13
-  - v3-provider-action-gate-22
   - v3-provider-action-gate-27
   - v3-chat-direct-relay-handoff-02
   runtime_status: source_controlled_runtime_boundary_verified
@@ -4803,8 +4772,6 @@ features:
   - V3_RESPONSES_DIRECT_TRANSPORT_RESPONSE_TIMEOUT
   - collapse_direct_client_sse_to_json
   mainline_bindings:
-  - v3-provider-action-gate-19
-  - v3-provider-action-gate-20
   - v3-provider-action-gate-24
   runtime_status: source_controlled_runtime_boundary_verified
 
@@ -4891,12 +4858,11 @@ features:
   - v3.provider.adaptive_concurrency_admission
   mainline_bindings:
   - v3-zen-health-probe-compat
-  - v3-rd-target-select-direct-admission-rescue
-  - v3-rd-target-select-responses-direct-admission-rescue
-  - v3-rd-target-select-relay-core-admission-rescue
-  - v3-rd-target-select-responses-relay-admission-rescue
-  - v3-rd-target-select-anthropic-relay-admission-rescue
-  - v3-provider-admission-lease-lifecycle
+  - v3-rd-target-select-direct-successor-scan
+  - v3-rd-target-select-responses-direct-successor-scan
+  - v3-rd-target-select-relay-core-successor-scan
+  - v3-rd-target-select-responses-relay-successor-scan
+  - v3-rd-target-select-anthropic-relay-successor-scan
   - v3-provider-global-probe-http-status
   - v3-provider-global-probe-02
   - v3-provider-global-probe-02-owner
@@ -4944,18 +4910,10 @@ features:
   - run_v3_plan_execution_operator_with_probes
   - await_v3_plan_execution_with_deadline
   - PlanExecutionOperator::execute_plan
-  - step_v3_target_planning_with_admission_sync
-  - try_admit_v3_selected_target
-  - V3RuntimeProviderAdmission::into_lease
-  - V3RuntimeProviderAdmission::drop
-  - V3PreAcquiredProviderAdmission::release
-  - V3AdaptiveConcurrencyPermitGuard::drop
   - V3AdaptiveConcurrencyController::observe_rate_limit
   - V3AdaptiveConcurrencyController::observe_business_success
   - V3AdaptiveConcurrencyController::observe_rate_limit_scoped
   - V3AdaptiveConcurrencyController::observe_business_success_scoped
-  - V3AdaptiveConcurrencyController::try_acquire_business_scoped
-  - V3AdaptiveConcurrencyController::wait_for_scoped_capacity_change
   - V3AdaptiveConcurrencyController::snapshot_for_scope
   - V3ConcurrencyIdentityScope
   - V3AdaptiveConcurrencyController::complete_probe
@@ -5057,7 +5015,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime later_tier_selection_skips_in_flight_rescue_probes_without_waiting --lib -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime provider_concurrency --lib -- --nocapture
   - npm run test:v3-provider-adaptive-concurrency
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_switches_without_waiting -- --exact --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --test anthropic_relay_mixed_pool_failover_integration anthropic_relay_provider_concurrency_full_does_not_exclude_declared_candidate -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --lib saturated_provider_admission_without_preacquired_lease_does_not_wait -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_provider_concurrency_ -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture

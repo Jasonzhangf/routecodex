@@ -27,7 +27,7 @@ targets = [
         parse_v3_config_02_authoring(&source).expect("unmatched-transient authoring"),
     )
     .expect("unmatched-transient manifest");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the provider"),
@@ -74,75 +74,4 @@ targets = [
         .expect("unmatched transient exhaustion must be terminal");
     assert_eq!(projection.status, 502);
     assert_eq!(projection.body["error"]["code"], "network_error");
-}
-
-#[tokio::test]
-async fn unmatched_transient_reselect_keeps_healthy_alternative_independent() {
-    let manifest = transport_thrash_manifest("unmatched_transient_reselect");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let selected = match resolve_target(
-        &manifest,
-        "unmatched_transient_reselect",
-        &BTreeSet::new(),
-        &health,
-    ) {
-        V3RelayProviderTargetResolution::Selected(selected) => selected,
-        _ => panic!("valid fixture must select a provider"),
-    };
-    assert_eq!(selected.candidate.provider_id, "first");
-    assert_eq!(selected.candidate.auth_alias, "key1");
-    let target = V3TargetInterpreter::default();
-    let captured_target_09 = target
-        .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
-        .expect("capture Target09 before execution");
-    let mut failed_candidates = BTreeSet::new();
-    let mut same_candidate_retries = BTreeMap::new();
-    let mut trace = Vec::new();
-    let context = V3RelayProviderFailurePolicyContext {
-        manifest: &manifest,
-        captured_target_09: Some(&captured_target_09),
-        failure_session_scope: test_provider_failure_scope(
-            "unmatched_transient_reselect",
-            "unmatched_transient_reselect",
-            "session-unmatched-transient-reselect",
-        )
-        .expect("test failure session scope"),
-        provider_health: &health,
-        retry_policy: V3RelayProviderFailureRetryPolicy::default(),
-        deterministic_sample: 0,
-    };
-    let result = run_v3_relay_provider_failure_policy(
-        &context,
-        selected,
-        "V3ProviderRespInbound01Raw",
-        200,
-        Some("wrapped_provider_error".to_string()),
-        "transient SSE body without a configured response policy".to_string(),
-        None,
-        &mut V3RelayProviderFailurePolicyState {
-            failed_candidates: &mut failed_candidates,
-            same_candidate_retries: &mut same_candidate_retries,
-            trace: &mut trace,
-            last_external_http: &mut None,
-        },
-    )
-    .await
-    .expect("unmatched transient must project through the policy");
-
-    assert_eq!(result.event.action, "switch_provider");
-    assert_eq!(result.event.wait_ms, None);
-    let reselected = result
-        .retry_selected
-        .as_ref()
-        .expect("unmatched transient with an alternative must reselect");
-    assert_ne!(
-        v3_relay_provider_candidate_key(&reselected.candidate),
-        v3_relay_provider_candidate_key(&result.event.candidate)
-    );
-    assert!(
-        matches!(result.decision.action, V3Error05ExecutionAction::ReevaluateTarget),
-        "a healthy alternative must not inherit the failed identity's recovery lane"
-    );
-    assert!(result.decision.action.recovery_witness().is_none());
-    assert!(result.terminal_projection.is_none());
 }

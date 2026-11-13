@@ -248,13 +248,31 @@ async fn openai_chat_truncated_200_switches_without_cooling_other_identities() {
         output.node_trace
     );
 
+    let failure = output
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .expect("the truncated primary attempt must publish its failure event");
+    // The failure is owned by the declared pre-cool observation threshold, not
+    // an immediate cooldown: one observed truncated transport failure records a
+    // pre_cool_observation with no cooldown_until, exactly like every other
+    // ordinary non429 failure. The health effect still stays bound to the exact
+    // failed identity; untried keys, models, and providers stay routable.
+    assert_eq!(
+        failure.health_state, "pre_cool_observation",
+        "a truncated HTTP 200 SSE body must enter the declared pre-cool observation"
+    );
+    assert_eq!(
+        failure.cooldown_until_ms, None,
+        "a truncated HTTP 200 SSE body must not immediately cool the failed primary"
+    );
     let now = u64::MAX;
     assert!(
-        !provider_health
+        provider_health
             .store()
             .availability(scope, Some("key1"), Some("chat-wire-model"), now)
             .available,
-        "the exact failed identity must be cooled"
+        "the exact failed identity must stay routable during pre-cool observation"
     );
     assert!(
         provider_health

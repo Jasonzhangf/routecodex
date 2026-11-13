@@ -8,17 +8,18 @@
     "mode": "direct"
   },
   "runtime_setup": {
-    "provider_id": "mock-responses-busy",
+    "provider_id": "mock-responses-primary",
     "model": "mock.responses-model",
     "wire_model": "responses-model",
     "candidate_ids": [
-      "mock-responses-busy/mock.responses-model",
-      "mock-responses-excluded/mock.responses-model"
+      "mock-responses-primary/mock.responses-model",
+      "mock-responses-recovered/mock.responses-model"
     ],
-    "provider_concurrency": {
-      "maxInFlight": 1,
-      "acquireTimeoutMs": 1000,
-      "staleLeaseMs": 300000
+    "process": "direct",
+    "health": {
+      "enabled": true,
+      "failure_threshold": 1,
+      "cooldown_ms": 60000
     },
     "attempt_store": {
       "residence_timeout_ms": 30000
@@ -29,12 +30,12 @@
     "path": "/v1/responses",
     "headers": {
       "content-type": "application/json",
-      "session-id": "concurrency-mixed-held-direct",
-      "thread-id": "concurrency-mixed-held-direct"
+      "session-id": "independence-failure-direct-holder",
+      "thread-id": "independence-failure-direct-holder"
     },
     "body": {
       "model": "mock.responses-model",
-      "input": "hold the only direct provider capacity",
+      "input": "hold the direct provider while a sibling fails",
       "stream": true
     }
   },
@@ -71,7 +72,7 @@
             "data": {
               "type": "response.created",
               "response": {
-                "id": "resp_concurrency_mixed_direct",
+                "id": "resp_independence_failure_direct_holder",
                 "status": "in_progress",
                 "output": []
               }
@@ -83,7 +84,7 @@
               "type": "response.output_text.delta",
               "output_index": 0,
               "content_index": 0,
-              "item_id": "msg_concurrency_mixed_direct",
+              "item_id": "msg_independence_failure_direct_holder",
               "delta": "held response released"
             }
           },
@@ -92,7 +93,7 @@
             "data": {
               "type": "response.completed",
               "response": {
-                "id": "resp_concurrency_mixed_direct",
+                "id": "resp_independence_failure_direct_holder",
                 "status": "completed",
                 "output": [
                   {
@@ -110,7 +111,7 @@
                     "summary": [
                       {
                         "type": "summary_text",
-                        "text": "concurrency holder completed"
+                        "text": "direct failure holder completed"
                       }
                     ]
                   }
@@ -126,13 +127,13 @@
         ]
       },
       {
-        "kind": "fault",
-        "fault": "controlled-probe-failure",
+        "kind": "json",
         "status": 500,
         "content_type": "application/json",
         "body": {
           "error": {
-            "message": "controlled probe failure"
+            "message": "controlled provider failure",
+            "code": "upstream_http_error"
           }
         }
       },
@@ -146,7 +147,7 @@
             "data": {
               "type": "response.created",
               "response": {
-                "id": "resp_concurrency_mixed_reuse_direct",
+                "id": "resp_independence_failure_direct_recovered",
                 "status": "in_progress",
                 "output": []
               }
@@ -158,8 +159,8 @@
               "type": "response.output_text.delta",
               "output_index": 0,
               "content_index": 0,
-              "item_id": "msg_concurrency_mixed_reuse_direct",
-              "delta": "capacity reused"
+              "item_id": "msg_independence_failure_direct_recovered",
+              "delta": "recovered response"
             }
           },
           {
@@ -167,7 +168,7 @@
             "data": {
               "type": "response.completed",
               "response": {
-                "id": "resp_concurrency_mixed_reuse_direct",
+                "id": "resp_independence_failure_direct_recovered",
                 "status": "completed",
                 "output": [
                   {
@@ -176,7 +177,7 @@
                     "content": [
                       {
                         "type": "output_text",
-                        "text": "capacity reused"
+                        "text": "recovered response"
                       }
                     ]
                   },
@@ -185,7 +186,7 @@
                     "summary": [
                       {
                         "type": "summary_text",
-                        "text": "capacity reuse completed"
+                        "text": "direct failure recovered completed"
                       }
                     ]
                   }
@@ -217,95 +218,90 @@
     ],
     "semantic_terminal_required": true
   },
-  "concurrency_replay": {
-    "kind": "provider_concurrency_all_busy",
-    "shape": "mixed_exclusion",
-    "expected_source_kind": "target_pool_exhausted",
-    "expected_source_stage": null,
-    "expected_attempts_empty": true,
-    "exhaustion_client_request": {
+  "request_independence_replay": {
+    "kind": "provider_request_independence",
+    "shape": "failure_isolation",
+    "failed_client_request": {
       "method": "POST",
       "path": "/v1/responses",
       "headers": {
         "content-type": "application/json",
-        "session-id": "concurrency-mixed-exhausted-direct",
-        "thread-id": "concurrency-mixed-exhausted-direct"
+        "session-id": "independence-failure-direct-failed",
+        "thread-id": "independence-failure-direct-failed"
       },
       "body": {
         "model": "mock.responses-model",
-        "input": "must not reach either direct provider as business",
+        "input": "fail once then recover on the next direct candidate",
         "stream": true
       }
     },
-    "capacity_reuse_client_request": {
-      "method": "POST",
-      "path": "/v1/responses",
-      "headers": {
-        "content-type": "application/json",
-        "session-id": "concurrency-mixed-reuse-direct",
-        "thread-id": "concurrency-mixed-reuse-direct"
-      },
-      "body": {
-        "model": "mock.responses-model",
-        "input": "reuse released direct capacity",
-        "stream": true
-      }
-    },
-    "expected_exhaustion_client": {
-      "transport": "closed",
-      "deadline_ms": 4000,
-      "error_codes_must_not": [
-        "ETIMEDOUT"
-      ]
-    },
-    "expected_capacity_reuse_client": {
+    "expected_failed_client": {
       "transport": "complete",
       "status": 200,
       "body_must": {
-        "text": "capacity reused",
+        "text": "recovered response",
         "status": "completed"
       },
       "body_must_not": [
         "provider_error",
         "internal_error",
-        "routecodex_internal",
-        "metadata_center"
+        "routecodex_internal"
       ],
       "semantic_terminal_required": true
     },
-    "typed_error_codes": [
-      "selected_target_exhausted"
-    ],
+    "post_recovery_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "independence-failure-direct-post",
+        "thread-id": "independence-failure-direct-post"
+      },
+      "body": {
+        "model": "mock.responses-model",
+        "input": "independent direct request after recovery",
+        "stream": true
+      }
+    },
+    "expected_post_recovery_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "recovered response",
+        "status": "completed"
+      },
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "failure_isolation": {
+      "failed_provider_id": "mock-responses-primary",
+      "recovered_provider_id": "mock-responses-recovered",
+      "expected_provider_status": 500,
+      "expected_action": "switch_provider",
+      "expected_holder_business_sends": 1,
+      "expected_failed_business_sends": 1,
+      "expected_recovery_business_sends": 2
+    },
     "typed_error_codes_must_not": [
       "provider_concurrency_busy"
-    ],
-    "upstream_business_sends": 1,
-    "mixed_exclusion": {
-      "excluded_provider_id": "mock-responses-excluded",
-      "expected_holder_business_sends": 1,
-      "expected_reuse_business_sends": 1,
-      "expected_probe_sends": 1,
-      "expected_health_entry_count": 2,
-      "probe_input_contains": "ping; reply pong",
-      "cooldown_identity": {
-        "interface_id": "default",
-        "auth_alias": "key1",
-        "kind": "auth_key",
-        "duration_ms": 60000
-      }
-    }
+    ]
   },
   "assertions": {
-    "provider_attempt_count": 2,
+    "provider_attempt_count": 4,
     "probe_attempts_may_occur": true,
     "no_control_leakage": true
   },
   "source": {
+    "sha": "25c366feb",
     "files": [
       "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
     ],
     "tests": [
-      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_direct_mixed_exclusion_stays_generic"
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_direct_provider_http_error_never_reaches_the_client"
     ]
   },
   "contract_differences": []

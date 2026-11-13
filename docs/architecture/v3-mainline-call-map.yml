@@ -6697,6 +6697,23 @@ chains:
       side_channel_reads:
       - v3.runtime.responses_timing_observability
       side_channel_writes: []
+  - step_id: v3-runtime-timing-refill-summary
+    from_node: V3RuntimeTimingTerminal
+    to_node: V3RuntimeTimingStreamObservation
+    caller_symbol: execute_v3_responses_direct_runtime_kernel_with_refill
+    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_kernel_entrypoints.rs
+    callee_symbol: merge_snapshot
+    callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_types.rs
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    semantic_contract:
+      - Completed refill executions contribute typed timing exactly once to the request summary; output and final stream snapshot publish the same total.
+      - Snapshot publication replaces a summary and never sums repeated snapshots; Server remains a read-only consumer.
+    resource_flow:
+      consumes: [v3.runtime.responses_timing_observability]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.runtime.responses_timing_observability]
+      side_channel_writes: [v3.runtime.responses_observability]
 - chain_id: v3.responses_session_admission
   owner_feature_id: v3.responses_session_inflight_admission
   summary: Parsed requests independently enter Runtime regardless of matching session or conversation. Explicit maintenance controls new dispatch; each response retains its own activity and front-flush custody.
@@ -6814,6 +6831,24 @@ chains:
       side_channel_reads: [v3.front.request_activity_gate]
       side_channel_writes: [v3.front.request_activity_gate]
 
+  - step_id: v3-client-pending-disconnect-terminal
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3Front08ClientTerminalOrError
+    caller_symbol: record_disconnect
+    caller_file: v3/crates/routecodex-v3-server/src/client_sse_transport.rs
+    callee_symbol: record_v3_transport_disconnect_cancelled
+    callee_file: v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
+    status: anchored
+    owner_feature_id: v3.client_sse_head_commit
+    semantic_contract:
+      - The recorder is installed before protocol planning for every SSE mode. A pending-outcome disconnect runs it once, including when the transport drops before installation, then aborts only the owned task.
+      - A resolved outcome retains its finalizer; cancellation does not change sibling requests or Provider health.
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.server.internal_observability_projection]
+
 - chain_id: v3.provider_action_gate.mainline
   owner_feature_id: v3.provider_action_gate
   summary: V3 provider action gate serializes provider failure recovery, permit ownership, post-commit SSE success/failure observation, and provider response event-codec terminal evidence; the Server frame owner consumes typed Error01 and performs the sole Error06 client-protocol projection.
@@ -6859,46 +6894,6 @@ chains:
           - v3.error.provider_action_gate
         side_channel_writes:
           - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-03
-      from_node: V3Error05ExecutionDecision
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: run_v3_relay_provider_failure_policy_with_response_source
-      caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_action_failure_in_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-04
-      from_node: V3Error05RecoveryWitness
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      callee_symbol: V3ProviderActionGate::wait_for_recovery_witness
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-05
       from_node: V3Error05ExecutionDecision
       to_node: V3Error06ClientProjected
@@ -6916,128 +6911,12 @@ chains:
         side_channel_reads: []
         side_channel_writes: []
     - step_id: v3-provider-action-gate-06
-      from_node: V3ProviderActionGateTerminalAdmission
+      from_node: V3Error05ExecutionDecision
       to_node: V3ProviderActionGateTerminalCommitted
       caller_symbol: V3ProviderActionGate::record_failure_and_commit_terminal_projection
       caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
       callee_symbol: V3ProviderActionGate::commit_terminal_generation_locked
       callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-07
-      from_node: V3ProviderReqOutbound08WirePayload
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: V3ProviderFailureRuntimeHealth::try_admit_candidate_rate_limit
-      caller_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy_health.rs
-      callee_symbol: V3ProviderActionGate::try_admit_exact_rate_limit
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.provider_action_gate
-        produces: []
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes: []
-    - step_id: v3-provider-action-gate-08
-      from_node: V3Error05RecoveryWitness
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-10
-      from_node: V3Error05RecoveryWitness
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-11
-      from_node: V3Error05RecoveryWitness
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-12
-      from_node: V3Error05RecoveryWitness
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-13
-      from_node: V3Error05RecoveryWitness
-      to_node: V3ProviderActionGateAdmission
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::wait_for_error05_recovery
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
       status: anchored
       owner_feature_id: v3.provider_action_gate
       resource_flow:
@@ -7111,288 +6990,8 @@ chains:
           - v3.error.provider_action_gate
         side_channel_writes:
           - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-19
-      from_node: V3ProviderActionGateAdmission
-      to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3ProviderActionAdmission::take_permit
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-20
-      from_node: V3ProviderActionGateAdmission
-      to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-      callee_symbol: V3ProviderActionAdmission::take_permit
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-21
-      from_node: V3ProviderActionGateAdmission
-      to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3ProviderActionAdmission::take_permit
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-22
-      from_node: V3ProviderActionGateAdmission
-      to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderActionAdmission::take_permit
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-23
-      from_node: V3ProviderActionGateAdmission
-      to_node: V3ProviderActionPermitInFlight
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3ProviderActionAdmission::take_permit
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-24
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-25
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-26
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-27
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-28
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-29
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-30
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-31
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionPermitAbandonRequested
-      caller_symbol: V3GeminiSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      callee_symbol: V3ProviderActionPermit::drop
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-32
-      from_node: V3ProviderActionPermitAbandonRequested
-      to_node: V3ProviderActionPermitAbandoned
-      caller_symbol: V3ProviderActionPermit::drop
-      caller_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      callee_symbol: V3ProviderActionGate::abandon_admission
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_action_gate.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-33
-      from_node: V3ProviderActionPermitInFlight
+      from_node: V3ProviderRespInbound01Raw
       to_node: V3ProviderActionSuccessObserved
       caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
       caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
@@ -7431,26 +7030,6 @@ chains:
           - v3.error.provider_action_gate
         side_channel_writes:
           - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-35
-      from_node: V3ProviderActionPermitAbandoned
-      to_node: V3ProviderActionFailureObserved
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: run_v3_direct_provider_failure_policy
-      callee_file: v3/crates/routecodex-v3-runtime/src/kernel/direct_runtime_helpers.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-36
       from_node: V3ProviderActionFailureObserved
       to_node: V3ProviderActionFailureRecorded
@@ -7472,7 +7051,7 @@ chains:
         side_channel_writes:
           - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-37
-      from_node: V3ProviderActionPermitInFlight
+      from_node: V3ProviderRespInbound01Raw
       to_node: V3ProviderActionSuccessObserved
       caller_symbol: execute_v3_relay_runtime_core
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
@@ -7511,148 +7090,8 @@ chains:
           - v3.error.provider_action_gate
         side_channel_writes:
           - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-39
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionFailureObserved
-      caller_symbol: project_sse_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      callee_symbol: V3OpenAiChatSseProviderOutcome::record_failure
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-40
-      from_node: V3ProviderActionPermitAbandoned
-      to_node: V3ProviderActionFailureRecorded
-      caller_symbol: V3OpenAiChatSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/openai_chat_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-41
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionSuccessObserved
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-42
-      from_node: V3ProviderActionSuccessObserved
-      to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-43
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionFailureObserved
-      caller_symbol: project_sse_stream
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      callee_symbol: V3GeminiSseProviderOutcome::record_failure
-      callee_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-44
-      from_node: V3ProviderActionPermitAbandoned
-      to_node: V3ProviderActionFailureRecorded
-      caller_symbol: V3GeminiSseProviderOutcome::record_failure
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/gemini_relay_runtime.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_post_commit_provider_stream_failure_from_source
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
-    - step_id: v3-provider-action-gate-45
-      from_node: V3ProviderActionPermitInFlight
-      to_node: V3ProviderActionSuccessRecorded
-      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-      callee_symbol: V3ProviderFailureRuntimeHealth::record_provider_success_in_failure_scope
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes:
-          - v3.error.execution_decision
-          - v3.error.provider_action_gate
-          - v3.provider.health_state
-        produces:
-          - v3.error.provider_action_gate
-        side_channel_reads:
-          - v3.error.provider_action_gate
-        side_channel_writes:
-          - v3.error.provider_action_gate
     - step_id: v3-provider-action-gate-46
-      from_node: V3ProviderActionPermitInFlight
+      from_node: V3ProviderRespInbound01Raw
       to_node: V3ProviderActionSuccessFinalize
       caller_symbol: execute_v3_anthropic_relay_runtime_inner
       caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
@@ -7771,77 +7210,6 @@ chains:
           - v3.error.provider_action_gate
         side_channel_writes:
           - v3.error.provider_action_gate
-
-    - step_id: v3-provider-action-gate-52
-      from_node: V3ProviderReqOutbound08WirePayload
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-      callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes: [v3.error.provider_action_gate]
-        produces: []
-        side_channel_reads: [v3.error.provider_action_gate]
-        side_channel_writes: []
-    - step_id: v3-provider-action-gate-53
-      from_node: V3ProviderReqOutbound08WirePayload
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: execute_v3_direct_runtime_kernel_core_resident
-      caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-      callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes: [v3.error.provider_action_gate]
-        produces: []
-        side_channel_reads: [v3.error.provider_action_gate]
-        side_channel_writes: []
-    - step_id: v3-provider-action-gate-54
-      from_node: V3ProviderReqOutbound08WirePayload
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: execute_v3_responses_relay_runtime_inner_with_refill
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-      callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes: [v3.error.provider_action_gate]
-        produces: []
-        side_channel_reads: [v3.error.provider_action_gate]
-        side_channel_writes: []
-    - step_id: v3-provider-action-gate-55
-      from_node: V3ProviderReqOutbound08WirePayload
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: execute_v3_relay_runtime_core
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-      callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes: [v3.error.provider_action_gate]
-        produces: []
-        side_channel_reads: [v3.error.provider_action_gate]
-        side_channel_writes: []
-    - step_id: v3-provider-action-gate-56
-      from_node: V3ProviderReqOutbound08WirePayload
-      to_node: V3Error05RecoveryWitness
-      caller_symbol: execute_v3_anthropic_relay_runtime_inner
-      caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-      callee_symbol: V3RuntimeProviderAdmission::take_rate_limit_control
-      callee_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-      status: anchored
-      owner_feature_id: v3.provider_action_gate
-      resource_flow:
-        consumes: [v3.error.provider_action_gate]
-        produces: []
-        side_channel_reads: [v3.error.provider_action_gate]
-        side_channel_writes: []
 
 - chain_id: v3.build_test_artifact_budget
   owner_feature_id: v3.build_test_artifact_budget
@@ -7998,12 +7366,12 @@ chains:
       produces: [v3.route.request_facts]
       side_channel_reads: []
       side_channel_writes: []
-- chain_id: v3.provider_admission_rescue_entrypoints
+- chain_id: v3.provider_declared_successor_selection
   owner_feature_id: v3.provider_global_subscription_probe
-  summary: Direct and Relay use one pre-transport selection boundary with atomic provider+authAlias capacity admission; full candidates are skipped request-locally without waiting, health mutation or Router reentry, and pure capacity exhaustion retains its typed cause.
-  exhaustion_contract: a cooldown-only request receives one rescue pass and captured-target reselection, then internal exhaustion when no candidate is available; pure all-busy exhaustion carries TargetPoolExhausted/provider_concurrency_busy, mixed exhaustion remains selected_target_exhausted, and independent scheduled health recovery does not retain the exhausted request
+  summary: Direct and Relay use one pre-transport selection boundary that immediately scans captured declared successors and never waits on capacity, probes, cooldown recovery, or Router reentry.
+  exhaustion_contract: selection scans the captured declared tier, same-tier keys, and declared default successor exactly once; empty or unavailable tiers continue to declared successors, and a parseable accepted request never enters Deferred or capacity wait
   edges:
-  - step_id: v3-rd-target-select-direct-admission-rescue
+  - step_id: v3-rd-target-select-direct-successor-scan
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_direct_runtime_kernel_core_resident
@@ -8013,17 +7381,17 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Direct runtime selects from the captured Target09 candidate set through the admission-aware rescue wrapper before provider transport.
-      - Direct atomically admits provider+authAlias capacity and immediately selects the next eligible candidate when full.
-      - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - All-full candidates wait with increasing backoff inside the declared acquisition budget without extra provider sends or health mutation; final eligibility is checked before exhaustion.
-      - Exact candidate keys proven capacity-busy survive sync and async reselection; only full captured-set coverage carries provider_concurrency_busy, while mixed exhaustion stays selected_target_exhausted.
+      - Direct runtime selects from the captured Target09 candidate set through the successor-scan wrapper before provider transport.
+      - The request path never acquires provider+authAlias capacity, a lease, a permit, a FIFO ticket, or a Deferred wait.
+      - A cooled preceding-tier candidate with another probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
+      - Same-provider sibling keys and declared tiers are considered without capacity checks.
+      - The request never waits for capacity, probe, cooldown recovery, or the original deadline; selection is immediate.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
-  - step_id: v3-rd-target-select-responses-direct-admission-rescue
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider, v3.operation_runner.request_local_exclusions]
+  - step_id: v3-rd-target-select-responses-direct-successor-scan
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
@@ -8033,16 +7401,16 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Responses Direct runtime uses the same admission-aware selection wrapper for initial selection and request-local reselection.
-      - Responses Direct skips full candidates when a spare exists; an all-full target waits for capacity within the declared budget without mutating health.
-      - The acquired provider admission lease is consumed by Provider transport or released by Runtime if selection does not reach transport.
-      - Exact capacity-busy candidate keys survive every direct reselection and are projected through the existing target-exhaustion terminal helper when the captured Target09 set is fully covered.
+      - Responses Direct runtime uses the same successor-scan wrapper for initial selection and request-local reselection.
+      - Responses Direct skips unavailable candidates only through exact-identity background health and request-local failed-key provenance; it never waits for capacity.
+      - Selection never consumes or releases a provider admission lease, permit, or FIFO ticket.
+      - Empty or cooled tiers continue to the declared default successor without health mutation or recovery wait.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
-  - step_id: v3-rd-target-select-relay-core-admission-rescue
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider, v3.operation_runner.request_local_exclusions]
+  - step_id: v3-rd-target-select-relay-core-successor-scan
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_relay_runtime_core
@@ -8052,16 +7420,16 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Generic Relay runtime resolves Target09 through the admission-aware relay wrapper before provider transport.
-      - Relay uses the same atomic capacity admission, immediately skipping full candidates without waiting or changing health.
-      - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Full capacity can exhaust the captured Relay pool without entering provider-failure health recovery; pure all-busy exhaustion preserves provider_concurrency_busy and mixed exhaustion remains selected_target_exhausted.
+      - Generic Relay runtime resolves Target09 through the same successor-scan wrapper before provider transport.
+      - Relay uses no capacity admission, lease, permit, or FIFO ticket and never changes health.
+      - A cooled preceding-tier candidate with another probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
+      - Empty or cooled tiers continue to the declared default successor without provider-failure health recovery or capacity wait.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
-  - step_id: v3-rd-target-select-responses-relay-admission-rescue
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider, v3.operation_runner.request_local_exclusions]
+  - step_id: v3-rd-target-select-responses-relay-successor-scan
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_responses_relay_runtime_inner
@@ -8071,16 +7439,16 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Responses Relay runtime uses the admission-aware relay wrapper for selected Target10 resolution after its route facts are captured.
-      - Full candidates are excluded only for this request and immediately reselected inside Target; capacity does not mutate failure policy or cooldown state.
-      - The selected admission lease is handed to Relay Provider transport exactly once; otherwise Runtime releases it before terminal projection.
-      - Pure capacity exhaustion carries the existing TargetPoolExhausted/provider_concurrency_busy source through terminal projection, while mixed exhaustion retains selected_target_exhausted.
+      - Responses Relay runtime uses the same successor-scan wrapper for selected Target10 resolution after its route facts are captured.
+      - A request-local failed key or cooled identity is skipped only as background visibility; capacity does not mutate failure policy or cooldown state.
+      - Provider transport never consumes an admission lease, permit, or FIFO ticket.
+      - Empty or cooled tiers continue to declared successors, and the request never waits for probe, cooldown recovery, or capacity.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
-  - step_id: v3-rd-target-select-anthropic-relay-admission-rescue
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider, v3.operation_runner.request_local_exclusions]
+  - step_id: v3-rd-target-select-anthropic-relay-successor-scan
     from_node: V3Target09CandidateSetExpanded
     to_node: V3Target10ConcreteProviderSelected
     caller_symbol: execute_v3_anthropic_relay_runtime_inner
@@ -8090,167 +7458,15 @@ chains:
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     semantic_contract:
-      - Anthropic Relay resolves Target09 through admission-aware selection before Provider transport.
-      - Anthropic Relay uses shared admission to switch immediately from full providers to the next eligible candidate.
-      - A cooled preceding-tier candidate with another rescue probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
-      - Full capacity can exhaust the captured Anthropic Relay pool without entering provider-failure health recovery; pure all-busy exhaustion preserves provider_concurrency_busy and mixed exhaustion remains selected_target_exhausted.
+      - Anthropic Relay resolves Target09 through the same successor-scan wrapper before Provider transport.
+      - Anthropic Relay uses no shared admission state and switches immediately to the next eligible candidate.
+      - A cooled preceding-tier candidate with another probe in flight stays unavailable; selection does not wait and proceeds to the eligible later tier.
+      - Empty or cooled tiers continue to the declared default successor without provider-failure health recovery or capacity wait.
     resource_flow:
       consumes: [v3.target.candidate_set, v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability]
-      produces: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan, v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.target.concrete_provider, v3.provider.adaptive_concurrency_admission, v3.operation_runner.request_local_exclusions]
-
-- chain_id: v3-provider-admission-lease-lifecycle
-  owner_feature_id: v3.provider_global_subscription_probe
-  summary: Runtime acquires one typed provider+authAlias+interface+model dynamic capacity lease under the shared provider+authAlias hard ceiling; WebSocketV2 releases that lease before a session wait and reacquires the same identity afterward, every path releases through RAII, and validated business success restores one unit only for that identity.
-  edges:
-  - step_id: v3-provider-admission-lease-acquire
-    from_node: V3Target10ConcreteProviderSelected
-    to_node: V3RuntimeProviderAdmission
-    caller_symbol: try_admit_v3_selected_target
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-    callee_symbol: V3AdaptiveConcurrencyController::try_acquire_business_scoped
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.responses_transport_capability]
-      produces: [v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.responses_transport_capability, v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-direct-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-responses-direct-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_responses_direct_runtime_kernel_core_resident
-    caller_file: v3/crates/routecodex-v3-runtime/src/kernel.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-relay-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_relay_runtime_core
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-responses-relay-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_responses_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-websocket-v2-slot-order
-    from_node: V3PreAcquiredProviderAdmission
-    to_node: V3ProviderResponsesWebSocketSessionSlot
-    caller_symbol: V3ProviderResponsesTransport::send
-    caller_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    callee_symbol: acquire_admission_and_connection_slot
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport/websocket.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    semantic_contract:
-      - WebSocketV2 preserves a granted lease when the session slot is immediately available and releases it before an actual slot wait.
-      - After a slot wait, transport immediately reacquires provider admission; a losing capacity race releases the slot and returns typed ConcurrencyBusy for Runtime reselect.
-      - Cancellation or admission failure releases the resources already owned by this request and cannot retain a provider lease while waiting for another request's WebSocket session.
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-      produces: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission, v3.provider.responses_websocket_connection]
-  - step_id: v3-provider-admission-lease-anthropic-relay-handoff
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3PreAcquiredProviderAdmission
-    caller_symbol: execute_v3_anthropic_relay_runtime_inner
-    caller_file: v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime.rs
-    callee_symbol: V3Transport13ResponsesRequest::with_pre_acquired_admission
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/transport.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.provider.transport_request]
-      produces: [v3.provider.transport_request]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-runtime-early-release
-    from_node: V3RuntimeProviderAdmission
-    to_node: V3AdaptiveConcurrencyPermitReleased
-    caller_symbol: V3RuntimeProviderAdmission::drop
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_cooldown_rescue.rs
-    callee_symbol: V3AdaptiveConcurrencyController::release
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission]
-      produces: [v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-request-drop-release
-    from_node: V3PreAcquiredProviderAdmission
-    to_node: V3AdaptiveConcurrencyPermitReleased
-    caller_symbol: V3PreAcquiredProviderAdmission::drop
-    caller_file: v3/crates/routecodex-v3-provider-responses/src/transport_admission.rs
-    callee_symbol: V3AdaptiveConcurrencyLease::release
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.provider.transport_request, v3.provider.adaptive_concurrency_admission]
-      produces: [v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
-  - step_id: v3-provider-admission-lease-provider-terminal-release
-    from_node: V3ProviderResponsesTransportSend
-    to_node: V3AdaptiveConcurrencyPermitReleased
-    caller_symbol: V3AdaptiveConcurrencyPermitGuard::drop
-    caller_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    callee_symbol: V3AdaptiveConcurrencyController::release
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/adaptive_concurrency.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    semantic_contract:
-      - Non-streaming response completion, transport failure, or cancellation drops the Provider permit guard.
-      - Streaming responses retain the guard until stream EOF or drop, then release the exact selected provider+authAlias lease.
-    resource_flow:
-      consumes: [v3.provider.adaptive_concurrency_admission, v3.response.provider_raw]
-      produces: [v3.provider.adaptive_concurrency_admission]
-      side_channel_reads: [v3.provider.adaptive_concurrency_admission]
-      side_channel_writes: [v3.provider.adaptive_concurrency_admission]
+      produces: [v3.target.concrete_provider]
+      side_channel_reads: [v3.provider.availability_projection, v3.error.action_plan]
+      side_channel_writes: [v3.target.concrete_provider, v3.operation_runner.request_local_exclusions]
   - step_id: v3-provider-admission-budget-recover-business-success
     from_node: V3ProviderHealthStateMutated
     to_node: V3AdaptiveConcurrencyController

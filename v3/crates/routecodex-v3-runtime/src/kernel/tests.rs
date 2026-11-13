@@ -1,6 +1,6 @@
 include!("../../tests/support/kernel_unit.rs");
 
-async fn assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn assert_first_byte_timeout_preserves_same_provider_sibling_keys(
     source_stage: &'static str,
     code: &'static str,
 ) {
@@ -87,8 +87,7 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
     .expect("first-byte timeout policy");
     let matches_reselect = matches!(
         result.decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
-            | V3Error05ExecutionAction::ReevaluateTarget
+        V3Error05ExecutionAction::Reselect | V3Error05ExecutionAction::ReevaluateTarget
     );
     if !matches_reselect {
         panic!(
@@ -102,16 +101,16 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
         .and_then(|event| event.next_provider_key.clone())
         .expect("first-byte timeout must publish the concrete next candidate");
     assert_eq!(
-        retry_key, other_provider_key,
-        "{code} must skip the same provider's sibling auth key"
+        retry_key, sibling_key,
+        "{code} must continue to the same provider's untried sibling auth key"
     );
     assert!(
         failed_candidates.contains(&selected_key),
         "the failed exact key stays request-local excluded"
     );
     assert!(
-        failed_candidates.contains(&sibling_key),
-        "the same provider's sibling auth key is excluded for this request"
+        !failed_candidates.contains(&sibling_key),
+        "the same provider's untried sibling auth key stays eligible for this request"
     );
     assert!(
         !failed_candidates.contains(&other_provider_key),
@@ -120,8 +119,8 @@ async fn assert_first_byte_timeout_excludes_same_provider_siblings(
 }
 
 #[tokio::test]
-async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn transport_hang_preserves_same_provider_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         "V3Transport13ResponsesHttpRequest",
         routecodex_v3_error::V3_TRANSIENT_TRANSPORT_HANG_CODE,
     )
@@ -129,8 +128,8 @@ async fn transport_hang_excludes_same_provider_sibling_keys_for_the_request() {
 }
 
 #[tokio::test]
-async fn sse_first_event_timeout_excludes_same_provider_sibling_keys_for_the_request() {
-    assert_first_byte_timeout_excludes_same_provider_siblings(
+async fn sse_first_event_timeout_preserves_same_provider_sibling_keys_for_the_request() {
+    assert_first_byte_timeout_preserves_same_provider_sibling_keys(
         "V3ProviderResp14Raw",
         "provider_response_sse_first_event_timeout",
     )
@@ -213,11 +212,9 @@ async fn relay_serialized_tool_recovery_is_typed_exact_and_health_neutral() {
     )
     .await
     .expect("typed Relay recovery");
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = result.decision.action else {
+    let V3Error05ExecutionAction::Reselect = result.decision.action else {
         panic!("expected reselection")
     };
-    assert_eq!(recovery.provider_runtime_identity(), key);
-    assert_eq!(recovery.failure_session_scope(), &scope);
     assert_eq!(failed, BTreeSet::from([key]));
     assert!(retries.is_empty());
     assert_eq!(
@@ -317,18 +314,12 @@ async fn direct_tool_markup_recovery_is_exact_and_health_neutral() {
     )
     .await
     .expect("response processing recovery");
-    let V3Error05ExecutionAction::WaitThenReselect { recovery } = &result.decision.action else {
+    let V3Error05ExecutionAction::Reselect = &result.decision.action else {
         panic!(
             "must reselect through Error05: {:?}",
             result.decision.action
         );
     };
-    assert_eq!(recovery.normalized_error_family(), source.code);
-    assert_eq!(recovery.failure_session_scope(), &scope);
-    assert_eq!(
-        recovery.provider_runtime_identity(),
-        candidate_key(&selected.candidate)
-    );
     assert_eq!(
         failed_candidates,
         BTreeSet::from([candidate_key(&selected.candidate)])

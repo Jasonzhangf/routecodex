@@ -140,10 +140,10 @@ mod tests {
         .expect("Error02 through Error05 must compose through canonical SDK nodes");
 
         assert_eq!(projection, serde_json::to_value(&decision).unwrap());
-        let V3Error05ExecutionAction::WaitThenReselect { recovery } = decision.action else {
+        let V3Error05ExecutionAction::Reselect = decision.action else {
             panic!("candidate capacity must produce target-local reselection");
         };
-        assert_eq!(recovery, witness);
+        assert!(decision.action.recovery_witness().is_none());
         assert_eq!(decision.exhaustion.route_pool_remaining_after_exclusion, 1);
         assert!(!decision.exhaustion.default_pool_available);
         assert!(!decision.exhaustion.same_provider_retry_available);

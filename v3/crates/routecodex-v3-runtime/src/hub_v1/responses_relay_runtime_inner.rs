@@ -6,9 +6,6 @@ use crate::operation_runner::plan_execution::{
     V3PlanExecutionTargetSource,
 };
 use crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key;
-use crate::provider_failure_runtime_policy::{
-    admit_v3_selected_target_after_recovery, V3AdmitAfterRecovery,
-};
 use serde_json::{json, Value};
 
 fn construct_responses_relay_transport_request(
@@ -321,28 +318,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     ));
                 }
                 Err(V3PlanExecutionStop::Exhausted {
-                    expanded: exhausted_expanded,
-                    exhaustion,
-                    source,
-                    ..
+                    exhaustion, source, ..
                 }) => {
-                    let source = match source {
-                        Some(source) => Some(source),
-                        None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
-                            &exhausted_expanded,
-                            &failed_candidates,
-                            &request_local_busy_candidates,
-                        ) {
-                            Ok(source) => source,
-                            Err(fault) => {
-                                return Ok(provider_failure_output(
-                                    V3ResponsesRelayProviderFailure::from(fault),
-                                    trace,
-                                    0,
-                                ))
-                            }
-                        },
-                    };
                     let failure = V3ResponsesRelayProviderFailure {
                         attempt_source: None,
                         status: 502,
@@ -379,12 +356,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
         let initial_execution_mode = initial_plan.execution_mode;
         let retained_expanded = initial_plan.expanded;
         failed_candidates = initial_plan.request_local_excluded_candidates;
-        request_local_busy_candidates = initial_plan.request_local_busy_candidates;
-        let mut initial_admitted = Some((
-            initial_plan.selected,
-            initial_plan.admission,
-            initial_plan.protocol_decision,
-        ));
+        request_local_busy_candidates = BTreeSet::new();
+        let mut initial_selected = Some((initial_plan.selected, initial_plan.protocol_decision));
         let mut req02 = req02;
         req02.previous.payload.0 = std::sync::Arc::new(execution_planned_request);
         let request_outcome = {
@@ -409,10 +382,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             initial_execution_mode,
         );
         trace.push("V3HubReqExecution05Planned");
-        let mut pending_provider_action_recovery = None;
-        let mut _provider_action_permit: Option<V3ProviderActionPermit> = None;
-        let mut provider_action_permit_target: Option<routecodex_v3_target::V3TargetCandidate> =
-            None;
         let mut same_candidate_retries = BTreeMap::<String, usize>::new();
         let mut last_external_http = None;
         let mut provider_failure_events = Vec::<V3RuntimeProviderFailureObservation>::new();
@@ -429,12 +398,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             deterministic_sample,
         };
         loop {
-            let (selected, mut selected_admission, protocol_decision): (
-                routecodex_v3_target::V3Target10ConcreteProviderSelected,
-                Option<V3RuntimeProviderAdmission>,
-                crate::nodes::V3Execution11ProtocolDecision,
-            ) = if let Some((selected, admission, protocol_decision)) = initial_admitted.take() {
-                (selected, Some(admission), protocol_decision)
+            let (selected, protocol_decision) = if let Some((selected, protocol_decision)) =
+                initial_selected.take()
+            {
+                (selected, protocol_decision)
             } else {
                 let preferred_selected = retry_selected.take();
                 match crate::operation_runner::plan_execution::await_v3_plan_execution_with_deadline(
@@ -464,8 +431,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         req05.previous.previous.previous.payload.0 =
                             std::sync::Arc::new(execution_planned_request);
                         failed_candidates = plan.request_local_excluded_candidates;
-                        request_local_busy_candidates = plan.request_local_busy_candidates;
-                        (plan.selected, Some(plan.admission), plan.protocol_decision)
+                        request_local_busy_candidates = BTreeSet::new();
+                        (plan.selected, plan.protocol_decision)
                     }
                     Err(V3PlanExecutionStop::Failed(source)) => {
                         return Err(V3ResponsesRelayRuntimeError::Target(format!(
@@ -484,31 +451,10 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         ));
                     }
                     Err(V3PlanExecutionStop::Exhausted {
-                        expanded: exhausted_expanded,
                         exhaustion,
                         source,
                         ..
                     }) => {
-                        let source = match source {
-                            Some(source) => Some(source),
-                            None => match crate::provider_failure_runtime_policy::v3_pure_all_busy_exhaustion_source(
-                                &exhausted_expanded,
-                                &failed_candidates,
-                                &request_local_busy_candidates,
-                            ) {
-                                Ok(source) => source,
-                                Err(fault) => {
-                                    return Ok(provider_failure_output(
-                                        terminalize_v3_responses_relay_provider_failure(
-                                            V3ResponsesRelayProviderFailure::from(fault),
-                                            last_external_http.clone(),
-                                        ),
-                                        trace,
-                                        0,
-                                    ))
-                                }
-                            },
-                        };
                         let failure = V3ResponsesRelayProviderFailure {
                             attempt_source: None,
                             status: 502,
@@ -548,17 +494,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     }
                 }
             };
-            if provider_action_permit_target
-                .as_ref()
-                .is_some_and(|target| {
-                    target.provider_id != selected.candidate.provider_id
-                        || target.auth_alias != selected.candidate.auth_alias
-                        || target.model_id != selected.candidate.model_id
-                })
-            {
-                drop(_provider_action_permit.take());
-                provider_action_permit_target = None;
-            }
             if matches!(
                 protocol_decision.mode,
                 crate::nodes::V3Execution11ProtocolDecisionMode::SameProtocolDirect
@@ -672,7 +607,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
-                                pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
@@ -756,88 +690,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             }
             trace.push("V3ProviderReqOutbound09TransportRequest");
             let provider_request_snapshot = transport_request.provider_request_projection();
-            let mut _rate_limit_permit = selected_admission.as_mut().and_then(|admission| {
-                admission.take_rate_limit_control(&mut pending_provider_action_recovery)
-            });
-            if pending_provider_action_recovery.is_some() {
-                drop(selected_admission.take());
-            }
-            if let Some(recovery) = pending_provider_action_recovery.take() {
-                match handle_error_before_resp03!(provider_health
-                    .wait_for_error05_recovery(
-                        &recovery,
-                        &selected,
-                        attempt_budget.residence_deadline()
-                    )
-                    .await
-                    .map_err(V3ResponsesRelayRuntimeError::ProviderHealth))
-                {
-                    V3ProviderActionRecoveryTransition::Admitted(mut admission) => {
-                        _provider_action_permit = admission.take_permit();
-                        provider_action_permit_target = Some(selected.candidate.clone());
-                        match admit_v3_selected_target_after_recovery(&selected) {
-                            V3AdmitAfterRecovery::Admitted(admission) => {
-                                selected_admission = Some(admission)
-                            }
-                            V3AdmitAfterRecovery::Busy => {
-                                let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                                failed_candidates.insert(busy_key.clone());
-                                request_local_busy_candidates.insert(busy_key);
-                                drop(_provider_action_permit.take());
-                                provider_action_permit_target = None;
-                                continue;
-                            }
-                            V3AdmitAfterRecovery::Failed(reason) => {
-                                return Err(V3ResponsesRelayRuntimeError::Target(reason))
-                            }
-                        }
-                        trace.push("V3ProviderActionGateAdmission");
-                    }
-                    V3ProviderActionRecoveryTransition::Superseded(ticket) => {
-                        pending_provider_action_recovery =
-                            Some(handle_error_before_resp03!(ticket
-                                .recovery_witness()
-                                .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
-                        retry_selected = Some(selected);
-                        trace.push("V3ProviderActionGateTerminalReevaluation");
-                        continue;
-                    }
-                    V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {
-                        pending_provider_action_recovery =
-                            Some(handle_error_before_resp03!(ticket
-                                .recovery_witness()
-                                .map_err(V3ResponsesRelayRuntimeError::ProviderHealth)));
-                        retry_selected = Some(selected);
-                        trace.push("V3ProviderActionGateTerminalReevaluation");
-                        continue;
-                    }
-                    V3ProviderActionRecoveryTransition::Consumed(_) => {
-                        pending_provider_action_recovery = None;
-                        retry_selected = Some(selected);
-                        trace.push("V3ProviderActionGateConsumedReevaluation");
-                        continue;
-                    }
-                }
-            }
-            provider_send_attempts = handle_error_before_resp03!(
-                crate::provider_failure_runtime_policy::admit_v3_provider_transport_attempt(
-                    &attempt_budget,
-                    &mut selected_admission,
-                    &mut _rate_limit_permit,
-                    &mut _provider_action_permit,
-                )
-                .await
-                .map_err(|error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string()))
-            );
+            provider_send_attempts =
+                handle_error_before_resp03!(attempt_budget.admit_transport_attempt().map_err(
+                    |error| V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                ));
             handle_error_before_resp03!(runtime_timing
                 .start_external()
                 .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-            let transport_request = match selected_admission.take() {
-                Some(admission) => {
-                    transport_request.with_pre_acquired_admission(admission.into_lease())
-                }
-                None => transport_request,
-            };
             let transport_result = match tokio::time::timeout(
                 v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
                 transport.send(transport_request),
@@ -853,23 +712,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             };
             let provider_raw = match transport_result {
                 Ok(raw) => raw,
-                Err(V3ProviderError::ConcurrencyBusy { .. }) => {
-                    attempt_budget.release_unsent_transport_attempt();
-                    provider_send_attempts = attempt_budget.transport_attempts();
-                    handle_error_before_resp03!(runtime_timing
-                        .finish_external()
-                        .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
-                    let busy_key = v3_relay_provider_candidate_key(&selected.candidate);
-                    failed_candidates.insert(busy_key.clone());
-                    request_local_busy_candidates.insert(busy_key);
-                    drop(_provider_action_permit.take());
-                    provider_action_permit_target = None;
-                    continue;
-                }
                 Err(V3ProviderError::HttpStatus { response }) => {
-                    if response.status == 429 {
-                        attempt_budget.record_rate_limited_attempt();
-                    }
                     last_external_http = Some(
                         crate::hub_v1::relay_runtime_shared::external_http_witness(&response),
                     );
@@ -913,7 +756,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             response.body_read_failure.as_deref(),
                         ),
                     );
-                    drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(
                             &failure_context,
@@ -923,7 +765,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
-                                pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
@@ -959,7 +800,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         Some(selected_observability.clone()),
                     );
                     failure.failed_attempt_evidence = failed_attempt_evidence;
-                    drop(_provider_action_permit.take());
                     let terminal_failure = handle_error_before_resp03!(
                         handle_v3_responses_relay_provider_failure(
                             &failure_context,
@@ -969,7 +809,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 failed_candidates: &mut failed_candidates,
                                 same_candidate_retries: &mut same_candidate_retries,
                                 retry_selected: &mut retry_selected,
-                                pending_recovery: &mut pending_provider_action_recovery,
                                 provider_failure_events: &mut provider_failure_events,
                                 provider_failure_event_sink: provider_failure_event_sink.as_ref(),
                                 selected_observability: &selected_observability,
@@ -999,9 +838,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));
             }
             let provider_status = provider_raw.status();
-            if provider_status == 429 {
-                attempt_budget.record_rate_limited_attempt();
-            }
             selected_observability.provider_status = Some(provider_status);
             let provider_id = provider_raw.provider_id().to_string();
             match provider_raw.into_body() {
@@ -1020,7 +856,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );
-                            drop(_provider_action_permit.take());
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
@@ -1030,7 +865,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
-                                        pending_recovery: &mut pending_provider_action_recovery,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
                                             .as_ref(),
@@ -1086,7 +920,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             ));
-                        drop(_provider_action_permit.take());
                         let terminal_failure = handle_error_before_resp03!(
                             handle_v3_responses_relay_provider_failure(
                                 &failure_context,
@@ -1096,7 +929,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     failed_candidates: &mut failed_candidates,
                                     same_candidate_retries: &mut same_candidate_retries,
                                     retry_selected: &mut retry_selected,
-                                    pending_recovery: &mut pending_provider_action_recovery,
                                     provider_failure_events: &mut provider_failure_events,
                                     provider_failure_event_sink: provider_failure_event_sink
                                         .as_ref(),
@@ -1151,7 +983,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     &selected_target_provider_id,
                                     Some(selected_observability.clone()),
                                 );
-                                drop(_provider_action_permit.take());
                                 let terminal_failure = handle_error_before_resp03!(
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
@@ -1161,7 +992,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
-                                            pending_recovery: &mut pending_provider_action_recovery,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
                                                 provider_failure_event_sink.as_ref(),
@@ -1362,7 +1192,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             let residence_deadline_error = failure.policy_error_message.contains(
                                 "provider SSE attempt exceeded the request residence deadline",
                             );
-                            drop(_provider_action_permit.take());
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
@@ -1372,7 +1201,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
                                         retry_selected: &mut retry_selected,
-                                        pending_recovery: &mut pending_provider_action_recovery,
                                         provider_failure_events: &mut provider_failure_events,
                                         provider_failure_event_sink: provider_failure_event_sink
                                             .as_ref(),
@@ -1474,7 +1302,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     &selected_target_provider_id,
                                     Some(selected_observability.clone()),
                                 );
-                                drop(_provider_action_permit.take());
                                 let terminal_failure = handle_error_before_resp03!(
                                     handle_v3_responses_relay_provider_failure(
                                         &failure_context,
@@ -1484,7 +1311,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                             failed_candidates: &mut failed_candidates,
                                             same_candidate_retries: &mut same_candidate_retries,
                                             retry_selected: &mut retry_selected,
-                                            pending_recovery: &mut pending_provider_action_recovery,
                                             provider_failure_events: &mut provider_failure_events,
                                             provider_failure_event_sink:
                                                 provider_failure_event_sink.as_ref(),

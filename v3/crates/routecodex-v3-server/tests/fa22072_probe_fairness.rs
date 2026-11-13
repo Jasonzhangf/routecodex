@@ -31,14 +31,31 @@ fn exact<'a>(pool: &'a Value, id: &str) -> Option<&'a Value> {
     })
 }
 
-async fn fail(port: u16, id: &str) {
+async fn fail(port: u16, id: &str, index: usize) {
+    // The identity pool is selected by the plain user-turn `thinking` signal
+    // plus a disjoint current-turn input-token band, so request `index` carries
+    // `index` bands of filler tokens behind the marker message.
+    let mut messages = vec![json!({"role":"user","content":"genuine failure"})];
+    if index > 0 {
+        messages.push(json!({
+            "role":"user",
+            "content":"pad ".repeat(index * fixture::FAIRNESS_BAND_TOKENS as usize)
+        }));
+    }
     let response = reqwest::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
-        .json(&json!({"model":format!("{id}-failure"),"messages":[{"role":"user","content":"genuine failure"}],"stream":false}))
-        .send().await.unwrap();
-    assert_eq!(response.status(), 200);
+        .json(&json!({"model":format!("{id}-failure"),"messages":messages,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body: Value = response.json().await.unwrap();
     assert_eq!(
-        response.json::<Value>().await.unwrap(),
+        status, 200,
+        "a genuine first-candidate failure must recover through its declared spare: {body}"
+    );
+    assert_eq!(
+        body,
         fixture::business("recovery"),
         "a genuine first-candidate failure must recover through its declared spare"
     );
@@ -59,7 +76,11 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     let client = reqwest::Client::new();
     timeout(
         Duration::from_secs(2),
-        futures_util::future::join_all(ids.iter().map(|id| fail(port, id))),
+        futures_util::future::join_all(
+            ids.iter()
+                .enumerate()
+                .map(|(index, id)| fail(port, id, index)),
+        ),
     )
     .await
     .expect("real failures must recover independently");
@@ -83,7 +104,37 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         5
     );
     drop(captures);
-    let before = pool(&client, &base).await;
+    // Each identity commits its threshold-one cooldown only after its precool
+    // observation completes. Wait for its first failed recovery probe so the
+    // probe-lane counter is settled before the four sibling transports start.
+    let mut observed = Value::Null;
+    let mut settled = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while tokio::time::Instant::now() < deadline {
+        let probed = peer
+            .captures
+            .lock()
+            .await
+            .iter()
+            .filter(|capture| capture["body"]["messages"][0]["content"] == "ping; reply pong")
+            .count();
+        observed = pool(&client, &base).await;
+        if probed >= ids.len()
+            && ids.iter().all(|id| {
+                exact(&observed, id)
+                    .is_some_and(|entry| entry["failure_count"].as_u64().unwrap_or(0) >= 1)
+            })
+        {
+            settled = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        settled,
+        "every identity's recovery probe must be attempted once while the upstream is failing: {observed}"
+    );
+    let before = observed;
     eprintln!("fairness genuine-failure cooldown={before}");
     for id in &ids {
         assert!(
@@ -105,18 +156,28 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         .forget();
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     peer.ready.store(true, Ordering::SeqCst);
-    let admitted = timeout(Duration::from_secs(15), peer.fifth_entered.acquire()).await;
+    // The request path carries no capacity permit, so the four cooled siblings
+    // are admitted on the probe lane itself instead of being denied by a held
+    // business transport. Wait until they really occupy the lane.
+    timeout(
+        Duration::from_secs(15),
+        peer.sibling_probes_entered.acquire_many(4),
+    )
+    .await
+    .expect("the four cooled siblings must be probed on their own lane")
+    .unwrap()
+    .forget();
     let during = pool(&client, &base).await;
     eprintln!(
         "fairness held transports=4 fifth_probe_captured={} cooldown={during}",
-        admitted.is_ok()
+        peer.fifth_entered.available_permits() == 0
     );
-    // Capacity denial must preserve failure count and the original ladder.
+    // A pending probe must preserve failure count and the original ladder.
     // The public projection hides expired until_ms; it must never introduce a
     // new future deadline or restore a held provider's exact recovery model.
     for id in &ids[..4] {
         let earlier = exact(&before, id).unwrap();
-        let current = exact(&during, id).expect("capacity-busy identity remains cooled");
+        let current = exact(&during, id).expect("probe-busy identity remains cooled");
         assert_eq!(current["failure_count"], earlier["failure_count"]);
         assert!(current["until_ms"].is_null() || current["until_ms"] == earlier["until_ms"]);
     }
@@ -127,6 +188,15 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         .any(|entry| entry["model_id"] == "sibling"));
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
+    assert_eq!(
+        peer.fifth_entered.available_permits(),
+        0,
+        "the free fifth identity must wait for a probe slot, not for a held transport"
+    );
+    // Free exactly one lane slot. The next probe must be the free fifth
+    // identity: a fixed due prefix may not starve it behind the four siblings.
+    peer.sibling_probes_release.add_permits(1);
+    let admitted = timeout(Duration::from_secs(15), peer.fifth_entered.acquire()).await;
     if let Ok(permit) = admitted {
         permit.unwrap().forget();
     } else {
@@ -139,7 +209,10 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         let _ = upstream.await;
         panic!("fixed due-prefix starved the free fifth identity while four real sibling transports remained held");
     }
-    assert_eq!(exact(&during, &ids[4]).unwrap()["state"], "probing");
+    assert_eq!(
+        exact(&pool(&client, &base).await, &ids[4]).unwrap()["state"],
+        "probing"
+    );
     peer.fifth_release.add_permits(1);
     timeout(Duration::from_secs(2), async {
         loop {
@@ -160,13 +233,31 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
     let after = pool(&client, &base).await;
+    // Exactly one sibling probe was released to free a lane slot. Its own
+    // probe-lane counter may advance; the other three stay unchanged.
+    let mut advanced = 0;
     for id in &ids[..4] {
-        assert_eq!(
-            exact(&after, id).unwrap()["failure_count"],
-            exact(&before, id).unwrap()["failure_count"]
-        );
+        let held = exact(&during, id).unwrap()["failure_count"]
+            .as_u64()
+            .unwrap();
+        let now = exact(&after, id).unwrap()["failure_count"]
+            .as_u64()
+            .unwrap();
+        if now == held + 1 {
+            advanced += 1;
+        } else {
+            assert_eq!(
+                now, held,
+                "only the released sibling probe's own probe-lane counter may advance"
+            );
+        }
     }
+    assert_eq!(
+        advanced, 1,
+        "one released sibling probe, one probe-lane step"
+    );
     peer.holders_release.add_permits(4);
+    peer.sibling_probes_release.add_permits(4);
     for holder in holders {
         assert_eq!(
             timeout(Duration::from_secs(2), holder)

@@ -210,6 +210,7 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     let captured_target_09 = target
         .expand_candidates(&manifest, target.classify_kind(selected.route.clone()), 0)
         .expect("capture Target09 before execution");
+    let failed_key = v3_relay_provider_candidate_key(&selected.candidate);
     let mut failed_candidates = BTreeSet::new();
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
@@ -245,13 +246,10 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
     .await
     .expect("generic provider HTTP 400 must follow provider-scoped health handling");
 
-    // A generic provider HTTP 400 is an ordinary recoverable failure here: the
-    // exact identity is held by typed observation, not by a permanent
-    // request-local exclusion.
-    assert!(
-        failed_candidates.is_empty(),
-        "generic provider HTTP 400 must not add a permanent request-local exclusion"
-    );
+    // A generic provider HTTP 400 may select a sibling, so the exact failed
+    // identity is excluded for this request while typed observation still owns
+    // its health state.
+    assert_eq!(failed_candidates, BTreeSet::from([failed_key]));
     assert_ne!(
         result.event.health_record.state,
         "request_local_provider_compat"

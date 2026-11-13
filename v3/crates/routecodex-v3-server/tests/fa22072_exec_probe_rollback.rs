@@ -340,7 +340,10 @@ snapshot_direct = true
     business(&client, &base, &format!("{provider}.sibling")).await;
     let add = client.post(format!("{base}/_routecodex/health/cooldown-pool/add")).json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test","kind":"probe","duration_ms":5000})).send().await.unwrap();
     assert_eq!(add.status(), 200);
-    // The real later-candidate request initiates probe A without waiting for it.
+    // Request admission no longer starts recovery. Make the scheduled probe due
+    // through the operator endpoint, then let the managed probe owner run it.
+    let probe_now = client.post(format!("{base}/_routecodex/health/cooldown-pool/probe")).json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test"})).send().await.unwrap();
+    assert_eq!(probe_now.status(), 200);
     business(&client, &base, "test").await;
     timeout(Duration::from_secs(2), async {
         loop {
@@ -351,6 +354,8 @@ snapshot_direct = true
     })
     .await
     .unwrap();
+    let extend_schedule = client.post(format!("{base}/_routecodex/health/cooldown-pool/add")).json(&json!({"provider_id":provider,"interface_id":"default","auth_alias":"key","model_id":"test","kind":"probe","duration_ms":5000})).send().await.unwrap();
+    assert_eq!(extend_schedule.status(), 200);
     eprintln!(
         "FA22072 actual held checkpoints provider={provider}: {}",
         serde_json::to_string(
