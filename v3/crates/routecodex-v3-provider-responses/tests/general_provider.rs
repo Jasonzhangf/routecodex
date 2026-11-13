@@ -15,10 +15,17 @@ use routecodex_v3_provider_responses::{
     V3ProviderTransportSendPhase, V3ResponsesProviderTarget,
 };
 use serde_json::{json, Value};
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio::{
     io::AsyncReadExt,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Notify},
 };
 
 #[derive(Debug)]
@@ -233,6 +240,117 @@ async fn one_generic_provider_serves_distinct_instances_and_preserves_wire_seman
     std::env::remove_var("V3_GENERAL_ALPHA_KEY");
     std::env::remove_var("V3_GENERAL_BETA_KEY");
     shutdown.send(()).unwrap();
+}
+
+#[derive(Clone)]
+struct OverlapState {
+    arrivals: Arc<AtomicUsize>,
+    first_arrived: mpsc::UnboundedSender<()>,
+    second_arrived: mpsc::UnboundedSender<()>,
+    release_first: Arc<Notify>,
+}
+
+async fn overlap_upstream(State(state): State<Arc<OverlapState>>) -> Response<Body> {
+    match state.arrivals.fetch_add(1, Ordering::SeqCst) {
+        0 => {
+            state.first_arrived.send(()).unwrap();
+            state.release_first.notified().await;
+        }
+        1 => state.second_arrived.send(()).unwrap(),
+        arrival => panic!("unexpected overlapping request arrival {arrival}"),
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            "{\"id\":\"resp_overlap\",\"output_text\":\"ok\"}",
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn max_in_flight_one_overlapping_business_requests_reach_upstream() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (first_arrived_tx, mut first_arrived_rx) = mpsc::unbounded_channel();
+    let (second_arrived_tx, mut second_arrived_rx) = mpsc::unbounded_channel();
+    let release_first = Arc::new(Notify::new());
+    let app = Router::new()
+        .route("/v1/responses", post(overlap_upstream))
+        .with_state(Arc::new(OverlapState {
+            arrivals: Arc::new(AtomicUsize::new(0)),
+            first_arrived: first_arrived_tx,
+            second_arrived: second_arrived_tx,
+            release_first: release_first.clone(),
+        }));
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+            .unwrap();
+    });
+
+    let base_url = format!("http://{address}/v1");
+    std::env::set_var("V3_OVERLAP_PROVIDER_KEY", "overlap-secret");
+    let mut provider_target = target(
+        "overlap-provider",
+        &base_url,
+        "overlap-model",
+        "overlap-key",
+        "V3_OVERLAP_PROVIDER_KEY",
+    );
+    provider_target.initial_concurrency_budget = 1;
+    let transport = ReqwestResponsesTransport::default();
+
+    let first_target = provider_target.clone();
+    let first_transport = transport.clone();
+    let first = tokio::spawn(async move {
+        let wire = build_v3_provider_12_responses_wire_payload(
+            "req-overlap-first",
+            first_target,
+            json!({"model":"overlap-model","input":"first"}),
+        )
+        .unwrap();
+        first_transport
+            .send(build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap())
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), first_arrived_rx.recv())
+        .await
+        .expect("first request must reach upstream")
+        .expect("first arrival notification");
+
+    let second = tokio::spawn({
+        let transport = transport.clone();
+        async move {
+            let wire = build_v3_provider_12_responses_wire_payload(
+                "req-overlap-second",
+                provider_target,
+                json!({"model":"overlap-model","input":"second"}),
+            )
+            .unwrap();
+            transport
+                .send(
+                    build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap(),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(2), second_arrived_rx.recv())
+        .await
+        .expect("second request must reach upstream while the first is held")
+        .expect("second arrival notification");
+
+    release_first.notify_one();
+    first.await.unwrap().unwrap();
+    second.await.unwrap().unwrap();
+
+    std::env::remove_var("V3_OVERLAP_PROVIDER_KEY");
+    shutdown_tx.send(()).unwrap();
 }
 
 #[tokio::test]
@@ -616,128 +734,6 @@ async fn auth_http_connect_and_client_disconnect_errors_remain_typed_failures() 
     shutdown.send(()).unwrap();
 }
 
-#[derive(Clone)]
-struct RateLimitState {
-    barrier: Arc<tokio::sync::Barrier>,
-}
-
-async fn rate_limited_upstream(State(state): State<Arc<RateLimitState>>) -> Response<Body> {
-    // Refuse both concurrent attempts only after they are simultaneously in
-    // flight, so the observed 429 watermark is deterministic.
-    state.barrier.wait().await;
-    Response::builder()
-        .status(StatusCode::TOO_MANY_REQUESTS)
-        .header("content-type", "application/json")
-        .body(Body::from("{\"error\":{\"message\":\"rate limited\"}}"))
-        .unwrap()
-}
-
-#[tokio::test]
-async fn upstream_429_collapses_adaptive_budget_below_the_refused_watermark() {
-    use routecodex_v3_provider_responses::adaptive_concurrency::V3AdaptiveConcurrencyController;
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let app = Router::new()
-        .route("/v1/responses", post(rate_limited_upstream))
-        .with_state(Arc::new(RateLimitState {
-            barrier: Arc::new(tokio::sync::Barrier::new(2)),
-        }));
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .unwrap();
-    });
-    let base_url = format!("http://{address}/v1");
-    std::env::set_var("V3_ADAPTIVE_429_KEY", "secret-adaptive-429");
-
-    let provider_target = target(
-        "adaptive-429-blackbox",
-        &base_url,
-        "model-429",
-        "adaptive",
-        "V3_ADAPTIVE_429_KEY",
-    );
-    let provider_key = format!(
-        "{}:{}",
-        provider_target.provider_id, provider_target.auth.alias
-    );
-    let controller = V3AdaptiveConcurrencyController::process_shared();
-    controller
-        .ensure_initial_budget(&provider_key, provider_target.initial_concurrency_budget)
-        .unwrap();
-    let baseline = controller.snapshot(&provider_key).unwrap();
-    assert_eq!(
-        baseline.hard_max_in_flight, 8,
-        "the declared static maxInFlight must remain only the hard ceiling"
-    );
-    assert_eq!(baseline.budget, 8);
-    assert_eq!(baseline.rate_limit_samples, 0);
-    assert_eq!(baseline.smoothed_budget, 8);
-
-    let transport = ReqwestResponsesTransport::default();
-    let mut attempts = Vec::new();
-    for attempt in 0..2 {
-        let transport = transport.clone();
-        let provider_target = provider_target.clone();
-        attempts.push(tokio::spawn(async move {
-            let wire = build_v3_provider_12_responses_wire_payload(
-                format!("req-adaptive-429-{attempt}"),
-                provider_target,
-                json!({"model":"model-429","input":"hello"}),
-            )
-            .unwrap();
-            transport
-                .send(
-                    build_v3_transport_13_responses_http_request_from_v3_provider_12(wire).unwrap(),
-                )
-                .await
-        }));
-    }
-    for attempt in attempts {
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt)
-            .await
-            .expect("both rate-limited attempts must terminate")
-            .unwrap();
-        assert!(
-            matches!(
-                result,
-                Err(V3ProviderError::HttpStatus { response }) if response.status == 429
-            ),
-            "the provider 429 must surface as a typed HTTP status error"
-        );
-    }
-
-    let scope =
-        routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
-            interface_id: provider_target.interface_id.clone(),
-            model_id: provider_target.canonical_model_id.clone(),
-        };
-    let snapshot = controller
-        .snapshot_for_scope(&provider_key, Some(&scope))
-        .unwrap();
-    assert_eq!(
-        snapshot.rate_limit_samples, 2,
-        "each refused attempt must contribute one 429 watermark sample"
-    );
-    assert_eq!(
-        snapshot.smoothed_budget, 1,
-        "two 429s at an in-flight watermark of two must cap the budget one slot below it"
-    );
-    assert_eq!(
-        snapshot.budget, 1,
-        "the adaptive budget must drop to the refused watermark minus one, not step down by one"
-    );
-    assert!(snapshot.saturated);
-    assert!(snapshot.in_flight == 0, "both leases must be released");
-
-    std::env::remove_var("V3_ADAPTIVE_429_KEY");
-    shutdown_tx.send(()).unwrap();
-}
 fn handoff_scope(request_id: &str) -> V3ProviderTransportHandoffScope {
     V3ProviderTransportHandoffScope {
         pipeline_id: "general-provider".to_string(),

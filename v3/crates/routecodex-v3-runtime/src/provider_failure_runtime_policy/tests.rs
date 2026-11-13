@@ -1353,7 +1353,7 @@ targets = [
 #[tokio::test]
 async fn transport_error_selects_untried_same_provider_sibling_key() {
     let manifest = transport_thrash_manifest("transport_thrash");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let selected = match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the first provider"),
@@ -1405,12 +1405,11 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
         .expect("transport failure must reselect");
     assert_eq!(reselected.candidate.provider_id, "first");
     assert_eq!(reselected.candidate.auth_alias, "key2");
-    // An ordinary transport failure is owned by typed observation and health;
-    // it must not become a permanent request-local exclusion.
+    // The failed exact identity is excluded for this request while typed
+    // observation and health still own the recovery policy.
     assert_eq!(
-        state.failed_candidates.len(),
-        0,
-        "transport failure must not add a permanent request-local exclusion"
+        *state.failed_candidates,
+        BTreeSet::from(["first:default:key1:gpt-test".to_string()])
     );
     assert!(!state
         .failed_candidates
@@ -1639,7 +1638,7 @@ targets = [
         parse_v3_config_02_authoring(&source).expect("response-policy authoring"),
     )
     .expect("response-policy manifest");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the provider"),

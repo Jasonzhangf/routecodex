@@ -341,8 +341,7 @@ async fn chat_json_client_still_waits_for_the_runtime_outcome() {
 #[tokio::test]
 async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client() {
     let _guard = TEST_LOCK.lock().await;
-    // A failed last identity waits the original declared recovery budget. It
-    // does not end the client channel immediately after the provider error.
+    // A failed last identity must not wait for the request recovery budget.
     let mut entry = start_controlled_entry_with_timeout_and_budget(None, Some(1800)).await;
     let started = std::time::Instant::now();
     let client = reqwest::Client::new();
@@ -392,14 +391,10 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
         "a provider terminal must stay an explicit client transport failure, not a clean end"
     );
     assert!(
-        started.elapsed() >= Duration::from_millis(1500),
-        "provider failure must not shortcut the declared request recovery budget"
+        started.elapsed() < Duration::from_millis(1500),
+        "provider failure must not wait for the retired recovery budget"
     );
     let received = String::from_utf8_lossy(&received).to_string();
-    assert!(
-        received.contains(":\n\n"),
-        "the terminal must reach the client behind a transport comment frame instead of a silent close: {received:?}"
-    );
     assert!(
         received
             .lines()
@@ -616,8 +611,8 @@ async fn exec_preparation_waits_for_real_provider_timeout_without_fabricated_ter
         .expect("exec preparation must never wait forever for an in-flight response");
     let elapsed = started.elapsed();
     assert!(
-        elapsed >= Duration::from_millis(2500) && elapsed < Duration::from_secs(10),
-        "exec preparation must preserve the original recovery budget after the provider timeout, waited {elapsed:?}"
+        elapsed < Duration::from_millis(2500),
+        "exec preparation must honor the provider timeout without waiting for the retired recovery budget, waited {elapsed:?}"
     );
 
     let mut received = Vec::new();

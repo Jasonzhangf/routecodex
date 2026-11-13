@@ -59,7 +59,14 @@ pub(crate) type V3ClientDisconnectRecorder = Box<dyn FnOnce() + Send>;
 /// recorder survives the runtime task abort that the disconnect triggers.
 #[derive(Clone, Default)]
 pub(crate) struct V3ClientDisconnectSlot {
-    recorder: Arc<Mutex<Option<V3ClientDisconnectRecorder>>>,
+    state: Arc<Mutex<V3ClientDisconnectState>>,
+}
+
+#[derive(Default)]
+struct V3ClientDisconnectState {
+    disconnected: bool,
+    consumed: bool,
+    recorder: Option<V3ClientDisconnectRecorder>,
 }
 
 impl V3ClientDisconnectSlot {
@@ -68,13 +75,48 @@ impl V3ClientDisconnectSlot {
     }
 
     pub(crate) fn set(&self, recorder: V3ClientDisconnectRecorder) {
-        if let Ok(mut slot) = self.recorder.lock() {
-            *slot = Some(recorder);
+        let run_now = self.state.lock().ok().and_then(|mut state| {
+            if state.consumed {
+                None
+            } else if state.disconnected {
+                state.consumed = true;
+                Some(recorder)
+            } else {
+                state.recorder = Some(recorder);
+                None
+            }
+        });
+        if let Some(recorder) = run_now {
+            recorder();
         }
     }
 
+    #[cfg(test)]
     fn take(&self) -> Option<V3ClientDisconnectRecorder> {
-        self.recorder.lock().ok().and_then(|mut slot| slot.take())
+        self.state.lock().ok().and_then(|mut state| {
+            let recorder = state.recorder.take();
+            if recorder.is_some() {
+                state.consumed = true;
+            }
+            recorder
+        })
+    }
+
+    fn record_disconnect(&self) {
+        let recorder = self.state.lock().ok().and_then(|mut state| {
+            state.disconnected = true;
+            if state.consumed {
+                None
+            } else if let Some(recorder) = state.recorder.take() {
+                state.consumed = true;
+                Some(recorder)
+            } else {
+                None
+            }
+        });
+        if let Some(recorder) = recorder {
+            recorder();
+        }
     }
 }
 
@@ -559,8 +601,8 @@ impl Stream for V3ClientSseChannelStream {
 
 impl Drop for V3ClientSseChannelStream {
     fn drop(&mut self) {
-        // A client that goes away after the committed prefix reached it but while
-        // the runtime outcome is still pending never reaches the runtime closeout:
+        // A client that goes away while the runtime outcome is still pending
+        // never reaches runtime closeout, even before its first business frame:
         // the abort below drops the runtime task first. Record that disconnect
         // terminal here. A resolved or already-closed outcome is left to the
         // existing finalizer so the terminal row is written exactly once.
@@ -569,16 +611,11 @@ impl Drop for V3ClientSseChannelStream {
             Err(oneshot::error::TryRecvError::Empty)
         );
         let record_disconnect = matches!(self.state, V3ClientSseChannelState::AwaitOutcome { .. })
-            && self.client_frame_emitted
             && self.outcome_task.is_some()
             && outcome_still_pending;
         if record_disconnect {
-            if let Some(recorder) = self
-                .client_disconnect_slot
-                .as_ref()
-                .and_then(V3ClientDisconnectSlot::take)
-            {
-                recorder();
+            if let Some(slot) = &self.client_disconnect_slot {
+                slot.record_disconnect();
             }
         }
         if let Some(task) = self.outcome_task.take() {
@@ -591,7 +628,7 @@ impl Drop for V3ClientSseChannelStream {
 mod tests {
     use super::*;
     use futures_util::StreamExt;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
     fn json_outcome(status: u16, content_type: &'static str, body: &'static str) -> Response<Body> {
@@ -675,6 +712,15 @@ mod tests {
                 chunk.as_ref().map(Vec::as_slice).ok() == Some(b": keepalive\n\n".as_slice())
             })
             .count()
+    }
+
+    fn disconnect_slot(calls: &Arc<AtomicUsize>) -> V3ClientDisconnectSlot {
+        let calls = Arc::clone(calls);
+        let slot = V3ClientDisconnectSlot::new();
+        slot.set(Box::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+        }));
+        slot
     }
 
     #[tokio::test]
@@ -814,6 +860,120 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("a client disconnect must abort the pending runtime task");
+    }
+
+    #[tokio::test]
+    async fn client_sse_channel_records_a_keepalive_only_disconnect_once() {
+        let (_outcome_sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let mut stream = Box::pin(channel(outcome, task, Duration::from_millis(50)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let slot = disconnect_slot(&calls);
+        stream.client_disconnect_slot = Some(slot.clone());
+
+        assert_eq!(
+            stream.next().await.expect("keepalive").expect("frame"),
+            b": keepalive\n\n".to_vec(),
+            "the pending channel must emit only the transport keepalive before the disconnect"
+        );
+        drop(stream);
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a real disconnect before the first business frame must record one cancelled terminal"
+        );
+        assert!(
+            slot.take().is_none(),
+            "the disconnect recorder must be consumed exactly once"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_disconnect_before_recorder_install_runs_it_once() {
+        let (_outcome_sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let mut stream = Box::pin(channel(outcome, task, Duration::from_millis(50)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let slot = V3ClientDisconnectSlot::new();
+        stream.client_disconnect_slot = Some(slot.clone());
+
+        assert_eq!(
+            stream.next().await.expect("keepalive").expect("frame"),
+            b": keepalive\n\n".to_vec()
+        );
+        drop(stream);
+
+        let first_calls = Arc::clone(&calls);
+        slot.set(Box::new(move || {
+            first_calls.fetch_add(1, Ordering::SeqCst);
+        }));
+        let second_calls = Arc::clone(&calls);
+        slot.set(Box::new(move || {
+            second_calls.fetch_add(100, Ordering::SeqCst);
+        }));
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a disconnect observed before recorder installation must be retained and consumed once"
+        );
+        assert!(slot.take().is_none(), "the recorder remains single-use");
+    }
+
+    #[tokio::test]
+    async fn client_sse_channel_records_a_delivered_prefix_disconnect_once() {
+        let (_outcome_sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let mut stream = Box::pin(channel_with_client_frames(
+            outcome,
+            task,
+            None,
+            Duration::from_millis(50),
+        ));
+        stream
+            .client_frame_prefix
+            .push_back(b"data: first\n\n".to_vec());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let slot = disconnect_slot(&calls);
+        stream.client_disconnect_slot = Some(slot.clone());
+
+        assert_eq!(
+            stream.next().await.expect("prefix").expect("frame"),
+            b"data: first\n\n".to_vec(),
+            "the committed prefix must reach the client before the disconnect"
+        );
+        drop(stream);
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "a delivered prefix followed by a disconnect must record one cancelled terminal"
+        );
+        assert!(
+            slot.take().is_none(),
+            "the disconnect recorder must remain single-use"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_sse_channel_does_not_record_a_ready_outcome_as_cancelled() {
+        let (outcome_sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let mut stream = Box::pin(channel(outcome, task, Duration::from_millis(50)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        stream.client_disconnect_slot = Some(disconnect_slot(&calls));
+
+        outcome_sender
+            .send(sse_outcome(vec![b"data: complete\n\n"], Duration::ZERO))
+            .expect("ready runtime outcome");
+        drop(stream);
+
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "a resolved runtime outcome must keep its existing finalizer and must not be reclassified as cancelled"
+        );
     }
 
     #[tokio::test]

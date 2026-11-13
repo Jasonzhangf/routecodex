@@ -790,7 +790,6 @@ fn compact_native_hub_v1_authoring_derives_closed_internal_defaults() {
         .as_ref()
         .expect("compact native V3 authoring must derive closed server execution policy");
     assert_eq!(execution.allowed_modes, vec!["direct", "relay"]);
-    assert_eq!(execution.attempt_store.request_max_attempts, 8);
     assert_eq!(execution.attempt_store.attempt_max_bytes, 64 * 1024 * 1024);
     assert_eq!(execution.attempt_store.attempt_max_frames, 262_144);
     assert_eq!(execution.attempt_store.request_max_bytes, 64 * 1024 * 1024);
@@ -855,7 +854,6 @@ fn server_execution_attempt_store_compiles_explicit_policy() {
         .expect("primary execution policy")
         .attempt_store;
 
-    assert_eq!(policy.request_max_attempts, 7);
     assert_eq!(policy.attempt_max_bytes, 1024);
     assert_eq!(policy.attempt_max_frames, 16);
     assert_eq!(policy.request_max_bytes, 2048);
@@ -864,9 +862,20 @@ fn server_execution_attempt_store_compiles_explicit_policy() {
 }
 
 #[test]
+fn legacy_request_attempt_count_does_not_limit_or_reject_configuration() {
+    let execution = HUB_V1_SERVER_EXECUTION.replacen(
+        "allowed_transports = [\"json\", \"sse\"]",
+        "allowed_transports = [\"json\", \"sse\"]\nattempt_store = { request_max_attempts = 0 }",
+        1,
+    );
+    let source = format!("{}\n{}\n{}", FULL_CONFIG, HUB_V1_DECLARATION, execution);
+    let authoring = parse_v3_config_02_authoring(&source).unwrap();
+    assert!(compile_v3_config_05_manifest(authoring).is_ok());
+}
+
+#[test]
 fn server_execution_attempt_store_rejects_zero_and_inverted_limits() {
     let invalid_policies = [
-        "attempt_store = { request_max_attempts = 0 }",
         "attempt_store = { attempt_max_bytes = 0 }",
         "attempt_store = { attempt_max_frames = 0 }",
         "attempt_store = { request_max_bytes = 0 }",

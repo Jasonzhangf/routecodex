@@ -122,6 +122,14 @@ impl V3ProviderFailureRuntimeHealth {
                 action,
                 self.observation_now_ms(now_ms),
             )?;
+            self.record_provider_action_failure_in_scope_for_interface(
+                scope,
+                provider_id,
+                interface_id,
+                Some(auth_alias),
+                Some(model_id),
+                "provider_http_429",
+            )?;
             record.state = if projection.available {
                 "rate_limit_capacity_wait"
             } else {

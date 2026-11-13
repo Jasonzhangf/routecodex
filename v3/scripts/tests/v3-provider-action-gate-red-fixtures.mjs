@@ -127,13 +127,13 @@ const cases = [
     diagnostic: /forbidden legacy token retry_delay_ms/u,
   },
   {
-    name: 'runtime recreates a request-local gate',
+    name: 'runtime revives a process-global gate',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     mutate: (source) => source.replaceAll(
-      'action_gate: V3ProviderActionGate::process_shared()',
       'action_gate: V3ProviderActionGate::default()',
+      'action_gate: V3ProviderActionGate::process_shared()',
     ),
-    diagnostic: /missing action_gate: V3ProviderActionGate::process_shared\(\)/u,
+    diagnostic: /missing action_gate: V3ProviderActionGate::default\(\)/u,
   },
   {
     name: 'OpenAI post-commit SSE failure loses fresh-request isolation coverage',
@@ -148,10 +148,10 @@ const cases = [
     name: 'Gemini fresh request starts consuming an unrelated recovery lane',
     path: 'v3/crates/routecodex-v3-runtime/tests/gemini_relay_runtime_integration.rs',
     mutate: (source) => source.replace(
-      'validated_terminal_sse_releases_action_lane_for_a_fresh_request',
-      'validated_terminal_sse_blocks_a_fresh_request',
+      'malformed_then_terminal_sse_keeps_fresh_request_immediate',
+      'malformed_then_terminal_sse_waits_for_a_fresh_request',
     ),
-    diagnostic: /missing active Rust test validated_terminal_sse_releases_action_lane_for_a_fresh_request/u,
+    diagnostic: /missing active Rust test malformed_then_terminal_sse_keeps_fresh_request_immediate/u,
   },
   {
     name: 'OpenAI active recovery loses explicit permit duration coverage',
@@ -232,13 +232,10 @@ const cases = [
     diagnostic: /success-released recovery transition must carry the exact retained recovery ticket/u,
   },
   {
-    name: 'Responses Relay success release bypasses the retained recovery generation',
+    name: 'Responses Relay re-introduces retained recovery state',
     path: 'v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs',
-    mutate: (source) => source.replace(
-      'V3ProviderActionRecoveryTransition::ReleasedBySuccess(ticket) => {',
-      'V3ProviderActionRecoveryTransition::ReleasedBySuccess(_ticket) => {',
-    ),
-    diagnostic: /Responses Relay must re-arm the exact retained recovery ticket/u,
+    mutate: (source) => `${source}\nlet mut pending_provider_action_recovery = None;\n`,
+    diagnostic: /Responses Relay must not wait or admit on the request path/u,
   },
   {
     name: 'V3 new failure revokes an already-owned exact permit',
@@ -259,13 +256,10 @@ const cases = [
     diagnostic: /provider success may release only its exact provider scope/u,
   },
   {
-    name: 'Direct fresh requests enter the recovery gate by default',
+    name: 'Direct re-introduces a provider action recovery wait',
     path: 'v3/crates/routecodex-v3-runtime/src/kernel.rs',
-    mutate: (source) => source.replace(
-      'let mut pending_provider_action_recovery = None;',
-      'let mut pending_provider_action_gate = true;',
-    ),
-    diagnostic: /must not retain bool-only provider action recovery state/u,
+    mutate: (source) => `${source}\nfn __fixture_wait() { let _ = wait_for_error05_recovery; }\n`,
+    diagnostic: /Direct must not wait or admit on the request path/u,
   },
   {
     name: 'provider change restarts isolated delay',
@@ -404,22 +398,22 @@ const cases = [
     diagnostic: /resources: missing binding v3\.error\.provider_action_gate/u,
   },
   {
-    name: 'V3 manifest revives wall-clock admission expiry',
+    name: 'V3 manifest revives a request-path admission contract',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(
-      '  wall_clock_expiry: forbidden\n',
-      '  wall_clock_expiry: after_5000ms\n',
+      'request_independence:\n',
+      'admission_permit:\n  owner_type: V3ProviderActionPermit\nrequest_independence:\n',
     ),
-    diagnostic: /admission_permit must lock explicit ownership/u,
+    diagnostic: /request-path admission contracts must be physically removed/u,
   },
   {
-    name: 'V3 manifest allows fresh requests to bypass active HTTP 429 recovery',
+    name: 'V3 manifest permits request-path admission waiting',
     path: 'docs/architecture/manifests/v3.provider_action_gate.mainline.yml',
     mutate: (source) => source.replace(
-      '  fresh_request_consumes_active_recovery_lane: http_429_only\n',
-      '  fresh_request_consumes_active_recovery_lane: false\n',
+      '  request_path_admission_or_wait: forbidden\n',
+      '  request_path_admission_or_wait: allowed\n',
     ),
-    diagnostic: /admission_permit must lock explicit ownership/u,
+    diagnostic: /request-path admission and wait must stay forbidden/u,
   },
   {
     name: 'V3 manifest moves typed Error05 to the Server owner',
@@ -454,8 +448,8 @@ const cases = [
     name: 'V3 resource owner drifts from the Runtime gate',
     path: 'docs/architecture/v3-resource-operation-map.yml',
     mutate: (source) => source.replace(
-      '  - resource_id: v3.error.provider_action_gate\n    resource_kind: process_local_control_side_channel\n    lifecycle: v3.provider_action_gate.mainline\n    owner_crate: routecodex-v3-runtime\n',
-      '  - resource_id: v3.error.provider_action_gate\n    resource_kind: process_local_control_side_channel\n    lifecycle: v3.provider_action_gate.mainline\n    owner_crate: routecodex-v3-server\n',
+      '  - resource_id: v3.error.provider_action_gate\n    resource_kind: process_local_background_observation\n    lifecycle: v3.provider_action_gate.mainline\n    owner_crate: routecodex-v3-runtime\n',
+      '  - resource_id: v3.error.provider_action_gate\n    resource_kind: process_local_background_observation\n    lifecycle: v3.provider_action_gate.mainline\n    owner_crate: routecodex-v3-server\n',
     ),
     diagnostic: /V3 lifecycle\/chain\/owner binding drift/u,
   },
@@ -463,8 +457,8 @@ const cases = [
     name: 'V3 wiki fabricates a terminal commit downstream edge',
     path: 'docs/architecture/wiki/v3-provider-action-gate.md',
     mutate: (source) => source.replace(
-      '  TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit\n',
-      '  TerminalAdmission -->|v3-provider-action-gate-06| TerminalCommit\n  TerminalCommit -->|fabricated gate witness| E05\n',
+      '  E05 -->|v3-provider-action-gate-06| TerminalCommit\n',
+      '  E05 -->|v3-provider-action-gate-06| TerminalCommit\n  TerminalCommit -->|fabricated gate witness| E05\n',
     ),
     diagnostic: /terminal commit cannot claim a downstream machine edge/u,
   },

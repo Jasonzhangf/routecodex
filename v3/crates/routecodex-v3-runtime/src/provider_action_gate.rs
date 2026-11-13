@@ -342,6 +342,21 @@ impl V3ProviderActionGate {
             },
         ))
     }
+
+    pub(crate) fn exact_rate_limit_is_blocked(
+        &self,
+        scope: &V3ProviderActionProviderScope,
+    ) -> Result<bool, String> {
+        let states = self.lock_states()?;
+        let Some((_key, state)) = states.iter().find(|(key, _)| {
+            key.provider_scope == *scope && key.normalized_error_family == "provider_http_429"
+        }) else {
+            return Ok(false);
+        };
+        let now = Instant::now();
+        Ok(now < state.next_admission_at || state.admitted_generation.is_some())
+    }
+
     pub fn process_shared() -> Self {
         static SHARED: OnceLock<V3ProviderActionGate> = OnceLock::new();
         SHARED.get_or_init(Self::default).clone()

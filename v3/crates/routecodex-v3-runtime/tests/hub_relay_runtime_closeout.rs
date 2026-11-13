@@ -317,10 +317,9 @@ async fn responses_relay_json_and_sse_enter_fixed_topology_without_p6_direct_nod
         json_observability.routing_group_id.as_deref(),
         Some("controlled")
     );
-    assert_eq!(
-        json_observability.pool_id.as_deref(),
-        Some("client_responses")
-    );
+    // An ordinary non-provider.model request uses the required default pool.
+    // A match.models declaration does not create a second model-driven route.
+    assert_eq!(json_observability.pool_id.as_deref(), Some("default"));
     assert_eq!(
         json_observability.provider_id.as_deref(),
         Some("controlled")
@@ -1600,8 +1599,9 @@ path = [
                 response_failure,
                 providers: Mutex::new(Vec::new()),
             };
-            // The explicit auth-key policy cools the attempted identity. The
-            // healthy alternative prevents last-candidate neutrality hiding it.
+            // The declared wait_retry/cooldown policy steps must not delay or
+            // cool the request. The healthy alternative still proves that the
+            // failed provider is skipped immediately during reselection.
             {
                 let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
                     &manifest,
@@ -1633,10 +1633,27 @@ path = [
                 assert_eq!(events.len(), 1);
                 let event = &events[0];
                 assert_eq!(event.provider_key, "limited:default:key1:gpt-5.5");
-                assert_eq!(event.wait_ms, Some(if scoped && group == "group_a" { 7000 } else { 11000 }),
-                    "wrong policy consumed: scoped={scoped}, group={group}, response={response_failure}");
-                assert_eq!(event.failure_count, 1);
-                assert_eq!(event.health_state, "cooldown");
+                assert_eq!(
+                    event.wait_ms, None,
+                    "a declared provider policy may not wait the request: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert_eq!(
+                    event.failure_count, 0,
+                    "a request-path failure must stay request-local: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert_eq!(
+                    event.health_state, "pre_cool_observation",
+                    "a request-path failure must stay health-neutral: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert!(
+                    event.cooldown_until_ms.is_none(),
+                    "a request-path failure must not create a cooldown: scoped={scoped}, group={group}, response={response_failure}"
+                );
+                assert_eq!(event.action, "switch_provider");
+                assert_eq!(
+                    event.next_provider_key.as_deref(),
+                    Some("minimax:default:key1:MiniMax-M3")
+                );
                 assert_eq!(output.status, 200);
                 let V3ResponsesRelayClientBody::Json(body) = output.client_body else {
                     panic!("expected business JSON")
@@ -1646,13 +1663,8 @@ path = [
                 assert!(body.get("error").is_none());
             }
             assert_eq!(*transport.providers.lock().unwrap(), ["limited", "minimax"]);
-            assert!(
-                !health
-                    .store()
-                    .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
-                    .available
-            );
             for (provider, key, model) in [
+                ("limited", "key1", "gpt-5.5"),
                 ("limited", "key2", "gpt-5.5"),
                 ("limited", "key1", "other-model"),
                 ("minimax", "key1", "MiniMax-M3"),
@@ -1920,10 +1932,16 @@ async fn responses_relay_provider_response_decode_error_reselects_next_candidate
         provider_event.next_provider_key.as_deref(),
         Some("minimax:default:key1:MiniMax-M3")
     );
-    assert_eq!(provider_event.failure_count, 1);
-    // A typed provider decode failure immediately cools the exact identity.
-    assert_eq!(provider_event.health_state, "cooldown");
-    assert!(provider_event.cooldown_until_ms.is_some());
+    assert_eq!(provider_event.wait_ms, None);
+    assert_eq!(
+        provider_event.failure_count, 0,
+        "a decode failure is request-local and must stay health-neutral: {provider_event:#?}"
+    );
+    assert_eq!(
+        provider_event.health_state, "pre_cool_observation",
+        "a decode failure must not create a cooldown: {provider_event:#?}"
+    );
+    assert!(provider_event.cooldown_until_ms.is_none());
 
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
@@ -2314,7 +2332,7 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
 }
 
 #[tokio::test]
-async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_requests() {
+async fn responses_relay_shared_health_skips_pre_cool_provider_on_subsequent_requests() {
     let server_id = "responses_shared_health";
     let manifest = responses_reselect_manifest_for_scope(server_id);
     let provider_health =
@@ -2360,20 +2378,21 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         Some("minimax:default:key1:MiniMax-M3")
     );
     assert_eq!(observability.provider_failure_events.len(), 1);
-    assert_eq!(observability.provider_failure_events[0].failure_count, 1);
+    let first_event = &observability.provider_failure_events[0];
+    assert_eq!(first_event.wait_ms, None);
     assert_eq!(
-        observability.provider_failure_events[0].health_state,
-        "cooldown"
+        first_event.failure_count, 0,
+        "a shared health handle must not count a request-local failure: {first_event:#?}"
     );
-    assert!(observability.provider_failure_events[0]
-        .cooldown_until_ms
-        .is_some());
     assert!(
-        !provider_health
+        provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
-            .available
+            .available,
+        "a request-local failure must leave the exact identity routable"
     );
+    assert_eq!(first_event.health_state, "pre_cool_observation");
+    assert!(first_event.cooldown_until_ms.is_none());
 
     for turn in 1..=3 {
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -2397,13 +2416,14 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         .await
         .unwrap();
         assert_eq!(output.status, 200);
-        // The first recoverable failure already cooled the exact provider
-        // identity, so every later request skips it without a reselect.
-        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
         let observability = output
             .observability
             .as_ref()
-            .expect("cooled provider run must keep route observability");
+            .expect("later request run must keep route observability");
+        // The first failure creates a pre-cool observation, not a cooldown. It
+        // still changes candidate visibility, so later requests skip that exact
+        // identity without a network failure or request-path wait.
+        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
         assert_eq!(
             observability.provider_key.as_deref(),
             Some("minimax:default:key1:MiniMax-M3")
@@ -2412,10 +2432,12 @@ async fn responses_relay_shared_health_skips_cooled_provider_on_subsequent_reque
         assert!(observability
             .unavailable_candidates
             .iter()
-            .any(|candidate| candidate.starts_with("limited:default:key1:gpt-5.5:availability(")));
+            .any(|candidate| candidate.starts_with(
+                "limited:default:key1:gpt-5.5:availability(provider_pre_cool_observation"
+            )));
         assert!(
             observability.provider_failure_events.is_empty(),
-            "cooled provider must be skipped before network send; observed events: {:?}",
+            "the pre-cool identity must be skipped before network send; observed events: {:?}",
             observability.provider_failure_events
         );
     }

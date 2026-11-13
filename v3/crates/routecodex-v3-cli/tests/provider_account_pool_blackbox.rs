@@ -286,7 +286,6 @@ struct Peer {
 enum Scenario {
     FirstTenFail,
     AllFail,
-    BudgetEightFail,
 }
 
 struct CounterEnvironment {
@@ -531,7 +530,6 @@ async fn peer_provider(
     let should_fail = match peer.scenario {
         Scenario::FirstTenFail => index <= 10,
         Scenario::AllFail => true,
-        Scenario::BudgetEightFail => true,
     };
     if !valid_payload {
         return (
@@ -822,7 +820,7 @@ async fn run_all_fail(mode: Mode) {
     peer_task.abort();
 }
 
-async fn run_budget_eight(mode: Mode) {
+async fn run_legacy_declared_budget_ignored(mode: Mode) {
     let _test_guard = TEST_LOCK.lock().await;
     let _counter = CounterEnvironment::new();
     let (receipts_tx, mut receipts_rx) = mpsc::unbounded_channel();
@@ -832,7 +830,7 @@ async fn run_budget_eight(mode: Mode) {
         .route(peer_route(mode), post(peer_provider))
         .with_state(Peer {
             receipts: receipts_tx,
-            scenario: Scenario::BudgetEightFail,
+            scenario: Scenario::AllFail,
             send_count: Arc::new(AtomicUsize::new(0)),
             mode,
         });
@@ -863,10 +861,14 @@ async fn run_budget_eight(mode: Mode) {
     );
 
     let received: Vec<_> = std::iter::from_fn(|| receipts_rx.try_recv().ok()).collect();
-    assert_eq!(received.len(), 8, "declared budget must permit eight sends");
+    assert_eq!(
+        received.len(),
+        11,
+        "the retired declared attempt ceiling must not stop eligible keys"
+    );
     assert!(
         receipts_rx.try_recv().is_err(),
-        "declared budget 8 must stop before keys 9-11"
+        "the legacy ceiling must not add an extra candidate send"
     );
     assert!(received.iter().all(|receipt| receipt.valid_payload));
     assert_eq!(
@@ -875,8 +877,8 @@ async fn run_budget_eight(mode: Mode) {
             .map(|receipt| &receipt.identity)
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        8,
-        "eight independent identities before local budget stop"
+        11,
+        "all declared independent identities must be attempted"
     );
     server.shutdown().await;
     peer_task.abort();
@@ -903,11 +905,11 @@ async fn pool_11_all_fail_real_exhaustion_relay() {
 }
 
 #[tokio::test]
-async fn pool_declared_budget_8_local_exhaustion_direct() {
-    run_budget_eight(Mode::Direct).await
+async fn pool_legacy_declared_budget_does_not_ceiling_candidates_direct() {
+    run_legacy_declared_budget_ignored(Mode::Direct).await
 }
 
 #[tokio::test]
-async fn pool_declared_budget_8_local_exhaustion_relay() {
-    run_budget_eight(Mode::Relay).await
+async fn pool_legacy_declared_budget_does_not_ceiling_candidates_relay() {
+    run_legacy_declared_budget_ignored(Mode::Relay).await
 }
