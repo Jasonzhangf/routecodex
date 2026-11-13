@@ -375,6 +375,20 @@ fn build_responses_wire_payload_with_registry(
     // 分支上：路由路径的 canonical/requested 模型是客户端模型（gpt 家族），而
     // wire_model 才是 deepseek-flash，挂错分支会让契约在真实路由上失效。
     ensure_v3_official_deepseek_reasoning_text(&mut body, &target);
+    // gpt 官方 Responses 目标的 reasoning 键存在性契约。
+    //
+    // 缺陷 f4bd01c：上面的 `is_v3_gpt_family_model` 门控让 gpt 目标整体跳过请求侧
+    // reasoning 兜底，于是「只有 encrypted_content、summary 缺失/为 null」的历史
+    // reasoning 条目被原样发出。OpenAI Responses 端点要求 reasoning input item 必须
+    // 携带 `summary` 参数，实测返回 400
+    // `Missing required parameter: 'input[N].summary'`
+    // （type=invalid_request_error，code=missing_required_parameter）。
+    //
+    // 该契约只补 `summary` 键的存在性（缺失时填空数组，语义是「无摘要」这一真实
+    // 状态），不伪造摘要文本、不删除任何可转发字段、不改写已有 summary。上游空
+    // 数组与「无摘要」等价，`summary: []` 是本仓既有的规范表示
+    // （见 `kernel/direct_response_thinking_compat.rs` 的同类补全）。
+    ensure_v3_responses_reasoning_summary_key(&mut body, &target);
     Ok(V3Provider12ResponsesWirePayload {
         namespace_identities,
         request_id,
@@ -590,6 +604,50 @@ fn strip_v3_request_encrypted_reasoning(body: &mut Value, deepseek_compat: bool)
                     Value::String("[thinking redacted]".to_string()),
                 );
             }
+        }
+    }
+}
+
+/// gpt 官方 Responses 目标的 reasoning `summary` 键存在性契约（缺陷 f4bd01c）。
+///
+/// OpenAI Responses 端点要求 reasoning input item 携带 `summary` 参数；缺失时返回
+/// 400 `Missing required parameter: 'input[N].summary'`
+/// （`type=invalid_request_error`，`code=missing_required_parameter`，已对
+/// `https://api.openai.com/v1/responses` 实测确认）。
+///
+/// `wire.rs` 的 gpt 家族门控让 gpt 目标跳过 `strip_v3_request_encrypted_reasoning`，
+/// 于是「只有 encrypted_content 而 summary 缺失/为 null」的历史 reasoning 条目会
+/// 原样发出并被上游拒绝。本函数只在该目标族上补 `summary` 键的存在性：
+///
+/// - 缺失或为 `null` 时补空数组——空数组是「无摘要」这一真实状态的规范表示，
+///   不伪造摘要文本；
+/// - 已有非空 summary 原样保留（字节不变，保证上游缓存前缀稳定）；
+/// - 不删除、不改写任何其他字段（`encrypted_content` 等照常透传）；
+/// - 只作用于 `type == "reasoning"` 条目，不触碰 message / function_call 等。
+///
+/// 非 gpt 目标不经此路径：它们的 reasoning 形态由 `strip_v3_request_encrypted_reasoning`
+/// 的既有分支（deepseek 重写 / 窄清理）负责，避免未经证实的 provider 被额外改写。
+fn ensure_v3_responses_reasoning_summary_key(body: &mut Value, target: &V3ResponsesProviderTarget) {
+    if !is_v3_gpt_family_model(&target.canonical_model_id) {
+        return;
+    }
+    let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in input.iter_mut() {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        if obj.get("type").and_then(Value::as_str) != Some("reasoning") {
+            continue;
+        }
+        let missing = match obj.get("summary") {
+            None => true,
+            Some(Value::Null) => true,
+            Some(_) => false,
+        };
+        if missing {
+            obj.insert("summary".to_string(), Value::Array(Vec::new()));
         }
     }
 }
