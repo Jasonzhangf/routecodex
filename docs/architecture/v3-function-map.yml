@@ -2888,6 +2888,7 @@ features:
   - gemini_signature_filter_public::gemini_prompt_block_sse_empty_candidates
   - gemini_sse_complete_attempt_buffering_and_late_error_public
   - signed_namespace_history_responses_exact_projection_consumer
+  - responses_direct_additional_tools_declarations_execute_and_follow_up_once
   - signed_namespace_history_anthropic_declared_drop_diagnostic
   - signed_namespace_history_chat_declared_drop_diagnostic
   - gemini_empty_finish_reason_public

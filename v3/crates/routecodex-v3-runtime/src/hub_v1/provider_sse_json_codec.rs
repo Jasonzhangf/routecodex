@@ -509,6 +509,7 @@ pub(super) fn response_message_part_has_client_output(part: &Value) -> Result<bo
         "output_text" | "reasoning_text" | "summary_text" => "text",
         "refusal" => "refusal",
         "output_audio" => "transcript",
+        "encrypted_content" => return Ok(false),
         other => {
             return Err(format!(
                 "provider Responses message content part type {other:?} is not registered"
@@ -1097,6 +1098,26 @@ mod provider_sse_json_codec_tests {
                 r#"{"type":"response.content_part.added","part":{"type":"reasoning_text","text":""}}"#
             ),
             Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
+    }
+
+    #[test]
+    fn responses_encrypted_content_part_is_non_visible_until_response_governance() {
+        let classify = |data| {
+            classify_v3_provider_sse_json_data(V3HubProviderWireProtocol::Responses, data)
+                .expect("Responses encrypted_content part must classify")
+        };
+        assert_eq!(
+            classify(
+                r#"{"type":"response.output_item.done","item":{"type":"message","id":"msg_cipher","content":[{"type":"encrypted_content","data":"cipher"}]}}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::ContinueBuffering)
+        );
+        assert_eq!(
+            classify(
+                r#"{"type":"response.output_item.done","item":{"type":"message","id":"msg_visible","content":[{"type":"output_text","text":"visible"},{"type":"encrypted_content","data":"cipher"}]}}"#
+            ),
+            Some(V3ProviderResponsesJsonFrameOutcome::StartClientStream)
         );
     }
 

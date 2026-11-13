@@ -2199,6 +2199,7 @@ features:
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
   - responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer
+  - responses_direct_additional_tools_declarations_execute_and_follow_up_once
   - responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer
   - namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom
   - namespace_target_bindings_keep_kind_choice_history_and_inverse
@@ -2269,6 +2270,8 @@ features:
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - fe1ec4b-responses-ciphertext-json-sse-two-turn
+  - fe1ec4b-responses-auth-expanded-cipher-relay-json
+  - fe1ec4b-responses-unique-gpt-cipher-relay-json
   - fe1ec4b-responses-tool-cipher-json-sse-followup
   - fe1ec4b-responses-anthropic-signature-json
   - fe1ec4b-responses-anthropic-signature-sse
