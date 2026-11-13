@@ -728,6 +728,14 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
                 &mut request_body,
                 &crate::hub_v1::provider_protocol_compat_id(provider_protocol),
             )?;
+            if provider_protocol == crate::hub_v1::V3HubProviderWireProtocol::Responses
+                && matches!(
+                    profile,
+                    crate::hub_v1::V3ProviderCompatProfileId::Passthrough
+                )
+            {
+                registry.preserve_native_additional_tool_declarations(&mut request_body)?;
+            }
             Ok(registry)
         })
         .map_err(|error| {

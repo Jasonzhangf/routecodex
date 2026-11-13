@@ -113,11 +113,32 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
     let payload = json!({
         "id": "resp_anthropic_sig",
         "status": "completed",
-        "output": [{
-            "type": "reasoning",
-            "encrypted_content": "sig-anthropic-signature",
-            "summary": [{"type": "summary_text", "text": "signed thought"}]
-        }]
+        "output": [
+            {
+                "type": "reasoning",
+                "encrypted_content": "sig-anthropic-signature",
+                "summary": [{"type": "summary_text", "text": "signed thought"}]
+            },
+            {
+                "type": "message",
+                "encrypted_content": "ordinary-anthropic-message-cipher",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "visible answer",
+                        "encrypted_content": "ordinary-anthropic-part-cipher"
+                    },
+                    {"type": "encrypted_content", "data": "typed-protocol-cipher"}
+                ]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_tool",
+                "output": [
+                    {"type": "encrypted_content", "data": "typed-tool-business-value"}
+                ]
+            }
+        ]
     });
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         payload,
@@ -132,7 +153,10 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
     );
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
     let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
-    let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, false);
+    // Anthropic source must keep its typed reasoning signature even when the
+    // request-side GPT retention flag is true; the source boundary still
+    // removes ordinary fields and protocol ciphertext parts.
+    let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, true);
 
     let payload = serde_json::to_string(&*stripped.previous.previous.payload.0).unwrap();
     assert!(
@@ -140,6 +164,23 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
         "anthropic thinking signature 载体不得被剥离: {payload}"
     );
     assert!(payload.contains("signed thought"));
+    assert!(payload.contains("visible answer"));
+    assert!(
+        !payload.contains("ordinary-anthropic-message-cipher"),
+        "ordinary Anthropic-source message fields must be stripped"
+    );
+    assert!(
+        !payload.contains("ordinary-anthropic-part-cipher"),
+        "ordinary Anthropic-source output_text parts must be stripped"
+    );
+    assert!(
+        !payload.contains("typed-protocol-cipher"),
+        "typed protocol ciphertext part must be removed even for typed Anthropic source: {payload}"
+    );
+    assert!(
+        payload.contains("typed-tool-business-value"),
+        "tool business data must remain untouched: {payload}"
+    );
 }
 
 #[test]

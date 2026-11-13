@@ -2272,7 +2272,10 @@ mod tests {
                     "type": "reasoning",
                     "id": "rs_gaaaa",
                     "encrypted_content": "gAAAA_cipher",
-                    "content": [{"type": "reasoning_text", "text": "visible"}]
+                    "content": [
+                        {"type": "reasoning_text", "text": "visible"},
+                        {"type": "encrypted_content", "data": "typed-reasoning-cipher"}
+                    ]
                 },
                 {
                     "type": "reasoning",
@@ -2296,9 +2299,15 @@ mod tests {
                     "type": "function_call_output",
                     "call_id": "call_1",
                     "encrypted_content": "tool-output-business-value",
-                    "output": [{
-                        "encrypted_content": "nested-tool-output-business-value"
-                    }]
+                    "output": [
+                        {
+                            "encrypted_content": "nested-tool-output-business-value"
+                        },
+                        {
+                            "type": "encrypted_content",
+                            "data": "typed-tool-output-business-value"
+                        }
+                    ]
                 },
                 {
                     "type": "function_call",
@@ -2329,6 +2338,14 @@ mod tests {
                     "arguments": {
                         "encrypted_content": "tool-search-argument-business-value"
                     }
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "message visible"},
+                        {"type": "encrypted_content", "data": "typed-message-cipher"}
+                    ]
                 }
             ]
         });
@@ -2352,11 +2369,23 @@ mod tests {
             "opaque cipher must be stripped"
         );
         assert!(
+            !payload.to_string().contains("typed-reasoning-cipher"),
+            "typed reasoning content part must be stripped"
+        );
+        assert!(
+            !payload.to_string().contains("typed-message-cipher"),
+            "typed message content part must be stripped"
+        );
+        assert!(
             !payload.to_string().contains("anthropic-signature-value"),
             "cipher shape must not infer an Anthropic source"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "plain");
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible");
+        assert_eq!(
+            payload["output"][1]["content"].as_array().unwrap().len(),
+            1
+        );
         assert_eq!(payload["output"][2]["summary"][0]["text"], "uuid visible");
         assert_eq!(payload["output"][3]["summary"][0]["text"], "opaque visible");
         assert_eq!(
@@ -2367,6 +2396,14 @@ mod tests {
             payload["output"][5]["output"][0]["encrypted_content"],
             "nested-tool-output-business-value",
             "the complete function_call_output business subtree must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][1]["type"], "encrypted_content",
+            "typed content inside a tool business result must be preserved"
+        );
+        assert_eq!(
+            payload["output"][5]["output"][1]["data"],
+            "typed-tool-output-business-value"
         );
         assert_eq!(
             payload["output"][6]["arguments"]["encrypted_content"],
@@ -2393,6 +2430,12 @@ mod tests {
             "tool-search-argument-business-value",
             "tool_search_call arguments are business data"
         );
+        assert_eq!(
+            payload["output"][10]["content"].as_array().unwrap().len(),
+            1,
+            "typed message content part must not consume the visible message"
+        );
+        assert_eq!(payload["output"][10]["content"][0]["text"], "message visible");
 
         let mut retained =
             json!({"output": [{"type": "reasoning", "encrypted_content": "rsn_KEEP"}]});
@@ -2408,6 +2451,76 @@ mod tests {
         assert_eq!(
             anthropic["output"][0]["encrypted_content"], "typed-signature",
             "typed Anthropic source must keep its signature verbatim"
+        );
+    }
+
+    #[test]
+    fn response_cipher_policy_preserves_anthropic_signature_but_strips_typed_protocol_part() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "typed-anthropic-signature",
+                    "summary": [{"type": "summary_text", "text": "signed thought"}]
+                },
+                {
+                    "type": "message",
+                    "encrypted_content": "ordinary-anthropic-field-cipher",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "visible answer",
+                            "encrypted_content": "ordinary-anthropic-part-cipher"
+                        },
+                        {"type": "encrypted_content", "data": "typed-protocol-cipher"}
+                    ]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_tool",
+                    "output": [
+                        {"type": "encrypted_content", "data": "typed-tool-business-value"}
+                    ]
+                }
+            ]
+        });
+
+        apply_v3_response_cipher_policy(&mut payload, false, true);
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "typed-anthropic-signature",
+            "typed Anthropic source signature must survive"
+        );
+        assert_eq!(payload["output"][1]["content"][0]["text"], "visible answer");
+        assert!(
+            payload["output"][1].get("encrypted_content").is_none(),
+            "ordinary Anthropic-source message fields are not signature carriers"
+        );
+        assert!(
+            payload["output"][1]["content"][0]
+                .get("encrypted_content")
+                .is_none(),
+            "ordinary Anthropic-source output_text parts are not signature carriers"
+        );
+        assert_eq!(
+            payload["output"][1]["content"].as_array().unwrap().len(),
+            1,
+            "typed protocol ciphertext part must be removed"
+        );
+        assert!(
+            !payload
+                .to_string()
+                .contains("typed-protocol-cipher")
+        );
+        assert_eq!(
+            payload["output"][2]["output"][0]["type"],
+            "encrypted_content",
+            "tool business data is not protocol ciphertext"
+        );
+        assert_eq!(
+            payload["output"][2]["output"][0]["data"],
+            "typed-tool-business-value"
         );
     }
 
