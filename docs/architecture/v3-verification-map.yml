@@ -3566,6 +3566,7 @@ features:
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
+  - npm run test:v3-runtime-private-semantics-gate
   - npm run test:v3-hub-relay-runtime-closeout
   - npm run verify:v3-hub-relay-runtime-closeout
   - npm run test:v3-hub-relay-runtime-closeout-red-fixtures
