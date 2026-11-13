@@ -2050,7 +2050,7 @@ features:
     - fe23457_relay_preserves_false_absent_and_distinct_tool_extensions
     - fe23457_strict_provider_rejects_dropped_declaration_field
     - fe23457_relay_preserves_tool_call_and_paired_result
-    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issuefe23457_anthropic_tool_preservation_public -- --nocapture --test-threads=1
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issuefe23457_anthropic_tool_preservation_public -- --nocapture
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
