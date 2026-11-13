@@ -2041,6 +2041,16 @@ features:
     response_opaque_test: anthropic_json_business_root_fields_survive_responses_client_projection
     response_opaque_command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test no_response_adjudication_blackbox anthropic_json_business_root_fields_survive_responses_client_projection -- --exact --nocapture --test-threads=1
     known_locator_control: responses_continuation_locator_does_not_enter_chat_canonical_payload proves previous_response_id is consumed by its existing continuation owner rather than treated as an unmapped business extension; public multi_listener_server previous_response_id cases retain admission and zero-provider-send behavior.
+  anthropic_tool_declaration_regression:
+    issue: fe23457
+    owner: v3/protocol_conversion/anthropic_tool_declaration
+    contract: client tools[].defer_loading and unknown declaration members survive Anthropic Relay inbound normalization, Chat Process and outbound projection into the first provider attempt; absent, false and distinct per-tool opaque values stay exact, and tool-call plus paired follow-up identity is unchanged.
+    tests:
+    - fe23457_relay_preserves_complete_declarations_first_attempt
+    - fe23457_relay_preserves_false_absent_and_distinct_tool_extensions
+    - fe23457_strict_provider_rejects_dropped_declaration_field
+    - fe23457_relay_preserves_tool_call_and_paired_result
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issuefe23457_anthropic_tool_preservation_public -- --nocapture --test-threads=1
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
@@ -2097,9 +2107,12 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hub_v1/request_outbound_mcp_tests.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec_tool_projection.rs
+  - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/responses_to_anthropic.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_codec/reasoning_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_request_field_projection.rs
   - v3/crates/routecodex-v3-runtime/src/hub_v1/anthropic_relay_runtime_codec.rs
+  - v3/crates/routecodex-v3-server/tests/issuefe23457_anthropic_tool_preservation_public.rs
   - v3/crates/routecodex-v3-runtime/tests/responses_direct_tool_passthrough.rs
   - v3/crates/routecodex-v3-server/tests/openai_chat_namespace_names.rs
   design:
