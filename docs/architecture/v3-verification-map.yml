@@ -3828,6 +3828,7 @@ features:
   - Folded reader returns the latest lifecycle row per request_key; raw reader preserves every lifecycle row so failed provider attempts stay visible.
   - Each listener writes its own isolated request-records file and never leaks another listener's port.
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
+  - A provider failure followed by a switch writes exactly one provider_attempt_failed row; the provider_switched row does not repeat the failed attempt's provider_status, error_category, error_detail, or observed_error.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
   - History writes compact oldest raw rows atomically before the byte limit, keep the new row, and remain bounded across repeated writes.
@@ -3839,6 +3840,7 @@ features:
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup
   - npm run verify:v3-resource-map
   - npm run verify-architecture-mainline-call-map
   - git diff --check
