@@ -113,11 +113,27 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
     let payload = json!({
         "id": "resp_anthropic_sig",
         "status": "completed",
-        "output": [{
-            "type": "reasoning",
-            "encrypted_content": "sig-anthropic-signature",
-            "summary": [{"type": "summary_text", "text": "signed thought"}]
-        }]
+        "output": [
+            {
+                "type": "reasoning",
+                "encrypted_content": "sig-anthropic-signature",
+                "summary": [{"type": "summary_text", "text": "signed thought"}]
+            },
+            {
+                "type": "message",
+                "content": [
+                    {"type": "output_text", "text": "visible answer"},
+                    {"type": "encrypted_content", "data": "typed-protocol-cipher"}
+                ]
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_tool",
+                "output": [
+                    {"type": "encrypted_content", "data": "typed-tool-business-value"}
+                ]
+            }
+        ]
     });
     let resp01 = build_v3_provider_resp_inbound_01_raw_with_compat_profile(
         payload,
@@ -140,6 +156,15 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
         "anthropic thinking signature 载体不得被剥离: {payload}"
     );
     assert!(payload.contains("signed thought"));
+    assert!(payload.contains("visible answer"));
+    assert!(
+        !payload.contains("typed-protocol-cipher"),
+        "typed protocol ciphertext part must be removed even for typed Anthropic source: {payload}"
+    );
+    assert!(
+        payload.contains("typed-tool-business-value"),
+        "tool business data must remain untouched: {payload}"
+    );
 }
 
 #[test]

@@ -401,8 +401,14 @@ pub fn apply_v3_response_cipher_policy(
     retain_response_cipher: bool,
     preserve_anthropic_signature: bool,
 ) {
-    if !retain_response_cipher && !preserve_anthropic_signature {
-        strip_v3_response_encrypted_fields_recursive(payload, true);
+    if !retain_response_cipher {
+        if preserve_anthropic_signature {
+            // Anthropic source 的 encrypted_content 字段是签名载体，必须保留；
+            // 但独立 `type=encrypted_content` 协议块仍不得进入 Responses 客户端。
+            strip_v3_response_typed_encrypted_content_parts_recursive(payload);
+        } else {
+            strip_v3_response_encrypted_fields_recursive(payload, true);
+        }
     }
 }
 
@@ -420,6 +426,34 @@ pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_respons
 /// 只删除 Codex 本地密文前缀。工具调用与工具结果属于业务数据，必须原样保留。
 fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bool) {
     strip_v3_response_encrypted_fields(value, strip_all, false);
+}
+
+/// 保留所有 `encrypted_content` 字段（typed Anthropic signature），只删除独立
+/// `type=encrypted_content` 协议 part。工具业务子树按现有 owner 边界完整保留。
+fn strip_v3_response_typed_encrypted_content_parts_recursive(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if map
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(is_v3_responses_tool_business_item)
+            {
+                return;
+            }
+            for child in map.values_mut() {
+                strip_v3_response_typed_encrypted_content_parts_recursive(child);
+            }
+        }
+        Value::Array(items) => {
+            items.retain(|item| {
+                item.get("type").and_then(Value::as_str) != Some("encrypted_content")
+            });
+            for item in items {
+                strip_v3_response_typed_encrypted_content_parts_recursive(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn strip_v3_response_encrypted_fields(value: &mut Value, strip_all: bool, in_content_array: bool) {

@@ -2455,6 +2455,61 @@ mod tests {
     }
 
     #[test]
+    fn response_cipher_policy_preserves_anthropic_signature_but_strips_typed_protocol_part() {
+        let mut payload = json!({
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "typed-anthropic-signature",
+                    "summary": [{"type": "summary_text", "text": "signed thought"}]
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        {"type": "output_text", "text": "visible answer"},
+                        {"type": "encrypted_content", "data": "typed-protocol-cipher"}
+                    ]
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_tool",
+                    "output": [
+                        {"type": "encrypted_content", "data": "typed-tool-business-value"}
+                    ]
+                }
+            ]
+        });
+
+        apply_v3_response_cipher_policy(&mut payload, false, true);
+
+        assert_eq!(
+            payload["output"][0]["encrypted_content"],
+            "typed-anthropic-signature",
+            "typed Anthropic source signature must survive"
+        );
+        assert_eq!(payload["output"][1]["content"][0]["text"], "visible answer");
+        assert_eq!(
+            payload["output"][1]["content"].as_array().unwrap().len(),
+            1,
+            "typed protocol ciphertext part must be removed"
+        );
+        assert!(
+            !payload
+                .to_string()
+                .contains("typed-protocol-cipher")
+        );
+        assert_eq!(
+            payload["output"][2]["output"][0]["type"],
+            "encrypted_content",
+            "tool business data is not protocol ciphertext"
+        );
+        assert_eq!(
+            payload["output"][2]["output"][0]["data"],
+            "typed-tool-business-value"
+        );
+    }
+
+    #[test]
     fn chat_reasoning_cipher_policy_keeps_business_values_and_strips_codex_shapes() {
         let mut payload = json!({
             "output": [
