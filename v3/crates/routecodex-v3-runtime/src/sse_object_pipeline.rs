@@ -216,18 +216,6 @@ pub(crate) fn process_sse_object_json<C: SseObjectConsumer>(
         })
 }
 
-pub(crate) fn project_sse_frame_json(
-    frame: &SseTransportIn03ValidatedFrameStream,
-) -> Result<Vec<u8>, SseObjectError> {
-    let object = SseObjectFrame::from_frame(frame);
-    object
-        .normalized_data_json()
-        .map(|data| data.into_bytes())
-        .ok_or_else(|| SseObjectError::Consumer {
-            message: "object has no JSON data".to_owned(),
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
