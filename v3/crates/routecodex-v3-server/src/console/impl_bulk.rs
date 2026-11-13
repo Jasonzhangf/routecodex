@@ -871,6 +871,22 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
     // Typed WebUI projection: terminal for non-SSE frames (Completed/Failed).
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
+    // A direct-lane inbound codec failure can return from the runtime before the
+    // observability accumulator exists, so the frame carries real typed Error06
+    // truth in `error_chain` while `observability` is absent. The request ledger
+    // must still close: record exactly one terminal row from the frame's own
+    // typed chain, then continue to the shared emitter path.
+    if !is_sse && observability.is_none() && (frame.status >= 400 || !frame.error_chain.is_empty())
+    {
+        if let Err(error) = record_v3_webui_error_for_context(
+            context,
+            frame.status,
+            None,
+            v3_obs_error_projection_for_direct_frame(&frame.error_chain),
+        ) {
+            emit_v3_webui_projection_failure(context, &error);
+        }
+    }
     let observability = observability?;
     // The direct lane ran the typed Error path in-process, so a non-SSE error
     // frame already holds real typed truth in `frame.error_chain`: record it here
