@@ -32,7 +32,9 @@ flowchart LR
    compilation before any listener binds. `RCC_HTTP_SSE_KEEPALIVE_MS` is
    rejected and never acts as a fallback or second truth.
 4. Provider/client event bytes and event order are unchanged.
-5. Error06 SSE starts with `event: error`; no success keepalive is prepended.
+5. Provider failure keeps Error01-06 internal. SSE transport ends with a
+   detectable break; it never emits `event: error`, provider status/body, or a
+   fabricated success terminal.
 6. EOF, provider stream error, and client body drop release the timer.
 7. Keepalive owns no continuation, tool, routing, provider, or terminal
    semantics.
