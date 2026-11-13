@@ -10,11 +10,11 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-/// A declared text-only pin cannot serve an image request. This existing
-/// route-plan rejection must keep its original source without inventing a
-/// provider attempt or escaping into the unrelated normal pool.
+/// Capability labels select the route pool; they do not reject a passable
+/// request. A pinned provider must still receive image and text requests, and
+/// the unrelated default pool must stay untouched.
 #[tokio::test]
-async fn fa22072_direct_attempt_zero_original_source_public_entry() {
+async fn fa22072_direct_capability_label_does_not_reject_declared_pin_public_entry() {
     let (home, _lock) = LOCK.lock().await;
     std::env::set_var(KEY_ENV, KEY);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -44,15 +44,7 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
     let samples = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(format!(
         ".rcc/codex-samples/openai-chat-completions/ports/{port}"
     ));
-    let original = serde_json::to_value(routecodex_v3_error::build_v3_error_01_source_raised(
-        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
-        "V3Router06RoutePoolResolved",
-        "v3_route_target_runtime_failure",
-        "direct route lifeai.step-5-preview cannot serve this request: model lacks vision",
-    ))
-    .unwrap();
     let mut controls = Vec::new();
-    let mut diagnostics = Vec::new();
     for (case, (image, stream)) in [(false, false), (true, false), (true, true), (false, true)]
         .into_iter()
         .enumerate()
@@ -101,25 +93,7 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
         let text = String::from_utf8_lossy(&wire);
         let received = captures.lock().await;
         let current = &received[before..];
-        if image {
-            if !current.is_empty() {
-                controls.push(format!(
-                    "case{case}: attempt-zero request reached provider: {current:?}"
-                ));
-            }
-            if completed
-                || text.contains(TEXT)
-                || text.contains("[DONE]")
-                || text.contains("\"error\"")
-                || text.contains(KEY)
-                || text.contains("model lacks vision")
-                || text.contains("v3_route_target_runtime_failure")
-            {
-                controls.push(format!(
-                    "case{case}: attempt-zero error leaked or completed: {text}"
-                ));
-            }
-        } else if current.len() != 1
+        if current.len() != 1
             || current[0].body["model"] != MODEL
             || current[0].authorization != format!("Bearer {KEY}")
             || status != Some(200)
@@ -151,18 +125,7 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
             continue;
         }
         let artifact = dirs[0].join("provider-failed-attempts.json");
-        if image {
-            let evidence = std::fs::read_to_string(artifact)
-                .ok()
-                .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-            if !evidence.as_ref().is_some_and(|value| {
-                value["object"] == "routecodex.v3.provider_failed_attempt_evidence"
-                    && value["attempts"] == json!([])
-                    && value["terminal_source"] == original
-            }) {
-                diagnostics.push(format!("case{case}: exact attempt-zero source absent: {evidence:?}; expected {original}"));
-            }
-        } else if artifact.exists() {
+        if artifact.exists() {
             controls.push(format!(
                 "case{case}: healthy request gained failure evidence"
             ));
@@ -188,7 +151,7 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
         .collect();
     if modes.len() != 4 || modes.iter().any(|mode| *mode != "direct") {
         controls.push(format!(
-            "actual attempt-zero entry was not Direct: {modes:?}"
+            "actual declared-pin entry was not Direct: {modes:?}"
         ));
     }
     let failures = handle.shutdown().await;
@@ -196,7 +159,7 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
         controls.push(format!("owned diagnostic shutdown failed: {failures:?}"));
     }
     if !decoy_captures.lock().await.is_empty() {
-        controls.push("attempt-zero pin entered unrelated default pool".into());
+        controls.push("capability label pin entered unrelated default pool".into());
     }
     task.abort();
     decoy_task.abort();
@@ -204,13 +167,9 @@ async fn fa22072_direct_attempt_zero_original_source_public_entry() {
     let _ = decoy_task.await;
     std::env::remove_var(KEY_ENV);
     drop(home);
-    eprintln!("direct-zero cleanup completed");
+    eprintln!("direct capability-label cleanup completed");
     assert!(
         controls.is_empty(),
-        "attempt-zero public controls failed: {controls:?}"
-    );
-    assert!(
-        diagnostics.is_empty(),
-        "known Direct attempt-zero diagnostic RED: {diagnostics:?}"
+        "capability-label public controls failed: {controls:?}"
     );
 }

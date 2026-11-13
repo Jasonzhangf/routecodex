@@ -221,6 +221,10 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         candidate_ids: generated.candidate_ids ?? candidateIds ?? null,
         attempt_store: generated.attempt_store ?? null,
         attempt_store_receipt: generated.attempt_store_receipt ?? null,
+        process: generated.process ?? null,
+        process_receipt: generated.process_receipt ?? null,
+        provider_health: generated.provider_health ?? null,
+        provider_health_receipt: generated.provider_health_receipt ?? null,
       }, null, 2));
       // Explicit same-protocol Relay needs an API that really authors the mode.
       // Do not count a default Direct run as supplemental Relay evidence.
@@ -229,7 +233,6 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         entry = { case_id: fixture.case_id, cell: fixture.cell, status: 'not_run',
           diagnostic: 'lifecycle generateRccConfig does not expose authored same-protocol relay mode' };
       } else {
-        mock.setCandidateIdentities?.(generated.candidate_identity_receipts?.candidates ?? []);
         phase = 'config_check';
         const check = spawnSync(binary, ['config', 'check', '-c', generated.path], {
           encoding: 'utf8', timeout: options.startupTimeoutMs,
@@ -251,7 +254,6 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
           ? await runProviderConcurrencyReplay({
             fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
             evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
-            candidateIdentityReceipts: generated.candidate_identity_receipts?.candidates ?? [],
           })
           : await runCase({
             fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
@@ -310,7 +312,6 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
             sampleRoot: retainedSampleRoot ?? sourceSampleRoot,
             listenerPort: generated?.rcc_port ?? null,
             exhaustedWindow: entry.observations?.provider_concurrency?.exhausted_window ?? {},
-            requestWindow: entry.observations?.provider_concurrency?.request_window ?? null,
             collectionPhase,
             stopReceipt: cleanup.rcc ?? null,
           })

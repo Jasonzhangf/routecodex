@@ -24,7 +24,18 @@ edges:
     to_node: V3Front08ClientTerminalOrError
     owner_feature_id: v3.client_sse_head_commit
     status: anchored
+  - step_id: v3-client-pending-disconnect-terminal
+    from_node: V3ServerRespOutbound06ClientFrame
+    to_node: V3Front08ClientTerminalOrError
+    owner_feature_id: v3.client_sse_head_commit
+    status: anchored
+    resource_flow:
+      consumes: []
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: [v3.server.internal_observability_projection]
 return_path:
+  cancelled: Pending-outcome client disconnect takes the recorder once before aborting its task, even before any business frame. Resolved outcomes keep the existing finalizer.
   success: The runtime outcome arrives inside one keepalive interval and the exact runtime status, headers, and body return unchanged.
   committed: The committed channel carries the projected client payload with SSE transport framing only; the transport module reads the HTTP status and content type and never parses, reclassifies, or rewrites the payload.
   failure: The runtime outcome has no successful client payload, so the committed channel closes the transport without projecting a provider status, error payload, or fabricated success.

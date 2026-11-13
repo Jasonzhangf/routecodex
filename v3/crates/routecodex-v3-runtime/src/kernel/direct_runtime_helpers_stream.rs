@@ -2425,13 +2425,7 @@ mod target_exhaustion_disposition_tests {
         );
         assert_eq!(
             nonterminal_decision.action,
-            V3Error05ExecutionAction::WaitThenReselect {
-                recovery: nonterminal_decision
-                    .action
-                    .recovery_witness()
-                    .expect("nonterminal decision must retain recovery")
-                    .clone(),
-            }
+            V3Error05ExecutionAction::Reselect
         );
         let nonterminal = provider_terminal_output(
             nonterminal_decision,

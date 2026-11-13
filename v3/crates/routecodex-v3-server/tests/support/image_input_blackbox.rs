@@ -168,7 +168,6 @@ enum Expect {
     Vision,
     SecondVision,
     Text,
-    Exhaustion,
 }
 
 /// The `request` fixture places images inside the current user run only when
@@ -193,13 +192,7 @@ fn expected_route(pool: PoolState, tool: bool) -> Expect {
                 Expect::Text
             }
         }
-        PoolState::MultimodalDisabled => {
-            if current_turn_image {
-                Expect::Exhaustion
-            } else {
-                Expect::Text
-            }
-        }
+        PoolState::MultimodalDisabled => Expect::Text,
     }
 }
 
@@ -297,74 +290,6 @@ fn request(path: &str, tool: bool, image_only: bool) -> Value {
 async fn run_case(path: &str, tool: bool, pool: PoolState, protocol: &str) {
     run_case_shape(path, tool, pool, protocol, false, None).await;
     run_case_shape(path, tool, pool, protocol, true, None).await;
-}
-
-async fn assert_incomplete_blackbox_transport(
-    result: Result<reqwest::Response, reqwest::Error>,
-    started: std::time::Instant,
-    context: &str,
-) {
-    match result {
-        Err(error) => {
-            let elapsed = started.elapsed();
-            assert!(
-                !error.is_timeout(),
-                "{context}: an unfinished client wait is not a transport break: {error}"
-            );
-            assert!(
-                !error.is_connect(),
-                "{context}: the test listener was reachable, so connect failure is not exhaustion: {error}"
-            );
-            assert!(
-                error.status().is_none(),
-                "{context}: a client HTTP response is not a transport break: {error}"
-            );
-            assert!(
-                elapsed < Duration::from_secs(15),
-                "{context}: exhaustion must terminate before the client wait expires: {elapsed:?}"
-            );
-        }
-        Ok(mut response) => {
-            assert_eq!(
-                response.status(),
-                StatusCode::OK,
-                "{context}: exhaustion must not generate a client HTTP error"
-            );
-            let mut body = Vec::new();
-            let terminal = loop {
-                match response.chunk().await {
-                    Ok(Some(chunk)) => body.extend_from_slice(&chunk),
-                    Ok(None) => panic!(
-                        "{context}: exhaustion completed the client transport normally: {}",
-                        String::from_utf8_lossy(&body)
-                    ),
-                    Err(error) => break error,
-                }
-            };
-            let elapsed = started.elapsed();
-            assert!(
-                !terminal.is_timeout(),
-                "{context}: an unfinished client wait is not a transport break: {terminal}"
-            );
-            assert!(
-                !terminal.is_connect(),
-                "{context}: the test listener was reachable, so connect failure is not exhaustion: {terminal}"
-            );
-            assert!(
-                terminal.status().is_none(),
-                "{context}: a client HTTP response is not a transport break: {terminal}"
-            );
-            let body = String::from_utf8_lossy(&body);
-            assert!(
-                body.trim().is_empty(),
-                "{context}: exhaustion must not project a success or error payload: {body}"
-            );
-            assert!(
-                elapsed < Duration::from_secs(15),
-                "{context}: exhaustion must terminate before the client wait expires: {elapsed:?}"
-            );
-        }
-    }
 }
 
 async fn run_case_shape(
@@ -525,7 +450,6 @@ async fn run_case_shape(
             .unwrap()["output"] = output.clone();
     }
     let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let request_started = std::time::Instant::now();
     let result = reqwest::Client::new()
         .post(format!("http://{}{path}", handle.listeners[0].addr))
         .json(&body)
@@ -544,30 +468,6 @@ async fn run_case_shape(
         }
         bodies
     };
-    if expect == Expect::Exhaustion {
-        // The selected pool's only candidate is disabled. The request must end
-        // without a fabricated success, without the provider error payload and
-        // without consulting the default pool.
-        assert_incomplete_blackbox_transport(
-            result,
-            request_started,
-            &format!("{path} tool={tool} protocol={protocol}"),
-        )
-        .await;
-        assert!(
-            drain(&mut vision_rx).is_empty(),
-            "a disabled candidate must not reach the network"
-        );
-        assert!(
-            drain(&mut second_rx).is_empty(),
-            "no second candidate may run for a disabled single candidate"
-        );
-        assert!(
-            drain(&mut text_rx).is_empty(),
-            "the default pool must not be consulted after the selected pool exhausts"
-        );
-        return;
-    }
     let result = result.unwrap_or_else(|error| {
         panic!("{path} tool={tool} pool={pool:?} protocol={protocol}: {error}")
     });
@@ -771,7 +671,7 @@ fn single_multimodal_pool_recovers_within_pool_not_cross_pool() {
 }
 
 #[test]
-fn disabled_multimodal_pool_exhausts_without_default_fallback() {
+fn disabled_multimodal_pool_continues_to_declared_default() {
     run_blackbox_test(async {
         let _guard = TEST_LOCK.lock().await;
         for path in ["/v1/chat/completions", "/v1/responses", "/v1/messages"] {
@@ -831,6 +731,19 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, earlier_imag
     text.models.get_mut("test").unwrap().wire_name = "text-wire".into();
     let group = manifest.route_groups.get_mut("default").unwrap();
     group.pools.remove("client_test");
+    let default_pool = group.pools.get("default").unwrap().clone();
+    let mut multimodal_pool = default_pool.clone();
+    multimodal_pool.id = "multimodal".into();
+    multimodal_pool.match_rule = Some(routecodex_v3_config::V3RoutePoolMatchManifest {
+        precedence: 100,
+        entry_protocol: None,
+        models: Vec::new(),
+        required_capabilities: vec!["multimodal".into()],
+        min_input_tokens: None,
+        max_input_tokens: None,
+    });
+    multimodal_pool.targets = vec![pool_target("test")];
+    group.pools.insert("multimodal".into(), multimodal_pool);
     group
         .pools
         .get_mut("default")
@@ -876,10 +789,21 @@ async fn assert_isolated_image_boundary(path: &str, content: Value, earlier_imag
         result.unwrap_or_else(|error| panic!("{path} earlier_image={earlier_image}: {error}"));
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.text().await.unwrap().contains("boundary-ok"));
-    let mut content_refs = Vec::new();
-    image_references(&content, &mut content_refs);
-    let has_image =
-        !content_refs.is_empty() || content["type"].as_str() == Some("function_call_output");
+    let has_image = match &content {
+        Value::Array(parts) => parts.iter().any(|part| {
+            part.get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind.contains("image"))
+        }),
+        Value::Object(row)
+            if row.get("type").and_then(Value::as_str) == Some("function_call_output") =>
+        {
+            let mut refs = Vec::new();
+            image_references(&content, &mut refs);
+            !refs.is_empty()
+        }
+        _ => false,
+    };
     let (wire, expected_model) = if earlier_image || !has_image {
         assert!(
             vision_rx.try_recv().is_err(),

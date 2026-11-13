@@ -14,16 +14,7 @@
     "candidate_ids": [
       "mock-responses/mock.responses-model"
     ],
-    "candidate_tiers": [
-      [
-        "mock-responses/mock.responses-model"
-      ]
-    ],
-    "provider_concurrency": {
-      "maxInFlight": 1,
-      "acquireTimeoutMs": 1000,
-      "staleLeaseMs": 300000
-    },
+    "process": "direct",
     "attempt_store": {
       "residence_timeout_ms": 30000
     }
@@ -33,12 +24,12 @@
     "path": "/v1/responses",
     "headers": {
       "content-type": "application/json",
-      "session-id": "concurrency-held-direct",
-      "thread-id": "concurrency-held-direct"
+      "session-id": "independence-held-direct-1",
+      "thread-id": "independence-held-direct-1"
     },
     "body": {
       "model": "mock.responses-model",
-      "input": "[holder] hold the only provider capacity",
+      "input": "hold the first independent direct request",
       "stream": true
     }
   },
@@ -69,16 +60,13 @@
       {
         "kind": "fault",
         "fault": "hold-open-controlled",
-        "when": {
-          "input_contains": "[holder]"
-        },
         "sse_events": [
           {
             "event": "response.created",
             "data": {
               "type": "response.created",
               "response": {
-                "id": "resp_concurrency_direct",
+                "id": "resp_independence_direct",
                 "status": "in_progress",
                 "output": []
               }
@@ -90,7 +78,7 @@
               "type": "response.output_text.delta",
               "output_index": 0,
               "content_index": 0,
-              "item_id": "msg_concurrency_direct",
+              "item_id": "msg_independence_direct",
               "delta": "held response released"
             }
           },
@@ -99,7 +87,7 @@
             "data": {
               "type": "response.completed",
               "response": {
-                "id": "resp_concurrency_direct",
+                "id": "resp_independence_direct",
                 "status": "completed",
                 "output": [
                   {
@@ -117,7 +105,7 @@
                     "summary": [
                       {
                         "type": "summary_text",
-                        "text": "concurrency holder completed"
+                        "text": "direct holder completed"
                       }
                     ]
                   }
@@ -126,140 +114,6 @@
                   "input_tokens": 5,
                   "output_tokens": 3,
                   "total_tokens": 8
-                }
-              }
-            }
-          }
-        ]
-      },
-      {
-        "kind": "sse",
-        "when": {
-          "input_contains": "[sibling-b]"
-        },
-        "status": 200,
-        "content_type": "text/event-stream",
-        "sse_events": [
-          {
-            "event": "response.created",
-            "data": {
-              "type": "response.created",
-              "response": {
-                "id": "resp_concurrency_direct_b",
-                "status": "in_progress",
-                "output": []
-              }
-            }
-          },
-          {
-            "event": "response.output_text.delta",
-            "data": {
-              "type": "response.output_text.delta",
-              "output_index": 0,
-              "content_index": 0,
-              "item_id": "msg_concurrency_direct_b",
-              "delta": "sibling B completed after release"
-            }
-          },
-          {
-            "event": "response.completed",
-            "data": {
-              "type": "response.completed",
-              "response": {
-                "id": "resp_concurrency_direct_b",
-                "status": "completed",
-                "output": [
-                  {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                      {
-                        "type": "output_text",
-                        "text": "sibling B completed after release"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "reasoning",
-                    "summary": [
-                      {
-                        "type": "summary_text",
-                        "text": "sibling B completed after release"
-                      }
-                    ]
-                  }
-                ],
-                "usage": {
-                  "input_tokens": 5,
-                  "output_tokens": 4,
-                  "total_tokens": 9
-                }
-              }
-            }
-          }
-        ]
-      },
-      {
-        "kind": "sse",
-        "when": {
-          "input_contains": "[sibling-c]"
-        },
-        "status": 200,
-        "content_type": "text/event-stream",
-        "sse_events": [
-          {
-            "event": "response.created",
-            "data": {
-              "type": "response.created",
-              "response": {
-                "id": "resp_concurrency_direct_c",
-                "status": "in_progress",
-                "output": []
-              }
-            }
-          },
-          {
-            "event": "response.output_text.delta",
-            "data": {
-              "type": "response.output_text.delta",
-              "output_index": 0,
-              "content_index": 0,
-              "item_id": "msg_concurrency_direct_c",
-              "delta": "sibling C completed after release"
-            }
-          },
-          {
-            "event": "response.completed",
-            "data": {
-              "type": "response.completed",
-              "response": {
-                "id": "resp_concurrency_direct_c",
-                "status": "completed",
-                "output": [
-                  {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                      {
-                        "type": "output_text",
-                        "text": "sibling C completed after release"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "reasoning",
-                    "summary": [
-                      {
-                        "type": "summary_text",
-                        "text": "sibling C completed after release"
-                      }
-                    ]
-                  }
-                ],
-                "usage": {
-                  "input_tokens": 5,
-                  "output_tokens": 4,
-                  "total_tokens": 9
                 }
               }
             }
@@ -284,94 +138,54 @@
     "semantic_terminal_required": true
   },
   "request_independence_replay": {
-    "kind": "bounded_capacity_wait",
-    "sibling_client_requests": [
+    "kind": "provider_request_independence",
+    "shape": "held_concurrent_requests",
+    "concurrent_client_requests": [
       {
-        "id": "sibling-b",
-        "client_request": {
-          "method": "POST",
-          "path": "/v1/responses",
-          "headers": {
-            "content-type": "application/json",
-            "session-id": "concurrency-direct-sibling-b",
-            "thread-id": "concurrency-direct-sibling-b"
-          },
-          "body": {
-            "model": "mock.responses-model",
-            "input": "[sibling-b] wait for released capacity",
-            "stream": true
-          }
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "session-id": "independence-held-direct-1",
+          "thread-id": "independence-held-direct-2"
         },
-        "expected_client": {
-          "transport": "complete",
-          "status": 200,
-          "body_must": {
-            "text": "sibling B completed after release",
-            "status": "completed"
-          },
-          "semantic_terminal_required": true
+        "body": {
+          "model": "mock.responses-model",
+          "input": "second independent direct request",
+          "stream": true
         }
       },
       {
-        "id": "sibling-c",
-        "client_request": {
-          "method": "POST",
-          "path": "/v1/responses",
-          "headers": {
-            "content-type": "application/json",
-            "session-id": "concurrency-direct-sibling-c",
-            "thread-id": "concurrency-direct-sibling-c"
-          },
-          "body": {
-            "model": "mock.responses-model",
-            "input": "[sibling-c] wait for released capacity",
-            "stream": true
-          }
+        "method": "POST",
+        "path": "/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "session-id": "independence-held-direct-3",
+          "thread-id": "independence-held-direct-3"
         },
-        "expected_client": {
-          "transport": "complete",
-          "status": 200,
-          "body_must": {
-            "text": "sibling C completed after release",
-            "status": "completed"
-          },
-          "semantic_terminal_required": true
+        "body": {
+          "model": "mock.responses-model",
+          "input": "third independent direct request",
+          "stream": true
         }
       }
     ],
-    "pending_before_release": [
-      "sibling-b",
-      "sibling-c"
-    ],
-    "completed_before_release": [],
-    "expected_peak_business_in_flight": {
-      "mock-responses/mock.responses-model": 1
+    "expected_concurrent_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "held response released",
+        "status": "completed"
+      },
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
     },
-    "expected_business_sends": [
-      {
-        "request_id": "holder",
-        "candidate_id": "mock-responses/mock.responses-model",
-        "outcome": "success",
-        "status": 200
-      },
-      {
-        "request_id": "sibling-b",
-        "candidate_id": "mock-responses/mock.responses-model",
-        "outcome": "success",
-        "status": 200
-      },
-      {
-        "request_id": "sibling-c",
-        "candidate_id": "mock-responses/mock.responses-model",
-        "outcome": "success",
-        "status": 200
-      }
-    ],
-    "failed_attempt": null,
-    "forbidden_client_content": [
-      "provider_error",
-      "internal_error",
-      "routecodex_internal",
+    "expected_upstream_business_sends": 3,
+    "typed_error_codes_must_not": [
       "provider_concurrency_busy",
       "selected_target_exhausted"
     ]
@@ -387,7 +201,8 @@
       "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
     ],
     "tests": [
-      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_all_full_exhausts_without_queueing"
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_same_listener_same_session_admits_independent_requests",
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_client_drop_releases_same_session_before_provider_eof"
     ]
   },
   "contract_differences": []

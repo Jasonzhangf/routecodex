@@ -148,13 +148,8 @@ test('generateRccConfig authors the declared runtime attempt_store policy', asyn
   }
 });
 
-test('generateRccConfig authors provider concurrency on the provider owner', async () => {
-  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-provider-concurrency-test-'));
-  const providerConcurrency = {
-    maxInFlight: 1,
-    acquireTimeoutMs: 60000,
-    staleLeaseMs: 300000,
-  };
+test('generateRccConfig authors Responses process=direct on the default interface', async () => {
+  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-provider-process-test-'));
   const generated = await generateRccConfig({
     mockPort: 12345, rccPort: 12346, adminPort: 12370, providerProtocol: 'responses',
     mode: 'direct', workRoot,
@@ -163,18 +158,31 @@ test('generateRccConfig authors provider concurrency on the provider owner', asy
       model: 'mock.responses-model',
       wire_model: 'responses-model',
       candidate_ids: ['mock-responses/mock.responses-model'],
-      provider_concurrency: providerConcurrency,
+      process: 'direct',
     },
   });
   try {
-    assert.deepEqual(generated.provider_concurrency, providerConcurrency);
-    assert.deepEqual(generated.provider_concurrency_receipt.policy, providerConcurrency);
-    assert.equal(generated.provider_concurrency_receipt.config_section, 'provider.concurrency');
+    assert.equal(generated.process, 'direct');
+    assert.equal(generated.process_receipt.provider_process, 'direct');
+    assert.equal(generated.process_receipt.interface_process, 'direct');
+    assert.equal(generated.process_receipt.interface_id, 'default');
+    assert.equal(
+      generated.process_receipt.config_section,
+      'provider.interfaces.default.responses.process',
+    );
     const providerText = readFileSync(generated.provider_path, 'utf8');
-    assert.match(providerText, /\[provider\.concurrency\]/);
-    assert.match(providerText, /maxInFlight = 1/);
-    assert.match(providerText, /acquireTimeoutMs = 60000/);
-    assert.match(providerText, /staleLeaseMs = 300000/);
+    // The default interface is authored explicitly, so the Direct process
+    // lands on the canonical interface owner and its provider projection.
+    assert.match(providerText, /^\[provider\.interfaces\.default\]$/m);
+    assert.match(providerText, /responses = \{ process = "direct", streaming = "always" \}/);
+    // Legacy `type`/`baseURL` scalars must not be duplicated beside the
+    // explicit interface; the protocol and endpoint appear exactly once.
+    assert.equal((providerText.match(/type = "responses"/g) ?? []).length, 1);
+    assert.equal(
+      (providerText.match(/baseURL = "http:\/\/127\.0\.0\.1:12345\/v1"/g) ?? []).length,
+      1,
+    );
+    assert.match(providerText, /defaultModel = "responses-model"/);
   } finally {
     generated.cleanup();
     rmSync(workRoot, { recursive: true, force: true });
@@ -311,69 +319,6 @@ test('generateRccConfig authors two same-tier providers with distinct fake ident
   } finally {
     generated.cleanup();
     rmSync(workRoot, { recursive: true, force: true });
-  }
-});
-
-test('generateRccConfig authors explicit candidate tiers inside one selected target', async () => {
-  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-candidate-tiers-test-'));
-  const [mockPort, rccPort] = await distinctFreePorts();
-  const runtimeSetup = {
-    provider_id: 'mock-chat-busy',
-    model: 'mock.chat-model',
-    wire_model: 'chat-model',
-    candidate_ids: ['mock-chat-busy/mock.chat-model', 'mock-chat-excluded/mock.chat-model'],
-    candidate_tiers: [
-      ['mock-chat-busy/mock.chat-model'],
-      ['mock-chat-excluded/mock.chat-model'],
-    ],
-  };
-  const generated = await generateRccConfig({
-    mockPort,
-    rccPort,
-    providerProtocol: 'openai_chat',
-    workRoot,
-    runtimeSetup,
-  });
-  try {
-    assert.equal(generated.candidate_identity_receipts.tier_count, 2);
-    assert.deepEqual(generated.candidate_identity_receipts.candidate_tiers, runtimeSetup.candidate_tiers);
-    assert.match(
-      generated.text,
-      /tiers = \[\[\{ use = "mock-chat-busy\/mock\.chat-model" \}\], \[\{ use = "mock-chat-excluded\/mock\.chat-model" \}\]\]/,
-    );
-    assert.equal((generated.text.match(/\{ use = /g) ?? []).length, 2);
-    assert.deepEqual(
-      generated.provider_files.map((file) => file.provider_id),
-      ['mock-chat-busy', 'mock-chat-excluded'],
-    );
-  } finally {
-    generated.cleanup();
-    rmSync(workRoot, { recursive: true, force: true });
-  }
-});
-
-test('generateRccConfig rejects candidate tiers outside declared membership or with duplicate members', async () => {
-  const base = {
-    provider_id: 'mock-chat-a',
-    model: 'mock.chat-model',
-    wire_model: 'chat-model',
-    candidate_ids: ['mock-chat-a/mock.chat-model', 'mock-chat-b/mock.chat-model'],
-  };
-  for (const [candidateTiers, expected] of [
-    [[['mock-chat-a/mock.chat-model'], ['mock-chat-missing/mock.chat-model']], /not in candidate_ids/],
-    [[['mock-chat-a/mock.chat-model', 'mock-chat-a/mock.chat-model'], ['mock-chat-b/mock.chat-model']], /duplicated/],
-    [[['mock-chat-a/mock.chat-model']], /include every candidate exactly once/],
-  ]) {
-    await assert.rejects(
-      generateRccConfig({
-        mockPort: 12345,
-        rccPort: 12346,
-        providerProtocol: 'openai_chat',
-        workRoot: tmpdir(),
-        runtimeSetup: { ...base, candidate_tiers: candidateTiers },
-      }),
-      expected,
-    );
   }
 });
 

@@ -53,9 +53,9 @@ Use this SOP when `/v1/responses` returns success on the wrong provider/model, a
    - `V3Execution11ProtocolDecision`
    - `V3Provider12ResponsesWirePayload`
 3. Apply model mapping rules:
-   - explicit `match.models` route pools declare inbound client model -> allowed targets mapping.
+   - ordinary pool selection uses the declared current-turn route classification; `match.models` does not select or filter ordinary pools. A valid explicit `provider.model` selects that provider/model directly.
    - provider-wire hook rewrites outbound `body.model` to selected target `wire_model`.
-   - default/no-explicit-model paths must reject silent wrong-model success unless a configured target model id matches the requested model.
+   - ordinary client model aliases do not constrain the model of a declared pool target; the selected target owns the outbound wire model.
    - provider `aliases` are catalog/display metadata only; they must not authorize runtime requested-model matching or provider-wire model rewriting.
 4. Apply provider-error rules:
    - every provider/runtime failure, including 429/401/403/413/5xx/transport/codec failures, enters `V3Error01SourceRaised -> ... -> V3Error06ClientProjected`.

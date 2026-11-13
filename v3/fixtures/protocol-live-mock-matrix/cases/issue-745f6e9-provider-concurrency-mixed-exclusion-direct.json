@@ -8,25 +8,18 @@
     "mode": "direct"
   },
   "runtime_setup": {
-    "provider_id": "mock-responses-busy",
+    "provider_id": "mock-responses-primary",
     "model": "mock.responses-model",
     "wire_model": "responses-model",
     "candidate_ids": [
-      "mock-responses-busy/mock.responses-model",
-      "mock-responses-excluded/mock.responses-model"
+      "mock-responses-primary/mock.responses-model",
+      "mock-responses-recovered/mock.responses-model"
     ],
-    "candidate_tiers": [
-      [
-        "mock-responses-busy/mock.responses-model"
-      ],
-      [
-        "mock-responses-excluded/mock.responses-model"
-      ]
-    ],
-    "provider_concurrency": {
-      "maxInFlight": 1,
-      "acquireTimeoutMs": 1000,
-      "staleLeaseMs": 300000
+    "process": "direct",
+    "health": {
+      "enabled": true,
+      "failure_threshold": 1,
+      "cooldown_ms": 60000
     },
     "attempt_store": {
       "residence_timeout_ms": 30000
@@ -37,12 +30,12 @@
     "path": "/v1/responses",
     "headers": {
       "content-type": "application/json",
-      "session-id": "concurrency-mixed-held-direct",
-      "thread-id": "concurrency-mixed-held-direct"
+      "session-id": "independence-failure-direct-holder",
+      "thread-id": "independence-failure-direct-holder"
     },
     "body": {
       "model": "mock.responses-model",
-      "input": "[holder] hold the only direct provider capacity",
+      "input": "hold the direct provider while a sibling fails",
       "stream": true
     }
   },
@@ -73,16 +66,13 @@
       {
         "kind": "fault",
         "fault": "hold-open-controlled",
-        "when": {
-          "input_contains": "[holder]"
-        },
         "sse_events": [
           {
             "event": "response.created",
             "data": {
               "type": "response.created",
               "response": {
-                "id": "resp_concurrency_mixed_direct",
+                "id": "resp_independence_failure_direct_holder",
                 "status": "in_progress",
                 "output": []
               }
@@ -94,7 +84,7 @@
               "type": "response.output_text.delta",
               "output_index": 0,
               "content_index": 0,
-              "item_id": "msg_concurrency_mixed_direct",
+              "item_id": "msg_independence_failure_direct_holder",
               "delta": "held response released"
             }
           },
@@ -103,7 +93,7 @@
             "data": {
               "type": "response.completed",
               "response": {
-                "id": "resp_concurrency_mixed_direct",
+                "id": "resp_independence_failure_direct_holder",
                 "status": "completed",
                 "output": [
                   {
@@ -121,7 +111,7 @@
                     "summary": [
                       {
                         "type": "summary_text",
-                        "text": "concurrency holder completed"
+                        "text": "direct failure holder completed"
                       }
                     ]
                   }
@@ -138,24 +128,17 @@
       },
       {
         "kind": "json",
-        "when": {
-          "input_contains": "[sibling-b]",
-          "provider_id": "mock-responses-excluded"
-        },
-        "status": 503,
+        "status": 500,
         "content_type": "application/json",
         "body": {
           "error": {
-            "message": "controlled provider 503"
+            "message": "controlled provider failure",
+            "code": "upstream_http_error"
           }
         }
       },
       {
         "kind": "sse",
-        "when": {
-          "input_contains": "[sibling-c]",
-          "provider_id": "mock-responses-excluded"
-        },
         "status": 200,
         "content_type": "text/event-stream",
         "sse_events": [
@@ -164,7 +147,7 @@
             "data": {
               "type": "response.created",
               "response": {
-                "id": "resp_concurrency_mixed_c_direct",
+                "id": "resp_independence_failure_direct_recovered",
                 "status": "in_progress",
                 "output": []
               }
@@ -176,8 +159,8 @@
               "type": "response.output_text.delta",
               "output_index": 0,
               "content_index": 0,
-              "item_id": "msg_concurrency_mixed_c_direct",
-              "delta": "sibling C completed through E"
+              "item_id": "msg_independence_failure_direct_recovered",
+              "delta": "recovered response"
             }
           },
           {
@@ -185,7 +168,7 @@
             "data": {
               "type": "response.completed",
               "response": {
-                "id": "resp_concurrency_mixed_c_direct",
+                "id": "resp_independence_failure_direct_recovered",
                 "status": "completed",
                 "output": [
                   {
@@ -194,7 +177,7 @@
                     "content": [
                       {
                         "type": "output_text",
-                        "text": "sibling C completed through E"
+                        "text": "recovered response"
                       }
                     ]
                   },
@@ -203,83 +186,15 @@
                     "summary": [
                       {
                         "type": "summary_text",
-                        "text": "sibling C completed through E"
+                        "text": "direct failure recovered completed"
                       }
                     ]
                   }
                 ],
                 "usage": {
                   "input_tokens": 5,
-                  "output_tokens": 4,
-                  "total_tokens": 9
-                }
-              }
-            }
-          }
-        ]
-      },
-      {
-        "kind": "sse",
-        "when": {
-          "input_contains": "[sibling-b]",
-          "provider_id": "mock-responses-busy"
-        },
-        "status": 200,
-        "content_type": "text/event-stream",
-        "sse_events": [
-          {
-            "event": "response.created",
-            "data": {
-              "type": "response.created",
-              "response": {
-                "id": "resp_concurrency_mixed_b_recovery_direct",
-                "status": "in_progress",
-                "output": []
-              }
-            }
-          },
-          {
-            "event": "response.output_text.delta",
-            "data": {
-              "type": "response.output_text.delta",
-              "output_index": 0,
-              "content_index": 0,
-              "item_id": "msg_concurrency_mixed_b_recovery_direct",
-              "delta": "sibling B recovered through A"
-            }
-          },
-          {
-            "event": "response.completed",
-            "data": {
-              "type": "response.completed",
-              "response": {
-                "id": "resp_concurrency_mixed_b_recovery_direct",
-                "status": "completed",
-                "output": [
-                  {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                      {
-                        "type": "output_text",
-                        "text": "sibling B recovered through A"
-                      }
-                    ]
-                  },
-                  {
-                    "type": "reasoning",
-                    "summary": [
-                      {
-                        "type": "summary_text",
-                        "text": "sibling B recovered through A"
-                      }
-                    ]
-                  }
-                ],
-                "usage": {
-                  "input_tokens": 5,
-                  "output_tokens": 4,
-                  "total_tokens": 9
+                  "output_tokens": 2,
+                  "total_tokens": 7
                 }
               }
             }
@@ -304,112 +219,75 @@
     "semantic_terminal_required": true
   },
   "request_independence_replay": {
-    "kind": "request_local_failure_isolation",
-    "sibling_client_requests": [
-      {
-        "id": "sibling-b",
-        "client_request": {
-          "method": "POST",
-          "path": "/v1/responses",
-          "headers": {
-            "content-type": "application/json",
-            "session-id": "concurrency-mixed-direct-sibling-b",
-            "thread-id": "concurrency-mixed-direct-sibling-b"
-          },
-          "body": {
-            "model": "mock.responses-model",
-            "input": "[sibling-b] fail E then recover A",
-            "stream": true
-          }
-        },
-        "expected_client": {
-          "transport": "complete",
-          "status": 200,
-          "body_must": {
-            "text": "sibling B recovered through A",
-            "status": "completed"
-          },
-          "semantic_terminal_required": true
-        }
+    "kind": "provider_request_independence",
+    "shape": "failure_isolation",
+    "failed_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "independence-failure-direct-failed",
+        "thread-id": "independence-failure-direct-failed"
       },
-      {
-        "id": "sibling-c",
-        "client_request": {
-          "method": "POST",
-          "path": "/v1/responses",
-          "headers": {
-            "content-type": "application/json",
-            "session-id": "concurrency-mixed-direct-sibling-c",
-            "thread-id": "concurrency-mixed-direct-sibling-c"
-          },
-          "body": {
-            "model": "mock.responses-model",
-            "input": "[sibling-c] complete through E",
-            "stream": true
-          }
-        },
-        "expected_client": {
-          "transport": "complete",
-          "status": 200,
-          "body_must": {
-            "text": "sibling C completed through E",
-            "status": "completed"
-          },
-          "semantic_terminal_required": true
-        }
+      "body": {
+        "model": "mock.responses-model",
+        "input": "fail once then recover on the next direct candidate",
+        "stream": true
       }
-    ],
-    "pending_before_release": [
-      "sibling-b"
-    ],
-    "completed_before_release": [
-      "sibling-c"
-    ],
-    "expected_peak_business_in_flight": {
-      "mock-responses-busy/mock.responses-model": 1,
-      "mock-responses-excluded/mock.responses-model": 1
     },
-    "expected_business_sends": [
-      {
-        "request_id": "holder",
-        "candidate_id": "mock-responses-busy/mock.responses-model",
-        "outcome": "success",
-        "status": 200
+    "expected_failed_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "recovered response",
+        "status": "completed"
       },
-      {
-        "request_id": "sibling-b",
-        "candidate_id": "mock-responses-excluded/mock.responses-model",
-        "outcome": "failure",
-        "status": 503
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "post_recovery_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "independence-failure-direct-post",
+        "thread-id": "independence-failure-direct-post"
       },
-      {
-        "request_id": "sibling-c",
-        "candidate_id": "mock-responses-excluded/mock.responses-model",
-        "outcome": "success",
-        "status": 200
-      },
-      {
-        "request_id": "sibling-b",
-        "candidate_id": "mock-responses-busy/mock.responses-model",
-        "outcome": "success",
-        "status": 200
+      "body": {
+        "model": "mock.responses-model",
+        "input": "independent direct request after recovery",
+        "stream": true
       }
-    ],
-    "failed_attempt": {
-      "request_id": "sibling-b",
-      "candidate_id": "mock-responses-excluded/mock.responses-model",
-      "http_status": 503,
-      "body_contains": "controlled provider 503",
-      "typed_error_code": "provider_http_503",
-      "client_visible": false,
-      "retry_before_release": false
     },
-    "forbidden_client_content": [
-      "controlled provider 503",
-      "provider_error",
-      "internal_error",
-      "routecodex_internal",
-      "selected_target_exhausted"
+    "expected_post_recovery_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "recovered response",
+        "status": "completed"
+      },
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "failure_isolation": {
+      "failed_provider_id": "mock-responses-primary",
+      "recovered_provider_id": "mock-responses-recovered",
+      "expected_provider_status": 500,
+      "expected_action": "switch_provider",
+      "expected_holder_business_sends": 1,
+      "expected_failed_business_sends": 1,
+      "expected_recovery_business_sends": 2
+    },
+    "typed_error_codes_must_not": [
+      "provider_concurrency_busy"
     ]
   },
   "assertions": {
@@ -418,11 +296,12 @@
     "no_control_leakage": true
   },
   "source": {
+    "sha": "25c366feb",
     "files": [
       "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
     ],
     "tests": [
-      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_direct_mixed_exclusion_stays_generic"
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_direct_provider_http_error_never_reaches_the_client"
     ]
   },
   "contract_differences": []

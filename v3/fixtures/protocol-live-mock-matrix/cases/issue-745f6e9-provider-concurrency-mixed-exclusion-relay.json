@@ -8,25 +8,17 @@
     "mode": "relay"
   },
   "runtime_setup": {
-    "provider_id": "mock-chat-busy",
+    "provider_id": "mock-chat-primary",
     "model": "mock.chat-model",
     "wire_model": "chat-model",
     "candidate_ids": [
-      "mock-chat-busy/mock.chat-model",
-      "mock-chat-excluded/mock.chat-model"
+      "mock-chat-primary/mock.chat-model",
+      "mock-chat-recovered/mock.chat-model"
     ],
-    "candidate_tiers": [
-      [
-        "mock-chat-busy/mock.chat-model"
-      ],
-      [
-        "mock-chat-excluded/mock.chat-model"
-      ]
-    ],
-    "provider_concurrency": {
-      "maxInFlight": 1,
-      "acquireTimeoutMs": 1000,
-      "staleLeaseMs": 300000
+    "health": {
+      "enabled": true,
+      "failure_threshold": 1,
+      "cooldown_ms": 60000
     },
     "attempt_store": {
       "residence_timeout_ms": 30000
@@ -37,12 +29,12 @@
     "path": "/v1/responses",
     "headers": {
       "content-type": "application/json",
-      "session-id": "concurrency-mixed-held-relay",
-      "thread-id": "concurrency-mixed-held-relay"
+      "session-id": "independence-failure-relay-holder",
+      "thread-id": "independence-failure-relay-holder"
     },
     "body": {
       "model": "mock.chat-model",
-      "input": "[holder] hold the only relay provider capacity",
+      "input": "hold the relay provider while a sibling fails",
       "stream": true
     }
   },
@@ -73,13 +65,10 @@
       {
         "kind": "fault",
         "fault": "hold-open-controlled",
-        "when": {
-          "input_contains": "[holder]"
-        },
         "sse_events": [
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_relay",
+              "id": "chatcmpl_independence_failure_relay_holder",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -94,7 +83,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_relay",
+              "id": "chatcmpl_independence_failure_relay_holder",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -104,7 +93,7 @@
                       "summary": [
                         {
                           "type": "summary_text",
-                          "text": "concurrency holder completed"
+                          "text": "relay failure holder completed"
                         }
                       ]
                     }
@@ -115,7 +104,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_relay",
+              "id": "chatcmpl_independence_failure_relay_holder",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -133,37 +122,30 @@
       },
       {
         "kind": "json",
-        "when": {
-          "input_contains": "[sibling-b]",
-          "provider_id": "mock-chat-excluded"
-        },
-        "status": 503,
+        "status": 500,
         "content_type": "application/json",
         "body": {
           "error": {
-            "message": "controlled provider 503"
+            "message": "controlled provider failure",
+            "code": "upstream_http_error"
           }
         }
       },
       {
         "kind": "sse",
-        "when": {
-          "input_contains": "[sibling-c]",
-          "provider_id": "mock-chat-excluded"
-        },
         "status": 200,
         "content_type": "text/event-stream",
         "sse_events": [
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_c_relay",
+              "id": "chatcmpl_independence_failure_relay_recovered",
               "object": "chat.completion.chunk",
               "choices": [
                 {
                   "index": 0,
                   "delta": {
                     "role": "assistant",
-                    "content": "sibling C completed through E"
+                    "content": "recovered response"
                   }
                 }
               ]
@@ -171,7 +153,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_c_relay",
+              "id": "chatcmpl_independence_failure_relay_recovered",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -181,7 +163,7 @@
                       "summary": [
                         {
                           "type": "summary_text",
-                        "text": "sibling C completed through E"
+                          "text": "relay failure recovered"
                         }
                       ]
                     }
@@ -192,70 +174,7 @@
           },
           {
             "data": {
-              "id": "chatcmpl_concurrency_mixed_c_relay",
-              "object": "chat.completion.chunk",
-              "choices": [
-                {
-                  "index": 0,
-                  "delta": {},
-                  "finish_reason": "stop"
-                }
-              ]
-            }
-          },
-          {
-            "data": "[DONE]"
-          }
-        ]
-      },
-      {
-        "kind": "sse",
-        "when": {
-          "input_contains": "[sibling-b]",
-          "provider_id": "mock-chat-busy"
-        },
-        "status": 200,
-        "content_type": "text/event-stream",
-        "sse_events": [
-          {
-            "data": {
-              "id": "chatcmpl_concurrency_mixed_b_recovery_relay",
-              "object": "chat.completion.chunk",
-              "choices": [
-                {
-                  "index": 0,
-                  "delta": {
-                    "role": "assistant",
-                    "content": "sibling B recovered through A"
-                  }
-                }
-              ]
-            }
-          },
-          {
-            "data": {
-              "id": "chatcmpl_concurrency_mixed_b_recovery_relay",
-              "object": "chat.completion.chunk",
-              "choices": [
-                {
-                  "index": 0,
-                  "delta": {
-                    "reasoning": {
-                      "summary": [
-                        {
-                          "type": "summary_text",
-                          "text": "sibling B recovered through A"
-                        }
-                      ]
-                    }
-                  }
-                }
-              ]
-            }
-          },
-          {
-            "data": {
-              "id": "chatcmpl_concurrency_mixed_b_recovery_relay",
+              "id": "chatcmpl_independence_failure_relay_recovered",
               "object": "chat.completion.chunk",
               "choices": [
                 {
@@ -284,7 +203,7 @@
       "output_items.0.content.0.type": "output_text",
       "output_items.0.content.0.text": "held response released",
       "output_items.1.type": "reasoning",
-      "output_items.1.summary.0.text": "concurrency holder completed"
+      "output_items.1.summary.0.text": "relay failure holder completed"
     },
     "body_must_not": [
       "provider_error",
@@ -295,114 +214,87 @@
     "semantic_terminal_required": true
   },
   "request_independence_replay": {
-    "kind": "request_local_failure_isolation",
-    "sibling_client_requests": [
-      {
-        "id": "sibling-b",
-        "client_request": {
-          "method": "POST",
-          "path": "/v1/responses",
-          "headers": {
-            "content-type": "application/json",
-            "session-id": "concurrency-mixed-relay-sibling-b",
-            "thread-id": "concurrency-mixed-relay-sibling-b"
-          },
-          "body": {
-            "model": "mock.chat-model",
-            "input": "[sibling-b] fail E then recover A",
-            "stream": true
-          }
-        },
-        "expected_client": {
-          "transport": "complete",
-          "status": 200,
-          "body_must": {
-            "text": "sibling B recovered through A",
-            "status": "completed",
-            "output_items.0.content.0.text": "sibling B recovered through A"
-          },
-          "semantic_terminal_required": true
-        }
+    "kind": "provider_request_independence",
+    "shape": "failure_isolation",
+    "failed_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "independence-failure-relay-failed",
+        "thread-id": "independence-failure-relay-failed"
       },
-      {
-        "id": "sibling-c",
-        "client_request": {
-          "method": "POST",
-          "path": "/v1/responses",
-          "headers": {
-            "content-type": "application/json",
-            "session-id": "concurrency-mixed-relay-sibling-c",
-            "thread-id": "concurrency-mixed-relay-sibling-c"
-          },
-          "body": {
-            "model": "mock.chat-model",
-            "input": "[sibling-c] complete through E",
-            "stream": true
-          }
-        },
-        "expected_client": {
-          "transport": "complete",
-          "status": 200,
-          "body_must": {
-            "text": "sibling C completed through E",
-            "status": "completed",
-            "output_items.0.content.0.text": "sibling C completed through E"
-          },
-          "semantic_terminal_required": true
-        }
+      "body": {
+        "model": "mock.chat-model",
+        "input": "fail once then recover on the next relay candidate",
+        "stream": true
       }
-    ],
-    "pending_before_release": [
-      "sibling-b"
-    ],
-    "completed_before_release": [
-      "sibling-c"
-    ],
-    "expected_peak_business_in_flight": {
-      "mock-chat-busy/mock.chat-model": 1,
-      "mock-chat-excluded/mock.chat-model": 1
     },
-    "expected_business_sends": [
-      {
-        "request_id": "holder",
-        "candidate_id": "mock-chat-busy/mock.chat-model",
-        "outcome": "success",
-        "status": 200
+    "expected_failed_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "recovered response",
+        "status": "completed",
+        "output_items.0.type": "message",
+        "output_items.0.role": "assistant",
+        "output_items.0.content.0.type": "output_text",
+        "output_items.0.content.0.text": "recovered response",
+        "output_items.1.type": "reasoning",
+        "output_items.1.summary.0.text": "relay failure recovered"
       },
-      {
-        "request_id": "sibling-b",
-        "candidate_id": "mock-chat-excluded/mock.chat-model",
-        "outcome": "failure",
-        "status": 503
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "post_recovery_client_request": {
+      "method": "POST",
+      "path": "/v1/responses",
+      "headers": {
+        "content-type": "application/json",
+        "session-id": "independence-failure-relay-post",
+        "thread-id": "independence-failure-relay-post"
       },
-      {
-        "request_id": "sibling-c",
-        "candidate_id": "mock-chat-excluded/mock.chat-model",
-        "outcome": "success",
-        "status": 200
-      },
-      {
-        "request_id": "sibling-b",
-        "candidate_id": "mock-chat-busy/mock.chat-model",
-        "outcome": "success",
-        "status": 200
+      "body": {
+        "model": "mock.chat-model",
+        "input": "independent relay request after recovery",
+        "stream": true
       }
-    ],
-    "failed_attempt": {
-      "request_id": "sibling-b",
-      "candidate_id": "mock-chat-excluded/mock.chat-model",
-      "http_status": 503,
-      "body_contains": "controlled provider 503",
-      "typed_error_code": "provider_http_503",
-      "client_visible": false,
-      "retry_before_release": false
     },
-    "forbidden_client_content": [
-      "controlled provider 503",
-      "provider_error",
-      "internal_error",
-      "routecodex_internal",
-      "selected_target_exhausted"
+    "expected_post_recovery_client": {
+      "transport": "complete",
+      "status": 200,
+      "body_must": {
+        "text": "recovered response",
+        "status": "completed",
+        "output_items.0.type": "message",
+        "output_items.0.role": "assistant",
+        "output_items.0.content.0.type": "output_text",
+        "output_items.0.content.0.text": "recovered response",
+        "output_items.1.type": "reasoning",
+        "output_items.1.summary.0.text": "relay failure recovered"
+      },
+      "body_must_not": [
+        "provider_error",
+        "internal_error",
+        "routecodex_internal"
+      ],
+      "semantic_terminal_required": true
+    },
+    "failure_isolation": {
+      "failed_provider_id": "mock-chat-primary",
+      "recovered_provider_id": "mock-chat-recovered",
+      "expected_provider_status": 500,
+      "expected_action": "switch_provider",
+      "expected_holder_business_sends": 1,
+      "expected_failed_business_sends": 1,
+      "expected_recovery_business_sends": 2
+    },
+    "typed_error_codes_must_not": [
+      "provider_concurrency_busy"
     ]
   },
   "assertions": {
@@ -411,11 +303,12 @@
     "no_control_leakage": true
   },
   "source": {
+    "sha": "25c366feb",
     "files": [
       "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs"
     ],
     "tests": [
-      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_provider_concurrency_relay_mixed_exclusion_stays_generic"
+      "v3/crates/routecodex-v3-server/tests/multi_listener_server.rs::responses_relay_provider_503_never_reaches_the_client"
     ]
   },
   "contract_differences": []

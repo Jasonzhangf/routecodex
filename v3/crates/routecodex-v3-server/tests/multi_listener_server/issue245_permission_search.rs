@@ -265,8 +265,18 @@ async fn issue245_witness(stream: bool) {
         && message["tool_call_id"] == "call_issue245_continuation"
         && message["content"] == result));
 
+    let entry = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let pool = cooldown_pool(&client, &base).await;
+            if let Some(entry) = find_entry(&pool, PROVIDER_A) {
+                break entry.clone();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("A's exact identity must cool after pre-cool observation");
     let pool = cooldown_pool(&client, &base).await;
-    let entry = find_entry(&pool, PROVIDER_A).expect("A's exact identity must cool");
     assert_eq!(entry["state"], "blocked");
     assert_eq!(entry["kind"], "probe");
     assert_eq!(entry["interface_id"], "default");

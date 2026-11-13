@@ -21,12 +21,20 @@ const RUNTIME_SETUP_KEYS = new Set([
   'model',
   'wire_model',
   'candidate_ids',
-  'candidate_tiers',
   'all_candidates_fail',
   'attempt_store',
-  'provider_concurrency',
+  'process',
+  'health',
 ]);
-const PROVIDER_CONCURRENCY_KEYS = new Set(['maxInFlight', 'acquireTimeoutMs', 'staleLeaseMs']);
+const PROVIDER_HEALTH_KEYS = new Set([
+  'enabled',
+  'failure_threshold',
+  'cooldown_ms',
+  'probe_interval_ms',
+  'advisory_probe',
+]);
+const REQUEST_INDEPENDENCE_KINDS = new Set(['provider_request_independence']);
+const REQUEST_INDEPENDENCE_SHAPES = new Set(['held_concurrent_requests', 'failure_isolation']);
 const CODEX_INTEGER_REPLAY_CASES = new Set([
   'issue-3192e71-codex-integer-positive',
   'issue-3192e71-fractional-negative',
@@ -119,7 +127,10 @@ export function validateCase(relative, value) {
   validateSource(relative, value.source, findings);
   validateToolFollowup(relative, value, findings);
   validateCodexReplayCase(relative, value, findings);
-  validateConcurrencyReplay(relative, value, findings);
+  validateRequestIndependenceReplay(relative, value, findings);
+  if (value.concurrency_replay !== undefined) {
+    findings.push(`${relative}: concurrency_replay is retired; declare request_independence_replay`);
+  }
   return findings;
 }
 
@@ -295,32 +306,6 @@ function validateRuntimeSetup(relative, setup, findings) {
   if (setup.candidate_ids[0] !== firstCandidate) {
     fail(`runtime_setup.candidate_ids[0] must be ${firstCandidate}`);
   }
-  if (setup.candidate_tiers !== undefined) {
-    if (!Array.isArray(setup.candidate_tiers) || setup.candidate_tiers.length === 0) {
-      fail('runtime_setup.candidate_tiers must be a non-empty array');
-    } else {
-      const declared = new Set(setup.candidate_ids);
-      const seen = new Set();
-      for (const [tierIndex, tier] of setup.candidate_tiers.entries()) {
-        if (!Array.isArray(tier) || tier.length === 0) {
-          fail(`runtime_setup.candidate_tiers[${tierIndex}] must be a non-empty array`);
-          continue;
-        }
-        for (const candidateId of tier) {
-          if (typeof candidateId !== 'string' || !declared.has(candidateId)) {
-            fail(`runtime_setup.candidate_tiers[${tierIndex}] member ${candidateId ?? 'null'} is not in candidate_ids`);
-          } else if (seen.has(candidateId)) {
-            fail(`runtime_setup.candidate_tiers member ${candidateId} is duplicated`);
-          } else {
-            seen.add(candidateId);
-          }
-        }
-      }
-      if (seen.size !== setup.candidate_ids.length) {
-        fail('runtime_setup.candidate_tiers must include every candidate_ids member exactly once');
-      }
-    }
-  }
   if (setup.all_candidates_fail !== undefined && typeof setup.all_candidates_fail !== 'boolean') {
     fail('runtime_setup.all_candidates_fail must be boolean when present');
   }
@@ -341,171 +326,200 @@ function validateRuntimeSetup(relative, setup, findings) {
       }
     }
   }
-  if (setup.provider_concurrency !== undefined) {
-    const concurrency = setup.provider_concurrency;
-    if (!isObject(concurrency)) {
-      fail('runtime_setup.provider_concurrency must be an object');
+  if (setup.process !== undefined) {
+    if (typeof setup.process !== 'string' || setup.process.trim().length === 0) {
+      fail('runtime_setup.process must be a non-empty string when present');
+    }
+  }
+  if (setup.health !== undefined) {
+    const health = setup.health;
+    if (!isObject(health)) {
+      fail('runtime_setup.health must be an object');
       return;
     }
-    const keys = Object.keys(concurrency);
+    const keys = Object.keys(health);
     if (keys.length === 0) {
-      fail('runtime_setup.provider_concurrency must declare at least one field');
+      fail('runtime_setup.health must declare at least one field');
     }
-    for (const [key, value] of Object.entries(concurrency)) {
-      if (!PROVIDER_CONCURRENCY_KEYS.has(key)) {
-        fail(`runtime_setup.provider_concurrency.${key} is not a supported field`);
+    for (const [key, value] of Object.entries(health)) {
+      if (!PROVIDER_HEALTH_KEYS.has(key)) {
+        fail(`runtime_setup.health.${key} is not a supported field`);
       }
-      if (!Number.isInteger(value) || value < 1) {
-        fail(`runtime_setup.provider_concurrency.${key} must be a positive integer`);
+      if (key === 'enabled' || key === 'advisory_probe') {
+        if (typeof value !== 'boolean') fail(`runtime_setup.health.${key} must be boolean`);
+      } else if (!Number.isInteger(value) || value < 1) {
+        fail(`runtime_setup.health.${key} must be a positive integer`);
       }
     }
   }
 }
 
-function validateConcurrencyReplay(relative, value, findings) {
-  const fail = (message) => findings.push(`${relative}: ${message}`);
-  if (value.concurrency_replay !== undefined) {
-    fail('concurrency_replay is retired; use request_independence_replay');
-  }
+const CLIENT_ERROR_MARKERS = ['provider_error', 'internal_error', 'routecodex_internal'];
+
+function validateRequestIndependenceReplay(relative, value, findings) {
   const replay = value.request_independence_replay;
   if (replay === undefined) return;
+  const fail = (message) => findings.push(`${relative}: ${message}`);
   if (!isObject(replay)) {
     fail('request_independence_replay must be an object when present');
     return;
   }
-  const kind = replay.kind;
-  if (kind !== 'bounded_capacity_wait' && kind !== 'request_local_failure_isolation') {
-    fail(`request_independence_replay.kind invalid: ${kind ?? 'null'}`);
+  if (!REQUEST_INDEPENDENCE_KINDS.has(replay.kind)) {
+    fail(`request_independence_replay.kind must be provider_request_independence: ${replay.kind ?? 'null'}`);
   }
-  const siblings = replay.sibling_client_requests;
-  if (!Array.isArray(siblings) || siblings.length !== 2) {
-    fail('request_independence_replay.sibling_client_requests must contain exactly two requests');
+  const shape = replay.shape ?? 'held_concurrent_requests';
+  if (!REQUEST_INDEPENDENCE_SHAPES.has(shape)) {
+    fail(`request_independence_replay.shape invalid: ${shape}`);
     return;
   }
-  const siblingIds = [];
-  for (const [index, sibling] of siblings.entries()) {
-    const prefix = `request_independence_replay.sibling_client_requests[${index}]`;
-    if (!isObject(sibling)) {
-      fail(`${prefix} must be an object`);
-      continue;
-    }
-    if (typeof sibling.id !== 'string' || !ID_PATTERN.test(sibling.id)) {
-      fail(`${prefix}.id invalid: ${sibling.id ?? 'null'}`);
-    } else if (siblingIds.includes(sibling.id)) {
-      fail(`${prefix}.id duplicate: ${sibling.id}`);
-    } else {
-      siblingIds.push(sibling.id);
-    }
-    validateClientRequest(`${relative}: ${prefix}.client_request`, sibling.client_request, findings);
-    validateExpectedClient(`${relative}: ${prefix}.expected_client`, sibling.expected_client, findings);
-  }
-  if (value.client_request?.path !== undefined) {
-    for (const sibling of siblings) {
-      if (isObject(sibling?.client_request) && sibling.client_request.path !== value.client_request.path) {
-        fail(`request_independence_replay sibling ${sibling.id} path must equal client_request.path`);
-      }
-    }
-  }
-  for (const field of ['pending_before_release', 'completed_before_release']) {
-    const ids = replay[field];
-    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !siblingIds.includes(id))) {
-      fail(`request_independence_replay.${field} must reference sibling ids`);
-    }
-    if (new Set(ids ?? []).size !== (ids ?? []).length) {
-      fail(`request_independence_replay.${field} must not contain duplicate ids`);
-    }
-  }
-  const peak = replay.expected_peak_business_in_flight;
-  if (!isObject(peak) || Object.keys(peak).length === 0) {
-    fail('request_independence_replay.expected_peak_business_in_flight must be a non-empty object');
-  } else {
-    for (const [candidateId, valuePeak] of Object.entries(peak)) {
-      if (!Array.isArray(value.runtime_setup?.candidate_ids)
-        || !value.runtime_setup.candidate_ids.includes(candidateId)) {
-        fail(`request_independence_replay peak candidate ${candidateId} is not declared in candidate_ids`);
-      }
-      if (valuePeak !== 1) {
-        fail(`request_independence_replay peak for ${candidateId} must be 1`);
-      }
-    }
-  }
-  const sends = replay.expected_business_sends;
-  if (!Array.isArray(sends) || sends.length < 3) {
-    fail('request_independence_replay.expected_business_sends must contain at least three sends');
-  } else {
-    for (const [index, send] of sends.entries()) {
-      if (!isObject(send)) {
-        fail(`request_independence_replay.expected_business_sends[${index}] must be an object`);
-        continue;
-      }
-      if (!siblingIds.includes(send.request_id) && send.request_id !== 'holder') {
-        fail(`request_independence_replay.expected_business_sends[${index}].request_id invalid: ${send.request_id ?? 'null'}`);
-      }
-      if (!Array.isArray(value.runtime_setup?.candidate_ids)
-        || !value.runtime_setup.candidate_ids.includes(send.candidate_id)) {
-        fail(`request_independence_replay.expected_business_sends[${index}].candidate_id is not declared`);
-      }
-      if (!['success', 'failure'].includes(send.outcome)) {
-        fail(`request_independence_replay.expected_business_sends[${index}].outcome invalid`);
-      }
-      if (!Number.isInteger(send.status)) {
-        fail(`request_independence_replay.expected_business_sends[${index}].status invalid`);
-      }
-    }
-  }
-  if (kind === 'bounded_capacity_wait') {
-    if (JSON.stringify(replay.pending_before_release) !== JSON.stringify(siblingIds)) {
-      fail('bounded_capacity_wait must keep both siblings pending before release');
-    }
-    if (!Array.isArray(replay.completed_before_release) || replay.completed_before_release.length !== 0) {
-      fail('bounded_capacity_wait must not complete a sibling before release');
-    }
-    if (!Array.isArray(sends) || sends.length !== 3 || sends.some((send) => send?.outcome !== 'success')) {
-      fail('bounded_capacity_wait must declare three successful business sends');
-    }
-  } else if (kind === 'request_local_failure_isolation') {
-    if (JSON.stringify(replay.pending_before_release) !== JSON.stringify(['sibling-b'])) {
-      fail('request_local_failure_isolation must keep sibling-b pending before release');
-    }
-    if (JSON.stringify(replay.completed_before_release) !== JSON.stringify(['sibling-c'])) {
-      fail('request_local_failure_isolation must complete sibling-c before release');
-    }
-    if (!Array.isArray(sends) || sends.length !== 4
-      || sends.filter((send) => send?.outcome === 'failure').length !== 1) {
-      fail('request_local_failure_isolation must declare four business sends with one failure');
-    }
-    const failed = replay.failed_attempt;
-    if (!isObject(failed)
-      || failed.request_id !== 'sibling-b'
-      || !value.runtime_setup?.candidate_ids?.includes(failed.candidate_id)
-      || failed.http_status !== 503
-      || failed.client_visible !== false
-      || failed.retry_before_release !== false) {
-      fail('request_local_failure_isolation.failed_attempt must bind the internal sibling-b 503');
-    }
-  }
-  const forbidden = replay.forbidden_client_content;
-  if (!Array.isArray(forbidden) || forbidden.length === 0
-    || forbidden.some((entry) => typeof entry !== 'string' || entry.length === 0)) {
-    fail('request_independence_replay.forbidden_client_content must be a non-empty string array');
-  }
-  if (!isObject(value.runtime_setup?.provider_concurrency)
-    || value.runtime_setup.provider_concurrency.maxInFlight !== 1
-    || value.runtime_setup.provider_concurrency.acquireTimeoutMs !== 1000
-    || value.runtime_setup.provider_concurrency.staleLeaseMs !== 300000) {
-    fail('request independence replay requires the declared maxInFlight=1 concurrency policy');
+  if (!Array.isArray(replay.typed_error_codes_must_not)
+    || replay.typed_error_codes_must_not.some((code) => typeof code !== 'string' || code.length === 0)) {
+    fail('request_independence_replay.typed_error_codes_must_not must be a string array');
+  } else if (!replay.typed_error_codes_must_not.includes('provider_concurrency_busy')) {
+    fail('request_independence_replay.typed_error_codes_must_not must include provider_concurrency_busy');
   }
   if (value.upstream_response?.attempts?.[0]?.fault !== 'hold-open-controlled') {
     fail('request_independence_replay requires first upstream attempt fault hold-open-controlled');
   }
-  if (kind === 'request_local_failure_isolation') {
-    const tiers = value.runtime_setup?.candidate_tiers;
-    if (!Array.isArray(tiers) || tiers.length !== 2
-      || tiers[0]?.length !== 1 || tiers[1]?.length !== 1
-      || tiers[0][0] !== value.runtime_setup.candidate_ids?.[0]
-      || tiers[1][0] !== value.runtime_setup.candidate_ids?.[1]) {
-      fail('request_local_failure_isolation must order the two existing candidates in two explicit tiers');
+  const holderSession = value.client_request?.headers?.['session-id'];
+  if (typeof holderSession !== 'string' || holderSession.length === 0) {
+    fail('client_request.headers.session-id must be a non-empty string');
+  }
+  if (value.cell?.mode === 'direct' && value.runtime_setup?.process !== 'direct') {
+    fail('direct request_independence_replay requires runtime_setup.process = direct');
+  }
+  if (shape === 'held_concurrent_requests') {
+    validateHeldConcurrentRequestReplay(relative, value, replay, holderSession, fail, findings);
+    return;
+  }
+  validateFailureIsolationReplay(relative, value, replay, holderSession, fail, findings);
+}
+
+function validateHeldConcurrentRequestReplay(relative, value, replay, holderSession, fail, findings) {
+  const requests = replay.concurrent_client_requests;
+  if (!Array.isArray(requests) || requests.length < 1) {
+    fail('request_independence_replay.concurrent_client_requests must be a non-empty array');
+    return;
+  }
+  requests.forEach((request, index) => {
+    const label = `request_independence_replay.concurrent_client_requests[${index}]`;
+    validateClientRequest(`${relative}: ${label}`, request, findings);
+    if (!isObject(request)) return;
+    if (request.path !== value.client_request?.path) {
+      fail(`${label}.path must equal client_request.path`);
     }
+    const session = request.headers?.['session-id'];
+    if (typeof session !== 'string' || session.length === 0) {
+      fail(`${label}.headers.session-id must be a non-empty string`);
+    }
+  });
+  if (replay.expected_upstream_business_sends !== requests.length + 1) {
+    fail('request_independence_replay.expected_upstream_business_sends must equal one holder plus each concurrent request');
+  }
+  validateCompleteClientExpectation(
+    'request_independence_replay.expected_concurrent_client',
+    replay.expected_concurrent_client,
+    fail,
+  );
+}
+
+function validateFailureIsolationReplay(relative, value, replay, holderSession, fail, findings) {
+  const failedRequest = replay.failed_client_request;
+  validateClientRequest(`${relative}: request_independence_replay.failed_client_request`, failedRequest, findings);
+  const recoveryRequest = replay.post_recovery_client_request;
+  validateClientRequest(`${relative}: request_independence_replay.post_recovery_client_request`, recoveryRequest, findings);
+  for (const [label, request] of [
+    ['failed_client_request', failedRequest],
+    ['post_recovery_client_request', recoveryRequest],
+  ]) {
+    if (!isObject(request)) continue;
+    if (request.path !== value.client_request?.path) {
+      fail(`request_independence_replay.${label}.path must equal client_request.path`);
+    }
+    const session = request.headers?.['session-id'];
+    if (typeof session !== 'string' || session.length === 0) {
+      fail(`request_independence_replay.${label}.headers.session-id must be a non-empty string`);
+    }
+  }
+  validateCompleteClientExpectation(
+    'request_independence_replay.expected_failed_client',
+    replay.expected_failed_client,
+    fail,
+  );
+  validateCompleteClientExpectation(
+    'request_independence_replay.expected_post_recovery_client',
+    replay.expected_post_recovery_client,
+    fail,
+  );
+  const isolation = replay.failure_isolation;
+  if (!isObject(isolation)) {
+    fail('request_independence_replay.failure_isolation must be an object');
+    return;
+  }
+  for (const key of ['failed_provider_id', 'recovered_provider_id']) {
+    if (typeof isolation[key] !== 'string' || isolation[key].length === 0) {
+      fail(`request_independence_replay.failure_isolation.${key} must be a non-empty string`);
+    }
+  }
+  const candidates = Array.isArray(value.runtime_setup?.candidate_ids)
+    ? value.runtime_setup.candidate_ids
+    : [];
+  if (candidates.length < 2) {
+    fail('failure_isolation requires at least two candidate_ids');
+  }
+  if (isolation.failed_provider_id && !candidates.some((candidate) => candidate.startsWith(`${isolation.failed_provider_id}/`))) {
+    fail('failure_isolation.failed_provider_id must be one of runtime_setup.candidate_ids');
+  }
+  if (isolation.recovered_provider_id && !candidates.some((candidate) => candidate.startsWith(`${isolation.recovered_provider_id}/`))) {
+    fail('failure_isolation.recovered_provider_id must be one of runtime_setup.candidate_ids');
+  }
+  if (!Number.isInteger(isolation.expected_provider_status)
+    || isolation.expected_provider_status < 400
+    || isolation.expected_provider_status > 599) {
+    fail('failure_isolation.expected_provider_status must be a provider HTTP error status 400-599');
+  }
+  if (isolation.expected_action !== 'switch_provider') {
+    fail('failure_isolation.expected_action must be switch_provider');
+  }
+  if (isolation.expected_failed_business_sends !== 1) {
+    fail('failure_isolation.expected_failed_business_sends must be 1');
+  }
+  if (!Number.isInteger(isolation.expected_recovery_business_sends)
+    || isolation.expected_recovery_business_sends < 1) {
+    fail('failure_isolation.expected_recovery_business_sends must be a positive integer');
+  }
+  if (isolation.expected_holder_business_sends !== 1) {
+    fail('failure_isolation.expected_holder_business_sends must be 1');
+  }
+  if (value.runtime_setup?.health?.enabled !== true) {
+    fail('failure_isolation requires runtime_setup.health.enabled = true');
+  }
+  if (value.upstream_response?.attempts?.[1]?.status !== isolation.expected_provider_status) {
+    fail('failure_isolation requires the second upstream attempt to return the declared provider error status');
+  }
+}
+
+function validateCompleteClientExpectation(label, expected, fail) {
+  if (!isObject(expected)) {
+    fail(`${label} must be an object`);
+    return;
+  }
+  if (expected.transport !== 'complete') {
+    fail(`${label}.transport must be complete`);
+  }
+  if (expected.status !== 200) {
+    fail(`${label}.status must be 200`);
+  }
+  if (!isObject(expected.body_must) || Object.keys(expected.body_must).length === 0) {
+    fail(`${label}.body_must must declare the genuine response fields`);
+  }
+  if (!Array.isArray(expected.body_must_not)) {
+    fail(`${label}.body_must_not must be a string array`);
+  } else if (!CLIENT_ERROR_MARKERS.every((marker) => expected.body_must_not.includes(marker))) {
+    fail(`${label}.body_must_not must forbid provider_error, internal_error and routecodex_internal`);
+  }
+  if (expected.semantic_terminal_required !== true) {
+    fail(`${label}.semantic_terminal_required must be true`);
   }
 }
 

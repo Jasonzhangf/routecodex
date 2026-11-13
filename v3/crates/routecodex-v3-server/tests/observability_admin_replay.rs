@@ -325,7 +325,10 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     let (request_key, list_row) = loop {
         let (status, body) = get_json(&client, &list_url).await;
         assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
-        if let Some(row) = body["records"].as_array().and_then(|rows| rows.first()) {
+        if let Some(row) = body["records"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["result"] == "error"))
+        {
             break (
                 row["request_key"]
                     .as_str()
@@ -407,6 +410,14 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "provider_attempt_failure"
     );
     assert_eq!(
+        attempts[0]["meta"]["observed_error"]["health_state"], "pre_cool_observation",
+        "the first recoverable failure must be held before cooldown"
+    );
+    assert!(
+        attempts[0]["meta"]["observed_error"]["cooldown_until_ms"].is_null(),
+        "pre-cool observation must not write cooldown before the observation completes"
+    );
+    assert_eq!(
         attempts[0]["meta"]["observed_error"]["chain"],
         json!([]),
         "the per-attempt snapshot carries no chain; the six-node chain comes from the Error projection"
@@ -425,9 +436,10 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     // This field follows row.attempts.max(1), not the buffered wire ordinal.
     // The two actual attempts are checked above.
     assert_eq!(observed["attempt_index"], 1);
-    // The diagnostic merge preserves a previously observed cooldown when the
-    // terminal event has none. Current health is read independently below.
-    assert!(observed["cooldown_until_ms"].as_u64().is_some());
+    assert!(
+        observed["cooldown_until_ms"].is_null(),
+        "the health-neutral terminal candidate must not invent a cooldown"
+    );
     assert_eq!(
         detail["observed_error_source"],
         "error06_projection_not_exposed"
@@ -507,10 +519,14 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         assert_eq!(artifacts_status, reqwest::StatusCode::OK);
         assert_eq!(artifacts["dir_exists"], true);
         let files = artifact_files(&artifacts).clone();
-        assert!(
-            !files.is_empty(),
-            "a captured failure must leave real artifacts"
-        );
+        if files.is_empty() {
+            assert!(
+                Instant::now() < artifacts_deadline,
+                "a captured failure must leave real artifacts"
+            );
+            sleep(Duration::from_millis(25)).await;
+            continue;
+        }
         let mut checked = Vec::new();
         let mut stable = true;
         for entry in &files {
@@ -545,27 +561,45 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "the failure evidence must include error.json"
     );
 
-    // 7. The first HTTP 503 must cool its exact provider/model/key identity.
-    let (pool_status, pool) = get_json(
-        &client,
-        &format!("http://{admin_addr}/api/observability/cooldown-pool"),
-    )
-    .await;
-    assert_eq!(pool_status, reqwest::StatusCode::OK);
-    let entries = pool["listeners"][0]["entries"]
-        .as_array()
-        .expect("cooldown pool entries");
+    // 7. The failed pre-cool observation must commit the exact identity into
+    //    the real health owner after the asynchronous observation completes.
+    let pool_deadline = Instant::now() + Duration::from_secs(20);
+    let (_, pool, entries) = loop {
+        let (pool_status, pool) = get_json(
+            &client,
+            &format!("http://{admin_addr}/api/observability/cooldown-pool"),
+        )
+        .await;
+        assert_eq!(pool_status, reqwest::StatusCode::OK);
+        let entries = pool["listeners"][0]["entries"]
+            .as_array()
+            .expect("cooldown pool entries")
+            .clone();
+        if entries
+            .iter()
+            .any(|entry| entry["provider_id"] == "mock" && entry["state"] == "blocked")
+        {
+            break (pool_status, pool, entries);
+        }
+        assert!(
+            Instant::now() < pool_deadline,
+            "the failed observation must commit cooldown within 20s: {pool}"
+        );
+        sleep(Duration::from_millis(50)).await;
+    };
     let first_cooled = entries
         .iter()
         .find(|entry| entry["provider_id"] == "mock")
-        .unwrap_or_else(|| panic!("the first HTTP 503 must cool its exact identity: {pool}"));
+        .unwrap_or_else(|| panic!("the failed observation must cool its exact identity: {pool}"));
     assert_eq!(first_cooled["auth_alias"], "key");
     assert_eq!(first_cooled["model_id"], "test");
+    assert_eq!(first_cooled["state"], "blocked");
     assert!(entries
         .iter()
         .all(|entry| entry["provider_id"] != "fallback"));
 
     // 8. A later business request cannot send another attempt to the cooled key.
+    let upstream_calls_after_observation = upstream_calls.load(Ordering::SeqCst);
     let response = client
         .post(format!("http://{server_addr}/v1/responses"))
         .json(&json!({
@@ -579,7 +613,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         response.is_err(),
         "a cooled identity must not fabricate a client HTTP response"
     );
-    assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        upstream_calls.load(Ordering::SeqCst),
+        upstream_calls_after_observation,
+        "the cooled identity must receive no additional business attempt"
+    );
     assert_eq!(
         fallback_calls.load(Ordering::SeqCst),
         2,

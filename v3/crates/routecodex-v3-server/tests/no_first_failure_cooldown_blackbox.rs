@@ -35,22 +35,22 @@ async fn independent_provider(
     State(state): State<Arc<Upstream>>,
     Json(body): Json<Value>,
 ) -> Response<Body> {
-    if body["input"].to_string().contains("ping; reply pong") {
+    let input = request_input_text(&body);
+    if input.contains("ping; reply pong") {
         return controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "probe_unavailable");
     }
-    let input = body["input"].as_str().unwrap_or("");
     *state
         .receipts
         .lock()
         .await
         .entry(format!("independent:{input}"))
         .or_default() += 1;
-    upstream_response(input)
+    upstream_response(&input)
 }
 
 async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
-    let input = body["input"].as_str().unwrap_or("");
-    if body["input"].to_string().contains("ping; reply pong") {
+    let input = request_input_text(&body);
+    if input.contains("ping; reply pong") {
         return controlled_failure(StatusCode::SERVICE_UNAVAILABLE, "probe_unavailable");
     }
     // Startup/recovery probes are distinct from business receipts.
@@ -69,7 +69,28 @@ async fn provider(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -
             .entry(format!("{input}@{model}"))
             .or_default() += 1;
     }
-    upstream_response(input)
+    upstream_response(&input)
+}
+
+fn request_input_text(body: &Value) -> String {
+    if let Some(input) = body["input"].as_str() {
+        return input.to_string();
+    }
+    body["input"]
+        .as_array()
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                let content = item.get("content")?;
+                content.as_str().map(str::to_string).or_else(|| {
+                    content.as_array().and_then(|parts| {
+                        parts
+                            .iter()
+                            .find_map(|part| part["text"].as_str().map(str::to_string))
+                    })
+                })
+            })
+        })
+        .unwrap_or_else(|| body["input"].to_string())
 }
 
 /// Shared upstream contract: auth/server/fail inputs are controlled failures,
@@ -88,7 +109,7 @@ fn upstream_response(input: &str) -> Response<Body> {
         };
         return controlled_failure(status, kind);
     }
-    successful_response(input)
+    successful_response(&input)
 }
 
 fn successful_response(input: &str) -> Response<Body> {
@@ -175,16 +196,16 @@ targets = [
   {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
 ]
 [route_groups.health.pools.other]
-match = {{ models = ["other"], precedence = 10 }}
+match = {{ entry_protocol = "responses", required_capabilities = ["web_search"], precedence = 10 }}
 targets = [
   {{ kind = "provider_model", provider = "primary", model = "other", key = "{alias}", priority = 100 }},
   {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
 ]
 [route_groups.health.pools.sibling]
-match = {{ models = ["sibling"], precedence = 10 }}
+match = {{ entry_protocol = "responses", required_capabilities = ["tools"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "primary", model = "main", key = "sibling", priority = 100 }}]
 [route_groups.health.pools.independent]
-match = {{ models = ["independent"], precedence = 10 }}
+match = {{ entry_protocol = "responses", required_capabilities = ["multimodal"], precedence = 10 }}
 targets = [
   {{ kind = "provider_model", provider = "independent", model = "main", key = "independent", priority = 100 }},
   {{ kind = "provider_model", provider = "fallback", model = "main", key = "fallback", priority = 1 }}
@@ -201,6 +222,105 @@ async fn request(client: &reqwest::Client, base: &str, model: &str, marker: &str
             .header("session-id", marker)
             .header("thread-id", marker)
             .json(&json!({"model":model,"input":marker,"stream":false}))
+            .send()
+            .await
+            .expect("healthy candidate must answer");
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains(marker),
+            "must return the real successful provider payload: {body}"
+        );
+        assert!(
+            !body.contains("\"error\""),
+            "client must not receive an error envelope: {body}"
+        );
+    })
+    .await
+    .expect("healthy fallback must complete headers and body within the unchanged bound");
+}
+
+async fn request_with_tool(
+    client: &reqwest::Client,
+    base: &str,
+    model: &str,
+    marker: &str,
+    tool_name: &str,
+    tool_arguments: &str,
+) {
+    let input = json!([
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": marker}]
+        },
+        {
+            "type": "function_call",
+            "name": tool_name,
+            "call_id": "call-health-continuation",
+            "arguments": tool_arguments
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call-health-continuation",
+            "output": "ok"
+        }
+    ]);
+    timeout(Duration::from_secs(8), async {
+        let response = client
+            .post(format!("{base}/v1/responses"))
+            .header("session-id", marker)
+            .header("thread-id", marker)
+            .json(&json!({
+                "model": model,
+                "input": input,
+                "tools": [{
+                    "type": "function",
+                    "name": tool_name,
+                    "parameters": {"type": "object"}
+                }],
+                "stream": false
+            }))
+            .send()
+            .await
+            .expect("healthy candidate must answer");
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains(marker),
+            "must return the real successful provider payload: {body}"
+        );
+        assert!(
+            !body.contains("\"error\""),
+            "client must not receive an error envelope: {body}"
+        );
+    })
+    .await
+    .expect("healthy fallback must complete headers and body within the unchanged bound");
+}
+
+async fn request_with_input(
+    client: &reqwest::Client,
+    base: &str,
+    model: &str,
+    marker: &str,
+    input: Value,
+    tools: Option<Value>,
+) {
+    timeout(Duration::from_secs(8), async {
+        let mut body = json!({
+            "model": model,
+            "input": input,
+            "stream": false
+        });
+        if let Some(tools) = tools {
+            body["tools"] = tools;
+        }
+        let response = client
+            .post(format!("{base}/v1/responses"))
+            .header("session-id", marker)
+            .header("thread-id", marker)
+            .json(&body)
             .send()
             .await
             .expect("healthy candidate must answer");
@@ -292,14 +412,14 @@ fn assert_identities(entries: Vec<Value>, expected: &[(&str, &str, &str, &str)])
 }
 
 async fn fallback(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
-    let input = body["input"].as_str().unwrap_or("");
+    let input = request_input_text(&body);
     *state
         .fallback_receipts
         .lock()
         .await
         .entry(input.to_string())
         .or_default() += 1;
-    successful_response(input)
+    successful_response(&input)
 }
 
 /// Asserts an exact requested model reached upstream exactly once.
@@ -366,9 +486,47 @@ async fn no_first_failure_cooldown_public_http() {
         "fresh proof must precede the earliest 1s backoff expiry"
     );
     assert_identities(pool(&client, &base).await, &[]);
-    request(&client, &base, "other", "health-test:other-model").await;
-    request(&client, &base, "sibling", "health-test:other-key").await;
-    request(&client, &base, "independent", "health-test:independent").await;
+    request_with_input(
+        &client,
+        &base,
+        "other",
+        "health-test:other-model",
+        json!([{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "health-test:other-model"},
+                {"type": "input_text", "text": "search the web"}
+            ]
+        }]),
+        Some(json!([{"type": "web_search"}])),
+    )
+    .await;
+    request_with_tool(
+        &client,
+        &base,
+        "sibling",
+        "health-test:other-key",
+        "controlled_tool",
+        "{}",
+    )
+    .await;
+    request_with_input(
+        &client,
+        &base,
+        "independent",
+        "health-test:independent",
+        json!([{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "health-test:independent"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+            ]
+        }]),
+        None,
+    )
+    .await;
     receipt(&state, "health-test:other-model").await;
     receipt(&state, "health-test:other-key").await;
     assert_eq!(
@@ -381,7 +539,22 @@ async fn no_first_failure_cooldown_public_http() {
     );
     assert_identities(pool(&client, &base).await, &[]);
 
-    request(&client, &base, "other", "health-test:server-terminal").await;
+    request_with_input(
+        &client,
+        &base,
+        "other",
+        "health-test:server-terminal",
+        json!([{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "health-test:server-terminal"},
+                {"type": "input_text", "text": "search the web"}
+            ]
+        }]),
+        Some(json!([{"type": "web_search"}])),
+    )
+    .await;
     receipt_at(&state, "health-test:server-terminal", "other").await;
     fallback_receipt(&state, "health-test:server-terminal").await;
     assert_identities(pool(&client, &base).await, &[]);
@@ -389,11 +562,13 @@ async fn no_first_failure_cooldown_public_http() {
         wait_for_cooldown_count(&client, &base, 1).await,
         &[("primary", "default", &alias, "other")],
     );
-    request(
+    request_with_tool(
         &client,
         &base,
         "sibling",
         "health-test:after-server-failure",
+        "controlled_tool",
+        "{}",
     )
     .await;
     receipt(&state, "health-test:after-server-failure").await;
@@ -402,7 +577,22 @@ async fn no_first_failure_cooldown_public_http() {
         &[("primary", "default", &alias, "other")],
     );
 
-    request(&client, &base, "independent", "health-test:auth-terminal").await;
+    request_with_input(
+        &client,
+        &base,
+        "independent",
+        "health-test:auth-terminal",
+        json!([{
+            "type": "message",
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "health-test:auth-terminal"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+            ]
+        }]),
+        None,
+    )
+    .await;
     assert_eq!(
         state
             .receipts

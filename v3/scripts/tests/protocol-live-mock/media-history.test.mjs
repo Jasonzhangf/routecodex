@@ -41,8 +41,8 @@ const currentFullHistory = [
     role: 'user',
     content: [
       { type: 'text', text: 'take a screenshot' },
-      { type: 'text', text: '[Image]', future_sibling: { occurrence: 1 } },
-      { type: 'text', text: '[Image]', future_sibling: { occurrence: 2 } },
+      { type: 'image_url', image_url: { url: 'https://example.test/image.png' }, future_sibling: { occurrence: 1 } },
+      { type: 'image_url', image_url: { url: 'https://example.test/image.png' }, future_sibling: { occurrence: 2 } },
     ],
   },
   {

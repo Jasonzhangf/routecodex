@@ -170,113 +170,112 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
   assert.ok(responsesSourceCipher.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-source'));
 });
 
-test('request independence replay fixtures bind both execution modes and bounded-capacity evidence', () => {
+test('provider request independence fixtures bind Direct/Relay and arrival or typed recovery evidence', () => {
   const loaded = loadFixtures(realFixtureRoot);
   const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
-  for (const [caseId, mode] of [
-    ['issue-745f6e9-provider-concurrency-all-busy-direct', 'direct'],
-    ['issue-745f6e9-provider-concurrency-all-busy-relay', 'relay'],
-  ]) {
+  const cases = [
+    ['issue-745f6e9-provider-concurrency-all-busy-direct', 'direct', 'held_concurrent_requests'],
+    ['issue-745f6e9-provider-concurrency-all-busy-relay', 'relay', 'held_concurrent_requests'],
+    ['issue-745f6e9-provider-concurrency-mixed-exclusion-direct', 'direct', 'failure_isolation'],
+    ['issue-745f6e9-provider-concurrency-mixed-exclusion-relay', 'relay', 'failure_isolation'],
+  ];
+  for (const [caseId, mode, shape] of cases) {
     const value = byId.get(caseId);
     assert.ok(value, caseId);
     assert.equal(value.cell.mode, mode);
-    assert.equal(value.runtime_setup.provider_concurrency.maxInFlight, 1);
-    assert.equal(value.runtime_setup.provider_concurrency.acquireTimeoutMs, 1000);
-    assert.equal(value.runtime_setup.provider_concurrency.staleLeaseMs, 300000);
-    assert.equal(value.runtime_setup.attempt_store.residence_timeout_ms, 30000);
-    assert.equal(value.request_independence_replay.kind, 'bounded_capacity_wait');
-    assert.deepEqual(
-      value.request_independence_replay.pending_before_release,
-      ['sibling-b', 'sibling-c'],
-    );
-    assert.deepEqual(value.request_independence_replay.completed_before_release, []);
-    assert.deepEqual(
-      value.request_independence_replay.expected_peak_business_in_flight,
-      { [value.runtime_setup.candidate_ids[0]]: 1 },
-    );
-    assert.equal(value.request_independence_replay.expected_business_sends.length, 3);
-    assert.ok(value.request_independence_replay.expected_business_sends.every(
-      (send) => send.outcome === 'success' && send.status === 200,
-    ));
-    assert.equal(value.assertions.provider_attempt_count, 3);
+    assert.equal(value.runtime_setup.provider_concurrency, undefined);
+    assert.equal(value.concurrency_replay, undefined);
+    assert.equal(value.request_independence_replay.kind, 'provider_request_independence');
+    assert.equal(value.request_independence_replay.shape, shape);
+    assert.ok(value.request_independence_replay.typed_error_codes_must_not.includes('provider_concurrency_busy'));
+    assert.equal(value.upstream_response.attempts[0].fault, 'hold-open-controlled');
+    if (mode === 'direct') {
+      assert.equal(value.runtime_setup.process, 'direct');
+    } else {
+      assert.equal(value.runtime_setup.process, undefined);
+    }
+    if (shape === 'held_concurrent_requests') {
+      assert.equal(value.request_independence_replay.concurrent_client_requests.length, 2);
+      assert.equal(value.request_independence_replay.expected_upstream_business_sends, 3);
+      const holderSession = value.client_request.headers['session-id'];
+      const concurrentSessions = value.request_independence_replay.concurrent_client_requests.map(
+        (request) => request.headers['session-id'],
+      );
+      assert.ok(concurrentSessions.includes(holderSession));
+      assert.ok(concurrentSessions.some((session) => session !== holderSession));
+      assert.equal(new Set(concurrentSessions).size, 2);
+    } else {
+      assert.ok(value.runtime_setup.candidate_ids.length >= 2);
+      assert.equal(value.runtime_setup.health.enabled, true);
+      assert.equal(value.request_independence_replay.failure_isolation.expected_action, 'switch_provider');
+      assert.equal(value.request_independence_replay.failure_isolation.expected_provider_status, 500);
+      assert.equal(value.request_independence_replay.failure_isolation.expected_failed_business_sends, 1);
+      assert.equal(value.request_independence_replay.failure_isolation.expected_recovery_business_sends, 2);
+    }
   }
 });
 
-test('request independence replay fixtures bind ordered mixed-target failure isolation', () => {
-  const loaded = loadFixtures(realFixtureRoot);
-  const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
-  for (const [caseId, mode] of [
-    ['issue-745f6e9-provider-concurrency-mixed-exclusion-direct', 'direct'],
-    ['issue-745f6e9-provider-concurrency-mixed-exclusion-relay', 'relay'],
-  ]) {
-    const value = byId.get(caseId);
-    assert.ok(value, caseId);
-    assert.equal(value.cell.mode, mode);
-    assert.deepEqual(value.runtime_setup.candidate_tiers, [
-      [value.runtime_setup.candidate_ids[0]],
-      [value.runtime_setup.candidate_ids[1]],
-    ]);
-    assert.equal(value.request_independence_replay.kind, 'request_local_failure_isolation');
-    assert.deepEqual(value.request_independence_replay.pending_before_release, ['sibling-b']);
-    assert.deepEqual(value.request_independence_replay.completed_before_release, ['sibling-c']);
-    assert.deepEqual(
-      value.request_independence_replay.expected_peak_business_in_flight,
-      {
-        [value.runtime_setup.candidate_ids[0]]: 1,
-        [value.runtime_setup.candidate_ids[1]]: 1,
-      },
-    );
-    assert.equal(value.request_independence_replay.expected_business_sends.length, 4);
-    assert.equal(value.request_independence_replay.failed_attempt.http_status, 503);
-    assert.equal(value.request_independence_replay.failed_attempt.client_visible, false);
-    assert.equal(value.request_independence_replay.failed_attempt.retry_before_release, false);
-    assert.equal(value.assertions.provider_attempt_count, 4);
-  }
-});
-
-test('request independence replay mutations cannot restore early close or weaken bounded capacity', () => {
-  const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
+test('provider request independence mutations cannot weaken arrival or typed-evidence contracts', () => {
   const mutations = [
     {
-      name: 'false pending completion',
-      mutate(value) { value.request_independence_replay.completed_before_release = ['sibling-b']; },
-      expected: /bounded_capacity_wait must not complete a sibling before release/,
+      name: 'missing typed code',
+      caseId: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+      mutate(value) { value.request_independence_replay.typed_error_codes_must_not = []; },
+      expected: /typed_error_codes_must_not must include provider_concurrency_busy/,
     },
     {
-      name: 'second concurrent permit',
-      mutate(value) {
-        const candidate = value.runtime_setup.candidate_ids[0];
-        value.request_independence_replay.expected_peak_business_in_flight[candidate] = 2;
-      },
-      expected: /peak for .* must be 1/,
+      name: 'second send allowed',
+      caseId: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+      mutate(value) { value.request_independence_replay.expected_upstream_business_sends = 4; },
+      expected: /expected_upstream_business_sends must equal one holder plus each concurrent request/,
     },
     {
-      name: 'retired early-close schema',
-      mutate(value) {
-        value.concurrency_replay = {
-          kind: 'provider_concurrency_all_busy',
-          typed_error_codes: ['provider_concurrency_busy'],
-        };
-      },
-      expected: /concurrency_replay is retired/,
+      name: 'missing client error marker',
+      caseId: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+      mutate(value) { value.request_independence_replay.expected_concurrent_client.body_must_not = []; },
+      expected: /body_must_not must forbid provider_error/,
     },
     {
-      name: 'missing sibling request',
-      mutate(value) {
-        value.request_independence_replay.sibling_client_requests.pop();
-      },
-      expected: /must contain exactly two requests/,
+      name: 'non-http provider failure',
+      caseId: 'issue-745f6e9-provider-concurrency-mixed-exclusion-direct',
+      mutate(value) { value.request_independence_replay.failure_isolation.expected_provider_status = 200; },
+      expected: /expected_provider_status must be a provider HTTP error status/,
     },
   ];
   for (const mutation of mutations) {
-    const value = realCase(caseId);
+    const value = realCase(mutation.caseId);
     mutation.mutate(value);
     withFixture(
-      { [caseId]: value },
-      validManifest([caseId]),
+      { [mutation.caseId]: value },
+      validManifest([mutation.caseId]),
       (root) => assert.match(findingsOf(root), mutation.expected, mutation.name),
     );
   }
+});
+
+test('provider request independence accepts same-session and different-session concurrent requests', () => {
+  const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
+  const holderSession = realCase(caseId).client_request.headers['session-id'];
+
+  const sameSession = realCase(caseId);
+  sameSession.request_independence_replay.concurrent_client_requests.forEach((request) => {
+    request.headers['session-id'] = holderSession;
+  });
+  withFixture(
+    { [caseId]: sameSession },
+    validManifest([caseId]),
+    (root) => assert.equal(findingsOf(root), ''),
+  );
+
+  const differentSessions = realCase(caseId);
+  differentSessions.request_independence_replay.concurrent_client_requests.forEach((request, index) => {
+    request.headers['session-id'] = `independent-${index + 2}`;
+  });
+  withFixture(
+    { [caseId]: differentSessions },
+    validManifest([caseId]),
+    (root) => assert.equal(findingsOf(root), ''),
+  );
 });
 
 test('Codex replay fixtures preserve exact raw arguments and assertion-only negatives', () => {
