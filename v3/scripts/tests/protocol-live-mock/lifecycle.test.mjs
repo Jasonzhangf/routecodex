@@ -314,6 +314,69 @@ test('generateRccConfig authors two same-tier providers with distinct fake ident
   }
 });
 
+test('generateRccConfig authors explicit candidate tiers inside one selected target', async () => {
+  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-candidate-tiers-test-'));
+  const [mockPort, rccPort] = await distinctFreePorts();
+  const runtimeSetup = {
+    provider_id: 'mock-chat-busy',
+    model: 'mock.chat-model',
+    wire_model: 'chat-model',
+    candidate_ids: ['mock-chat-busy/mock.chat-model', 'mock-chat-excluded/mock.chat-model'],
+    candidate_tiers: [
+      ['mock-chat-busy/mock.chat-model'],
+      ['mock-chat-excluded/mock.chat-model'],
+    ],
+  };
+  const generated = await generateRccConfig({
+    mockPort,
+    rccPort,
+    providerProtocol: 'openai_chat',
+    workRoot,
+    runtimeSetup,
+  });
+  try {
+    assert.equal(generated.candidate_identity_receipts.tier_count, 2);
+    assert.deepEqual(generated.candidate_identity_receipts.candidate_tiers, runtimeSetup.candidate_tiers);
+    assert.match(
+      generated.text,
+      /tiers = \[\[\{ use = "mock-chat-busy\/mock\.chat-model" \}\], \[\{ use = "mock-chat-excluded\/mock\.chat-model" \}\]\]/,
+    );
+    assert.equal((generated.text.match(/\{ use = /g) ?? []).length, 2);
+    assert.deepEqual(
+      generated.provider_files.map((file) => file.provider_id),
+      ['mock-chat-busy', 'mock-chat-excluded'],
+    );
+  } finally {
+    generated.cleanup();
+    rmSync(workRoot, { recursive: true, force: true });
+  }
+});
+
+test('generateRccConfig rejects candidate tiers outside declared membership or with duplicate members', async () => {
+  const base = {
+    provider_id: 'mock-chat-a',
+    model: 'mock.chat-model',
+    wire_model: 'chat-model',
+    candidate_ids: ['mock-chat-a/mock.chat-model', 'mock-chat-b/mock.chat-model'],
+  };
+  for (const [candidateTiers, expected] of [
+    [[['mock-chat-a/mock.chat-model'], ['mock-chat-missing/mock.chat-model']], /not in candidate_ids/],
+    [[['mock-chat-a/mock.chat-model', 'mock-chat-a/mock.chat-model'], ['mock-chat-b/mock.chat-model']], /duplicated/],
+    [[['mock-chat-a/mock.chat-model']], /include every candidate exactly once/],
+  ]) {
+    await assert.rejects(
+      generateRccConfig({
+        mockPort: 12345,
+        rccPort: 12346,
+        providerProtocol: 'openai_chat',
+        workRoot: tmpdir(),
+        runtimeSetup: { ...base, candidate_tiers: candidateTiers },
+      }),
+      expected,
+    );
+  }
+});
+
 test('generateRccConfig rejects a multi-candidate model that leaves the declared model', async () => {
   await assert.rejects(
     generateRccConfig({

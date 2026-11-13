@@ -1,8 +1,8 @@
-// Deterministic installed-binary replay for provider concurrency exhaustion.
+// Deterministic installed-binary replay for provider concurrency.
 //
-// This module owns one explicit concurrent flow. The first request holds a
-// loopback provider attempt while the second request must terminate locally
-// without another upstream business send.
+// The accepted R2 flow keeps one opaque target, bounded provider capacity, and
+// concurrent client residence. The legacy exhaustion flow remains import-safe
+// for existing collector coverage, but new fixtures use the independence schema.
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,10 +19,14 @@ import { findSemanticTerminal, parseClientBody } from './protocol-semantics.mjs'
 
 export const PROVIDER_CONCURRENCY_REPLAY_KIND = 'provider_concurrency_all_busy';
 export const PROVIDER_CONCURRENCY_MIXED_SHAPE = 'mixed_exclusion';
+export const REQUEST_INDEPENDENCE_REPLAY_KIND = 'request_independence_replay';
+export const BOUNDED_CAPACITY_WAIT_KIND = 'bounded_capacity_wait';
+export const REQUEST_LOCAL_FAILURE_ISOLATION_KIND = 'request_local_failure_isolation';
 
 const PROTOCOL_DEPS = Object.freeze({ parseClientBody, findSemanticTerminal });
 const EXCLUDED_ATTEMPT_KINDS = new Set(['probe', 'startup']);
 const HOLD_TIMEOUT_MS = 5_000;
+const DEFAULT_PENDING_OBSERVATION_MS = 4_500;
 const PROBE_INPUT_MARKER = 'ping; reply pong';
 const HEALTH_POOL_PATH = '/_routecodex/health/cooldown-pool';
 const HEALTH_POOL_ADD_PATH = '/_routecodex/health/cooldown-pool/add';
@@ -32,13 +36,567 @@ const TYPED_SOURCE_FILE_NAMES = new Set([
 ]);
 
 export function isProviderConcurrencyReplay(fixture) {
-  return fixture?.concurrency_replay?.kind === PROVIDER_CONCURRENCY_REPLAY_KIND;
+  return isRequestIndependenceReplay(fixture)
+    || fixture?.concurrency_replay?.kind === PROVIDER_CONCURRENCY_REPLAY_KIND;
 }
 
 /**
- * Run the two-request all-busy replay and retain client/provider evidence.
+ * Run the accepted R2 request-independence flow or the legacy replay.
  */
 export async function runProviderConcurrencyReplay({
+  fixture,
+  mock,
+  rccUrl,
+  sendHttp,
+  evidenceRoot,
+  timeoutMs = 30_000,
+  pendingObservationMs = DEFAULT_PENDING_OBSERVATION_MS,
+  candidateIdentityReceipts = [],
+  clientResultOverride = null,
+  cancelRequestId = null,
+  cancelRequest = null,
+} = {}) {
+  if (!isRequestIndependenceReplay(fixture)) {
+    return runLegacyProviderConcurrencyReplay({
+      fixture,
+      mock,
+      rccUrl,
+      sendHttp,
+      evidenceRoot,
+      timeoutMs,
+    });
+  }
+  return runRequestIndependenceReplay({
+    fixture,
+    mock,
+    rccUrl,
+    sendHttp,
+    evidenceRoot,
+    timeoutMs,
+    pendingObservationMs,
+    candidateIdentityReceipts,
+    clientResultOverride,
+    cancelRequestId,
+    cancelRequest,
+  });
+}
+
+function isRequestIndependenceReplay(fixture) {
+  const kind = fixture?.request_independence_replay?.kind;
+  return kind === BOUNDED_CAPACITY_WAIT_KIND || kind === REQUEST_LOCAL_FAILURE_ISOLATION_KIND;
+}
+
+/**
+ * Run one bounded-capacity or request-local-failure-isolation replay.
+ *
+ * Pending means the client promise has not settled. The harness keeps that
+ * promise alive, never aborts it to manufacture pending evidence, and releases
+ * the controlled holder only after the pre-release assertions are captured.
+ */
+async function runRequestIndependenceReplay({
+  fixture,
+  mock,
+  rccUrl,
+  sendHttp,
+  evidenceRoot,
+  timeoutMs,
+  pendingObservationMs,
+  candidateIdentityReceipts,
+  clientResultOverride,
+  cancelRequestId,
+  cancelRequest,
+} = {}) {
+  const caseId = text(fixture?.case_id) || 'unknown-case';
+  const entryProtocol = text(fixture?.cell?.entry_protocol);
+  const replay = isPlainObject(fixture?.request_independence_replay)
+    ? fixture.request_independence_replay
+    : {};
+  const kind = text(replay.kind);
+  const productDiagnostics = [];
+  const runnerDiagnostics = [];
+  const capabilityDiagnostics = [];
+  const evidenceRefs = [];
+  const turnAttempts = [];
+  const captureDir = join(evidenceRoot, 'captures');
+  const clients = new Map();
+  const siblingDeclarations = Array.isArray(replay.sibling_client_requests)
+    ? replay.sibling_client_requests
+    : [];
+  const siblingById = new Map(siblingDeclarations
+    .filter((entry) => isPlainObject(entry) && text(entry.id))
+    .map((entry) => [text(entry.id), entry]));
+  const pendingBeforeRelease = Array.isArray(replay.pending_before_release)
+    ? replay.pending_before_release.map(text).filter(Boolean)
+    : [];
+  const completedBeforeRelease = Array.isArray(replay.completed_before_release)
+    ? replay.completed_before_release.map(text).filter(Boolean)
+    : [];
+  const expectedPeak = isPlainObject(replay.expected_peak_business_in_flight)
+    ? replay.expected_peak_business_in_flight
+    : {};
+  const expectedSends = Array.isArray(replay.expected_business_sends)
+    ? replay.expected_business_sends.filter(isPlainObject)
+    : [];
+  const failedAttempt = isPlainObject(replay.failed_attempt) ? replay.failed_attempt : null;
+  const forbiddenClientContent = Array.isArray(replay.forbidden_client_content)
+    ? replay.forbidden_client_content.map(text).filter(Boolean)
+    : [];
+  const identityReceiptByToken = new Map();
+  for (const receipt of Array.isArray(candidateIdentityReceipts) ? candidateIdentityReceipts : []) {
+    const token = text(receipt?.auth_token);
+    if (token) identityReceiptByToken.set(token, receipt);
+  }
+  let debugStatus = null;
+  let heldObserved = false;
+  let holdObservedEpochMs = null;
+  let releaseStartedEpochMs = null;
+  let releaseCompletedEpochMs = null;
+  let releaseCount = 0;
+  let preReleaseCaptures = [];
+  let cancelledClient = null;
+
+  if (kind !== BOUNDED_CAPACITY_WAIT_KIND && kind !== REQUEST_LOCAL_FAILURE_ISOLATION_KIND) {
+    capabilityDiagnostics.push(`capability_missing: unsupported request independence kind ${kind || 'null'}`);
+  }
+  if (!isPlainObject(fixture?.client_request)) {
+    capabilityDiagnostics.push('capability_missing: holder client_request required');
+  }
+  if (siblingDeclarations.length !== 2) {
+    capabilityDiagnostics.push('capability_missing: exactly two sibling client requests required');
+  }
+  for (const declaration of siblingDeclarations) {
+    if (!isPlainObject(declaration?.client_request)) {
+      capabilityDiagnostics.push(`capability_missing: sibling ${text(declaration?.id) || 'unknown'} request required`);
+    }
+  }
+  for (const [name, value] of [
+    ['setActiveCase', mock?.setActiveCase],
+    ['getCaptures', mock?.getCaptures],
+    ['waitForHeld', mock?.waitForHeld],
+    ['waitForCapture', mock?.waitForCapture],
+    ['releaseHeld', mock?.releaseHeld],
+    ['sendHttp', sendHttp],
+  ]) {
+    if (typeof value !== 'function') capabilityDiagnostics.push(`capability_missing: ${name} function required`);
+  }
+  if (expectedSends.length < 3) capabilityDiagnostics.push('capability_missing: expected_business_sends required');
+  if (capabilityDiagnostics.length > 0) {
+    return finalizeConcurrencyReport({
+      fixture,
+      capabilityDiagnostics,
+      runnerDiagnostics,
+      productDiagnostics,
+      turnAttempts,
+      evidenceRefs,
+      observations: {},
+    });
+  }
+
+  try {
+    mkdirSync(captureDir, { recursive: true });
+  } catch (error) {
+    runnerDiagnostics.push(`evidence root unwritable: ${error.message}`);
+    return finalizeConcurrencyReport({
+      fixture,
+      capabilityDiagnostics,
+      runnerDiagnostics,
+      productDiagnostics,
+      turnAttempts,
+      evidenceRefs,
+      observations: {},
+    });
+  }
+
+  try {
+    try {
+      debugStatus = await sendHttp(`${String(rccUrl).replace(/\/+$/, '')}/_routecodex/debug/status`, {
+        method: 'GET',
+        headers: {},
+        timeoutMs: 1500,
+      });
+      writeConcurrencyEvidence(captureDir, `${caseId}-debug-status.json`, {
+        case_id: caseId,
+        response: debugStatus,
+      }, evidenceRefs);
+    } catch (error) {
+      debugStatus = { error: error.message };
+    }
+
+    mock.setActiveCase(fixture, 0);
+    startClient('holder', fixture.client_request, 'holder');
+    try {
+      await mock.waitForHeld(caseId, Math.min(timeoutMs, HOLD_TIMEOUT_MS));
+      heldObserved = true;
+      holdObservedEpochMs = Date.now();
+      clients.get('holder').attempt.outcome = 'held';
+    } catch (error) {
+      throw runnerFailure(`controlled provider hold failed: ${error.message}`, 'MOCK_HOLD');
+    }
+
+    if (kind === BOUNDED_CAPACITY_WAIT_KIND) {
+      for (const declaration of siblingDeclarations) {
+        startClient(text(declaration.id), declaration.client_request, 'bounded-sibling');
+      }
+      await delayDuration(pendingObservationMs);
+      preReleaseCaptures = readCaptures(mock, runnerDiagnostics);
+      inspectPendingClients({
+        clients,
+        ids: pendingBeforeRelease,
+        productDiagnostics,
+        phase: 'pending-before-release',
+      });
+      inspectNoAdditionalHolderBusinessAttempt({
+        captures: preReleaseCaptures,
+        candidateIdentityReceipts,
+        productDiagnostics,
+      });
+      if (completedBeforeRelease.length > 0) {
+        productDiagnostics.push('bounded capacity wait must not complete a sibling before release');
+      }
+    } else {
+      const siblingB = siblingById.get('sibling-b') ?? siblingDeclarations[0];
+      const siblingC = siblingById.get('sibling-c') ?? siblingDeclarations[1];
+      startClient(text(siblingC.id), siblingC.client_request, 'independent-sibling');
+      await clients.get(text(siblingC.id)).promise;
+      const completed = clients.get(text(siblingC.id));
+      if (!completed.settled || completed.error) {
+        productDiagnostics.push('independent sibling C did not complete through the healthy identity');
+      }
+      if (!completedBeforeRelease.includes(text(siblingC.id))) {
+        productDiagnostics.push(`completed_before_release is missing ${text(siblingC.id)}`);
+      }
+      startClient(text(siblingB.id), siblingB.client_request, 'failure-isolation-b');
+      const failedCandidateId = text(failedAttempt?.candidate_id);
+      if (text(failedAttempt?.request_id) !== 'sibling-b' || !failedCandidateId) {
+        productDiagnostics.push('mixed replay requires sibling-b failed_attempt metadata');
+      } else {
+        try {
+          await mock.waitForCapture((capture) => {
+            return captureFinished(capture)
+              && captureRequestId(capture, replay) === 'sibling-b'
+              && captureCandidateId(capture, identityReceiptByToken) === failedCandidateId;
+          }, Math.min(timeoutMs, HOLD_TIMEOUT_MS));
+        } catch (error) {
+          throw runnerFailure(`sibling-b failed provider attempt was not observed: ${error.message}`, 'MOCK_CAPTURE');
+        }
+      }
+      inspectPendingClients({
+        clients,
+        ids: ['sibling-b'],
+        productDiagnostics,
+        phase: 'failed-attempt-pending',
+      });
+      inspectPendingClients({
+        clients,
+        ids: pendingBeforeRelease,
+        productDiagnostics,
+        phase: 'mixed-before-release',
+      });
+      preReleaseCaptures = readCaptures(mock, runnerDiagnostics);
+      inspectNoAdditionalHolderBusinessAttempt({
+        captures: preReleaseCaptures,
+        candidateIdentityReceipts,
+        productDiagnostics,
+      });
+    }
+
+    if (cancelRequestId && typeof cancelRequest === 'function') {
+      try {
+        await cancelRequest(cancelRequestId);
+        await delayDuration(10);
+        cancelledClient = clients.get(cancelRequestId) ?? null;
+        if (cancelledClient && !cancelledClient.settled) {
+          productDiagnostics.push(`cancelled client ${cancelRequestId} did not settle`);
+        }
+      } catch (error) {
+        runnerDiagnostics.push(`client cancellation failed: ${error.message}`);
+      }
+    }
+  } catch (error) {
+    if (['MOCK_HOLD', 'MOCK_CAPTURE'].includes(error?.code)) runnerDiagnostics.push(error.message);
+    else runnerDiagnostics.push(`request independence runner error: ${error?.message ?? String(error)}`);
+  } finally {
+    releaseStartedEpochMs = Date.now();
+    try {
+      releaseCount = await mock.releaseHeld(caseId);
+    } catch (error) {
+      runnerDiagnostics.push(`controlled provider release failed: ${error.message}`);
+    } finally {
+      releaseCompletedEpochMs = Date.now();
+    }
+  }
+
+  for (const state of clients.values()) {
+    try {
+      await state.promise;
+    } catch (error) {
+      if (state.id !== cancelRequestId) {
+        runnerDiagnostics.push(`${state.id} client send rejected: ${error.message}`);
+      }
+    }
+  }
+
+  if (cancelRequestId) {
+    for (const declaration of siblingDeclarations) {
+      const id = text(declaration.id);
+      if (!id || id === cancelRequestId) continue;
+      const survivor = clients.get(id);
+      if (!survivor?.settled || survivor.error || survivor.raw?.closed || survivor.raw?.aborted
+        || survivor.raw?.complete !== true) {
+        productDiagnostics.push(
+          `${id} did not survive cancellation of sibling ${cancelRequestId}`,
+        );
+      }
+    }
+  }
+
+  if (releaseCount !== 1) productDiagnostics.push(`controlled hold release count ${releaseCount} != 1`);
+  if (!heldObserved) productDiagnostics.push('controlled provider hold was not observed');
+  if (holdObservedEpochMs === null
+    || clients.get('holder')?.attempt.send_started_epoch_ms === null
+    || holdObservedEpochMs < clients.get('holder')?.attempt.send_started_epoch_ms) {
+    productDiagnostics.push('controlled provider hold preceded the holder client send');
+  }
+
+  const captures = readCaptures(mock, runnerDiagnostics);
+  const businessCaptures = captures.filter((capture) => {
+    return !EXCLUDED_ATTEMPT_KINDS.has(capture?.attempt_kind)
+      && captureRequestId(capture, replay) !== null
+      && captureCandidateId(capture, identityReceiptByToken) !== null;
+  });
+  assertExpectedBusinessSends({
+    replay,
+    captures: businessCaptures,
+    identityReceiptByToken,
+    productDiagnostics,
+  });
+  assertFailedAttempt({
+    failedAttempt,
+    captures,
+    identityReceiptByToken,
+    releaseStartedEpochMs,
+    productDiagnostics,
+  });
+  const peakBusinessInFlight = calculatePeakBusinessInFlight(businessCaptures, identityReceiptByToken);
+  for (const [candidateId, expected] of Object.entries(expectedPeak)) {
+    const observed = peakBusinessInFlight[candidateId] ?? 0;
+    if (observed !== expected) {
+      productDiagnostics.push(
+        `peak business in-flight for ${candidateId} ${observed} != ${expected}`,
+      );
+    }
+  }
+  assertNoUnauthorizedFailedIdentityRecovery({
+    replay,
+    captures,
+    identityReceiptByToken,
+    releaseStartedEpochMs,
+    productDiagnostics,
+  });
+
+  const clientResults = [];
+  for (const state of clients.values()) {
+    if (state.id === cancelRequestId && state.error) {
+      clientResults.push(clientResultEvidence(state, null));
+      continue;
+    }
+    const expected = state.id === 'holder'
+      ? fixture.expected_client
+      : siblingById.get(state.id)?.expected_client;
+    const raw = state.raw;
+    clientResults.push(clientResultEvidence(state, raw));
+    if (!raw) {
+      if (state.id !== cancelRequestId) productDiagnostics.push(`${state.id} client response missing`);
+      continue;
+    }
+    const observed = observeClient(raw, entryProtocol);
+    if (observed && expected) {
+      const clientResult = assertClientResult(
+        observed,
+        {
+          ...expected,
+          no_control_leakage: fixture.assertions?.no_control_leakage !== false,
+        },
+        entryProtocol,
+        PROTOCOL_DEPS,
+      );
+      productDiagnostics.push(...clientResult.diagnostics.map((line) => `${state.id}: ${line}`));
+    } else if (!observed) {
+      productDiagnostics.push(`${state.id} client response could not be observed`);
+    }
+    for (const forbidden of forbiddenClientContent) {
+      if (text(raw.bodyText).includes(forbidden)) {
+        productDiagnostics.push(`${state.id}: forbidden client content ${forbidden}`);
+      }
+    }
+  }
+
+  const requestWindow = {
+    started_epoch_ms: clients.get('holder')?.attempt.send_started_epoch_ms ?? null,
+    settled_epoch_ms: Math.max(...[...clients.values()]
+      .map((state) => state.attempt.send_settled_epoch_ms)
+      .filter(Number.isFinite), Date.now()),
+  };
+  const timeline = {
+    holder_send_started_epoch_ms: clients.get('holder')?.attempt.send_started_epoch_ms ?? null,
+    hold_observed_epoch_ms: holdObservedEpochMs,
+    release_started_epoch_ms: releaseStartedEpochMs,
+    release_completed_epoch_ms: releaseCompletedEpochMs,
+    sibling_started_epoch_ms: Object.fromEntries(siblingDeclarations.map((entry) => [
+      text(entry.id),
+      clients.get(text(entry.id))?.attempt.send_started_epoch_ms ?? null,
+    ])),
+    sibling_settled_epoch_ms: Object.fromEntries(siblingDeclarations.map((entry) => [
+      text(entry.id),
+      clients.get(text(entry.id))?.attempt.send_settled_epoch_ms ?? null,
+    ])),
+    holder_send_settled_epoch_ms: clients.get('holder')?.attempt.send_settled_epoch_ms ?? null,
+  };
+  const holderEvidence = writeConcurrencyEvidence(captureDir, `${caseId}-holder-client.json`, {
+    case_id: caseId,
+    role: 'holder',
+    request: requestEvidence(fixture.client_request),
+    client_response: clients.get('holder')?.raw ?? null,
+    attempt: clients.get('holder')?.attempt ?? null,
+  }, evidenceRefs);
+  const siblingEvidence = siblingDeclarations.map((entry) => {
+    const id = text(entry.id);
+    const state = clients.get(id);
+    return writeConcurrencyEvidence(captureDir, `${caseId}-${id}-client.json`, {
+      case_id: caseId,
+      role: id,
+      request: requestEvidence(entry.client_request),
+      client_response: state?.raw ?? null,
+      attempt: state?.attempt ?? null,
+    }, evidenceRefs);
+  });
+  const providerEvidence = writeConcurrencyEvidence(captureDir, `${caseId}-provider.json`, {
+    case_id: caseId,
+    provider_captures: captures,
+    business_sends: businessCaptures.length,
+    expected_business_sends: expectedSends,
+    peak_business_in_flight: peakBusinessInFlight,
+  }, evidenceRefs);
+  const failedEvidence = failedAttempt
+    ? writeConcurrencyEvidence(captureDir, `${caseId}-failed-attempt.json`, {
+      case_id: caseId,
+      expected: failedAttempt,
+      captures: captures.filter((capture) => {
+        return captureRequestId(capture, replay) === text(failedAttempt.request_id)
+          && captureCandidateId(capture, identityReceiptByToken) === text(failedAttempt.candidate_id);
+      }),
+    }, evidenceRefs)
+    : null;
+
+  return finalizeConcurrencyReport({
+    fixture,
+    capabilityDiagnostics,
+    runnerDiagnostics,
+    productDiagnostics,
+    turnAttempts,
+    evidenceRefs,
+    observations: {
+      provider_concurrency: {
+        kind,
+        holder_held: heldObserved,
+        release_count: releaseCount,
+        upstream_business_sends: businessCaptures.length,
+        expected_upstream_business_sends: expectedSends.length,
+        pending_before_release: pendingBeforeRelease,
+        completed_before_release: completedBeforeRelease,
+        observed_pending_before_release: [...pendingBeforeRelease].filter((id) => {
+          const state = clients.get(id);
+          return state && !state.settledBeforeRelease;
+        }),
+        observed_completed_before_release: [...completedBeforeRelease].filter((id) => {
+          return clients.get(id)?.settled && !clients.get(id)?.error;
+        }),
+        client_results: clientResults,
+        peak_business_in_flight: peakBusinessInFlight,
+        failed_attempt: failedAttempt ? {
+          request_id: text(failedAttempt.request_id),
+          candidate_id: text(failedAttempt.candidate_id),
+          status: failedAttempt.http_status ?? null,
+          typed_error_code: text(failedAttempt.typed_error_code) || null,
+          client_visible: failedAttempt.client_visible === true,
+        } : null,
+        cancellations: cancelledClient ? [{
+          request_id: cancelledClient.id,
+          settled: cancelledClient.settled,
+          error_code: errorCodeOf(cancelledClient.raw),
+        }] : [],
+        debug_status: debugStatus ? {
+          error: debugStatus.error ?? null,
+          status: debugStatus.status ?? null,
+          body_text: debugStatus.bodyText ?? null,
+        } : null,
+        timeline,
+        request_window: requestWindow,
+        evidence: [
+          holderEvidence,
+          ...siblingEvidence,
+          providerEvidence,
+          ...(failedEvidence ? [failedEvidence] : []),
+        ],
+      },
+    },
+  });
+
+  function startClient(id, request, role) {
+    const attempt = attemptReceipt(request, role, turnAttempts.length);
+    turnAttempts.push(attempt);
+    const state = {
+      id,
+      request,
+      attempt,
+      raw: null,
+      error: null,
+      settled: false,
+      settledBeforeRelease: false,
+      promise: null,
+    };
+    clients.set(id, state);
+    attempt.send_started_epoch_ms = Date.now();
+    state.promise = sendClient(request, timeoutMs).then(
+      (raw) => {
+        const selected = isPlainObject(clientResultOverride) && clientResultOverride[id]
+          ? clientResultOverride[id]
+          : raw;
+        state.raw = selected;
+        state.settled = true;
+        state.settledBeforeRelease = releaseStartedEpochMs === null;
+        attempt.send_settled_epoch_ms = Date.now();
+        attempt.outcome = 'settled';
+        return selected;
+      },
+      (error) => {
+        state.error = error;
+        state.settled = true;
+        state.settledBeforeRelease = releaseStartedEpochMs === null;
+        attempt.send_settled_epoch_ms = Date.now();
+        attempt.outcome = 'failed';
+        attempt.failure_code = errorCodeOf(error) ?? error?.code ?? null;
+        attempt.failure_message = error?.message ?? String(error);
+        return null;
+      },
+    );
+    return state;
+  }
+
+  async function sendClient(request, deadlineMs) {
+    return sendHttp(`${String(rccUrl).replace(/\/+$/, '')}${request.path}`, {
+      method: text(request.method) || 'POST',
+      headers: requestHeaders(request),
+      body: JSON.stringify(request.body ?? {}),
+      timeoutMs: deadlineMs,
+    });
+  }
+}
+
+/**
+ * Run the two-request legacy all-busy replay and retain client/provider evidence.
+ */
+async function runLegacyProviderConcurrencyReplay({
   fixture,
   mock,
   rccUrl,
@@ -885,6 +1443,147 @@ export async function runProviderMixedExclusionReplay({
  * Read request-records after the owned stop and require one terminal all-busy
  * row carrying the expected typed source code and execution mode.
  */
+function collectRequestIndependenceEvidence({
+  fixture,
+  caseRoot,
+  storePath,
+  sampleRoot,
+  listenerPort,
+  requestWindow,
+  collectionPhase,
+  stopReceipt,
+}) {
+  const expectedMode = text(fixture?.cell?.mode) || null;
+  const expectedEndpoint = text(fixture?.client_request?.path) || null;
+  const read = readStore(storePath);
+  const findings = [...read.findings];
+  const latest = latestRowsByRequestKey(read.rows);
+  const started = finiteInteger(requestWindow?.started_epoch_ms);
+  const settled = finiteInteger(requestWindow?.settled_epoch_ms);
+  const windowRows = latest.filter((row) => {
+    if (listenerPort !== null && Number(row.scope?.port) !== Number(listenerPort)) return false;
+    if (expectedEndpoint && row.meta?.endpoint !== expectedEndpoint) return false;
+    const rowStarted = finiteInteger(row.started_epoch_ms);
+    return started !== null && settled !== null && rowStarted !== null
+      && rowStarted >= started - 1000 && rowStarted <= settled + 1000;
+  });
+  const requestIds = [...new Set(windowRows
+    .map((row) => text(row.meta?.request_id))
+    .filter(Boolean))];
+  const observedMode = collectActualModeEvidence({
+    rows: read.rows,
+    listenerPort,
+    expectedEndpoint,
+    exhaustedSettled: settled,
+  });
+  const failedAttempt = isPlainObject(fixture?.request_independence_replay?.failed_attempt)
+    ? fixture.request_independence_replay.failed_attempt
+    : null;
+  const expectedCodes = failedAttempt
+    ? [text(failedAttempt.typed_error_code)].filter(Boolean)
+    : [];
+  const sample = failedAttempt
+    ? readTypedSourceEvidence({ sampleRoot, requestIds, expectedCodes })
+    : { candidate: null, findings: [] };
+  findings.push(...sample.findings);
+  const failedSample = sample.candidate
+    ? {
+      kind: sample.candidate.kind,
+      path: sample.candidate.path,
+      request_id: sample.candidate.request_id,
+      observed_codes: sample.candidate.observed_codes,
+      terminal_source: sample.candidate.terminal_source,
+      terminal_cause: sample.candidate.terminal_cause,
+      attempts: sample.candidate.attempts,
+    }
+    : null;
+  let status = 'pass';
+  if (!storePath || read.bytes === null) {
+    status = 'incomplete';
+  } else if (collectionPhase !== 'post_stop_complete') {
+    status = 'incomplete';
+    findings.push(`collection phase ${collectionPhase} cannot prove flush completeness`);
+  } else if (findings.length > 0) {
+    status = 'incomplete';
+  } else if (windowRows.length === 0) {
+    status = 'mismatch';
+    findings.push('no request records matched the request-independence window');
+  } else if (observedMode.mode !== expectedMode) {
+    status = 'mismatch';
+    findings.push(`execution mode mismatch: expected ${expectedMode}, observed ${observedMode.mode ?? 'none'}`);
+  } else if (failedAttempt && !failedSample) {
+    status = 'incomplete';
+    findings.push('failed provider attempt evidence is unavailable; 503 eligibility remains UNKNOWN');
+  }
+
+  const recordsPath = caseRoot ? join(caseRoot, 'provider-concurrency-records.jsonl') : null;
+  const evidencePath = caseRoot ? join(caseRoot, 'provider-concurrency-evidence.json') : null;
+  const typedSourcePath = caseRoot ? join(caseRoot, 'provider-concurrency-typed-source.json') : null;
+  const artifacts = {
+    records_path: recordsPath,
+    evidence_path: evidencePath,
+    typed_source_path: typedSourcePath,
+    records_written: false,
+    evidence_written: false,
+    typed_source_written: false,
+  };
+  const artifactFindings = [];
+  if (caseRoot && read.bytes) {
+    try {
+      mkdirSync(caseRoot, { recursive: true });
+      writeFileSync(recordsPath, read.bytes);
+      artifacts.records_written = true;
+    } catch (error) {
+      artifactFindings.push(`provider-concurrency-records.jsonl write failed: ${error.message}`);
+    }
+  } else if (caseRoot) {
+    artifactFindings.push('no raw request-record bytes available for request-independence evidence');
+  }
+  if (typedSourcePath && sample.candidate?.bytes) {
+    try {
+      writeFileSync(typedSourcePath, sample.candidate.bytes);
+      artifacts.typed_source_written = true;
+    } catch (error) {
+      artifactFindings.push(`provider-concurrency-typed-source.json write failed: ${error.message}`);
+    }
+  }
+  const result = {
+    kind: 'request independence replay evidence',
+    status,
+    expected_mode: expectedMode,
+    actual_mode: observedMode.mode,
+    actual_mode_source: observedMode.source,
+    expected_typed_error_codes: expectedCodes,
+    failed_attempt: failedSample,
+    request_window: { started_epoch_ms: started, settled_epoch_ms: settled },
+    source_path: storePath ?? null,
+    sample_root: sampleRoot ?? null,
+    raw_record_count: read.rows.length,
+    request_keys: latest.map((row) => row.request_key).filter(Boolean),
+    findings: [...findings, ...artifactFindings],
+    artifacts,
+    records_ref: null,
+    typed_source_ref: null,
+    evidence_ref: null,
+  };
+  if (result.status === 'pass' && artifactFindings.length > 0) result.status = 'incomplete';
+  result.records_ref = artifacts.records_written ? recordsPath : null;
+  result.typed_source_ref = artifacts.typed_source_written ? typedSourcePath : null;
+  if (evidencePath) {
+    try {
+      artifacts.evidence_written = true;
+      result.evidence_ref = evidencePath;
+      writeFileSync(evidencePath, `${JSON.stringify(result, null, 2)}\n`);
+    } catch (error) {
+      artifacts.evidence_written = false;
+      result.evidence_ref = null;
+      result.findings.push(`provider-concurrency-evidence.json write failed: ${error.message}`);
+      if (result.status === 'pass') result.status = 'incomplete';
+    }
+  }
+  return result;
+}
+
 export function collectProviderConcurrencyEvidence({
   fixture,
   caseRoot,
@@ -892,9 +1591,22 @@ export function collectProviderConcurrencyEvidence({
   sampleRoot = null,
   listenerPort = null,
   exhaustedWindow = {},
+  requestWindow = null,
   collectionPhase = 'post_stop_missing',
   stopReceipt = null,
 } = {}) {
+  if (isRequestIndependenceReplay(fixture)) {
+    return collectRequestIndependenceEvidence({
+      fixture,
+      caseRoot,
+      storePath,
+      sampleRoot,
+      listenerPort,
+      requestWindow,
+      collectionPhase,
+      stopReceipt,
+    });
+  }
   const expectedMode = text(fixture?.cell?.mode) || null;
   const expectedCodes = fixture?.concurrency_replay?.typed_error_codes ?? [];
   const expectedSourceKind = text(fixture?.concurrency_replay?.expected_source_kind)
@@ -1197,6 +1909,11 @@ function finalizeConcurrencyReport({
         : 'passed';
   const diagnostics = [...capabilityDiagnostics, ...runnerDiagnostics, ...productDiagnostics];
   const providerAttempts = observations.provider_concurrency?.upstream_business_sends ?? 0;
+  const observationKind = observations.provider_concurrency?.kind
+    ?? 'provider_concurrency_all_busy';
+  const clientClosed = observations.provider_concurrency?.client_results
+    ? observations.provider_concurrency.client_results.some((entry) => entry.closed)
+    : Boolean(observations.provider_concurrency?.exhausted_client?.closed);
   return {
     case_id: fixture?.case_id ?? null,
     cell: {
@@ -1224,13 +1941,13 @@ function finalizeConcurrencyReport({
       status: status === 'passed' ? 'passed' : 'failed',
       request_source: 'provider-concurrency-replay',
       provider_attempts: providerAttempts,
-      client_closed: Boolean(observations.provider_concurrency?.exhausted_client?.closed),
+      client_closed: clientClosed,
       diagnostics,
     }],
     first_divergence: diagnostics.length ? 'provider_concurrency' : null,
     observations: {
       live: [{
-        kind: 'provider_concurrency_all_busy',
+        kind: observationKind,
         ...observations.provider_concurrency,
       }],
       infra: runnerDiagnostics.map((message) => ({ kind: 'infra_failure', message })),
@@ -1243,6 +1960,245 @@ function finalizeConcurrencyReport({
     evidence_refs: evidenceRefs,
     captures: evidenceRefs.filter((path) => path.endsWith('-provider.json')),
     client_evidence: evidenceRefs.filter((path) => path.includes('-client.json')),
+  };
+}
+
+function delayDuration(ms) {
+  const duration = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  return new Promise((resolve) => setTimeout(resolve, duration));
+}
+
+function captureFinished(capture) {
+  return Number.isFinite(capture?.business_finished_epoch_ms)
+    || capture?.response_wire?.complete === true;
+}
+
+function captureRequestId(capture, replay) {
+  const input = typeof capture?.body?.input === 'string'
+    ? capture.body.input
+    : JSON.stringify(capture?.body?.input ?? capture?.raw_body ?? '');
+  const ids = [
+    'holder',
+    ...(Array.isArray(replay?.sibling_client_requests)
+      ? replay.sibling_client_requests.map((entry) => text(entry?.id)).filter(Boolean)
+      : []),
+  ];
+  return ids.find((id) => input.includes(`[${id}]`)) ?? null;
+}
+
+function captureCandidateId(capture, identityReceiptByToken) {
+  const direct = text(capture?.candidate_id);
+  if (direct) return direct;
+  const token = authTokenOf(capture);
+  const receipt = identityReceiptByToken.get(token);
+  return text(receipt?.candidate_id) || null;
+}
+
+function inspectPendingClients({ clients, ids, productDiagnostics, phase }) {
+  for (const id of ids) {
+    const state = clients.get(id);
+    if (!state) {
+      productDiagnostics.push(`${id} client request was not started`);
+    } else if (state.settled) {
+      productDiagnostics.push(
+        `${id} completed before release during ${phase}; false pending completion is forbidden`,
+      );
+    }
+  }
+}
+
+function inspectNoAdditionalHolderBusinessAttempt({
+  captures,
+  candidateIdentityReceipts,
+  productDiagnostics,
+}) {
+  const holderCandidateId = text(candidateIdentityReceipts?.[0]?.candidate_id);
+  if (!holderCandidateId) return;
+  const holderBusiness = (captures ?? []).filter((capture) => {
+    return !EXCLUDED_ATTEMPT_KINDS.has(capture?.attempt_kind)
+      && captureCandidateId(capture, new Map()) === holderCandidateId;
+  });
+  if (holderBusiness.length > 1) {
+    productDiagnostics.push(
+      `second concurrent business attempt entered limit-one identity ${holderCandidateId}`,
+    );
+  }
+}
+
+function assertExpectedBusinessSends({
+  replay,
+  captures,
+  identityReceiptByToken,
+  productDiagnostics,
+}) {
+  const expected = Array.isArray(replay?.expected_business_sends)
+    ? replay.expected_business_sends.filter(isPlainObject)
+    : [];
+  const expectedCounts = countBusinessSends(expected, (entry) => [
+    text(entry.request_id),
+    text(entry.candidate_id),
+    text(entry.outcome),
+    String(Number(entry.status)),
+  ].join('|'));
+  const actualCounts = countBusinessSends(captures, (capture) => {
+    const status = Number(capture?.response_script?.status ?? capture?.status ?? 0);
+    return [
+      captureRequestId(capture, replay) ?? '',
+      captureCandidateId(capture, identityReceiptByToken) ?? '',
+      status >= 200 && status < 300 ? 'success' : 'failure',
+      String(status),
+    ].join('|');
+  });
+  if (!sameCountMap(expectedCounts, actualCounts)) {
+    productDiagnostics.push(
+      `business send counts differ: expected ${renderCountMap(expectedCounts)}, observed ${renderCountMap(actualCounts)}`,
+    );
+  }
+}
+
+function countBusinessSends(values, keyOf) {
+  const counts = new Map();
+  for (const value of values ?? []) {
+    const key = keyOf(value);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function sameCountMap(left, right) {
+  if (left.size !== right.size) return false;
+  for (const [key, value] of left) {
+    if (right.get(key) !== value) return false;
+  }
+  return true;
+}
+
+function renderCountMap(counts) {
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}:${value}`)
+    .join(', ');
+}
+
+function assertFailedAttempt({
+  failedAttempt,
+  captures,
+  identityReceiptByToken,
+  releaseStartedEpochMs,
+  productDiagnostics,
+}) {
+  if (!failedAttempt) return;
+  const requestId = text(failedAttempt.request_id);
+  const candidateId = text(failedAttempt.candidate_id);
+  const expectedStatus = Number(failedAttempt.http_status);
+  const bodyContains = text(failedAttempt.body_contains);
+  const matches = (captures ?? []).filter((capture) => {
+    const status = Number(capture?.response_script?.status ?? capture?.status ?? 0);
+    const body = JSON.stringify(capture?.response_script?.body ?? capture?.response_script ?? capture ?? '');
+    return captureRequestId(capture, { sibling_client_requests: [{ id: requestId }] }) === requestId
+      && captureCandidateId(capture, identityReceiptByToken) === candidateId
+      && status === expectedStatus
+      && (!bodyContains || body.includes(bodyContains));
+  });
+  if (matches.length !== 1) {
+    productDiagnostics.push(`failed provider attempt count ${matches.length} != 1`);
+    return;
+  }
+  const failed = matches[0];
+  if (!captureFinished(failed)) {
+    productDiagnostics.push('failed provider attempt did not complete');
+  }
+  if (Number.isFinite(releaseStartedEpochMs)
+    && Number.isFinite(failed.business_finished_epoch_ms)
+    && failed.business_finished_epoch_ms > releaseStartedEpochMs) {
+    productDiagnostics.push('failed provider attempt completed after holder release');
+  }
+}
+
+function calculatePeakBusinessInFlight(captures, identityReceiptByToken) {
+  const byCandidate = new Map();
+  for (const capture of captures ?? []) {
+    const candidateId = captureCandidateId(capture, identityReceiptByToken);
+    const started = finiteInteger(capture?.business_started_epoch_ms ?? capture?.captured_at_epoch_ms);
+    const finished = finiteInteger(capture?.business_finished_epoch_ms);
+    if (!candidateId || started === null || finished === null || finished < started) continue;
+    const events = byCandidate.get(candidateId) ?? [];
+    events.push({ started, finished });
+    byCandidate.set(candidateId, events);
+  }
+  const peaks = {};
+  for (const [candidateId, intervals] of byCandidate) {
+    const positive = intervals.filter((interval) => interval.started < interval.finished);
+    const events = positive.flatMap((interval) => [
+      { time: interval.started, delta: 1 },
+      { time: interval.finished, delta: -1 },
+    ]);
+    let active = 0;
+    let peak = intervals.length > 0 ? 1 : 0;
+    events.sort((left, right) => left.time - right.time || left.delta - right.delta);
+    for (const event of events) {
+      active += event.delta;
+      peak = Math.max(peak, active);
+    }
+    peaks[candidateId] = peak;
+  }
+  return peaks;
+}
+
+function assertNoUnauthorizedFailedIdentityRecovery({
+  replay,
+  captures,
+  identityReceiptByToken,
+  releaseStartedEpochMs,
+  productDiagnostics,
+}) {
+  const failedAttempt = isPlainObject(replay?.failed_attempt) ? replay.failed_attempt : null;
+  if (!failedAttempt || failedAttempt.retry_before_release === true) return;
+  const requestId = text(failedAttempt.request_id);
+  const candidateId = text(failedAttempt.candidate_id);
+  const beforeRelease = (captures ?? []).filter((capture) => {
+    const started = finiteInteger(capture?.business_started_epoch_ms ?? capture?.captured_at_epoch_ms);
+    return started !== null && Number.isFinite(releaseStartedEpochMs) && started <= releaseStartedEpochMs;
+  });
+  const sameIdentity = beforeRelease.filter((capture) => {
+    return captureRequestId(capture, replay) === requestId
+      && captureCandidateId(capture, identityReceiptByToken) === candidateId;
+  });
+  if (sameIdentity.length !== 1) {
+    productDiagnostics.push(
+      `failed identity ${candidateId} retry count before release ${sameIdentity.length - 1} != 0`,
+    );
+  }
+  const failedProbe = beforeRelease.find((capture) => {
+    return capture?.attempt_kind === 'probe'
+      && captureCandidateId(capture, identityReceiptByToken) === candidateId;
+  });
+  if (failedProbe) {
+    productDiagnostics.push(`failed identity ${candidateId} created a recovery probe before release`);
+  }
+  const recovery = (captures ?? []).find((capture) => {
+    return captureRequestId(capture, replay) === requestId
+      && captureCandidateId(capture, identityReceiptByToken) !== candidateId
+      && Number(capture?.response_script?.status ?? capture?.status ?? 0) >= 200
+      && Number(capture?.response_script?.status ?? capture?.status ?? 0) < 300;
+  });
+  if (!recovery) {
+    productDiagnostics.push(`${requestId} did not recover through the released captured-target identity`);
+  } else if (Number.isFinite(releaseStartedEpochMs)
+    && Number(recovery.business_started_epoch_ms) <= releaseStartedEpochMs) {
+    productDiagnostics.push(`${requestId} recovered before the held identity capacity was released`);
+  }
+}
+
+function clientResultEvidence(state, raw) {
+  return {
+    request_id: state.id,
+    settled: state.settled,
+    status: raw?.status ?? null,
+    closed: Boolean(raw?.closed ?? raw?.aborted),
+    response_ended: Boolean(raw?.response_ended),
+    error_code: state.error ? errorCodeOf(state.error) ?? state.error.code ?? null : errorCodeOf(raw),
+    body_text: text(raw?.bodyText),
   };
 }
 

@@ -47,6 +47,8 @@ export async function startMockProvider(options = {}) {
     captures: [],
     heldByCase: new Map(),
     heldWaiters: new Map(),
+    candidateIdentityByToken: new Map(),
+    captureWaiters: new Set(),
   };
   const sockets = new Set();
   const server = createServer((request, response) => {
@@ -81,6 +83,15 @@ export async function startMockProvider(options = {}) {
       state.attemptByTurn.clear();
       state.phase = 'case';
       return { case_id: fixture.case_id, turn: state.turn, phase: 'case' };
+    },
+    setCandidateIdentities(receipts) {
+      state.candidateIdentityByToken.clear();
+      for (const receipt of Array.isArray(receipts) ? receipts : []) {
+        const token = typeof receipt?.auth_token === 'string' ? receipt.auth_token : '';
+        if (!token) continue;
+        state.candidateIdentityByToken.set(token, cloneValue(receipt));
+      }
+      return { count: state.candidateIdentityByToken.size };
     },
     setTurn(turnIndex) {
       state.turn = nonNegativeInteger(turnIndex, 'turnIndex');
@@ -131,6 +142,31 @@ export async function startMockProvider(options = {}) {
         state.heldWaiters.set(caseId, waiters);
       });
     },
+    waitForCapture(predicate, timeoutMs = 2000) {
+      if (typeof predicate !== 'function') {
+        throw new MockProviderError('mock_invalid_predicate', 'waitForCapture requires a predicate function');
+      }
+      const existing = state.captures.find((capture) => predicate(capture, state.captures));
+      if (existing) return Promise.resolve(cloneValue(existing));
+      return new Promise((resolve, reject) => {
+        const waiter = {
+          predicate,
+          resolve,
+          reject,
+          timer: null,
+        };
+        waiter.timer = setTimeout(() => {
+          state.captureWaiters.delete(waiter);
+          reject(new MockProviderError(
+            'mock_capture_timeout',
+            `controlled capture did not arrive within ${timeoutMs}ms`,
+            504,
+          ));
+        }, positiveInteger(timeoutMs, 'timeoutMs'));
+        state.captureWaiters.add(waiter);
+        notifyCaptureWaiters(state);
+      });
+    },
     releaseHeld(caseId) {
       requireCaseId(caseId, 'releaseHeld');
       const held = state.heldByCase.get(caseId) ?? null;
@@ -139,9 +175,15 @@ export async function startMockProvider(options = {}) {
       applyTurnTransition(held.capture, state);
       for (const fragment of held.remaining) writeWire(held.response, held.wire, fragment);
       endWire(held.response, held.wire);
+      finishCapture(held.capture);
       return 1;
     },
     async close() {
+      for (const waiter of state.captureWaiters) {
+        clearTimeout(waiter.timer);
+        waiter.reject(new MockProviderError('mock_provider_closed', 'mock provider closed', 503));
+      }
+      state.captureWaiters.clear();
       for (const held of state.heldByCase.values()) {
         try {
           held.response.end();
@@ -194,6 +236,7 @@ async function handleRequest(request, response, options, state) {
     captured_at_epoch_ms: Date.now(),
     response_script: null,
   };
+  annotateCaptureIdentity(capture, state);
 
   if (probe) {
     capture.response_script = { mode: 'probe', status: 200 };
@@ -230,13 +273,15 @@ async function handleRequest(request, response, options, state) {
   const attemptIndex = state.attemptByTurn.get(state.turn) ?? 0;
   state.attemptByTurn.set(state.turn, attemptIndex + 1);
   const scripts = scriptsForTurn(state.fixture, state.turn);
-  const { script, repeated } = scriptAt(scripts, attemptIndex);
+  const { script, repeated } = scriptAt(scripts, attemptIndex, capture);
   capture.attempt = attemptIndex;
   capture.attempt_repeated = repeated;
   capture.response_script = cloneValue(script);
   const responseWire = createResponseWireCapture(script);
   capture.response_wire = responseWire.receipt;
-  state.captures.push(capture);
+  capture.business_started_epoch_ms = capture.captured_at_epoch_ms;
+  capture.business_finished_epoch_ms = null;
+  recordCapture(state, capture);
 
   if (typeof options.validateRequest === 'function') {
     try {
@@ -246,6 +291,8 @@ async function handleRequest(request, response, options, state) {
         mode: 'request_rejected',
         status: error instanceof MockProviderError ? error.statusCode : 500,
       };
+      finishCapture(capture);
+      notifyCaptureWaiters(state);
       throw error;
     }
   }
@@ -265,6 +312,8 @@ async function handleRequest(request, response, options, state) {
     }
     return;
   }
+  finishCapture(capture);
+  notifyCaptureWaiters(state);
   applyTurnTransition(capture, state);
 }
 
@@ -318,9 +367,74 @@ function normalizeScript(source, inherited, label) {
   return script;
 }
 
-function scriptAt(scripts, index) {
+function scriptAt(scripts, index, capture = null) {
+  if (capture) {
+    const selected = scripts.find((script) => scriptMatchesCapture(script, capture));
+    if (selected) return { script: selected, repeated: false };
+  }
   if (index < scripts.length) return { script: scripts[index], repeated: false };
   return { script: scripts[scripts.length - 1], repeated: true };
+}
+
+function scriptMatchesCapture(script, capture) {
+  const when = script?.when;
+  if (!isPlainObject(when)) return false;
+  if (typeof when.input_contains === 'string') {
+    const input = typeof capture.body?.input === 'string'
+      ? capture.body.input
+      : JSON.stringify(capture.body?.input ?? capture.raw_body ?? '');
+    if (!input.includes(when.input_contains)) return false;
+  }
+  if (typeof when.provider_id === 'string') {
+    if (capture.provider_id !== when.provider_id) return false;
+  }
+  if (typeof when.auth_token === 'string') {
+    const authorization = capture.headers?.authorization;
+    const token = typeof authorization === 'string'
+      ? authorization.replace(/^Bearer\s+/i, '')
+      : '';
+    if (token !== when.auth_token) return false;
+  }
+  return true;
+}
+
+function annotateCaptureIdentity(capture, state) {
+  const authorization = capture.headers?.authorization;
+  const token = typeof authorization === 'string'
+    ? authorization.replace(/^Bearer\s+/i, '')
+    : '';
+  capture.auth_token = token || null;
+  const receipt = token ? state.candidateIdentityByToken.get(token) : null;
+  if (!receipt) return;
+  capture.candidate_id = receipt.candidate_id ?? null;
+  capture.provider_id = receipt.provider_id ?? null;
+  capture.model = receipt.model ?? null;
+  capture.interface_id = receipt.interface_id ?? 'default';
+}
+
+function recordCapture(state, capture) {
+  state.captures.push(capture);
+  notifyCaptureWaiters(state);
+}
+
+function finishCapture(capture) {
+  if (!capture || capture.business_finished_epoch_ms !== null) return;
+  capture.business_finished_epoch_ms = Date.now();
+}
+
+function notifyCaptureWaiters(state) {
+  for (const waiter of [...state.captureWaiters]) {
+    let matched = null;
+    try {
+      matched = state.captures.find((capture) => waiter.predicate(capture, state.captures)) ?? null;
+    } catch {
+      matched = null;
+    }
+    if (!matched) continue;
+    state.captureWaiters.delete(waiter);
+    clearTimeout(waiter.timer);
+    waiter.resolve(cloneValue(matched));
+  }
 }
 
 async function sendScript(script, response, wire) {

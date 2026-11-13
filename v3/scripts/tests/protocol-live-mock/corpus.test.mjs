@@ -170,7 +170,7 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
   assert.ok(responsesSourceCipher.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-source'));
 });
 
-test('provider concurrency replay fixtures bind both execution modes and exact all-busy evidence', () => {
+test('request independence replay fixtures bind both execution modes and bounded-capacity evidence', () => {
   const loaded = loadFixtures(realFixtureRoot);
   const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
   for (const [caseId, mode] of [
@@ -181,41 +181,91 @@ test('provider concurrency replay fixtures bind both execution modes and exact a
     assert.ok(value, caseId);
     assert.equal(value.cell.mode, mode);
     assert.equal(value.runtime_setup.provider_concurrency.maxInFlight, 1);
-    assert.equal(value.concurrency_replay.kind, 'provider_concurrency_all_busy');
-    assert.equal(value.concurrency_replay.upstream_business_sends, 1);
-    assert.deepEqual(value.concurrency_replay.typed_error_codes, ['provider_concurrency_busy']);
-    assert.equal(value.concurrency_replay.expected_exhaustion_client.error_codes_must_not[0], 'ETIMEDOUT');
-    const holderSession = value.client_request.headers['session-id'];
-    const exhaustedSession = value.concurrency_replay.exhaustion_client_request.headers['session-id'];
-    assert.notEqual(holderSession, exhaustedSession);
+    assert.equal(value.runtime_setup.provider_concurrency.acquireTimeoutMs, 1000);
+    assert.equal(value.runtime_setup.provider_concurrency.staleLeaseMs, 300000);
+    assert.equal(value.runtime_setup.attempt_store.residence_timeout_ms, 30000);
+    assert.equal(value.request_independence_replay.kind, 'bounded_capacity_wait');
+    assert.deepEqual(
+      value.request_independence_replay.pending_before_release,
+      ['sibling-b', 'sibling-c'],
+    );
+    assert.deepEqual(value.request_independence_replay.completed_before_release, []);
+    assert.deepEqual(
+      value.request_independence_replay.expected_peak_business_in_flight,
+      { [value.runtime_setup.candidate_ids[0]]: 1 },
+    );
+    assert.equal(value.request_independence_replay.expected_business_sends.length, 3);
+    assert.ok(value.request_independence_replay.expected_business_sends.every(
+      (send) => send.outcome === 'success' && send.status === 200,
+    ));
+    assert.equal(value.assertions.provider_attempt_count, 3);
   }
 });
 
-test('provider concurrency replay mutations cannot weaken transport or typed-evidence contracts', () => {
+test('request independence replay fixtures bind ordered mixed-target failure isolation', () => {
+  const loaded = loadFixtures(realFixtureRoot);
+  const byId = new Map(loaded.map(({ value }) => [value.case_id, value]));
+  for (const [caseId, mode] of [
+    ['issue-745f6e9-provider-concurrency-mixed-exclusion-direct', 'direct'],
+    ['issue-745f6e9-provider-concurrency-mixed-exclusion-relay', 'relay'],
+  ]) {
+    const value = byId.get(caseId);
+    assert.ok(value, caseId);
+    assert.equal(value.cell.mode, mode);
+    assert.deepEqual(value.runtime_setup.candidate_tiers, [
+      [value.runtime_setup.candidate_ids[0]],
+      [value.runtime_setup.candidate_ids[1]],
+    ]);
+    assert.equal(value.request_independence_replay.kind, 'request_local_failure_isolation');
+    assert.deepEqual(value.request_independence_replay.pending_before_release, ['sibling-b']);
+    assert.deepEqual(value.request_independence_replay.completed_before_release, ['sibling-c']);
+    assert.deepEqual(
+      value.request_independence_replay.expected_peak_business_in_flight,
+      {
+        [value.runtime_setup.candidate_ids[0]]: 1,
+        [value.runtime_setup.candidate_ids[1]]: 1,
+      },
+    );
+    assert.equal(value.request_independence_replay.expected_business_sends.length, 4);
+    assert.equal(value.request_independence_replay.failed_attempt.http_status, 503);
+    assert.equal(value.request_independence_replay.failed_attempt.client_visible, false);
+    assert.equal(value.request_independence_replay.failed_attempt.retry_before_release, false);
+    assert.equal(value.assertions.provider_attempt_count, 4);
+  }
+});
+
+test('request independence replay mutations cannot restore early close or weaken bounded capacity', () => {
   const caseId = 'issue-745f6e9-provider-concurrency-all-busy-direct';
   const mutations = [
     {
-      name: 'missing typed code',
-      mutate(value) { value.concurrency_replay.typed_error_codes = []; },
-      expected: /typed_error_codes must be a non-empty string array/,
+      name: 'false pending completion',
+      mutate(value) { value.request_independence_replay.completed_before_release = ['sibling-b']; },
+      expected: /bounded_capacity_wait must not complete a sibling before release/,
     },
     {
-      name: 'timeout accepted',
-      mutate(value) { value.concurrency_replay.expected_exhaustion_client.error_codes_must_not = []; },
-      expected: /error_codes_must_not must include ETIMEDOUT/,
-    },
-    {
-      name: 'second send allowed',
-      mutate(value) { value.concurrency_replay.upstream_business_sends = 2; },
-      expected: /upstream_business_sends must be 1/,
-    },
-    {
-      name: 'same session',
+      name: 'second concurrent permit',
       mutate(value) {
-        value.concurrency_replay.exhaustion_client_request.headers['session-id'] =
-          value.client_request.headers['session-id'];
+        const candidate = value.runtime_setup.candidate_ids[0];
+        value.request_independence_replay.expected_peak_business_in_flight[candidate] = 2;
       },
-      expected: /exhaustion request must use a distinct session-id/,
+      expected: /peak for .* must be 1/,
+    },
+    {
+      name: 'retired early-close schema',
+      mutate(value) {
+        value.concurrency_replay = {
+          kind: 'provider_concurrency_all_busy',
+          typed_error_codes: ['provider_concurrency_busy'],
+        };
+      },
+      expected: /concurrency_replay is retired/,
+    },
+    {
+      name: 'missing sibling request',
+      mutate(value) {
+        value.request_independence_replay.sibling_client_requests.pop();
+      },
+      expected: /must contain exactly two requests/,
     },
   ];
   for (const mutation of mutations) {

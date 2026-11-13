@@ -132,7 +132,7 @@ endpoints = ${tomlStringArray(PROTOCOLS)}
 ${renderExecutionSection(serverId, mode, attemptStore)}
 
 [servers.${tomlKey(serverId)}.routes.default]
-tiers = ${renderDefaultTier(plan.candidates)}
+tiers = ${renderCandidateTiers(plan.tiers)}
 `;
 
   writeFileSync(configPath, configText);
@@ -154,7 +154,8 @@ tiers = ${renderDefaultTier(plan.candidates)}
     validated: true,
     protocol: providerProtocol,
     wire_model: wireModel,
-    tier_count: 1,
+    tier_count: plan.tiers.length,
+    candidate_tiers: plan.tiers.map((tier) => tier.map((candidate) => candidate.candidateId)),
     candidates: providerFiles.map((file) => ({
       candidate_id: file.candidate_id,
       provider_id: file.provider_id,
@@ -236,15 +237,17 @@ tiers = ${renderDefaultTier(plan.candidates)}
  */
 function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, defaultWireModel }) {
   if (!runtimeSetup) {
+    const candidate = {
+      candidateId: `${defaultProviderId}/${defaultModel}`,
+      providerId: defaultProviderId,
+      model: defaultModel,
+      wireModel: defaultWireModel,
+      token: FAKE_TASK_TOKEN,
+    };
     return {
       wireModel: defaultWireModel,
-      candidates: [{
-        candidateId: `${defaultProviderId}/${defaultModel}`,
-        providerId: defaultProviderId,
-        model: defaultModel,
-        wireModel: defaultWireModel,
-        token: FAKE_TASK_TOKEN,
-      }],
+      candidates: [candidate],
+      tiers: [[candidate]],
     };
   }
   const rawCandidates = runtimeSetup.candidate_ids;
@@ -276,6 +279,11 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
         wireModel: declaredWireModel,
         token: FAKE_TASK_TOKEN,
       }],
+      tiers: [[{
+        ...only,
+        wireModel: declaredWireModel,
+        token: FAKE_TASK_TOKEN,
+      }]],
     };
   }
   const seenProviders = new Set();
@@ -288,13 +296,41 @@ function resolveCandidatePlan({ runtimeSetup, defaultProviderId, defaultModel, d
       throw new Error(`runtimeSetup candidate ${entry.candidateId} model ${entry.model} must match declared model ${declaredModel}`);
     }
   }
+  const candidates = parsed.map((entry) => ({
+    ...entry,
+    wireModel: declaredWireModel,
+    token: `${FAKE_TASK_TOKEN}-${entry.providerId}`,
+  }));
+  const byId = new Map(candidates.map((candidate) => [candidate.candidateId, candidate]));
+  const rawTiers = runtimeSetup.candidate_tiers ?? [candidates.map((candidate) => candidate.candidateId)];
+  if (!Array.isArray(rawTiers) || rawTiers.length === 0) {
+    throw new Error('runtimeSetup.candidate_tiers must declare at least one tier');
+  }
+  const seen = new Set();
+  const tiers = rawTiers.map((tier, tierIndex) => {
+    if (!Array.isArray(tier) || tier.length === 0) {
+      throw new Error(`runtimeSetup candidate tier ${tierIndex} must be a non-empty array`);
+    }
+    return tier.map((candidateId) => {
+      const id = String(candidateId);
+      const candidate = byId.get(id);
+      if (!candidate) {
+        throw new Error(`runtimeSetup candidate tier member ${id} is not in candidate_ids`);
+      }
+      if (seen.has(id)) {
+        throw new Error(`runtimeSetup candidate tier member ${id} is duplicated`);
+      }
+      seen.add(id);
+      return candidate;
+    });
+  });
+  if (seen.size !== candidates.length) {
+    throw new Error('runtimeSetup candidate_tiers must include every candidate exactly once');
+  }
   return {
     wireModel: declaredWireModel,
-    candidates: parsed.map((entry) => ({
-      ...entry,
-      wireModel: declaredWireModel,
-      token: `${FAKE_TASK_TOKEN}-${entry.providerId}`,
-    })),
+    candidates,
+    tiers,
   };
 }
 
@@ -335,13 +371,17 @@ supportsStreaming = true
 `;
 }
 
-function renderDefaultTier(candidates) {
-  if (candidates.length === 1) {
-    return `[[{ use = "${candidates[0].providerId}/${candidates[0].model}" }]]`;
+function renderCandidateTiers(tiers) {
+  if (tiers.length === 1 && tiers[0].length === 1) {
+    return `[[{ use = "${tiers[0][0].providerId}/${tiers[0][0].model}" }]]`;
   }
-  const members = candidates.map((candidate) => `  { use = "${candidate.providerId}/${candidate.model}" },`);
-  members[members.length - 1] = members[members.length - 1].replace(/,$/, '');
-  return `[[\n${members.join('\n')}\n]]`;
+  const rendered = tiers.map((tier) => {
+    if (tier.length === 1) return `[{ use = "${tier[0].providerId}/${tier[0].model}" }]`;
+    const members = tier.map((candidate) => `  { use = "${candidate.providerId}/${candidate.model}" },`);
+    members[members.length - 1] = members[members.length - 1].replace(/,$/, '');
+    return `[\n${members.join('\n')}\n]`;
+  });
+  return `[${rendered.join(', ')}]`;
 }
 
 function renderExecutionSection(serverId, mode, attemptStore) {

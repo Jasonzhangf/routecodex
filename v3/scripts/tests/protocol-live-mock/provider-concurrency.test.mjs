@@ -2,12 +2,497 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 
 import {
   collectProviderConcurrencyEvidence,
   runProviderConcurrencyReplay,
 } from './provider-concurrency.mjs';
+
+const DIRECT_CANDIDATE_A = 'mock-responses-busy/mock.responses-model';
+const DIRECT_CANDIDATE_E = 'mock-responses-excluded/mock.responses-model';
+const DIRECT_TOKEN_A = 'fake-loopback-token-mock-responses-busy';
+const DIRECT_TOKEN_E = 'fake-loopback-token-mock-responses-excluded';
+
+function requestIndependenceFixture() {
+  return {
+    case_id: 'issue-745f6e9-provider-concurrency-all-busy-direct',
+    cell: {
+      entry_protocol: 'responses',
+      provider_protocol: 'responses',
+      transport: 'sse',
+      mode: 'direct',
+    },
+    runtime_setup: {
+      provider_id: 'mock-responses',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: [DIRECT_CANDIDATE_A],
+      candidate_tiers: [[DIRECT_CANDIDATE_A]],
+      provider_concurrency: {
+        maxInFlight: 1,
+        acquireTimeoutMs: 1000,
+        staleLeaseMs: 300000,
+      },
+      attempt_store: { residence_timeout_ms: 30000 },
+    },
+    client_request: {
+      method: 'POST',
+      path: '/v1/responses',
+      headers: { 'content-type': 'application/json', 'session-id': 'holder', 'thread-id': 'holder' },
+      body: { model: 'mock.responses-model', input: '[holder] hold A', stream: true },
+    },
+    expected_provider: {
+      paths: ['/v1/responses'],
+      method: 'POST',
+      auth_required: true,
+      body_must: { model: 'responses-model', stream: true },
+      exact: null,
+    },
+    expected_client: {
+      transport: 'complete',
+      status: 200,
+      body_must: { text: 'held response released', status: 'completed' },
+      semantic_terminal_required: true,
+    },
+    upstream_response: {
+      protocol: 'responses',
+      mode: 'fault',
+      status: 200,
+      content_type: 'text/event-stream',
+      fault: 'hold-open-controlled',
+      attempts: [
+        {
+          kind: 'fault',
+          fault: 'hold-open-controlled',
+          when: { input_contains: '[holder]' },
+          sse_events: [
+            { event: 'response.created', data: { type: 'response.created', response: { id: 'resp-held', status: 'in_progress', output: [] } } },
+            { event: 'response.output_text.delta', data: { type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'msg_held', delta: 'held response released' } },
+            { event: 'response.completed', data: { type: 'response.completed', response: { id: 'resp-held', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'held response released' }] }], usage: { input_tokens: 1, output_tokens: 3, total_tokens: 4 } } } },
+          ],
+        },
+        {
+          kind: 'sse',
+          when: { input_contains: '[sibling-' },
+          status: 200,
+          content_type: 'text/event-stream',
+          sse_events: [
+            { event: 'response.created', data: { type: 'response.created', response: { id: 'resp-sibling', status: 'in_progress', output: [] } } },
+            { event: 'response.output_text.delta', data: { type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: 'msg_sibling', delta: 'held response released' } },
+            { event: 'response.completed', data: { type: 'response.completed', response: { id: 'resp-sibling', status: 'completed', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'held response released' }] }], usage: { input_tokens: 1, output_tokens: 3, total_tokens: 4 } } } },
+          ],
+        },
+      ],
+    },
+    request_independence_replay: {
+      kind: 'bounded_capacity_wait',
+      sibling_client_requests: [
+        {
+          id: 'sibling-b',
+          client_request: {
+            method: 'POST',
+            path: '/v1/responses',
+            headers: { 'content-type': 'application/json', 'session-id': 'sibling-b', 'thread-id': 'sibling-b' },
+            body: { model: 'mock.responses-model', input: '[sibling-b] wait for capacity', stream: true },
+          },
+          expected_client: {
+            transport: 'complete',
+            status: 200,
+            body_must: { text: 'held response released', status: 'completed' },
+            semantic_terminal_required: true,
+          },
+        },
+        {
+          id: 'sibling-c',
+          client_request: {
+            method: 'POST',
+            path: '/v1/responses',
+            headers: { 'content-type': 'application/json', 'session-id': 'sibling-c', 'thread-id': 'sibling-c' },
+            body: { model: 'mock.responses-model', input: '[sibling-c] wait for capacity', stream: true },
+          },
+          expected_client: {
+            transport: 'complete',
+            status: 200,
+            body_must: { text: 'held response released', status: 'completed' },
+            semantic_terminal_required: true,
+          },
+        },
+      ],
+      pending_before_release: ['sibling-b', 'sibling-c'],
+      completed_before_release: [],
+      expected_peak_business_in_flight: { [DIRECT_CANDIDATE_A]: 1 },
+      expected_business_sends: [
+        { request_id: 'holder', candidate_id: DIRECT_CANDIDATE_A, outcome: 'success', status: 200 },
+        { request_id: 'sibling-b', candidate_id: DIRECT_CANDIDATE_A, outcome: 'success', status: 200 },
+        { request_id: 'sibling-c', candidate_id: DIRECT_CANDIDATE_A, outcome: 'success', status: 200 },
+      ],
+      failed_attempt: null,
+      forbidden_client_content: ['provider_error', 'internal_error', 'routecodex_internal', 'provider_concurrency_busy'],
+    },
+    assertions: { provider_attempt_count: 3, probe_attempts_may_occur: true, no_control_leakage: true },
+  };
+}
+
+function mixedRequestIndependenceFixture() {
+  const value = requestIndependenceFixture();
+  value.case_id = 'issue-745f6e9-provider-concurrency-mixed-exclusion-direct';
+  value.runtime_setup = {
+    ...value.runtime_setup,
+    candidate_ids: [DIRECT_CANDIDATE_A, DIRECT_CANDIDATE_E],
+    candidate_tiers: [[DIRECT_CANDIDATE_A], [DIRECT_CANDIDATE_E]],
+  };
+  value.request_independence_replay = {
+    kind: 'request_local_failure_isolation',
+    sibling_client_requests: [
+      {
+        id: 'sibling-b',
+        client_request: {
+          method: 'POST',
+          path: '/v1/responses',
+          headers: { 'content-type': 'application/json', 'session-id': 'sibling-b', 'thread-id': 'sibling-b' },
+          body: { model: 'mock.responses-model', input: '[sibling-b] fail E then recover A', stream: true },
+        },
+        expected_client: {
+          transport: 'complete',
+          status: 200,
+          body_must: { text: 'sibling B recovered through A', status: 'completed' },
+          semantic_terminal_required: true,
+        },
+      },
+      {
+        id: 'sibling-c',
+        client_request: {
+          method: 'POST',
+          path: '/v1/responses',
+          headers: { 'content-type': 'application/json', 'session-id': 'sibling-c', 'thread-id': 'sibling-c' },
+          body: { model: 'mock.responses-model', input: '[sibling-c] complete through E', stream: true },
+        },
+        expected_client: {
+          transport: 'complete',
+          status: 200,
+          body_must: { text: 'sibling C completed through E', status: 'completed' },
+          semantic_terminal_required: true,
+        },
+      },
+    ],
+    pending_before_release: ['sibling-b'],
+    completed_before_release: ['sibling-c'],
+    expected_peak_business_in_flight: { [DIRECT_CANDIDATE_A]: 1, [DIRECT_CANDIDATE_E]: 1 },
+    expected_business_sends: [
+      { request_id: 'holder', candidate_id: DIRECT_CANDIDATE_A, outcome: 'success', status: 200 },
+      { request_id: 'sibling-b', candidate_id: DIRECT_CANDIDATE_E, outcome: 'failure', status: 503 },
+      { request_id: 'sibling-c', candidate_id: DIRECT_CANDIDATE_E, outcome: 'success', status: 200 },
+      { request_id: 'sibling-b', candidate_id: DIRECT_CANDIDATE_A, outcome: 'success', status: 200 },
+    ],
+    failed_attempt: {
+      request_id: 'sibling-b',
+      candidate_id: DIRECT_CANDIDATE_E,
+      http_status: 503,
+      body_contains: 'controlled provider 503',
+      typed_error_code: 'provider_http_503',
+      client_visible: false,
+      retry_before_release: false,
+    },
+    forbidden_client_content: ['controlled provider 503', 'provider_error', 'internal_error', 'routecodex_internal'],
+  };
+  value.assertions = { ...value.assertions, provider_attempt_count: 4 };
+  return value;
+}
+
+function fakeRequestIndependenceHarness({
+  kind = 'bounded_capacity_wait',
+  extraConcurrentCapture = false,
+  completeSiblingBeforeRelease = false,
+  extraERetryBeforeRelease = false,
+  leakProviderError = false,
+  cancellationBlocksSibling = false,
+} = {}) {
+  const fixtureValue = kind === 'request_local_failure_isolation'
+    ? mixedRequestIndependenceFixture()
+    : requestIndependenceFixture();
+  const captures = [];
+  const waiters = new Set();
+  const clientControls = new Map();
+  let releaseCount = 0;
+  let resolveHolder;
+  let resolveB;
+
+  function addCapture(label, candidateId, started = Date.now(), status = 200, bodyText = '') {
+    const providerId = candidateId.split('/')[0];
+    const capture = {
+      attempt_kind: 'business',
+      case_id: fixtureValue.case_id,
+      turn: 0,
+      method: 'POST',
+      path: '/v1/responses',
+      candidate_id: candidateId,
+      provider_id: providerId,
+      headers: { authorization: `Bearer ${candidateId.startsWith('mock-responses-busy') ? DIRECT_TOKEN_A : DIRECT_TOKEN_E}` },
+      body: { model: 'responses-model', input: `[${label}]`, stream: true },
+      response_script: { status, body: bodyText || null },
+      captured_at_epoch_ms: started,
+      business_started_epoch_ms: started,
+      business_finished_epoch_ms: null,
+    };
+    captures.push(capture);
+    for (const waiter of [...waiters]) {
+      if (waiter.predicate(capture, captures)) {
+        waiters.delete(waiter);
+        clearTimeout(waiter.timer);
+        waiter.resolve(cloneJSON(capture));
+      }
+    }
+    return capture;
+  }
+
+  function finishCapture(capture) {
+    capture.business_finished_epoch_ms = Date.now();
+  }
+
+  const mock = {
+    async setActiveCase() {},
+    getCaptures() { return cloneJSON(captures); },
+    async waitForHeld() {},
+    async waitForCapture(predicate, timeoutMs = 1000) {
+      const existing = captures.find((capture) => predicate(capture, captures));
+      if (existing) return cloneJSON(existing);
+      return new Promise((resolve, reject) => {
+        const waiter = {
+          predicate,
+          resolve,
+          timer: setTimeout(() => {
+            waiters.delete(waiter);
+            reject(new Error('capture wait timed out'));
+          }, timeoutMs),
+        };
+        waiters.add(waiter);
+      });
+    },
+    async releaseHeld() {
+      releaseCount += 1;
+      const holderCapture = captures.find((capture) => capture.body.input === '[holder]');
+      if (holderCapture) finishCapture(holderCapture);
+      resolveHolder?.();
+      if (kind === 'request_local_failure_isolation') {
+        void (async () => {
+          await delay(5);
+          const recovery = addCapture('sibling-b', DIRECT_CANDIDATE_A, Date.now(), 200, 'sibling B recovered through A');
+          finishCapture(recovery);
+          resolveB?.();
+        })();
+      } else {
+        void (async () => {
+          await delay(5);
+          const born = addCapture('sibling-b', DIRECT_CANDIDATE_A, Date.now(), 200, 'held response released');
+          finishCapture(born);
+          clientControls.get('sibling-b')?.resolve(completeClient(HOLDER_BODY));
+          await delay(5);
+          const c = addCapture('sibling-c', DIRECT_CANDIDATE_A, Date.now(), 200, 'held response released');
+          finishCapture(c);
+          clientControls.get('sibling-c')?.resolve(completeClient(HOLDER_BODY));
+        })();
+      }
+      return 1;
+    },
+  };
+
+  const sendHttp = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    const input = String(body.input ?? '');
+    if (input.includes('[holder]')) {
+      const capture = addCapture('holder', DIRECT_CANDIDATE_A, Date.now(), 200, 'held response released');
+      return new Promise((resolve) => {
+        resolveHolder = () => {
+          finishCapture(capture);
+          resolve(completeClient(HOLDER_BODY));
+        };
+      });
+    }
+    if (input.includes('[sibling-b]')) {
+      if (kind === 'request_local_failure_isolation') {
+        const failed = addCapture('sibling-b', DIRECT_CANDIDATE_E, Date.now(), 503, '{"error":{"message":"controlled provider 503"}}');
+        finishCapture(failed);
+        if (extraERetryBeforeRelease) {
+          const retry = addCapture('sibling-b', DIRECT_CANDIDATE_E, Date.now(), 503, '{"error":{"message":"controlled provider 503"}}');
+          finishCapture(retry);
+        }
+        return new Promise((resolve) => {
+          resolveB = () => resolve(completeClient(mixedSuccessBody('sibling B recovered through A')));
+        });
+      }
+      return new Promise((resolve, reject) => {
+        clientControls.set('sibling-b', {
+          resolve,
+          reject(error) {
+            reject(error);
+          },
+        });
+        if (completeSiblingBeforeRelease) {
+          clientControls.get('sibling-b').resolve(completeClient(HOLDER_BODY));
+        }
+      });
+    }
+    if (input.includes('[sibling-c]')) {
+      if (kind === 'request_local_failure_isolation') {
+        const capture = addCapture('sibling-c', DIRECT_CANDIDATE_E, Date.now(), 200, 'sibling C completed through E');
+        finishCapture(capture);
+        return completeClient(mixedSuccessBody('sibling C completed through E'));
+      }
+      return new Promise((resolve, reject) => {
+        clientControls.set('sibling-c', {
+          resolve,
+          reject(error) {
+            reject(error);
+          },
+        });
+      });
+    }
+    throw new Error(`unexpected request input: ${input}`);
+  };
+
+  if (extraConcurrentCapture) {
+    const extra = addCapture('holder', DIRECT_CANDIDATE_A, Date.now(), 200, 'held response released');
+    void extra;
+  }
+
+  return {
+    fixture: fixtureValue,
+    mock,
+    sendHttp,
+    candidateIdentityReceipts: [
+      { candidate_id: DIRECT_CANDIDATE_A, provider_id: 'mock-responses-busy', model: 'mock.responses-model', auth_token: DIRECT_TOKEN_A },
+      { candidate_id: DIRECT_CANDIDATE_E, provider_id: 'mock-responses-excluded', model: 'mock.responses-model', auth_token: DIRECT_TOKEN_E },
+    ],
+    async cancelRequest(id) {
+      const control = clientControls.get(id);
+      if (!control) throw new Error(`no client control for ${id}`);
+      const error = new Error('request cancelled');
+      error.code = 'ABORT_ERR';
+      control.reject(error);
+      if (cancellationBlocksSibling) {
+        clientControls.get('sibling-c')?.resolve(CLOSED_BY_PRODUCT);
+      }
+    },
+    get releaseCount() { return releaseCount; },
+    leakProviderError,
+  };
+}
+
+function mixedSuccessBody(textValue) {
+  return HOLDER_BODY.replaceAll('held response released', textValue)
+    .replaceAll('resp-held', 'resp-mixed')
+    .replaceAll('msg_held', 'msg_mixed');
+}
+
+function cloneJSON(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+async function runNewReplay(harness, options = {}) {
+  const evidenceRoot = mkdtempSync(join(tmpdir(), 'provider-concurrency-new-'));
+  try {
+    return {
+      result: await runProviderConcurrencyReplay({
+        fixture: harness.fixture,
+        mock: harness.mock,
+        rccUrl: 'http://127.0.0.1:12345',
+        sendHttp: harness.sendHttp,
+        evidenceRoot,
+        timeoutMs: 1000,
+        pendingObservationMs: 20,
+        candidateIdentityReceipts: harness.candidateIdentityReceipts,
+        ...options,
+      }),
+      harness,
+    };
+  } finally {
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+}
+
+test('bounded capacity replay keeps two siblings pending, serializes one identity, and completes all three clients', async () => {
+  const harness = fakeRequestIndependenceHarness();
+  const { result } = await runNewReplay(harness);
+  assert.equal(result.status, 'passed', result.diagnostic);
+  assert.equal(result.observations.provider_concurrency.kind, 'bounded_capacity_wait');
+  assert.deepEqual(result.observations.provider_concurrency.pending_before_release, ['sibling-b', 'sibling-c']);
+  assert.equal(result.observations.provider_concurrency.client_results.length, 3);
+  assert.deepEqual(result.observations.provider_concurrency.peak_business_in_flight, { [DIRECT_CANDIDATE_A]: 1 });
+  assert.equal(harness.releaseCount, 1);
+});
+
+test('bounded capacity replay rejects a second concurrent business attempt on the limit-one identity', async () => {
+  const harness = fakeRequestIndependenceHarness({ extraConcurrentCapture: true });
+  const { result } = await runNewReplay(harness);
+  assert.equal(result.status, 'failed');
+  assert.match(result.diagnostic, /concurrent business attempt/i);
+});
+
+test('bounded capacity replay rejects false completion before the holder is released', async () => {
+  const harness = fakeRequestIndependenceHarness({ completeSiblingBeforeRelease: true });
+  const { result } = await runNewReplay(harness);
+  assert.equal(result.status, 'failed');
+  assert.match(result.diagnostic, /completed before release/i);
+});
+
+test('request-local failure isolation completes C through E, keeps B resident, and recovers B through A', async () => {
+  const harness = fakeRequestIndependenceHarness({ kind: 'request_local_failure_isolation' });
+  const { result } = await runNewReplay(harness);
+  assert.equal(result.status, 'passed', result.diagnostic);
+  assert.equal(result.observations.provider_concurrency.kind, 'request_local_failure_isolation');
+  assert.deepEqual(result.observations.provider_concurrency.completed_before_release, ['sibling-c']);
+  assert.deepEqual(result.observations.provider_concurrency.pending_before_release, ['sibling-b']);
+  assert.equal(result.observations.provider_concurrency.failed_attempt.status, 503);
+  assert.deepEqual(result.observations.provider_concurrency.peak_business_in_flight, {
+    [DIRECT_CANDIDATE_A]: 1,
+    [DIRECT_CANDIDATE_E]: 1,
+  });
+  assert.equal(harness.releaseCount, 1);
+});
+
+test('request-local failure isolation rejects an unauthorized E retry before release', async () => {
+  const harness = fakeRequestIndependenceHarness({ kind: 'request_local_failure_isolation', extraERetryBeforeRelease: true });
+  const { result } = await runNewReplay(harness);
+  assert.equal(result.status, 'failed');
+  assert.match(result.diagnostic, /retry|business send/i);
+});
+
+test('request-local failure isolation rejects leaking the internal 503 body to the client', async () => {
+  const harness = fakeRequestIndependenceHarness({ kind: 'request_local_failure_isolation', leakProviderError: true });
+  const { result } = await runNewReplay(harness, {
+    clientResultOverride: {
+      'sibling-b': completeClient('{"error":{"message":"controlled provider 503"}}'),
+    },
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.diagnostic, /forbidden client content|controlled provider 503/i);
+});
+
+test('bounded capacity replay lets a surviving sibling complete after one pending request cancels', async () => {
+  const harness = fakeRequestIndependenceHarness();
+  const { result } = await runNewReplay(harness, {
+    cancelRequestId: 'sibling-b',
+    cancelRequest: harness.cancelRequest,
+  });
+  assert.equal(result.status, 'passed', result.diagnostic);
+  assert.deepEqual(
+    result.observations.provider_concurrency.cancellations.map((entry) => entry.request_id),
+    ['sibling-b'],
+  );
+  assert.equal(result.observations.provider_concurrency.client_results.length, 3);
+});
+
+test('bounded capacity replay rejects cancellation of one request blocking a surviving sibling', async () => {
+  const harness = fakeRequestIndependenceHarness({ cancellationBlocksSibling: true });
+  const { result } = await runNewReplay(harness, {
+    cancelRequestId: 'sibling-b',
+    cancelRequest: harness.cancelRequest,
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.diagnostic, /sibling-c did not survive cancellation of sibling sibling-b/i);
+});
 
 const HOLDER_BODY = [
   'event: response.created',

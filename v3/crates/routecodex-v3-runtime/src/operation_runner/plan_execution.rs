@@ -1011,13 +1011,13 @@ pub(crate) async fn wait_for_target_recovery(
             return Ok(true);
         }
         let observed_generation = health.target_availability_generation();
-        // A released admission lease is not recovery evidence for a transport
-        // that just reported busy. Only unmasked healthy alternatives may
-        // bypass this request's original due time.
+        // A busy candidate remains part of the captured target. Listen for its
+        // capacity release so the next planning episode can attempt the same
+        // declared identity without waiting for the recovery ladder.
         let capacity_keys: BTreeSet<_> = expanded.candidates.iter()
             .filter(|candidate| {
                 let key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate);
-                !permanent.contains(&key) && !busy.contains(&key)
+                !permanent.contains(&key)
                     && V3TargetInterpreter::candidate_admitted(candidate, now_ms)
                     && availability.availability_for_interface(
                         &candidate.provider_id, &candidate.interface_id,
@@ -1288,6 +1288,77 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
         assert!(
             result.is_err(),
             "an ineligible candidate must not immediately trigger reselection"
+        );
+    }
+
+    #[tokio::test]
+    async fn target_recovery_current_admission_busy_wakes_on_capacity_release() {
+        let provider_id = "r05_current_admission_wake";
+        let manifest = test_manifest(provider_id);
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope =
+            V3ProviderFailureSessionScope::new("test", "default", "admission-wake").unwrap();
+        let hit = crate::provider_failure_runtime_policy::resolve_v3_relay_opaque_target_once(
+            &manifest,
+            "test",
+            "responses",
+            "/v1/responses",
+            &json!({"model":"client-model","input":"opaque"}),
+            0,
+        )
+        .unwrap();
+        let expanded =
+            expand_v3_relay_target_candidates_from_opaque_hit(&manifest, hit, 0).unwrap();
+        let budget =
+            crate::execution_control::V3AttemptBudget::from_manifest(&manifest, "test").unwrap();
+        let now_ms =
+            crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                .unwrap();
+        let candidate_key = crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(
+            &expanded.candidates[0],
+        );
+        let controller = V3AdaptiveConcurrencyController::process_shared();
+        let capacity_key = crate::provider_failure_runtime_policy::v3_provider_concurrency_key_parts(
+            provider_id,
+            "key1",
+        );
+        let identity = routecodex_v3_provider_responses::adaptive_concurrency::V3ConcurrencyIdentityScope {
+            interface_id: "default".to_string(),
+            model_id: "gpt-test".to_string(),
+        };
+        controller.ensure_initial_budget(&capacity_key, 1).unwrap();
+        let lease = controller
+            .try_acquire_business_scoped(&capacity_key, Some(&identity))
+            .expect("hold provider capacity");
+        let mut excluded = BTreeSet::from([candidate_key.clone()]);
+        let mut busy = excluded.clone();
+        let mut waiting = tokio::spawn(async move {
+            wait_for_target_recovery(
+                &expanded,
+                &health,
+                &scope,
+                &mut excluded,
+                &mut busy,
+                now_ms,
+                &budget,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!waiting.is_finished(), "the capacity wait must be registered");
+        controller
+            .release(lease.into_permit())
+            .expect("release provider capacity");
+        let result = tokio::time::timeout(Duration::from_millis(300), &mut waiting).await;
+        if result.is_err() {
+            waiting.abort();
+        }
+        assert!(
+            result
+                .expect("current admission busy must wake on capacity release")
+                .unwrap()
+                .unwrap(),
+            "capacity release must authorize a fresh admission check"
         );
     }
 

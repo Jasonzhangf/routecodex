@@ -21,6 +21,7 @@ const RUNTIME_SETUP_KEYS = new Set([
   'model',
   'wire_model',
   'candidate_ids',
+  'candidate_tiers',
   'all_candidates_fail',
   'attempt_store',
   'provider_concurrency',
@@ -294,6 +295,32 @@ function validateRuntimeSetup(relative, setup, findings) {
   if (setup.candidate_ids[0] !== firstCandidate) {
     fail(`runtime_setup.candidate_ids[0] must be ${firstCandidate}`);
   }
+  if (setup.candidate_tiers !== undefined) {
+    if (!Array.isArray(setup.candidate_tiers) || setup.candidate_tiers.length === 0) {
+      fail('runtime_setup.candidate_tiers must be a non-empty array');
+    } else {
+      const declared = new Set(setup.candidate_ids);
+      const seen = new Set();
+      for (const [tierIndex, tier] of setup.candidate_tiers.entries()) {
+        if (!Array.isArray(tier) || tier.length === 0) {
+          fail(`runtime_setup.candidate_tiers[${tierIndex}] must be a non-empty array`);
+          continue;
+        }
+        for (const candidateId of tier) {
+          if (typeof candidateId !== 'string' || !declared.has(candidateId)) {
+            fail(`runtime_setup.candidate_tiers[${tierIndex}] member ${candidateId ?? 'null'} is not in candidate_ids`);
+          } else if (seen.has(candidateId)) {
+            fail(`runtime_setup.candidate_tiers member ${candidateId} is duplicated`);
+          } else {
+            seen.add(candidateId);
+          }
+        }
+      }
+      if (seen.size !== setup.candidate_ids.length) {
+        fail('runtime_setup.candidate_tiers must include every candidate_ids member exactly once');
+      }
+    }
+  }
   if (setup.all_candidates_fail !== undefined && typeof setup.all_candidates_fail !== 'boolean') {
     fail('runtime_setup.all_candidates_fail must be boolean when present');
   }
@@ -336,64 +363,149 @@ function validateRuntimeSetup(relative, setup, findings) {
 }
 
 function validateConcurrencyReplay(relative, value, findings) {
-  const replay = value.concurrency_replay;
-  if (replay === undefined) return;
   const fail = (message) => findings.push(`${relative}: ${message}`);
+  if (value.concurrency_replay !== undefined) {
+    fail('concurrency_replay is retired; use request_independence_replay');
+  }
+  const replay = value.request_independence_replay;
+  if (replay === undefined) return;
   if (!isObject(replay)) {
-    fail('concurrency_replay must be an object when present');
+    fail('request_independence_replay must be an object when present');
     return;
   }
-  if (replay.kind !== 'provider_concurrency_all_busy') {
-    fail(`concurrency_replay.kind must be provider_concurrency_all_busy: ${replay.kind ?? 'null'}`);
+  const kind = replay.kind;
+  if (kind !== 'bounded_capacity_wait' && kind !== 'request_local_failure_isolation') {
+    fail(`request_independence_replay.kind invalid: ${kind ?? 'null'}`);
   }
-  if (!Array.isArray(replay.typed_error_codes)
-    || replay.typed_error_codes.length === 0
-    || replay.typed_error_codes.some((code) => typeof code !== 'string' || code.length === 0)) {
-    fail('concurrency_replay.typed_error_codes must be a non-empty string array');
-  }
-  if (replay.upstream_business_sends !== 1) {
-    fail('concurrency_replay.upstream_business_sends must be 1');
-  }
-  const exhausted = replay.exhaustion_client_request;
-  validateClientRequest(`${relative}: concurrency_replay.exhaustion_client_request`, exhausted, findings);
-  if (isObject(exhausted)) {
-    if (exhausted.path !== value.client_request?.path) {
-      fail('concurrency_replay.exhaustion_client_request.path must equal client_request.path');
-    }
-    const holderSession = value.client_request?.headers?.['session-id'];
-    const exhaustedSession = exhausted.headers?.['session-id'];
-    if (typeof holderSession !== 'string' || holderSession.length === 0) {
-      fail('client_request.headers.session-id must be a non-empty string');
-    }
-    if (typeof exhaustedSession !== 'string' || exhaustedSession.length === 0) {
-      fail('concurrency_replay.exhaustion_client_request.headers.session-id must be a non-empty string');
-    } else if (exhaustedSession === holderSession) {
-      fail('concurrency_replay exhaustion request must use a distinct session-id');
-    }
-  }
-  const expected = replay.expected_exhaustion_client;
-  if (!isObject(expected)) {
-    fail('concurrency_replay.expected_exhaustion_client must be an object');
+  const siblings = replay.sibling_client_requests;
+  if (!Array.isArray(siblings) || siblings.length !== 2) {
+    fail('request_independence_replay.sibling_client_requests must contain exactly two requests');
     return;
   }
-  if (expected.transport !== 'closed') {
-    fail('concurrency_replay.expected_exhaustion_client.transport must be closed');
+  const siblingIds = [];
+  for (const [index, sibling] of siblings.entries()) {
+    const prefix = `request_independence_replay.sibling_client_requests[${index}]`;
+    if (!isObject(sibling)) {
+      fail(`${prefix} must be an object`);
+      continue;
+    }
+    if (typeof sibling.id !== 'string' || !ID_PATTERN.test(sibling.id)) {
+      fail(`${prefix}.id invalid: ${sibling.id ?? 'null'}`);
+    } else if (siblingIds.includes(sibling.id)) {
+      fail(`${prefix}.id duplicate: ${sibling.id}`);
+    } else {
+      siblingIds.push(sibling.id);
+    }
+    validateClientRequest(`${relative}: ${prefix}.client_request`, sibling.client_request, findings);
+    validateExpectedClient(`${relative}: ${prefix}.expected_client`, sibling.expected_client, findings);
   }
-  if (!Number.isInteger(expected.deadline_ms) || expected.deadline_ms < 1 || expected.deadline_ms > 10_000) {
-    fail('concurrency_replay.expected_exhaustion_client.deadline_ms must be an integer from 1 to 10000');
+  if (value.client_request?.path !== undefined) {
+    for (const sibling of siblings) {
+      if (isObject(sibling?.client_request) && sibling.client_request.path !== value.client_request.path) {
+        fail(`request_independence_replay sibling ${sibling.id} path must equal client_request.path`);
+      }
+    }
   }
-  if (!Array.isArray(expected.error_codes_must_not)
-    || expected.error_codes_must_not.some((code) => typeof code !== 'string' || code.length === 0)) {
-    fail('concurrency_replay.expected_exhaustion_client.error_codes_must_not must be a string array');
-  } else if (!expected.error_codes_must_not.includes('ETIMEDOUT')) {
-    fail('concurrency_replay.expected_exhaustion_client.error_codes_must_not must include ETIMEDOUT');
+  for (const field of ['pending_before_release', 'completed_before_release']) {
+    const ids = replay[field];
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !siblingIds.includes(id))) {
+      fail(`request_independence_replay.${field} must reference sibling ids`);
+    }
+    if (new Set(ids ?? []).size !== (ids ?? []).length) {
+      fail(`request_independence_replay.${field} must not contain duplicate ids`);
+    }
+  }
+  const peak = replay.expected_peak_business_in_flight;
+  if (!isObject(peak) || Object.keys(peak).length === 0) {
+    fail('request_independence_replay.expected_peak_business_in_flight must be a non-empty object');
+  } else {
+    for (const [candidateId, valuePeak] of Object.entries(peak)) {
+      if (!Array.isArray(value.runtime_setup?.candidate_ids)
+        || !value.runtime_setup.candidate_ids.includes(candidateId)) {
+        fail(`request_independence_replay peak candidate ${candidateId} is not declared in candidate_ids`);
+      }
+      if (valuePeak !== 1) {
+        fail(`request_independence_replay peak for ${candidateId} must be 1`);
+      }
+    }
+  }
+  const sends = replay.expected_business_sends;
+  if (!Array.isArray(sends) || sends.length < 3) {
+    fail('request_independence_replay.expected_business_sends must contain at least three sends');
+  } else {
+    for (const [index, send] of sends.entries()) {
+      if (!isObject(send)) {
+        fail(`request_independence_replay.expected_business_sends[${index}] must be an object`);
+        continue;
+      }
+      if (!siblingIds.includes(send.request_id) && send.request_id !== 'holder') {
+        fail(`request_independence_replay.expected_business_sends[${index}].request_id invalid: ${send.request_id ?? 'null'}`);
+      }
+      if (!Array.isArray(value.runtime_setup?.candidate_ids)
+        || !value.runtime_setup.candidate_ids.includes(send.candidate_id)) {
+        fail(`request_independence_replay.expected_business_sends[${index}].candidate_id is not declared`);
+      }
+      if (!['success', 'failure'].includes(send.outcome)) {
+        fail(`request_independence_replay.expected_business_sends[${index}].outcome invalid`);
+      }
+      if (!Number.isInteger(send.status)) {
+        fail(`request_independence_replay.expected_business_sends[${index}].status invalid`);
+      }
+    }
+  }
+  if (kind === 'bounded_capacity_wait') {
+    if (JSON.stringify(replay.pending_before_release) !== JSON.stringify(siblingIds)) {
+      fail('bounded_capacity_wait must keep both siblings pending before release');
+    }
+    if (!Array.isArray(replay.completed_before_release) || replay.completed_before_release.length !== 0) {
+      fail('bounded_capacity_wait must not complete a sibling before release');
+    }
+    if (!Array.isArray(sends) || sends.length !== 3 || sends.some((send) => send?.outcome !== 'success')) {
+      fail('bounded_capacity_wait must declare three successful business sends');
+    }
+  } else if (kind === 'request_local_failure_isolation') {
+    if (JSON.stringify(replay.pending_before_release) !== JSON.stringify(['sibling-b'])) {
+      fail('request_local_failure_isolation must keep sibling-b pending before release');
+    }
+    if (JSON.stringify(replay.completed_before_release) !== JSON.stringify(['sibling-c'])) {
+      fail('request_local_failure_isolation must complete sibling-c before release');
+    }
+    if (!Array.isArray(sends) || sends.length !== 4
+      || sends.filter((send) => send?.outcome === 'failure').length !== 1) {
+      fail('request_local_failure_isolation must declare four business sends with one failure');
+    }
+    const failed = replay.failed_attempt;
+    if (!isObject(failed)
+      || failed.request_id !== 'sibling-b'
+      || !value.runtime_setup?.candidate_ids?.includes(failed.candidate_id)
+      || failed.http_status !== 503
+      || failed.client_visible !== false
+      || failed.retry_before_release !== false) {
+      fail('request_local_failure_isolation.failed_attempt must bind the internal sibling-b 503');
+    }
+  }
+  const forbidden = replay.forbidden_client_content;
+  if (!Array.isArray(forbidden) || forbidden.length === 0
+    || forbidden.some((entry) => typeof entry !== 'string' || entry.length === 0)) {
+    fail('request_independence_replay.forbidden_client_content must be a non-empty string array');
   }
   if (!isObject(value.runtime_setup?.provider_concurrency)
-    || value.runtime_setup.provider_concurrency.maxInFlight !== 1) {
-    fail('concurrency_replay requires runtime_setup.provider_concurrency.maxInFlight = 1');
+    || value.runtime_setup.provider_concurrency.maxInFlight !== 1
+    || value.runtime_setup.provider_concurrency.acquireTimeoutMs !== 1000
+    || value.runtime_setup.provider_concurrency.staleLeaseMs !== 300000) {
+    fail('request independence replay requires the declared maxInFlight=1 concurrency policy');
   }
   if (value.upstream_response?.attempts?.[0]?.fault !== 'hold-open-controlled') {
-    fail('concurrency_replay requires first upstream attempt fault hold-open-controlled');
+    fail('request_independence_replay requires first upstream attempt fault hold-open-controlled');
+  }
+  if (kind === 'request_local_failure_isolation') {
+    const tiers = value.runtime_setup?.candidate_tiers;
+    if (!Array.isArray(tiers) || tiers.length !== 2
+      || tiers[0]?.length !== 1 || tiers[1]?.length !== 1
+      || tiers[0][0] !== value.runtime_setup.candidate_ids?.[0]
+      || tiers[1][0] !== value.runtime_setup.candidate_ids?.[1]) {
+      fail('request_local_failure_isolation must order the two existing candidates in two explicit tiers');
+    }
   }
 }
 

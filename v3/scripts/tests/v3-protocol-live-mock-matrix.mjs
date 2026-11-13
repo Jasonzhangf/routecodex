@@ -229,6 +229,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
         entry = { case_id: fixture.case_id, cell: fixture.cell, status: 'not_run',
           diagnostic: 'lifecycle generateRccConfig does not expose authored same-protocol relay mode' };
       } else {
+        mock.setCandidateIdentities?.(generated.candidate_identity_receipts?.candidates ?? []);
         phase = 'config_check';
         const check = spawnSync(binary, ['config', 'check', '-c', generated.path], {
           encoding: 'utf8', timeout: options.startupTimeoutMs,
@@ -250,6 +251,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
           ? await runProviderConcurrencyReplay({
             fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
             evidenceRoot: caseRoot, timeoutMs: options.requestTimeoutMs,
+            candidateIdentityReceipts: generated.candidate_identity_receipts?.candidates ?? [],
           })
           : await runCase({
             fixture, mock, rccUrl: 'http://127.0.0.1:' + rccPort, sendHttp,
@@ -308,6 +310,7 @@ Defaults are anchored to this script, so root and v3 working directories work.`)
             sampleRoot: retainedSampleRoot ?? sourceSampleRoot,
             listenerPort: generated?.rcc_port ?? null,
             exhaustedWindow: entry.observations?.provider_concurrency?.exhausted_window ?? {},
+            requestWindow: entry.observations?.provider_concurrency?.request_window ?? null,
             collectionPhase,
             stopReceipt: cleanup.rcc ?? null,
           })
