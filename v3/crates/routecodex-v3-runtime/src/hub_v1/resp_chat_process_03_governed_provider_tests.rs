@@ -121,8 +121,13 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
             },
             {
                 "type": "message",
+                "encrypted_content": "ordinary-anthropic-message-cipher",
                 "content": [
-                    {"type": "output_text", "text": "visible answer"},
+                    {
+                        "type": "output_text",
+                        "text": "visible answer",
+                        "encrypted_content": "ordinary-anthropic-part-cipher"
+                    },
                     {"type": "encrypted_content", "data": "typed-protocol-cipher"}
                 ]
             },
@@ -157,6 +162,14 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
     );
     assert!(payload.contains("signed thought"));
     assert!(payload.contains("visible answer"));
+    assert!(
+        !payload.contains("ordinary-anthropic-message-cipher"),
+        "ordinary Anthropic-source message fields must be stripped"
+    );
+    assert!(
+        !payload.contains("ordinary-anthropic-part-cipher"),
+        "ordinary Anthropic-source output_text parts must be stripped"
+    );
     assert!(
         !payload.contains("typed-protocol-cipher"),
         "typed protocol ciphertext part must be removed even for typed Anthropic source: {payload}"

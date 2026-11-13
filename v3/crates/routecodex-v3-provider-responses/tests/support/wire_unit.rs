@@ -2465,8 +2465,13 @@ mod tests {
                 },
                 {
                     "type": "message",
+                    "encrypted_content": "ordinary-anthropic-field-cipher",
                     "content": [
-                        {"type": "output_text", "text": "visible answer"},
+                        {
+                            "type": "output_text",
+                            "text": "visible answer",
+                            "encrypted_content": "ordinary-anthropic-part-cipher"
+                        },
                         {"type": "encrypted_content", "data": "typed-protocol-cipher"}
                     ]
                 },
@@ -2488,6 +2493,16 @@ mod tests {
             "typed Anthropic source signature must survive"
         );
         assert_eq!(payload["output"][1]["content"][0]["text"], "visible answer");
+        assert!(
+            payload["output"][1].get("encrypted_content").is_none(),
+            "ordinary Anthropic-source message fields are not signature carriers"
+        );
+        assert!(
+            payload["output"][1]["content"][0]
+                .get("encrypted_content")
+                .is_none(),
+            "ordinary Anthropic-source output_text parts are not signature carriers"
+        );
         assert_eq!(
             payload["output"][1]["content"].as_array().unwrap().len(),
             1,

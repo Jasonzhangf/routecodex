@@ -403,9 +403,9 @@ pub fn apply_v3_response_cipher_policy(
 ) {
     if !retain_response_cipher {
         if preserve_anthropic_signature {
-            // Anthropic source 的 encrypted_content 字段是签名载体，必须保留；
-            // 但独立 `type=encrypted_content` 协议块仍不得进入 Responses 客户端。
-            strip_v3_response_typed_encrypted_content_parts_recursive(payload);
+            // Anthropic source 只保留 reasoning 上的合法签名；普通对象与独立
+            // `type=encrypted_content` 协议块仍不得进入 Responses 客户端。
+            strip_v3_response_anthropic_signature_excluding_protocol_cipher(payload);
         } else {
             strip_v3_response_encrypted_fields_recursive(payload, true);
         }
@@ -428,9 +428,10 @@ fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bo
     strip_v3_response_encrypted_fields(value, strip_all, false);
 }
 
-/// 保留所有 `encrypted_content` 字段（typed Anthropic signature），只删除独立
-/// `type=encrypted_content` 协议 part。工具业务子树按现有 owner 边界完整保留。
-fn strip_v3_response_typed_encrypted_content_parts_recursive(value: &mut Value) {
+/// 对 typed Anthropic source 只保留 `type=reasoning` 上的非空字符串签名载体；
+/// 其余非工具对象上的 `encrypted_content` 字段和独立 `type=encrypted_content`
+/// 协议 part 都删除。工具业务子树按现有 owner 边界完整保留。
+fn strip_v3_response_anthropic_signature_excluding_protocol_cipher(value: &mut Value) {
     match value {
         Value::Object(map) => {
             if map
@@ -440,8 +441,17 @@ fn strip_v3_response_typed_encrypted_content_parts_recursive(value: &mut Value) 
             {
                 return;
             }
+            let is_reasoning = map.get("type").and_then(Value::as_str) == Some("reasoning");
+            let keep_signature = is_reasoning
+                && matches!(
+                    map.get("encrypted_content"),
+                    Some(Value::String(signature)) if !signature.trim().is_empty()
+                );
+            if !keep_signature {
+                map.remove("encrypted_content");
+            }
             for child in map.values_mut() {
-                strip_v3_response_typed_encrypted_content_parts_recursive(child);
+                strip_v3_response_anthropic_signature_excluding_protocol_cipher(child);
             }
         }
         Value::Array(items) => {
@@ -449,7 +459,7 @@ fn strip_v3_response_typed_encrypted_content_parts_recursive(value: &mut Value) 
                 item.get("type").and_then(Value::as_str) != Some("encrypted_content")
             });
             for item in items {
-                strip_v3_response_typed_encrypted_content_parts_recursive(item);
+                strip_v3_response_anthropic_signature_excluding_protocol_cipher(item);
             }
         }
         _ => {}
