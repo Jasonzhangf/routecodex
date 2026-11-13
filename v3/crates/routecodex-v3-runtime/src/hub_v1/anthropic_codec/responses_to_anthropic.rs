@@ -867,7 +867,9 @@ pub(super) fn responses_tool_as_anthropic_tool(
     {
         return responses_web_search_tool_as_anthropic_tool(tool);
     }
-    let mut output = Map::new();
+    // Start from the complete canonical declaration so unconsumed business
+    // members remain associated with this exact tool on the Anthropic wire.
+    let mut output = tool.clone();
     let name = tool
         .get("name")
         .or_else(|| {
@@ -890,11 +892,16 @@ pub(super) fn responses_tool_as_anthropic_tool(
         "name".to_string(),
         Value::String(super::super::request_outbound_mcp_names::provider_function_name(&name)),
     );
-    if let Some(description) = tool.get("description").or_else(|| {
+    match tool.get("description").or_else(|| {
         tool.get("function")
             .and_then(|function| function.get("description"))
     }) {
-        output.insert("description".to_string(), description.clone());
+        Some(description) => {
+            output.insert("description".to_string(), description.clone());
+        }
+        None => {
+            output.remove("description");
+        }
     }
     let input_schema = tool
         .get("parameters")
@@ -905,6 +912,12 @@ pub(super) fn responses_tool_as_anthropic_tool(
         .cloned()
         .unwrap_or_else(|| json!({"type":"object"}));
     output.insert("input_schema".to_string(), input_schema);
+    // Canonical structural aliases and internal carrier fields stay out of the
+    // provider declaration; only client business members ride through beside
+    // the mapped name, description and input_schema.
+    for alias in ["type", "parameters", "function", "strict", "execution"] {
+        output.remove(alias);
+    }
     Ok(Value::Object(output))
 }
 

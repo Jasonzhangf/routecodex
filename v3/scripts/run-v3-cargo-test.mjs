@@ -711,7 +711,11 @@ export function executeCargo(cargoArgs, executables, {
   });
 }
 
-export async function runV3CargoTest(args, { execute = executeCargo, probeCommand = defaultProbeCommand } = {}) {
+export async function runV3CargoTest(args, {
+  execute = executeCargo,
+  probeCommand = defaultProbeCommand,
+  activeBuilders = activeV3BuilderCommands,
+} = {}) {
   let cargoArgs;
   try {
     cargoArgs = buildCargoArgs(args);
@@ -753,7 +757,7 @@ export async function runV3CargoTest(args, { execute = executeCargo, probeComman
     } else {
       try {
         await releaseOwnedTestArtifacts({ executables });
-        const bytes = await enforceV3DebugBudget();
+        const bytes = await enforceV3DebugBudget({ activeBuilders });
         if (bytes !== null) {
           process.stdout.write(`[v3-cargo-test] debug allocation after cleanup: ${bytes} bytes\n`);
         }
