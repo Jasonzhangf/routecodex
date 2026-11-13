@@ -153,7 +153,10 @@ fn resp03_anthropic_source_witness_preserves_signature_after_canonical_projectio
     );
     let compat = build_provider_resp_compat_02_from_v3_provider_resp_inbound_01(resp01).unwrap();
     let resp02 = build_v3_hub_resp_inbound_02_from_provider_resp_compat_02(compat).unwrap();
-    let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, false);
+    // Anthropic source must keep its typed reasoning signature even when the
+    // request-side GPT retention flag is true; the source boundary still
+    // removes ordinary fields and protocol ciphertext parts.
+    let stripped = strip_v3_resp03_encrypted_reasoning_content(resp02, true);
 
     let payload = serde_json::to_string(&*stripped.previous.previous.payload.0).unwrap();
     assert!(
