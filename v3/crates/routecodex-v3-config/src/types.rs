@@ -570,7 +570,16 @@ pub fn default_provider_request_timeout_ms() -> u64 {
 /// Only a provider declared `local = true` may exceed it. The whole-request
 /// `request_timeout_ms` is a separate budget and is not capped here, so a long
 /// healthy stream is not cut off.
-pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 120_000;
+pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 30_000;
+
+/// Declared local providers may wait longer for their first frame, but never
+/// beyond ten minutes. A stalled local candidate still fails the attempt and
+/// enters provider reselection.
+pub const V3_PROVIDER_LOCAL_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 600_000;
+
+/// Once a provider has produced its first semantic frame, every later frame or
+/// terminal must arrive within this fixed inter-frame budget.
+pub const V3_PROVIDER_SSE_INTER_FRAME_TIMEOUT_MS: u64 = 30_000;
 
 /// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
 pub fn default_provider_sse_first_frame_timeout_ms() -> u64 {

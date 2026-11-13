@@ -98,22 +98,19 @@ pub(crate) fn direct_external_error(
     )
 }
 
-/// Direct SSE 首语义帧与帧间超时：provider 返回 200 后挂起时 fail-fast。
-/// 未配置时使用 30s compatibility default；慢 provider 可显式覆盖该预算。
-/// 超时归一化为 transport Error01 进入错误链（reselect / Error06 终态投影），
-/// 不在 server/SSE 层裸造错误帧。
+/// Direct SSE 首语义帧默认预算。声明 local 的 provider 可通过配置延长首帧等待。
 fn v3_direct_sse_default_timeout() -> std::time::Duration {
     std::time::Duration::from_millis(
         routecodex_v3_config::default_provider_sse_first_frame_timeout_ms(),
     )
 }
 
-fn v3_direct_sse_frame_interval_timeout(
-    sse_first_frame_timeout_ms: Option<u64>,
-) -> std::time::Duration {
-    sse_first_frame_timeout_ms
-        .map(std::time::Duration::from_millis)
-        .unwrap_or_else(v3_direct_sse_default_timeout)
+/// After the first semantic frame, the fixed inter-frame budget is independent
+/// of a local provider's longer first-frame allowance.
+fn v3_direct_sse_frame_interval_timeout() -> std::time::Duration {
+    std::time::Duration::from_millis(
+        routecodex_v3_config::V3_PROVIDER_SSE_INTER_FRAME_TIMEOUT_MS,
+    )
 }
 
 pub(crate) fn v3_route_plan_error_source(
@@ -617,7 +614,7 @@ async fn process_direct_sse_stream(
         session_id,
         stream,
         usage_observation.clone(),
-        v3_direct_sse_frame_interval_timeout(sse_first_frame_timeout_ms),
+        v3_direct_sse_frame_interval_timeout(),
         compatibility_profile,
         custom_tool_function_binding,
         provider_protocol,
@@ -1780,14 +1777,14 @@ mod tests {
     }
 
     #[test]
-    fn direct_sse_frame_interval_timeout_uses_provider_cold_start_budget() {
+    fn direct_sse_frame_interval_timeout_is_fixed_at_thirty_seconds() {
         assert_eq!(
-            v3_direct_sse_frame_interval_timeout(Some(900_000)),
-            std::time::Duration::from_secs(900)
+            v3_direct_sse_frame_interval_timeout(),
+            std::time::Duration::from_secs(30)
         );
         assert_eq!(
-            v3_direct_sse_frame_interval_timeout(None),
-            v3_direct_sse_default_timeout()
+            v3_direct_sse_default_timeout(),
+            std::time::Duration::from_secs(30)
         );
     }
 
