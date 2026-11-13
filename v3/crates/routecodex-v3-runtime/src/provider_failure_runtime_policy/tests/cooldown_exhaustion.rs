@@ -151,7 +151,7 @@ fn request_local_provider_failure_excludes_only_failed_candidate() {
         }
     }
 
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("first provider must be selectable before failure"),

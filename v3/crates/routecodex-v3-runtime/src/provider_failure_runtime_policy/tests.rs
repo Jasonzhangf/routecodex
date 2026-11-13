@@ -1353,7 +1353,7 @@ targets = [
 #[tokio::test]
 async fn transport_error_selects_untried_same_provider_sibling_key() {
     let manifest = transport_thrash_manifest("transport_thrash");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let selected = match resolve_target(&manifest, "transport_thrash", &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the first provider"),
@@ -1638,7 +1638,7 @@ targets = [
         parse_v3_config_02_authoring(&source).expect("response-policy authoring"),
     )
     .expect("response-policy manifest");
-    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
     let selected = match resolve_target(&manifest, scope, &BTreeSet::new(), &health) {
         V3RelayProviderTargetResolution::Selected(selected) => selected,
         _ => panic!("valid fixture must select the provider"),

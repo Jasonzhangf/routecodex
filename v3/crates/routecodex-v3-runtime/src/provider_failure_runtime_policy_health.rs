@@ -19,7 +19,7 @@ impl V3ProviderFailureRuntimeHealth {
         let store = V3ProviderHealthStore::from_manifest_without_persistence(manifest);
         Self {
             store,
-            action_gate: V3ProviderActionGate::process_shared(),
+            action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
             precool: Default::default(),
             observation_clock: None,
@@ -79,7 +79,7 @@ impl V3ProviderFailureRuntimeHealth {
         let store = V3ProviderHealthStore::from_manifest(manifest);
         Self {
             store,
-            action_gate: V3ProviderActionGate::process_shared(),
+            action_gate: V3ProviderActionGate::default(),
             probe_owner: Default::default(),
             precool: Default::default(),
             observation_clock: None,
@@ -658,6 +658,8 @@ impl V3ProviderFailureRuntimeHealth {
             ),
         )?;
         self.action_gate
+            .record_provider_success(&provider_scope.clone().rate_limit_global())?;
+        self.action_gate
             .record_provider_success(&provider_scope)
     }
 
@@ -998,6 +1000,24 @@ impl V3ProviderFailureRuntimeHealth {
         )?;
         self.action_gate
             .try_admit_exact_rate_limit(&scope.rate_limit_global())
+    }
+
+    pub(crate) fn rate_limit_visibility_blocked(
+        &self,
+        provider_id: &str,
+        interface_id: &str,
+        auth_alias: Option<&str>,
+        model_id: Option<&str>,
+    ) -> Result<bool, String> {
+        let scope = V3ProviderActionProviderScope::rate_limit_identity(
+            v3_relay_provider_candidate_key_parts(
+                provider_id,
+                Some(interface_id),
+                auth_alias,
+                model_id,
+            ),
+        );
+        self.action_gate.exact_rate_limit_is_blocked(&scope)
     }
 
     pub(crate) fn store(&self) -> V3ProviderHealthStore {

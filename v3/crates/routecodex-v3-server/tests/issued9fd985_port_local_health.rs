@@ -112,6 +112,7 @@ struct UpstreamState {
     sibling_business: AtomicUsize,
     probes: AtomicUsize,
     probe_success: AtomicBool,
+    rate_limit_once: AtomicBool,
     hold_probe: AtomicBool,
     probe_entered: Semaphore,
     probe_release: Semaphore,
@@ -125,6 +126,7 @@ impl UpstreamState {
             sibling_business: AtomicUsize::new(0),
             probes: AtomicUsize::new(0),
             probe_success: AtomicBool::new(probe_success),
+            rate_limit_once: AtomicBool::new(false),
             hold_probe: AtomicBool::new(false),
             probe_entered: Semaphore::new(0),
             probe_release: Semaphore::new(0),
@@ -184,6 +186,23 @@ fn failure_body() -> Response<Body> {
         .expect("build failure response")
 }
 
+fn rate_limit_body() -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "error": {
+                    "type": "rate_limit_error",
+                    "code": "insufficient_quota",
+                    "message": "controlled provider rate limit"
+                }
+            })
+            .to_string(),
+        ))
+        .expect("build rate limit response")
+}
+
 fn is_probe(body: &Value) -> bool {
     body["input"]
         .as_array()
@@ -227,6 +246,11 @@ async fn upstream(
     }
     let is_cross_port_isolation_request = body["input"].as_str() == Some("other-port-same-key");
     if model == "main"
+        && authorization.contains(KEY_SECRET)
+        && state.rate_limit_once.swap(false, Ordering::SeqCst)
+    {
+        rate_limit_body()
+    } else if model == "main"
         && state.fail_main
         && authorization.contains(KEY_SECRET)
         && !is_cross_port_isolation_request
@@ -751,6 +775,65 @@ async fn id9_exact_identity_isolation() {
     assert!(
         cooldown_entries(&client, &base_b).await.is_empty(),
         "port B must not inherit the exact identity failure"
+    );
+
+    handle.shutdown().await;
+    let _ = primary_shutdown.send(());
+    let _ = spare_shutdown.send(());
+}
+
+#[tokio::test]
+async fn id9_429_visibility_is_port_local() {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("rate-limit-visibility");
+    let _key = EnvGuard::set(KEY_ENV, KEY_SECRET);
+    let _sibling = EnvGuard::set(SIBLING_ENV, SIBLING_SECRET);
+    let (primary_base, primary, primary_shutdown) = start_upstream(false, true).await;
+    let (spare_base, spare, spare_shutdown) = start_upstream(false, true).await;
+    primary.rate_limit_once.store(true, Ordering::SeqCst);
+    let handle = spawn_v3_server_aggregate(port_manifest(
+        free_port(),
+        free_port(),
+        &primary_base,
+        &spare_base,
+    ))
+    .await
+    .expect("spawn two-listener aggregate");
+    let base_a = listener_base(&handle, "a");
+    let base_b = listener_base(&handle, "b");
+    let client = reqwest::Client::builder()
+        .pool_max_idle_per_host(0)
+        .build()
+        .expect("build listener-local rate limit client");
+
+    let primary_before_a = primary.business_count();
+    let (status, body) = business_request(&client, &base_a, "client-test", "port-a-429").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("upstream-ok"), "{body}");
+    assert_eq!(
+        primary.business_count(),
+        primary_before_a + 1,
+        "listener A must attempt the primary identity before switching"
+    );
+    assert!(
+        spare.business_count() > 0,
+        "listener A must complete the request through the healthy spare"
+    );
+
+    let primary_before_b = primary.business_count();
+    let spare_before_b = spare.business_count();
+    let (status, body) = business_request(&client, &base_b, "client-test", "port-b-same-key").await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body.contains("upstream-ok"), "{body}");
+    assert_eq!(
+        primary.business_count(),
+        primary_before_b + 1,
+        "listener B must not inherit listener A's 429 visibility block"
+    );
+    assert_eq!(
+        spare.business_count(),
+        spare_before_b,
+        "listener B must remain on the primary identity"
     );
 
     handle.shutdown().await;

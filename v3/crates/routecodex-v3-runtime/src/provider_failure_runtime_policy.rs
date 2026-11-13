@@ -583,6 +583,26 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
+        match self.global.rate_limit_visibility_blocked(
+            provider_id,
+            interface_id,
+            Some(auth_alias),
+            Some(model_id),
+        ) {
+            Ok(true) => {
+                projection.available = false;
+                projection
+                    .blocked_scopes
+                    .push("provider_http_429_backpressure".to_string());
+            }
+            Ok(false) => {}
+            Err(_) => {
+                projection.available = false;
+                projection
+                    .blocked_scopes
+                    .push("provider_action_gate_unavailable".to_string());
+            }
+        }
         projection.available = projection.available && session.available && !excluded_candidate;
         projection
     }
@@ -788,7 +808,7 @@ impl From<V3ProviderHealthStore> for V3ProviderFailureRuntimeHealth {
             probe_owner: Default::default(),
             precool: Default::default(),
             observation_clock: None,
-            action_gate: V3ProviderActionGate::process_shared(),
+            action_gate: V3ProviderActionGate::default(),
             default_same_provider_retries: 0,
         }
     }

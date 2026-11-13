@@ -454,7 +454,7 @@ for (const [name, source, rel] of [
 requireText(
   findFunctionBody(text.policy, 'V3ProviderFailureRuntimeHealth::from', files.policy),
   files.policy,
-  'action_gate: V3ProviderActionGate::process_shared()',
+  'action_gate: V3ProviderActionGate::default()',
 );
 for (const token of [
   'project_v3_client_disconnect',

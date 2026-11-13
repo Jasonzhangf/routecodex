@@ -127,13 +127,13 @@ const cases = [
     diagnostic: /forbidden legacy token retry_delay_ms/u,
   },
   {
-    name: 'runtime recreates a request-local gate',
+    name: 'runtime revives a process-global gate',
     path: 'v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs',
     mutate: (source) => source.replaceAll(
-      'action_gate: V3ProviderActionGate::process_shared()',
       'action_gate: V3ProviderActionGate::default()',
+      'action_gate: V3ProviderActionGate::process_shared()',
     ),
-    diagnostic: /missing action_gate: V3ProviderActionGate::process_shared\(\)/u,
+    diagnostic: /missing action_gate: V3ProviderActionGate::default\(\)/u,
   },
   {
     name: 'OpenAI post-commit SSE failure loses fresh-request isolation coverage',

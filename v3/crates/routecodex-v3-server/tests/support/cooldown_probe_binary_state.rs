@@ -137,12 +137,12 @@ async fn wait_receipt(rx: &mut mpsc::UnboundedReceiver<(String, bool)>, expected
 }
 
 #[tokio::test]
-async fn health_neutral_429_keeps_exact_key_routable_without_probe() {
+async fn health_neutral_429_skips_exact_key_without_probe() {
     automatic_recovery(false, false).await;
 }
 
 #[tokio::test]
-async fn in_flight_business_success_keeps_exact_key_routable_after_429() {
+async fn in_flight_business_success_completes_without_reopening_429_backpressure() {
     automatic_recovery(true, false).await;
 }
 
@@ -323,18 +323,14 @@ targets = [{{ kind = "provider_model", provider = "{provider_id}", model = "test
     }
     let refused_count = *failures.lock().await;
     let fresh = business(&client, &managed).await;
-    if !late_business_failure && refusal_status == 429 {
-        assert!(
-            fresh.contains("controlled-secret"),
-            "429 must not gate the exact identity: {fresh}"
-        );
-    } else {
-        assert!(fresh.contains("spare-secret"));
-    }
+    assert!(
+        fresh.contains("spare-secret"),
+        "a constrained exact identity must use the healthy fallback: {fresh}"
+    );
     assert_eq!(
         *failures.lock().await,
         refused_count,
-        "a fresh request must not be gated by the previous observation"
+        "a fresh request must not retry the constrained identity"
     );
     assert!(
         pool_entries(&client, managed.pool_url())

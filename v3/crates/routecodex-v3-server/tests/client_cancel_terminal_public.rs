@@ -757,6 +757,50 @@ async fn run_after_business_prefix(mode: Mode) {
     entry.stop().await;
 }
 
+async fn run_openai_chat_cancel_after_upstream_prefix() {
+    let (_home_guard, _lock) = TEST_LOCK.lock().await;
+    let _env = EnvGuard::install();
+    let home = PathBuf::from(std::env::var("HOME").unwrap());
+    let mut entry = start(Mode::OpenAiChat).await;
+    let server_addr = entry.handle.listeners[0].addr;
+    let path = request_records_path(&home, server_addr.port());
+
+    let mut socket = TcpStream::connect(server_addr).await.unwrap();
+    write_raw_request(&mut socket, Mode::OpenAiChat, AFTER_PREFIX_INPUT).await;
+    let capture = timeout(Duration::from_secs(5), entry.captures.recv())
+        .await
+        .expect("the controlled provider must receive the prefix request")
+        .expect("provider capture channel");
+    assert_eq!(capture["stream"], json!(true));
+
+    let wire = read_until(&mut socket, KEEPALIVE_FRAME, Duration::from_secs(3)).await;
+    assert!(
+        !String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
+        "OpenAI Chat Direct must keep the uncommitted provider prefix buffered"
+    );
+    drop(socket);
+
+    let rows = wait_for_terminal_count(&path, 1, Duration::from_secs(10)).await;
+    let terminals = session_terminal_rows(&rows);
+    assert_eq!(
+        terminals.len(),
+        1,
+        "disconnect during the buffered attempt must produce one effective terminal: {terminals:#?}"
+    );
+    assert_cancelled_terminal(terminals[0]);
+    assert_no_failed_or_provider_failure(&rows);
+    entry.release_provider();
+
+    sleep(Duration::from_millis(200)).await;
+    let rows = read_rows(&path);
+    assert_eq!(
+        session_terminal_rows(&rows).len(),
+        1,
+        "provider completion after the disconnect must not add a second terminal"
+    );
+    entry.stop().await;
+}
+
 async fn run_normal_completion(mode: Mode) {
     let (_home_guard, _lock) = TEST_LOCK.lock().await;
     let _env = EnvGuard::install();
@@ -837,6 +881,11 @@ async fn client_cancel_before_business_records_one_cancel_responses_relay() {
 #[tokio::test]
 async fn client_cancel_after_business_prefix_records_one_cancel_responses_relay() {
     run_after_business_prefix(Mode::ResponsesRelay).await;
+}
+
+#[tokio::test]
+async fn client_cancel_after_upstream_prefix_records_one_cancel_openai_chat() {
+    run_openai_chat_cancel_after_upstream_prefix().await;
 }
 
 #[tokio::test]
