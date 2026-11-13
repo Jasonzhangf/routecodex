@@ -157,10 +157,7 @@ fn provider_http_errors_reselect_when_route_pool_remains() {
     ] {
         let decision = provider_error_05(code, "V3ProviderRespInbound01Raw", false);
         assert!(
-            matches!(
-                decision.action,
-                V3Error05ExecutionAction::WaitThenReselect { .. }
-            ),
+            matches!(decision.action, V3Error05ExecutionAction::Reselect),
             "{code} must reselect"
         );
     }
@@ -177,10 +174,7 @@ fn transient_stream_failures_reselect_even_when_same_provider_budget_is_reported
     ] {
         let decision = provider_error_05(code, stage, true);
         assert!(
-            matches!(
-                decision.action,
-                V3Error05ExecutionAction::WaitThenReselect { .. }
-            ),
+            matches!(decision.action, V3Error05ExecutionAction::Reselect),
             "{code} must switch candidates instead of retrying the same provider"
         );
     }

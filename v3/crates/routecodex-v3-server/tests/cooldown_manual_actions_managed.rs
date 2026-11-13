@@ -13,7 +13,12 @@
 //! creates a manual cooldown, then asks for a probe on it.
 
 use axum::{
-    body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router,
+    body::Body,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::Response,
+    routing::post,
+    Json, Router,
 };
 use routecodex_v3_config::V3ConfigStore;
 use routecodex_v3_server::spawn_v3_server_aggregate_with_admin;
@@ -277,6 +282,10 @@ async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
 async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
+    std::env::set_var(
+        "V3_COOLDOWN_MANUAL_SIBLING_KEY",
+        "controlled-sibling-secret",
+    );
 
     // Controlled loopback upstream first so the config can point at it.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -313,7 +322,13 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
 
     let observation_probes_before = *upstream.probes.lock().await;
     zero_success(&client, &base, "test", "zero:fail-first").await;
-    zero_receipt(&upstream, "zero:fail-first").await;
+    zero_receipt(
+        &upstream,
+        "zero:fail-first",
+        Some("test"),
+        Some("Bearer controlled-secret"),
+    )
+    .await;
     assert!(
         !zero_is_cooled(&client, &base).await,
         "a business failure must not cool before observation"
@@ -377,12 +392,33 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     );
 
     // Siblings still answer while the exact identity is cooled.
-    zero_success(&client, &base, "sibling", "zero:sibling-model").await;
-    zero_receipt(&upstream, "zero:sibling-model").await;
-    zero_success(&client, &base, "independent", "zero:sibling-provider").await;
-    zero_receipt(&upstream, "zero:sibling-provider").await;
-    zero_success(&client, &base, "sibling-key", "zero:sibling-key").await;
-    zero_receipt(&upstream, "zero:sibling-key").await;
+    zero_success(&client, &base, "test.sibling", "zero:sibling-model").await;
+    zero_receipt(&upstream, "zero:sibling-model", Some("sibling"), None).await;
+    zero_success(&client, &base, "independent.test", "zero:sibling-provider").await;
+    zero_receipt(
+        &upstream,
+        "zero:sibling-provider",
+        Some("independent-wire"),
+        Some("Bearer controlled-secret"),
+    )
+    .await;
+    zero_success_with_tools(&client, &base, "zero:sibling-key").await;
+    zero_receipt(
+        &upstream,
+        "zero:sibling-key",
+        Some("test"),
+        Some("Bearer controlled-sibling-secret"),
+    )
+    .await;
+
+    let entries = pool_entries(&client, format!("{base}/_routecodex/health/cooldown-pool")).await;
+    assert_eq!(
+        entries.len(),
+        1,
+        "successful siblings must not add cooldowns"
+    );
+    assert_eq!(entries[0]["model_id"], json!("test"));
+    assert_eq!(entries[0]["auth_alias"], json!("key"));
 
     // A matching valid 2xx probe restores the exact identity. The operator probe
     // only makes it due now; the runtime still runs it over the same provider wire.
@@ -423,14 +459,27 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
 
     // The recovered identity routes again, and the server plus siblings stay alive.
     zero_success(&client, &base, "test", "zero:recovered").await;
-    zero_receipt(&upstream, "zero:recovered").await;
-    zero_success(&client, &base, "sibling", "zero:alive-after-recovery").await;
-    zero_receipt(&upstream, "zero:alive-after-recovery").await;
+    zero_receipt(
+        &upstream,
+        "zero:recovered",
+        Some("test"),
+        Some("Bearer controlled-secret"),
+    )
+    .await;
+    zero_success(&client, &base, "test.sibling", "zero:alive-after-recovery").await;
+    zero_receipt(
+        &upstream,
+        "zero:alive-after-recovery",
+        Some("sibling"),
+        None,
+    )
+    .await;
 
     managed.finish().await;
     shutdown.send(()).unwrap();
     upstream_task.await.unwrap();
     std::env::remove_var("V3_COOLDOWN_MANUAL_TEST_KEY");
+    std::env::remove_var("V3_COOLDOWN_MANUAL_SIBLING_KEY");
 }
 
 /// Controlled loopback upstream: probe traffic and business traffic are recorded
@@ -438,19 +487,26 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
 /// primary can return to routing; rescue probes cannot restore it early.
 #[derive(Default)]
 struct ZeroUpstream {
-    business: Mutex<BTreeMap<String, usize>>,
+    business: Mutex<BTreeMap<String, ZeroBusinessReceipt>>,
     probes: Mutex<usize>,
     probe_ready: std::sync::atomic::AtomicBool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ZeroBusinessReceipt {
+    count: usize,
+    model: Option<String>,
+    authorization: Option<String>,
+}
+
 async fn zero_provider(
     State(state): State<Arc<ZeroUpstream>>,
+    headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response<Body> {
-    // A recovery probe carries an array input and the fixed probe text; a business
-    // request carries its string marker. Keeping them apart is the whole point.
-    let probe = body.get("input").map_or(false, serde_json::Value::is_array)
-        || body.to_string().contains("ping; reply pong");
+    // Only the fixed probe text identifies a recovery probe. Ordinary business
+    // requests may also carry structured current-turn tool input.
+    let probe = body.to_string().contains("ping; reply pong");
     if probe {
         *state.probes.lock().await += 1;
         return if state.probe_ready.load(std::sync::atomic::Ordering::SeqCst) {
@@ -459,17 +515,49 @@ async fn zero_provider(
             zero_rejection()
         };
     }
-    let marker = body["input"].as_str().unwrap_or("").to_string();
-    *state
-        .business
-        .lock()
-        .await
+    let marker = zero_business_marker(&body);
+    let mut business = state.business.lock().await;
+    let receipt = business
         .entry(marker.clone())
-        .or_default() += 1;
+        .or_insert_with(|| ZeroBusinessReceipt {
+            count: 0,
+            model: body
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            authorization: headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+        });
+    receipt.count += 1;
     if marker.starts_with("zero:fail-") {
         return zero_rejection();
     }
     zero_ok(&marker)
+}
+
+fn zero_business_marker(body: &Value) -> String {
+    if let Some(marker) = body["input"].as_str() {
+        return marker.to_string();
+    }
+    body["input"]
+        .as_array()
+        .and_then(|items| {
+            items.iter().rev().find_map(|item| {
+                item.get("content")?
+                    .as_array()?
+                    .iter()
+                    .rev()
+                    .find_map(|part| {
+                        part.get("text")
+                            .and_then(Value::as_str)
+                            .filter(|text| text.starts_with("zero:"))
+                            .map(str::to_string)
+                    })
+            })
+        })
+        .unwrap_or_default()
 }
 
 fn zero_rejection() -> Response<Body> {
@@ -519,12 +607,84 @@ async fn zero_success(client: &reqwest::Client, base: &str, model: &str, marker:
     );
 }
 
-async fn zero_receipt(upstream: &Arc<ZeroUpstream>, marker: &str) {
-    assert_eq!(
-        upstream.business.lock().await.get(marker),
-        Some(&1),
-        "{marker}: must reach the controlled upstream exactly once"
+async fn zero_success_with_tools(client: &reqwest::Client, base: &str, marker: &str) {
+    // Keep this name outside the classifier's search/thinking/coding keywords.
+    // Only an "other" tool continuation selects the declared tools pool.
+    let input = json!([
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": marker}]
+        },
+        {
+            "type": "function_call",
+            "name": "controlled_tool",
+            "call_id": "call-zero-sibling-key",
+            "arguments": "{}"
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call-zero-sibling-key",
+            "output": "ok"
+        }
+    ]);
+    let response = timeout(
+        Duration::from_secs(5),
+        client
+            .post(format!("{base}/v1/responses"))
+            .json(&json!({
+                "model": "test",
+                "input": input,
+                "tools": [{
+                    "type": "function",
+                    "name": "controlled_tool",
+                    "parameters": {"type": "object"}
+                }],
+                "stream": false
+            }))
+            .send(),
+    )
+    .await
+    .expect("the sibling key must answer promptly")
+    .expect("the sibling key must actually answer");
+    assert_eq!(response.status(), 200);
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains(marker),
+        "must return the real successful provider payload: {body}"
     );
+}
+
+async fn zero_receipt(
+    upstream: &Arc<ZeroUpstream>,
+    marker: &str,
+    expected_model: Option<&str>,
+    expected_authorization: Option<&str>,
+) {
+    let receipt = upstream.business.lock().await.get(marker).cloned();
+    let receipt = receipt.unwrap_or(ZeroBusinessReceipt {
+        count: 0,
+        model: None,
+        authorization: None,
+    });
+    assert_eq!(
+        receipt.count, 1,
+        "{marker}: must reach the controlled upstream exactly once: {receipt:?}"
+    );
+    if let Some(expected_model) = expected_model {
+        assert_eq!(
+            receipt.model.as_deref(),
+            Some(expected_model),
+            "{marker}: wrong provider wire model"
+        );
+    }
+    if let Some(expected_authorization) = expected_authorization {
+        assert_eq!(
+            receipt.authorization.as_deref(),
+            Some(expected_authorization),
+            "{marker}: wrong provider auth key"
+        );
+    }
 }
 
 async fn zero_is_cooled(client: &reqwest::Client, base: &str) -> bool {
@@ -562,7 +722,7 @@ endpoints = ["responses"]
 type = "responses"
 base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "sibling", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}, {{ alias = "sibling", env = "V3_COOLDOWN_MANUAL_SIBLING_KEY" }}] }}
 [providers.test.models.test]
 [providers.test.models.sibling]
 
@@ -572,6 +732,7 @@ base_url = "http://127.0.0.1:{upstream_port}/v1"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_COOLDOWN_MANUAL_TEST_KEY" }}] }}
 [providers.independent.models.test]
+wire_name = "independent-wire"
 
 [providers.fallback]
 type = "responses"
@@ -586,14 +747,8 @@ targets = [
   {{ kind = "provider_model", provider = "test", model = "test", key = "key", priority = 100 }},
   {{ kind = "provider_model", provider = "fallback", model = "test", key = "key", priority = 99 }}
 ]
-[route_groups.default.pools.sibling]
-match = {{ models = ["sibling"], precedence = 10 }}
-targets = [{{ kind = "provider_model", provider = "test", model = "sibling", key = "key", priority = 100 }}]
-[route_groups.default.pools.independent]
-match = {{ models = ["independent"], precedence = 10 }}
-targets = [{{ kind = "provider_model", provider = "independent", model = "test", key = "key", priority = 100 }}]
-[route_groups.default.pools.sibling-key]
-match = {{ models = ["sibling-key"], precedence = 10 }}
+[route_groups.default.pools.tools]
+match = {{ entry_protocol = "responses", required_capabilities = ["tools"], precedence = 10 }}
 targets = [{{ kind = "provider_model", provider = "test", model = "test", key = "sibling", priority = 100 }}]
 
 {declaration}

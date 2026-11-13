@@ -54,7 +54,7 @@ fn provider_failure_with_route_capacity_is_typed_nonterminal_error05() {
 
     assert!(matches!(
         decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
+        V3Error05ExecutionAction::Reselect
     ));
     assert!(
         decision.try_into_terminal().is_err(),
@@ -82,7 +82,7 @@ fn provider_failure_never_uses_same_provider_budget() {
 
     assert!(matches!(
         decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
+        V3Error05ExecutionAction::Reselect
     ));
     assert!(decision.try_into_terminal().is_err());
 }
@@ -172,7 +172,7 @@ fn recoverable_response_processing_runtime_failure_with_capacity_is_nonterminal_
 
     assert!(matches!(
         decision.action,
-        V3Error05ExecutionAction::WaitThenReselect { .. }
+        V3Error05ExecutionAction::Reselect
     ));
     assert!(decision.try_into_terminal().is_err());
 

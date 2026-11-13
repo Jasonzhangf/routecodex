@@ -29,10 +29,12 @@ const ATTEMPT_STORE_KEYS = [
   'process_max_bytes',
   'residence_timeout_ms',
 ];
-const PROVIDER_CONCURRENCY_KEYS = [
-  'maxInFlight',
-  'acquireTimeoutMs',
-  'staleLeaseMs',
+const PROVIDER_HEALTH_KEYS = [
+  'enabled',
+  'failure_threshold',
+  'cooldown_ms',
+  'probe_interval_ms',
+  'advisory_probe',
 ];
 
 /**
@@ -67,7 +69,8 @@ export async function generateRccConfig(options = {}) {
     throw new Error('mode must be direct or relay');
   }
   const attemptStore = normalizeAttemptStore(options.runtimeSetup?.attempt_store);
-  const providerConcurrency = normalizeProviderConcurrency(options.runtimeSetup?.provider_concurrency);
+  const processPolicy = normalizeProcessPolicy(options.runtimeSetup?.process);
+  const providerHealth = normalizeProviderHealth(options.runtimeSetup?.health);
   const serverId = requireIdentifier(options.serverId ?? 'loopback', 'serverId');
   const defaultProviderId = requireIdentifier(options.providerId ?? `mock-${providerProtocol}`, 'providerId');
   const defaultModel = options.model ?? `mock.${MODEL_FOR_PROTOCOL[providerProtocol]}`;
@@ -102,7 +105,8 @@ export async function generateRccConfig(options = {}) {
       wireModel: candidate.wireModel,
       model: candidate.model,
       token: candidate.token,
-      providerConcurrency,
+      processPolicy,
+      providerHealth,
     });
     writeFileSync(providerPath, text);
     validateProviderFile(providerPath, candidate);
@@ -205,11 +209,23 @@ tiers = ${renderDefaultTier(plan.candidates)}
       policy: attemptStore,
       config_section: attemptStore ? `servers.${serverId}.execution.attempt_store` : null,
     },
-    provider_concurrency: providerConcurrency,
-    provider_concurrency_receipt: {
-      configured: Boolean(providerConcurrency),
-      policy: providerConcurrency,
-      config_section: providerConcurrency ? 'provider.concurrency' : null,
+    process: processPolicy,
+    process_receipt: {
+      configured: Boolean(processPolicy),
+      provider_process: processPolicy,
+      // A provider-level Responses declaration compiles into the provider and
+      // its default interface. This harness authors the default interface
+      // explicitly so Direct cases carry `process=direct` on both the compiled
+      // provider projection and its canonical interface manifest.
+      interface_process: processPolicy,
+      interface_id: processPolicy ? 'default' : null,
+      config_section: processPolicy ? 'provider.interfaces.default.responses.process' : null,
+    },
+    provider_health: providerHealth,
+    provider_health_receipt: {
+      configured: Boolean(providerHealth),
+      policy: providerHealth,
+      config_section: providerHealth ? 'provider.v3.health' : null,
     },
     provider_id: primary.provider_id,
     model: primary.model,
@@ -305,34 +321,51 @@ function renderProviderFile({
   wireModel,
   model,
   token,
-  providerConcurrency,
+  processPolicy,
+  providerHealth,
 }) {
-  const concurrency = providerConcurrency
-    ? `\n[provider.concurrency]\n${PROVIDER_CONCURRENCY_KEYS
-      .filter((key) => providerConcurrency[key] !== undefined)
-      .map((key) => `${key} = ${providerConcurrency[key]}`)
-      .join('\n')}\n`
-    : '';
-  return `version = "2.0.0"
-providerId = "${providerId}"
-
-[provider]
-id = "${providerId}"
-enabled = true
-type = "${providerProtocol}"
-baseURL = "${baseURL}"
-defaultModel = "${wireModel}"
-${concurrency}
-
-[provider.auth]
-type = "apikey"
-apiKey = "${token}"
-
-[provider.models."${model}"]
-wireName = "${wireModel}"
-capabilities = ["text", "tools", "reasoning", "multimodal"]
-supportsStreaming = true
-`;
+  // Legacy provider scalars and an explicit `interfaces` table are mutually
+  // exclusive in the V2 provider-directory parser. A declared process policy
+  // therefore moves protocol/endpoint/process onto the default interface; the
+  // compiled provider-level projection is derived from that interface, so a
+  // true Direct case carries `process=direct` on both owner projections.
+  const providerHeader = ['[provider]', `id = "${providerId}"`, 'enabled = true'];
+  if (processPolicy) {
+    providerHeader.push(`defaultModel = "${wireModel}"`);
+  } else {
+    providerHeader.push(
+      `type = "${providerProtocol}"`,
+      `baseURL = "${baseURL}"`,
+      `defaultModel = "${wireModel}"`,
+    );
+  }
+  const sections = [providerHeader.join('\n')];
+  if (processPolicy) {
+    sections.push(
+      [
+        '[provider.interfaces.default]',
+        `type = "${providerProtocol}"`,
+        `baseURL = "${baseURL}"`,
+        `responses = { process = "${processPolicy}", streaming = "always" }`,
+      ].join('\n'),
+    );
+  }
+  sections.push(
+    ['[provider.auth]', 'type = "apikey"', `apiKey = "${token}"`].join('\n'),
+    [
+      `[provider.models."${model}"]`,
+      `wireName = "${wireModel}"`,
+      'capabilities = ["text", "tools", "reasoning", "multimodal"]',
+      'supportsStreaming = true',
+    ].join('\n'),
+  );
+  if (providerHealth) {
+    const healthLines = PROVIDER_HEALTH_KEYS
+      .filter((key) => providerHealth[key] !== undefined)
+      .map((key) => `${key} = ${providerHealth[key]}`);
+    sections.push(['[provider.v3.health]', ...healthLines].join('\n'));
+  }
+  return `version = "2.0.0"\nproviderId = "${providerId}"\n\n${sections.join('\n\n')}\n`;
 }
 
 function renderDefaultTier(candidates) {
@@ -381,24 +414,36 @@ function normalizeAttemptStore(raw) {
   return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
-function normalizeProviderConcurrency(raw) {
+function normalizeProcessPolicy(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw new Error('runtime_setup.process must be a non-empty string when present');
+  }
+  return raw.trim();
+}
+
+function normalizeProviderHealth(raw) {
   if (raw === undefined || raw === null) return null;
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('runtime_setup.provider_concurrency must be an object when present');
+    throw new Error('runtime_setup.health must be an object when present');
   }
   const normalized = {};
   for (const key of Object.keys(raw)) {
-    if (!PROVIDER_CONCURRENCY_KEYS.includes(key)) {
-      throw new Error(`runtime_setup.provider_concurrency.${key} is not a supported field`);
+    if (!PROVIDER_HEALTH_KEYS.includes(key)) {
+      throw new Error(`runtime_setup.health.${key} is not a supported field`);
     }
     const value = raw[key];
-    if (!Number.isInteger(value) || value < 1) {
-      throw new Error(`runtime_setup.provider_concurrency.${key} must be a positive integer`);
+    if (key === 'enabled' || key === 'advisory_probe') {
+      if (typeof value !== 'boolean') {
+        throw new Error(`runtime_setup.health.${key} must be boolean`);
+      }
+    } else if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`runtime_setup.health.${key} must be a positive integer`);
     }
     normalized[key] = value;
   }
   if (Object.keys(normalized).length === 0) {
-    throw new Error('runtime_setup.provider_concurrency must declare at least one field');
+    throw new Error('runtime_setup.health must declare at least one field');
   }
   return normalized;
 }

@@ -1,7 +1,7 @@
 {
   "id": "v3.operation_runner.request",
   "version": "1",
-  "description": "The invocation origin resource carries client, dry_run, and refill. A refill is a new execution that re-enters this same request mainline through the normal Runtime entry loop; the static DAG has no back-edge. Capacity admission reads the selected typed provider/interface/model/auth identity: its dynamic bucket is bounded by the shared provider/auth hard ceiling, and its lease carries that scope into transport. Identity partitioning does not add a payload edge or change this SESE operator topology; release and validated recovery remain in the mapped provider admission lease lifecycle.",
+  "description": "请求来源保留 client、dry_run 和 refill。准入不做限制，不申请业务容量、lease 或 permit，不进入并发、session、能力或 Deferred 准入队列。请求立即按捕获的声明 tier 和 pool 后继选择并发送，错误经独立 typed Error 图处理并立即切换可用后继，不等待冷却、探测或恢复。没有人为请求尝试次数上限，也没有耗尽后睡到 residence deadline 的分支。同 session 连续未解决错误仅在错误链内执行固定两秒节流，首次错误和正常请求不延迟，新请求彼此独立。保留真实 transport timeout、客户端取消和字节内存记账。下一尝试和 refill 均在图外创建新执行，原有单源单汇拓扑没有回边。",
   "inputs": [
     { "id": "source-request", "schema": "Any", "schema_ref": "v3.operation_runner.arc.source_request" }
   ],
@@ -58,8 +58,8 @@
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
-        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.provider.adaptive_concurrency_admission", "v3.error.provider_action_gate", "v3.operation_runner.request_local_exclusions"],
-        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.error.provider_action_gate", "v3.operation_runner.request_local_exclusions"]
+        "reads": ["v3.route.opaque_target", "v3.config.published_manifest", "v3.provider.health_state", "v3.provider.key_health_state", "v3.provider.availability_projection", "v3.operation_runner.request_local_exclusions"],
+        "writes": ["v3.hub.resolved_target", "v3.operation_runner.execution_mode", "v3.operation_runner.request_local_exclusions"]
       }
     },
     {
