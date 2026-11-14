@@ -385,6 +385,91 @@ async fn a83b3ce_recover_only_positive_control_at_public_entry() {
     }
 }
 
+#[tokio::test]
+async fn p0_error_leak_family_precommit_sse_reselect_or_transport_break() {
+    let _guard = TEST_LOCK.lock().await;
+    let body = json!({
+        "input":"response-failure",
+        "stream":true
+    })
+    .to_string();
+    let headers = format!(
+        "Content-Type: application/json\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+
+    for process in ["direct", "chat"] {
+        let mut recovery = start(process, true).await;
+        let wire = raw(&recovery, "/v1/responses", &headers, &body).await;
+        let text = String::from_utf8_lossy(&wire);
+        assert!(
+            text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+            "{process}: recovered request must establish SSE: {text}"
+        );
+        assert!(
+            text.contains("business error word survives") && text.contains("response.completed"),
+            "{process}: declared successor must deliver business completion: {text}"
+        );
+        for leaked in [
+            "network_error",
+            "unparseable-json",
+            "owned private provider cause",
+            "response failed",
+        ] {
+            assert!(
+                !text.contains(leaked),
+                "{process}: recovered SSE leaked {leaked}: {text}"
+            );
+        }
+        assert_eq!(
+            recovery.captures.recv().await.unwrap()["model"],
+            "wire-owned"
+        );
+        assert_eq!(
+            recovery.captures.recv().await.unwrap()["model"],
+            "wire-recover"
+        );
+        assert!(
+            recovery.captures.try_recv().is_err(),
+            "{process}: recovery must attempt exactly two candidates"
+        );
+        drained(&recovery).await;
+        recovery.stop().await;
+
+        let mut exhaustion = start(process, false).await;
+        let wire = raw(&exhaustion, "/v1/responses", &headers, &body).await;
+        let text = String::from_utf8_lossy(&wire);
+        if !wire.is_empty() {
+            assert!(
+                text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+                "{process}: exhaustion must only break an accepted SSE transport: {text}"
+            );
+            assert!(
+                !text.contains("data:")
+                    && !text.contains("event:")
+                    && !text.contains("network_error")
+                    && !text.contains("unparseable-json")
+                    && !text.contains("[DONE]")
+                    && !wire.ends_with(b"0\r\n\r\n"),
+                "{process}: exhaustion leaked a client error or fabricated terminal: {text}"
+            );
+        }
+        assert_eq!(
+            exhaustion.captures.recv().await.unwrap()["model"],
+            "wire-owned"
+        );
+        assert!(
+            timeout(Duration::from_millis(100), exhaustion.captures.recv())
+                .await
+                .is_err(),
+            "{process}: exhaustion must not invent a successor attempt"
+        );
+        internal_chain_receipt(&exhaustion, "family-exhaustion").await;
+        drained(&exhaustion).await;
+        exhaustion.stop().await;
+    }
+}
+
 fn request_dirs(samples_root: &Path, marker: &str) -> Vec<std::path::PathBuf> {
     std::fs::read_dir(samples_root)
         .map(|entries| {
