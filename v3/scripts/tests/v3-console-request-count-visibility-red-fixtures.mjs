@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-const repo = resolve(
-  process.cwd(),
-  process.env.ROUTECODEX_V3_SOURCE_ROOT || ".",
-);
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const verifier = resolve(
   repo,
   "v3/scripts/architecture/verify-v3-console-request-count-visibility.mjs",
@@ -23,6 +28,10 @@ const copied = [
   "docs/architecture/v3-mainline-call-map.yml",
   "docs/architecture/v3-resource-operation-map.yml",
   "docs/architecture/v3-verification-map.yml",
+  "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+  "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+  "v3/crates/routecodex-v3-server/src/executors.rs",
+  "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
 ];
 const cases = [
   {
@@ -119,6 +128,461 @@ const cases = [
       ),
     diagnostic: /V3 verification map must bind request count edges 01 through 04 in order/u,
   },
+  {
+    name: "V3 count function map drops the success commit symbol",
+    path: "docs/architecture/v3-function-map.yml",
+    mutate: (source) =>
+      source.replace("  - V3RequestIdCounter::commit_request_success\n", ""),
+    diagnostic: /must declare the success commit V3RequestIdCounter::commit_request_success/u,
+  },
+  {
+    name: "global count function map drops the success commit builder",
+    path: "docs/architecture/function-map.yml",
+    mutate: (source) => source.replace("  - commit_request_success\n", ""),
+    diagnostic: /must declare the success commit commit_request_success/u,
+  },
+  {
+    name: "V3 resource map drops the success commit writer",
+    path: "docs/architecture/v3-resource-operation-map.yml",
+    mutate: (source) =>
+      source.replace(
+        ", V3RequestIdCounter::commit_request_success]",
+        "]",
+      ),
+    diagnostic: /must allow the success commit writer V3RequestIdCounter::commit_request_success/u,
+  },
+  {
+    name: "V3 count verification map allows allocation to increment counts",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - totalCount and windowCount increment only when the allocated identity commits one success terminal.",
+        "  - totalCount and windowCount increment during identity allocation.",
+      ),
+    diagnostic: /must require that counts increment only on a success commit/u,
+  },
+  {
+    name: "V3 count verification map allows error terminal increments",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - Error terminals (admission rejection, error frame, provider exhaustion, SSE failure or disconnect) must never increment totalCount or windowCount.",
+        "  - Error terminals may increment totalCount or windowCount.",
+      ),
+    diagnostic: /must forbid count increments on error terminals/u,
+  },
+  {
+    name: "V3 count verification map allows double-committing one request",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - Provider retries, provider switches, continuation frames, and a repeated completion must not commit the same request twice.",
+        "  - Provider retries, provider switches, continuation frames, and a repeated completion may commit the same request twice.",
+      ),
+    diagnostic: /must forbid double-committing one request/u,
+  },
+  {
+    name: "V3 count verification map allows SSE drop to count",
+    path: "docs/architecture/v3-verification-map.yml",
+    mutate: (source) =>
+      source.replace(
+        "  - Relay and Direct SSE lanes commit the success count only when the committed stream reaches its completion terminal, so a dropped or disconnected stream never counts.",
+        "  - Relay and Direct SSE lanes commit the success count when the stream is handed to the client, including a dropped or disconnected stream.",
+      ),
+    diagnostic:
+      /must require that SSE lanes commit only at the stream completion terminal/u,
+  },
+  {
+    name: "anthropic relay SSE emitter commits before the stream terminal",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                true,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      ),
+    diagnostic:
+      /console emitter must pass the client response body stream judgment/u,
+  },
+  {
+    name: "anthropic relay emitter regresses to stream_observation presence (the JSON closeout regression)",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // File-scope blind spot: the responses relay lane lives in live_snapshot.rs,
+    // so an anchor limited to the two executors would never see this regression.
+    name: "responses relay emitter commits before the stream terminal (live_snapshot.rs)",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      source.replace(
+        "            started_at,\n            output.stream_observation.is_none(),\n        );\n    }\n    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_responses_relay(",
+        "            started_at,\n            true,\n        );\n    }\n    let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_responses_relay(",
+      ),
+    diagnostic:
+      /console emitter must pass the client response body stream judgment/u,
+  },
+  {
+    // File-scope blind spot: the direct lane emitter lives in impl_bulk.rs.
+    name: "direct lane emitter commits before the stream terminal (impl_bulk.rs)",
+    path: "v3/crates/routecodex-v3-server/src/console/impl_bulk.rs",
+    mutate: (source) =>
+      source.replace(
+        "        &observability,\n        started_at,\n        !is_sse,\n    );",
+        "        &observability,\n        started_at,\n        true,\n    );",
+      ),
+    diagnostic:
+      /console emitter must pass the client response body stream judgment/u,
+  },
+  {
+    // An emitter call whose parentheses never balance cannot be trusted; the
+    // verifier must refuse instead of silently skipping it.
+    name: "emitter call with unbalanced parentheses (live_snapshot.rs)",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      `${source}\n#[allow(dead_code)]\nfn probe_unscannable_emit(\n    console_context: &V3ConsoleEmissionContext,\n    observability: &V3RuntimeObservability,\n    started_at: std::time::Instant,\n) {\n    emit_v3_observability_console_lines(\n        console_context,\n        200,\n        &[],\n        observability,\n        started_at,\n        true\n    // missing closing paren\n}\n`,
+    diagnostic: /could not be parsed \(unbalanced call parentheses\)/u,
+  },
+  {
+    // The lane anchor must not depend on any nearby text: a comment claiming a
+    // different lane's constructor must not hide the anthropic regression.
+    name: "anthropic regression with a misleading neighbour comment",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        // same call shape as openai_chat_relay_output_response(\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // Renaming the anthropic response constructor must not hide the regression:
+    // ownership is the in-scope client_body_is_sse binding, not the constructor.
+    name: "anthropic regression with the response constructor renamed",
+    paths: [
+      "v3/crates/routecodex-v3-server/src/executors.rs",
+      "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    ],
+    mutate: (source) => {
+      let mutated = source.replaceAll("anthropic_relay_output_response", "anthropic_output_response");
+      mutated = mutated.replace(
+        "                !client_body_is_sse,\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+        "                relay_output.stream_observation.is_none(),\n            );\n        }\n        let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_anthropic_relay(",
+      );
+      return mutated;
+    },
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A single-line call followed by an allowlist-shaped tail must not be
+    // over-scanned: paren balancing must report the real last argument `true`,
+    // not a tail string from some later helper.
+    name: "single-line emitter overshoots into a following helper",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      source.replace(
+        "        emit_v3_observability_console_lines(\n            console_context,\n            output.status,\n            &output.node_trace,\n            observability,\n            started_at,\n            output.stream_observation.is_none(),\n        );",
+        "        emit_v3_observability_console_lines(console_context, output.status, &output.node_trace, observability, started_at, true);\n        let _tail = format!(\"output.stream_observation.is_none()\");",
+      ),
+    diagnostic: /got "true"/u,
+  },
+  {
+    // A comment that names the emitter is not an occurrence; the verifier must
+    // not fail on it. This is a non-regression input, so it must PASS.
+    name: "emitter name in a comment must not fail the scan",
+    path: "v3/crates/routecodex-v3-server/src/live_snapshot.rs",
+    mutate: (source) =>
+      source.replace(
+        "fn finalize_v3_responses_relay_server_output(",
+        "// emit_v3_observability_console_lines( is the shared console emitter\nfn finalize_v3_responses_relay_server_output(",
+      ),
+    expectPass: true,
+  },
+  {
+    // A brand new lane in a brand new file must be discovered and its include_usage
+    // checked; living in another file must not let it escape the guard.
+    name: "new lane in a new file escapes the scan (new_lane.rs)",
+    create: {
+      path: "v3/crates/routecodex-v3-server/src/new_lane.rs",
+      content: `use std::time::Instant;
+
+use crate::console::impl_bulk::emit_v3_observability_console_lines;
+use crate::V3ConsoleEmissionContext;
+use crate::V3RuntimeObservability;
+
+pub(crate) fn probe_new_lane(
+    console_context: &V3ConsoleEmissionContext,
+    observability: &V3RuntimeObservability,
+    started_at: Instant,
+) {
+    emit_v3_observability_console_lines(
+        console_context,
+        200,
+        &[],
+        observability,
+        started_at,
+        true,
+    );
+}
+`,
+    },
+    diagnostic: /new_lane\.rs console emitter must pass the client response body stream judgment/u,
+  },
+  {
+    // E1: reverting the fix wholesale — the pre-fix emit predicate together with
+    // the pre-fix unconditional finalizer — must never pass. This is exactly the
+    // state the product code was in before a23987f22, and it is the highest-risk
+    // escape because no identifier is renamed and nothing looks suspicious.
+    name: "anthropic lane fully reverted to the pre-fix shape",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        // include_usage answers \"is the client response body not a stream\". This\n        // lane populates stream_observation for both the JSON and the SSE\n        // closeout, so is_none() is not the client-body truth; the typed\n        // client_body.is_sse() is.\n        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {\n            match (\n                relay_output.stream_observation.clone(),\n                relay_output.observability.clone(),\n            ) {\n                (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {\n                    context: console_context.clone(),\n                    status: relay_output.status,\n                    node_trace: relay_output.node_trace.clone(),\n                    observability,\n                    stream_observation,\n                    started_at,\n                }),\n                _ => None,\n            }\n        } else {\n            None\n        };",
+          "        let stream_console_finalizer = match (\n            relay_output.stream_observation.clone(),\n            relay_output.observability.clone(),\n        ) {\n            (Some(stream_observation), Some(observability)) => Some(V3SseConsoleFinalizer {\n                context: console_context.clone(),\n                status: relay_output.status,\n                node_trace: relay_output.node_trace.clone(),\n                observability,\n                stream_observation,\n                started_at,\n            }),\n            _ => None,\n        };",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E2: a type annotation on the binding made the old exact-text anchor vanish,
+    // so the lane check was skipped entirely. Evidence must tolerate `: bool`.
+    name: "anthropic lane regresses behind a type-annotated binding",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();",
+          "        let client_body_is_sse: bool = relay_output.client_body.is_sse();",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E3: renaming the binding made the old exact-text anchor vanish too. Lane
+    // ownership must not depend on the binding identifier name.
+    name: "anthropic lane regresses behind a renamed binding",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {",
+          "        let client_body_streaming = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_streaming {",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E4: the second anthropic emitter lives in endpoint_handlers.rs, inside a
+    // function whose name does not mention the lane and which also emits for
+    // openai_chat and gemini. Only the in-scope binding identifies it there, so
+    // the same regression must be caught on that file too.
+    name: "endpoint_handlers anthropic emitter regresses behind its binding",
+    path: "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    mutate: (source) =>
+      source.replace(
+        "                        started_at,\n                        !client_body_is_sse,\n                    );",
+        "                        started_at,\n                        output.stream_observation.is_none(),\n                    );",
+      ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // E5: deleting the binding must not disable the lane check. Even with the
+    // in-scope binding gone, the enclosing `entry_protocol == "anthropic"` guard
+    // still proves the lane, so a regression that relies on the binding alone
+    // stays rejected by the fallback evidence.
+    name: "anthropic binding deleted but the entry-protocol guard still proves the lane",
+    path: "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "            let client_body_is_sse = output.client_body.is_sse();\n",
+          "",
+        )
+        .replace(
+          "                        started_at,\n                        !client_body_is_sse,\n                    );",
+          "                        started_at,\n                        output.stream_observation.is_none(),\n                    );",
+        )
+        .replace(
+          "            let stream_console_finalizer = if client_body_is_sse {",
+          "            let stream_console_finalizer = if output.client_body.is_sse() {",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // Triple kill: delete the binding, rename the owning function so its name no
+    // longer mentions anthropic, and regress the predicate. Binding (A), function
+    // name (B) and enclosing guard (C) all die together on this emit, so only the
+    // function-body evidence (D) can still see the lane. If it cannot, this
+    // regression ships silently.
+    name: "anthropic direct lane escapes after binding, name and guard all change",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          '        // include_usage answers "is the client response body not a stream". This\n        // lane populates stream_observation for both the JSON and the SSE\n        // closeout, so is_none() is not the client-body truth; the typed\n        // client_body.is_sse() is.\n        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {',
+          "        let stream_console_finalizer = if relay_output.client_body.is_sse() {",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        )
+        .replace(
+          "execute_v3_anthropic_direct_server_outcome",
+          "execute_v3_same_protocol_direct_server_outcome",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A comment that mentions anthropic above another lane's guard is prose, not
+    // evidence. Reading unmasked text here would fail the gemini emit and turn an
+    // innocent explanatory comment into a CI break. Non-regression: must PASS.
+    name: "a comment naming anthropic must not brand another lane",
+    path: "v3/crates/routecodex-v3-server/src/endpoint_handlers.rs",
+    mutate: (source) =>
+      source.replace(
+        'if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
+        '// unlike "anthropic" the gemini lane keeps stream_observation\n        if entry_protocol == "gemini" && execution_mode == V3EntryProtocolExecutionMode::Relay {',
+      ),
+    expectPass: true,
+  },
+  {
+    // A decoy guard for another protocol placed elsewhere in the same function
+    // must not suppress the function-body evidence. A per-body exclusion would
+    // let an attacker plant an unrelated gemini guard and restore this escape.
+    name: "a decoy guard elsewhere cannot silence the function-body evidence",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {",
+          '        if entry_protocol == "gemini" {\n            // no-op suppression decoy\n        }\n        let stream_console_finalizer = if relay_output.client_body.is_sse() {',
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        )
+        .replace(
+          "execute_v3_anthropic_direct_server_outcome",
+          "execute_v3_same_protocol_direct_server_outcome",
+        ),
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // Hoisting every "anthropic" literal inside the function into a file-scope
+    // const erases the in-body brand while leaving compilable code. Combined with
+    // deleting the binding and renaming the function it defeats A/B/C and a
+    // literal-only D. Evidence D must follow the const reference, not just a
+    // literal, or the lane disappears from the scan and the regression ships.
+    name: "hoisting the anthropic literal into a const cannot hide the lane",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) => {
+      const fnName = "pub(crate) async fn execute_v3_anthropic_direct_server_outcome(";
+      const start = source.indexOf(fnName);
+      if (start < 0) return source;
+      const fnClose = source.indexOf("\n}", start);
+      const fnBody = source.slice(start, fnClose);
+      const head = source
+        .slice(0, start)
+        .replace(
+          /^use crate::\*;/u,
+          'pub(crate) const LANE_PROTOCOL: &str = "anthropic";\nuse crate::*;',
+        );
+      const newFn = fnBody
+        .replace(
+          "        let client_body_is_sse = relay_output.client_body.is_sse();\n        let stream_console_finalizer = if client_body_is_sse {",
+          "        let stream_console_finalizer = if relay_output.client_body.is_sse() {",
+        )
+        .replace(
+          "                started_at,\n                !client_body_is_sse,\n            );",
+          "                started_at,\n                relay_output.stream_observation.is_none(),\n            );",
+        )
+        .replace(
+          "execute_v3_anthropic_direct_server_outcome",
+          "execute_v3_same_protocol_direct_server_outcome",
+        )
+        .split('"anthropic"')
+        .join("LANE_PROTOCOL");
+      return head + newFn + source.slice(fnClose);
+    },
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A lane whose body carries no "anthropic" text at all, only a reference to a
+    // neutrally named const bound to it. Nothing but following the const can see
+    // this lane, so this case binds the const-resolution branch instead of
+    // passing on an identifier that happens to contain the word.
+    name: "a neutral const bound to anthropic still identifies the lane",
+    create: {
+      path: "v3/crates/routecodex-v3-server/src/hoisted_lane.rs",
+      content: `use std::time::Instant;
+
+use crate::console::impl_bulk::emit_v3_observability_console_lines;
+use crate::V3ConsoleEmissionContext;
+use crate::V3RuntimeObservability;
+
+const LANE: &str = "anthropic";
+
+pub(crate) fn probe_hoisted_lane(
+    console_context: &V3ConsoleEmissionContext,
+    relay_output: &V3ProbeRelayOutput,
+    started_at: Instant,
+) {
+    let _lane = LANE;
+    emit_v3_observability_console_lines(
+        console_context,
+        200,
+        &[],
+        relay_output.observability(),
+        started_at,
+        relay_output.stream_observation.is_none(),
+    );
+}
+`,
+    },
+    diagnostic:
+      /anthropic relay console emitter must judge the client response body \(client_body\.is_sse\(\)\), not the stream observation/u,
+  },
+  {
+    // A diagnostic string that merely mentions anthropic must not brand another
+    // lane. Scanning identifiers only in the fully masked view keeps this a PASS;
+    // reading string contents there would wrongly fail a correct lane.
+    name: "a string mentioning anthropic must not brand another lane",
+    path: "v3/crates/routecodex-v3-server/src/executors.rs",
+    mutate: (source) =>
+      source.replace(
+        "pub(crate) async fn execute_v3_gemini_direct_server_outcome(",
+        'pub(crate) async fn execute_v3_gemini_direct_server_outcome(\n    _unused_lane_note: (),\n',
+      ).replace(
+        "    let mut relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime",
+        '    let _lane_note = "gemini lane must not receive an anthropic-only header";\n    let mut relay_output = match routecodex_v3_runtime::execute_v3_gemini_relay_runtime',
+      ),
+    expectPass: true,
+  },
 ];
 
 const failures = [];
@@ -128,20 +592,43 @@ for (const testCase of cases) {
     for (const relative of copied) {
       cpSync(resolve(repo, relative), resolve(root, relative), { recursive: true });
     }
-    const target = resolve(root, testCase.path);
-    const original = readFileSync(target, "utf8");
-    const mutated = testCase.mutate(original);
-    if (mutated === original) {
-      failures.push(`${testCase.name}: mutation did not change ${testCase.path}`);
+    // A case declares what it changes: one file via path+mutate, several files
+    // via paths+mutate (for cross-file renames), or a brand new file via create.
+    const edits = [];
+    if (testCase.path !== undefined) {
+      edits.push({ path: testCase.path, mutate: testCase.mutate });
+    }
+    for (const path of testCase.paths ?? []) {
+      edits.push({ path, mutate: testCase.mutate });
+    }
+    if (testCase.create !== undefined) {
+      edits.push({ path: testCase.create.path, replace: () => testCase.create.content });
+    }
+    let changed = 0;
+    for (const edit of edits) {
+      const target = resolve(root, edit.path);
+      const original = existsSync(target) ? readFileSync(target, "utf8") : "";
+      const mutated = edit.mutate !== undefined ? edit.mutate(original) : edit.replace(original);
+      if (mutated !== original) changed += 1;
+      writeFileSync(target, mutated);
+    }
+    if (changed === 0) {
+      failures.push(`${testCase.name}: mutation did not change any target file`);
       continue;
     }
-    writeFileSync(target, mutated);
     const result = spawnSync(process.execPath, [verifier], {
       cwd: root,
       env: { ...process.env, ROUTECODEX_V3_SOURCE_ROOT: root },
       encoding: "utf8",
     });
     const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+    if (testCase.expectPass === true) {
+      // A non-regression case: the guard must not fail on this input.
+      if (result.status !== 0) {
+        failures.push(`${testCase.name}: verifier unexpectedly failed: ${output.slice(-1200)}`);
+      }
+      continue;
+    }
     if (result.status === 0) {
       failures.push(`${testCase.name}: verifier unexpectedly passed`);
     } else if (!testCase.diagnostic.test(output)) {
@@ -158,6 +645,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
+const rejected = cases.filter((testCase) => testCase.expectPass !== true).length;
+const accepted = cases.length - rejected;
 console.log(
-  `[test:v3-console-request-count-visibility-red-fixtures] PASS (${cases.length} forbidden mutations rejected)`,
+  `[test:v3-console-request-count-visibility-red-fixtures] PASS (${rejected} forbidden mutations rejected, ${accepted} non-regression inputs accepted)`,
 );

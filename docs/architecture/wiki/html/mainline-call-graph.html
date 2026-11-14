@@ -995,7 +995,7 @@
         </tbody>
         </table>
         <h2>v3.console_request_count_visibility.mainline</h2>
-        <p>One aggregate-owned request counter handle is shared by every listener, and one atomic V3 request identity allocation carries total and local-day counts into both human request and terminal response headlines.</p>
+        <p>One aggregate-owned request counter handle is shared by every listener; one atomic V3 request identity allocation reserves the monotonic sequence with predicted total and local-day counts, and only a confirmed success terminal commits those counts into both human request and terminal response headlines.</p>
         <p>Entry contract: <code>V3RequestCounter01AggregateOwned</code> via <code>docs/architecture/function-map.yml</code></p>
         <pre class="mermaid">flowchart LR
           V3ConsoleResp03HumanBlock[&quot;V3ConsoleResp03HumanBlock&quot;]
