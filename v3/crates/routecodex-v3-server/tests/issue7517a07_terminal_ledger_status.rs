@@ -132,6 +132,144 @@ async fn upstream(
             .body(Body::from_stream(stream))
             .unwrap();
     }
+    if input.contains("incomplete-content-filter") {
+        let frame = format!(
+            "event: response.incomplete\ndata: {}\n\n",
+            json!({
+                "type": "response.incomplete",
+                "response": {
+                    "id": "resp_7517a07_content_filter",
+                    "object": "response",
+                    "status": "incomplete",
+                    "model": "wire-7517a07",
+                    "incomplete_details": {"reason": "content_filter"},
+                    "output": [{
+                        "id": "msg_7517a07_filtered",
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "incomplete",
+                        "content": [{
+                            "type": "output_text",
+                            "text": "filtered-business-content",
+                            "annotations": []
+                        }]
+                    }]
+                }
+            })
+        );
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(frame))
+            .unwrap();
+    }
+    if input.contains("failed-terminal") {
+        let (response_id, delta_text, error_code, error_message) =
+            if input.contains("failed-terminal-secondary") {
+                (
+                    "resp_7517a07_failed_secondary",
+                    "failed-terminal-secondary-prefix",
+                    "controlled_secondary_failure",
+                    "controlled secondary failure terminal",
+                )
+            } else {
+                (
+                    "resp_7517a07_failed",
+                    "failed-terminal-prefix",
+                    "controlled_provider_failure",
+                    "controlled failed terminal",
+                )
+            };
+        let delta = json!({
+            "type": "response.output_text.delta",
+            "delta": delta_text,
+            "item_id": "msg_7517a07_failed",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        });
+        let failed = json!({
+            "type": "response.failed",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "status": "failed",
+                "model": "wire-7517a07",
+                "error": {
+                    "code": error_code,
+                    "message": error_message
+                },
+                "output": []
+            }
+        });
+        let stream = stream::iter([
+            Ok::<Bytes, Infallible>(Bytes::from(format!(
+                "event: response.output_text.delta\ndata: {delta}\n\n"
+            ))),
+            Ok::<Bytes, Infallible>(Bytes::from(format!(
+                "event: response.failed\ndata: {failed}\n\n"
+            ))),
+        ]);
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+    if input.contains("cancelled-terminal") {
+        let delta = json!({
+            "type": "response.output_text.delta",
+            "delta": "cancelled-terminal-prefix",
+            "item_id": "msg_7517a07_cancelled",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        });
+        let cancelled = json!({
+            "type": "response.cancelled",
+            "response": {
+                "id": "resp_7517a07_cancelled",
+                "object": "response",
+                "status": "cancelled",
+                "model": "wire-7517a07",
+                "error": {
+                    "code": "provider_cancelled",
+                    "message": "controlled provider cancellation"
+                },
+                "output": []
+            }
+        });
+        let stream = stream::iter([
+            Ok::<Bytes, Infallible>(Bytes::from(format!(
+                "event: response.output_text.delta\ndata: {delta}\n\n"
+            ))),
+            Ok::<Bytes, Infallible>(Bytes::from(format!(
+                "event: response.cancelled\ndata: {cancelled}\n\n"
+            ))),
+        ]);
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
+    if input.contains("missing-terminal") {
+        let delta = json!({
+            "type": "response.output_text.delta",
+            "delta": "missing-terminal-prefix",
+            "item_id": "msg_7517a07_missing",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        });
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(format!(
+                "event: response.output_text.delta\ndata: {delta}\n\n"
+            )))
+            .unwrap();
+    }
     if input.contains("sse-body-error") {
         // Emit one semantic frame, then fail the body stream. The SSE reader sees
         // an upstream read error and maps it to `provider_response_body_error`.
@@ -777,6 +915,384 @@ async fn issue7517a07_genuine_provider_502_keeps_502() {
     assert!(
         kept,
         "a genuine provider HTTP 502 must keep provider_status=502/http_502: {terminals:#?}"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+/// A provider-legal Responses `incomplete/content_filter` terminal is business
+/// content. It must reach the client and record a completed request, not a
+/// generated provider failure or a missing-terminal error.
+#[tokio::test]
+async fn issue7517a07_direct_sse_content_filter_is_legal_completed_terminal() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "incomplete-content-filter public regression",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains("response.incomplete") && body.contains("content_filter"),
+        "the provider's legal terminal must reach the client unchanged: {body}"
+    );
+    assert!(
+        body.contains("filtered-business-content"),
+        "the provider's business content must be preserved: {body}"
+    );
+    assert!(
+        !body.contains("response.failed") && !body.contains("network_error"),
+        "a legal content_filter terminal must not become a proxy error: {body}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-content-filter", &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.completed"))
+        .unwrap_or_else(|| {
+            panic!("a content_filter terminal must record request.completed: {terminals:#?}")
+        });
+    assert_eq!(terminal["result"], json!("success"), "{terminal:#?}");
+    assert_eq!(
+        terminal["meta"]["response_status"],
+        json!("incomplete"),
+        "the completed row keeps the provider's real status: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["finish_reason"],
+        json!("content_filter"),
+        "the completed row keeps the provider's real terminal reason: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["error_category"],
+        json!("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL"),
+        "a legal terminal must not be recorded as missing: {terminal}"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+async fn assert_direct_sse_failed_terminal_preserves_cause(
+    input: &str,
+    expected_code: &str,
+    expected_message: &str,
+    label: &str,
+) {
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": input,
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut wire = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+    let wire_text = String::from_utf8_lossy(&wire);
+    assert!(
+        !wire_text.contains(expected_message)
+            && !wire_text.contains("response.failed")
+            && !wire_text.contains("network_error"),
+        "a provider failure must not be projected as a client error payload: {wire_text}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows(label, &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.failed"))
+        .unwrap_or_else(|| panic!("a failed terminal must record request.failed: {terminals:#?}"));
+    let category = terminal["meta"]["error_category"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        category != "PROVIDER_RESPONSE_SSE_MISSING_TERMINAL",
+        "a real failed terminal must not claim the terminal was absent: {terminal}"
+    );
+    assert!(
+        category != "network_error",
+        "the failed terminal must keep its typed provider cause: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        json!(expected_code),
+        "the provider failure code must survive closeout: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_detail"],
+        json!(expected_message),
+        "the provider failure message must survive closeout: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["provider_id"],
+        json!("test"),
+        "the failed terminal must retain the actual provider identity: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["provider_status"],
+        json!(502),
+        "a failed SSE terminal must not fabricate provider HTTP 502: {terminal}"
+    );
+
+    entry.stop().await;
+}
+
+/// A genuine provider `response.failed` terminal remains a failed request with
+/// its own cause. It must not be rewritten as a missing terminal or leak the
+/// provider error payload to the client.
+#[tokio::test]
+async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
+    let (_home_guard, _lock) = TEST_LOCK.lock().await;
+    assert_direct_sse_failed_terminal_preserves_cause(
+        "failed-terminal public regression",
+        "controlled_provider_failure",
+        "controlled failed terminal",
+        "issue7517a07-failed-terminal",
+    )
+    .await;
+}
+
+/// A second real model-entry failure terminal must retain a distinct typed
+/// code and message rather than collapsing onto the first fixture's cause.
+#[tokio::test]
+async fn issue7517a07_direct_sse_distinct_failed_terminal_preserves_its_cause() {
+    let (_home_guard, _lock) = TEST_LOCK.lock().await;
+    assert_direct_sse_failed_terminal_preserves_cause(
+        "failed-terminal-secondary public regression",
+        "controlled_secondary_failure",
+        "controlled secondary failure terminal",
+        "issue7517a07-distinct-failed-terminal",
+    )
+    .await;
+}
+
+async fn assert_direct_sse_cancelled_terminal_preserves_cause() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "cancelled-terminal public regression",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut wire = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+    let wire_text = String::from_utf8_lossy(&wire);
+    assert!(
+        !wire_text.contains("response.cancelled") && !wire_text.contains("network_error"),
+        "a provider cancellation must not be projected as a client error payload: {wire_text}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-cancelled-terminal", &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.failed"))
+        .unwrap_or_else(|| {
+            panic!("a provider cancelled terminal must record request.failed: {terminals:#?}")
+        });
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        json!("provider_cancelled"),
+        "a real cancelled terminal keeps its own typed cause: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_detail"],
+        json!("controlled provider cancellation"),
+        "the Provider cancellation cause is preserved: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["provider_status"],
+        json!(502),
+        "a cancelled SSE terminal must not fabricate provider HTTP 502: {terminal}"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+/// A Provider-owned `response.cancelled` terminal keeps its own cause after
+/// post-commit closeout. It is not a missing terminal, a client disconnect, or
+/// a Provider HTTP error payload.
+#[tokio::test]
+async fn issue7517a07_direct_sse_cancelled_terminal_is_not_missing_terminal() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "cancelled-terminal public regression",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut wire = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+    let wire_text = String::from_utf8_lossy(&wire);
+    assert!(
+        !wire_text.contains("response.cancelled") && !wire_text.contains("network_error"),
+        "a provider cancellation must not be projected as a client error payload: {wire_text}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-cancelled-terminal", &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.failed"))
+        .unwrap_or_else(|| {
+            panic!("a provider cancelled terminal must record request.failed: {terminals:#?}")
+        });
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        json!("provider_cancelled"),
+        "a real cancelled terminal keeps its own typed cause: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_detail"],
+        json!("controlled provider cancellation"),
+        "the Provider cancellation cause is preserved: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["provider_status"],
+        json!(502),
+        "a cancelled SSE terminal must not fabricate provider HTTP 502: {terminal}"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+/// EOF after a committed business frame and no semantic terminal remains a
+/// failed request. It must not fabricate a successful completion or a 502.
+#[tokio::test]
+async fn issue7517a07_direct_sse_missing_terminal_is_failed() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "missing-terminal public regression",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut wire = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+    let wire_text = String::from_utf8_lossy(&wire);
+    assert!(
+        !wire_text.contains("response.completed") && !wire_text.contains("network_error"),
+        "missing terminal must not fabricate success or a client error payload: {wire_text}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-missing-terminal", &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.failed"))
+        .unwrap_or_else(|| panic!("a missing terminal must record request.failed: {terminals:#?}"));
+    assert_ne!(
+        terminal["meta"]["provider_status"],
+        json!(502),
+        "a missing terminal must not fabricate provider HTTP 502: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["error_category"],
+        json!("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL"),
+        "the public stream-error lane keeps its own transport cause: {terminal}"
     );
 
     entry.stop().await;
