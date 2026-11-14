@@ -2464,6 +2464,7 @@ features:
   - provider/client payloads do not leak session metadata_center resource or routecodex control fields
   required_gates:
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling a83b3ce_relay_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry -- --exact
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue955d28d_next_candidate_public -- --nocapture --test-threads=1
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime terminal_merge --lib -- --nocapture
   - npm run test:v3-5520-duplicate-tool-identity
   - npm run test:v3-hub-relay-runtime-closeout
