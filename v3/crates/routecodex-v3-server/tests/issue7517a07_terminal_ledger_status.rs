@@ -164,9 +164,25 @@ async fn upstream(
             .unwrap();
     }
     if input.contains("failed-terminal") {
+        let (response_id, delta_text, error_code, error_message) =
+            if input.contains("failed-terminal-secondary") {
+                (
+                    "resp_7517a07_failed_secondary",
+                    "failed-terminal-secondary-prefix",
+                    "controlled_secondary_failure",
+                    "controlled secondary failure terminal",
+                )
+            } else {
+                (
+                    "resp_7517a07_failed",
+                    "failed-terminal-prefix",
+                    "controlled_provider_failure",
+                    "controlled failed terminal",
+                )
+            };
         let delta = json!({
             "type": "response.output_text.delta",
-            "delta": "failed-terminal-prefix",
+            "delta": delta_text,
             "item_id": "msg_7517a07_failed",
             "output_index": 0,
             "content_index": 0,
@@ -175,13 +191,13 @@ async fn upstream(
         let failed = json!({
             "type": "response.failed",
             "response": {
-                "id": "resp_7517a07_failed",
+                "id": response_id,
                 "object": "response",
                 "status": "failed",
                 "model": "wire-7517a07",
                 "error": {
-                    "code": "controlled_provider_failure",
-                    "message": "controlled failed terminal"
+                    "code": error_code,
+                    "message": error_message
                 },
                 "output": []
             }
@@ -975,12 +991,12 @@ async fn issue7517a07_direct_sse_content_filter_is_legal_completed_terminal() {
     drop(home_guard);
 }
 
-/// A genuine provider `response.failed` terminal remains a failed request with
-/// its own cause. It must not be rewritten as a missing terminal or leak the
-/// provider error payload to the client.
-#[tokio::test]
-async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
-    let (home_guard, _lock) = TEST_LOCK.lock().await;
+async fn assert_direct_sse_failed_terminal_preserves_cause(
+    input: &str,
+    expected_code: &str,
+    expected_message: &str,
+    label: &str,
+) {
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
     let entry = start().await;
     let server_port = entry.handle.listeners[0].addr.port();
@@ -994,7 +1010,7 @@ async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
         .post(format!("{}/v1/responses", entry.base()))
         .json(&json!({
             "model": CLIENT_MODEL,
-            "input": "failed-terminal public regression",
+            "input": input,
             "stream": true
         }))
         .send()
@@ -1011,7 +1027,7 @@ async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
     }
     let wire_text = String::from_utf8_lossy(&wire);
     assert!(
-        !wire_text.contains("controlled failed terminal")
+        !wire_text.contains(expected_message)
             && !wire_text.contains("response.failed")
             && !wire_text.contains("network_error"),
         "a provider failure must not be projected as a client error payload: {wire_text}"
@@ -1019,7 +1035,7 @@ async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
 
     let path = request_records_path(&home, server_port);
     let rows = wait_terminal(&path, Duration::from_secs(15)).await;
-    let terminals = dump_rows("issue7517a07-failed-terminal", &rows);
+    let terminals = dump_rows(label, &rows);
     let terminal = terminals
         .iter()
         .find(|terminal| terminal["event_type"] == json!("request.failed"))
@@ -1035,10 +1051,118 @@ async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
         category != "network_error",
         "the failed terminal must keep its typed provider cause: {terminal}"
     );
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        json!(expected_code),
+        "the provider failure code must survive closeout: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_detail"],
+        json!(expected_message),
+        "the provider failure message must survive closeout: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["provider_id"],
+        json!("test"),
+        "the failed terminal must retain the actual provider identity: {terminal}"
+    );
     assert_ne!(
         terminal["meta"]["provider_status"],
         json!(502),
         "a failed SSE terminal must not fabricate provider HTTP 502: {terminal}"
+    );
+
+    entry.stop().await;
+}
+
+/// A genuine provider `response.failed` terminal remains a failed request with
+/// its own cause. It must not be rewritten as a missing terminal or leak the
+/// provider error payload to the client.
+#[tokio::test]
+async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
+    let (_home_guard, _lock) = TEST_LOCK.lock().await;
+    assert_direct_sse_failed_terminal_preserves_cause(
+        "failed-terminal public regression",
+        "controlled_provider_failure",
+        "controlled failed terminal",
+        "issue7517a07-failed-terminal",
+    )
+    .await;
+}
+
+/// A second real model-entry failure terminal must retain a distinct typed
+/// code and message rather than collapsing onto the first fixture's cause.
+#[tokio::test]
+async fn issue7517a07_direct_sse_distinct_failed_terminal_preserves_its_cause() {
+    let (_home_guard, _lock) = TEST_LOCK.lock().await;
+    assert_direct_sse_failed_terminal_preserves_cause(
+        "failed-terminal-secondary public regression",
+        "controlled_secondary_failure",
+        "controlled secondary failure terminal",
+        "issue7517a07-distinct-failed-terminal",
+    )
+    .await;
+}
+
+async fn assert_direct_sse_cancelled_terminal_preserves_cause() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "cancelled-terminal public regression",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut wire = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+    let wire_text = String::from_utf8_lossy(&wire);
+    assert!(
+        !wire_text.contains("response.cancelled") && !wire_text.contains("network_error"),
+        "a provider cancellation must not be projected as a client error payload: {wire_text}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-cancelled-terminal", &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.failed"))
+        .unwrap_or_else(|| {
+            panic!("a provider cancelled terminal must record request.failed: {terminals:#?}")
+        });
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        json!("provider_cancelled"),
+        "a real cancelled terminal keeps its own typed cause: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_detail"],
+        json!("controlled provider cancellation"),
+        "the Provider cancellation cause is preserved: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["provider_status"],
+        json!(502),
+        "a cancelled SSE terminal must not fabricate provider HTTP 502: {terminal}"
     );
 
     entry.stop().await;

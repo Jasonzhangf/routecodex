@@ -1275,33 +1275,21 @@ impl V3DirectSseConsoleFinalizer {
     }
 
     fn emit_direct_sse_semantic_failure_console_line(self) {
+        // A genuine failure is a typed stream error at the provider/runtime
+        // boundary; the post-commit stream wrapper owns its original cause.
+        // A clean EOF without that typed source is an observability gap.
         let response_status = self
             .observability
             .response_status
-            .clone()
-            .unwrap_or_else(|| "failed".to_string());
-        let finish_reason = self
-            .observability
-            .finish_reason
-            .clone()
-            .unwrap_or_else(|| "unreported".to_string());
-        let (code, message) =
-            provider_response_semantic_failure_source_fields(&response_status, &finish_reason);
-        let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
-            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            code.clone(),
-            message.clone(),
-            routecodex_v3_error::V3ExternalErrorLink {
-                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
-                status: None,
-                code: Some(code),
-                provider_id: None,
-                upstream_request_id: None,
-                message: Some(message),
-            },
+            .as_deref()
+            .unwrap_or("unreported");
+        emit_v3_runtime_observability_contract_failure(
+            &self.context,
+            &self.observability,
+            format!(
+                "semantic failure terminal lacks typed Error01 source response_status={response_status}"
+            ),
         );
-        self.emit_direct_sse_failure_source_console_line(source);
     }
 
     fn emit_direct_sse_failure_source_console_line(
@@ -1351,25 +1339,6 @@ fn is_v3_legal_business_incomplete_terminal(response_status: Option<&str>) -> bo
     matches!(
         response_status.map(str::trim),
         Some(status) if status.eq_ignore_ascii_case("incomplete")
-    )
-}
-
-fn provider_response_semantic_failure_source_fields(
-    response_status: &str,
-    finish_reason: &str,
-) -> (String, String) {
-    let response_status = response_status.trim();
-    let code = match response_status.to_ascii_lowercase().as_str() {
-        "failed" => "provider_response_failed",
-        "cancelled" | "canceled" => "provider_response_cancelled",
-        "error" => "provider_response_error",
-        _ => "provider_response_terminal_failure",
-    };
-    (
-        code.to_string(),
-        format!(
-            "provider response SSE stream ended with a {response_status} semantic terminal finish_reason={finish_reason}"
-        ),
     )
 }
 
@@ -2172,9 +2141,9 @@ mod direct_sse_observability_none_tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_failed_semantic_terminal_records_failure_with_its_own_cause() {
+    async fn direct_sse_failed_terminal_without_typed_source_reports_absence() {
         let state = test_listener_state(7777);
-        let request_id = "req-direct-sse-no-observability-failed-terminal";
+        let request_id = "req-direct-sse-no-observability-missing-failure-source";
         let context = test_context(&state, request_id);
         let frame = live_sse_frame_with_observation(
             V3Server16Body::Sse(delta_stream()),
@@ -2193,69 +2162,21 @@ mod direct_sse_observability_none_tests {
         let rows = state.webui_observability.rows().unwrap();
         let row = rows
             .get(&build_v3_obs_request_key(7777, request_id))
-            .expect("a failed terminal must record a terminal ledger row");
+            .expect("a failed terminal must still close with a terminal ledger row");
         assert_eq!(row.event_type, "request.failed", "{}", row.event_type);
-        assert_eq!(row.result.as_deref(), Some("error"));
         assert_eq!(
             row.meta.error_category.as_deref(),
-            Some("provider_response_failed"),
-            "a real failed terminal keeps its own cause instead of claiming absence: {row:?}"
-        );
-        assert_eq!(
-            row.meta
-                .observed_error
-                .as_ref()
-                .and_then(|truth| truth.external_error_code.as_deref()),
-            Some("provider_response_failed")
+            Some("runtime_observability_contract"),
+            "a missing typed cause is exposed as an observability gap, not a provider cause: {row:?}"
         );
         assert_eq!(
             row.meta.error_detail.as_deref(),
-            Some(
-                "provider response SSE stream ended with a failed semantic terminal finish_reason=error"
-            )
+            Some("semantic failure terminal lacks typed Error01 source response_status=failed")
         );
         assert_ne!(
-            row.meta.provider_status,
-            Some(502),
-            "a genuine provider failure terminal must not fabricate HTTP 502"
-        );
-    }
-
-    #[tokio::test]
-    async fn direct_sse_cancelled_semantic_terminal_keeps_cancelled_cause() {
-        let state = test_listener_state(7777);
-        let request_id = "req-direct-sse-no-observability-cancelled-terminal";
-        let context = test_context(&state, request_id);
-        let frame = live_sse_frame_with_observation(
-            V3Server16Body::Sse(delta_stream()),
-            observation_with_terminal("cancelled", Some("provider_cancelled")),
-        );
-
-        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
-        let client_stream = match frame.body {
-            V3Server16Body::Sse(stream) => stream,
-            _ => unreachable!("test frame owns Direct live SSE body"),
-        };
-        let mut stream: V3IoSseStream =
-            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
-        while stream.next().await.is_some() {}
-
-        let rows = state.webui_observability.rows().unwrap();
-        let row = rows
-            .get(&build_v3_obs_request_key(7777, request_id))
-            .expect("a cancelled terminal must record a terminal ledger row");
-        assert_eq!(row.event_type, "request.failed", "{}", row.event_type);
-        assert_eq!(row.result.as_deref(), Some("error"));
-        assert_eq!(
             row.meta.error_category.as_deref(),
-            Some("provider_response_cancelled"),
-            "a provider-cancelled terminal keeps its own cause: {row:?}"
-        );
-        assert_eq!(
-            row.meta.error_detail.as_deref(),
-            Some(
-                "provider response SSE stream ended with a cancelled semantic terminal finish_reason=provider_cancelled"
-            )
+            Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL"),
+            "the existing semantic terminal must not be reclassified as absent: {row:?}"
         );
     }
 
