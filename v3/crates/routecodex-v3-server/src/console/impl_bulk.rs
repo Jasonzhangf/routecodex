@@ -1125,37 +1125,50 @@ impl V3DirectSseConsoleFinalizer {
                 return;
             }
         };
-        let Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Success) = terminal
-        else {
-            // A transport EOF and [DONE] are not a semantic terminal. The
-            // collector rejects this before commit; a late no-observability
-            // closeout must retain the same truthful failure instead of
-            // fabricating request.completed/success.
-            let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
-                routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
-                "V3ProviderResp14Raw",
-                "provider_response_sse_stream",
-                "provider response SSE stream ended without a terminal semantic event",
-                routecodex_v3_error::V3ExternalErrorLink {
-                    kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
-                    status: None,
-                    code: Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string()),
-                    provider_id: None,
-                    upstream_request_id: None,
-                    message: Some(
-                        "provider response SSE stream ended without a terminal semantic event"
-                            .to_string(),
-                    ),
-                },
-            );
-            let result =
-                routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
-                    source, 599,
+        match terminal {
+            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Success) => {
+                self.emit_direct_sse_complete_console_lines();
+            }
+            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Failure) => {
+                // A Responses `incomplete` terminal (for example the protocol
+                // `content_filter` reason, or a length stop) is the provider's
+                // own legal terminal, not a provider failure. It is forwarded
+                // to the client as business content and must not be replaced
+                // with a locally generated failure; only a real failed or
+                // cancelled terminal owns the failure path.
+                if is_v3_legal_business_incomplete_terminal(
+                    self.observability.response_status.as_deref(),
+                ) {
+                    self.emit_direct_sse_complete_console_lines();
+                } else {
+                    self.emit_direct_sse_semantic_failure_console_line();
+                }
+            }
+            None => {
+                // A transport EOF and [DONE] are not a semantic terminal. The
+                // collector rejects this before commit; a late no-observability
+                // closeout must retain the same truthful failure instead of
+                // fabricating request.completed/success.
+                let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+                    routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_stream",
+                    "provider response SSE stream ended without a terminal semantic event",
+                    routecodex_v3_error::V3ExternalErrorLink {
+                        kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                        status: None,
+                        code: Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string()),
+                        provider_id: None,
+                        upstream_request_id: None,
+                        message: Some(
+                            "provider response SSE stream ended without a terminal semantic event"
+                                .to_string(),
+                        ),
+                    },
                 );
-            self.emit_direct_sse_failure_console_line(result);
-            return;
-        };
-        self.emit_direct_sse_complete_console_lines();
+                self.emit_direct_sse_failure_source_console_line(source);
+            }
+        }
     }
 
     pub(crate) fn emit_direct_sse_complete_console_lines(self) {
@@ -1260,6 +1273,104 @@ impl V3DirectSseConsoleFinalizer {
             result,
         );
     }
+
+    fn emit_direct_sse_semantic_failure_console_line(self) {
+        let response_status = self
+            .observability
+            .response_status
+            .clone()
+            .unwrap_or_else(|| "failed".to_string());
+        let finish_reason = self
+            .observability
+            .finish_reason
+            .clone()
+            .unwrap_or_else(|| "unreported".to_string());
+        let (code, message) =
+            provider_response_semantic_failure_source_fields(&response_status, &finish_reason);
+        let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderResp14Raw",
+            code.clone(),
+            message.clone(),
+            routecodex_v3_error::V3ExternalErrorLink {
+                kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                status: None,
+                code: Some(code),
+                provider_id: None,
+                upstream_request_id: None,
+                message: Some(message),
+            },
+        );
+        self.emit_direct_sse_failure_source_console_line(source);
+    }
+
+    fn emit_direct_sse_failure_source_console_line(
+        self,
+        source: routecodex_v3_error::V3Error01SourceRaised,
+    ) {
+        let result = routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+            source.clone(),
+            599,
+        );
+        match result {
+            Ok(projected) => {
+                emit_v3_error_console_line_for_context(
+                    &self.context,
+                    &self.observability,
+                    projected.status,
+                    &projected.chain,
+                    Some(&projected.body),
+                );
+                if let Err(error) = record_v3_webui_error_for_context(
+                    &self.context,
+                    projected.status,
+                    None,
+                    V3ObsErrorProjection {
+                        execution_mode: Some(self.observability.execution_mode.as_str()),
+                        exposed: true,
+                        error_class: Some(projected.error_class),
+                        observed_source: Some("error01_provider_terminal"),
+                        error_chain: &projected.chain,
+                        health_action: projected.health_action.as_ref(),
+                        diagnostic_source: Some(&source),
+                        terminal_typed_status_cleared: true,
+                        ..Default::default()
+                    },
+                ) {
+                    emit_v3_webui_projection_failure(&self.context, &error);
+                }
+            }
+            Err(fault) => {
+                self.emit_direct_sse_failure_console_line(Err(fault));
+            }
+        }
+    }
+}
+
+fn is_v3_legal_business_incomplete_terminal(response_status: Option<&str>) -> bool {
+    matches!(
+        response_status.map(str::trim),
+        Some(status) if status.eq_ignore_ascii_case("incomplete")
+    )
+}
+
+fn provider_response_semantic_failure_source_fields(
+    response_status: &str,
+    finish_reason: &str,
+) -> (String, String) {
+    let response_status = response_status.trim();
+    let code = match response_status.to_ascii_lowercase().as_str() {
+        "failed" => "provider_response_failed",
+        "cancelled" | "canceled" => "provider_response_cancelled",
+        "error" => "provider_response_error",
+        _ => "provider_response_terminal_failure",
+    };
+    (
+        code.to_string(),
+        format!(
+            "provider response SSE stream ended with a {response_status} semantic terminal finish_reason={finish_reason}"
+        ),
+    )
 }
 
 pub(crate) fn emit_v3_post_commit_sse_source_console_line_for_context(
@@ -1909,17 +2020,25 @@ mod direct_sse_observability_none_tests {
         live_sse_frame_with_observation(body, V3RuntimeStreamObservation::default())
     }
 
-    fn success_observation() -> V3RuntimeStreamObservation {
+    fn observation_with_terminal(
+        response_status: &str,
+        finish_reason: Option<&str>,
+    ) -> V3RuntimeStreamObservation {
         let observation = V3RuntimeStreamObservation::default();
         observation
             .merge_snapshot(
                 &routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservationSnapshot {
-                    response_status: Some("completed".to_string()),
+                    response_status: Some(response_status.to_string()),
+                    finish_reason: finish_reason.map(str::to_string),
                     ..Default::default()
                 },
             )
-            .expect("test observation must accept a completed response status");
+            .expect("test observation must accept a terminal response status");
         observation
+    }
+
+    fn success_observation() -> V3RuntimeStreamObservation {
+        observation_with_terminal("completed", None)
     }
 
     fn delta_stream() -> V3ClientSseStream {
@@ -1963,6 +2082,18 @@ mod direct_sse_observability_none_tests {
             row.event_type
         );
         assert_eq!(row.result.as_deref(), Some("error"));
+        assert_eq!(
+            row.meta
+                .observed_error
+                .as_ref()
+                .and_then(|truth| truth.external_error_code.as_deref()),
+            Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL")
+        );
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("provider_response_sse_stream"),
+            "a genuinely absent terminal keeps its own typed cause: {row:?}"
+        );
         assert_ne!(
             row.meta.provider_status,
             Some(502),
@@ -2001,6 +2132,131 @@ mod direct_sse_observability_none_tests {
             .expect("clean EOF after a semantic terminal must record a terminal ledger row");
         assert_eq!(row.event_type, "request.completed", "{}", row.event_type);
         assert_eq!(row.result.as_deref(), Some("success"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_legal_incomplete_terminal_is_not_recorded_as_provider_failure() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-content-filter";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            observation_with_terminal("incomplete", Some("content_filter")),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        while stream.next().await.is_some() {}
+
+        let rows = state.webui_observability.rows().unwrap();
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("legal incomplete terminal must record a terminal ledger row");
+        assert_eq!(
+            row.event_type, "request.completed",
+            "a provider-legal incomplete/content_filter terminal is not a proxy failure: {}",
+            row.event_type
+        );
+        assert_ne!(
+            row.meta.error_category.as_deref(),
+            Some("provider_response_sse_stream"),
+            "the legal terminal must not be rewritten as a missing-terminal failure"
+        );
+        assert_eq!(row.meta.response_status.as_deref(), Some("incomplete"));
+        assert_eq!(row.meta.finish_reason.as_deref(), Some("content_filter"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_failed_semantic_terminal_records_failure_with_its_own_cause() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-failed-terminal";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            observation_with_terminal("failed", Some("error")),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        while stream.next().await.is_some() {}
+
+        let rows = state.webui_observability.rows().unwrap();
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("a failed terminal must record a terminal ledger row");
+        assert_eq!(row.event_type, "request.failed", "{}", row.event_type);
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("provider_response_failed"),
+            "a real failed terminal keeps its own cause instead of claiming absence: {row:?}"
+        );
+        assert_eq!(
+            row.meta
+                .observed_error
+                .as_ref()
+                .and_then(|truth| truth.external_error_code.as_deref()),
+            Some("provider_response_failed")
+        );
+        assert_eq!(
+            row.meta.error_detail.as_deref(),
+            Some(
+                "provider response SSE stream ended with a failed semantic terminal finish_reason=error"
+            )
+        );
+        assert_ne!(
+            row.meta.provider_status,
+            Some(502),
+            "a genuine provider failure terminal must not fabricate HTTP 502"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_cancelled_semantic_terminal_keeps_cancelled_cause() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-cancelled-terminal";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            observation_with_terminal("cancelled", Some("provider_cancelled")),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        while stream.next().await.is_some() {}
+
+        let rows = state.webui_observability.rows().unwrap();
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("a cancelled terminal must record a terminal ledger row");
+        assert_eq!(row.event_type, "request.failed", "{}", row.event_type);
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("provider_response_cancelled"),
+            "a provider-cancelled terminal keeps its own cause: {row:?}"
+        );
+        assert_eq!(
+            row.meta.error_detail.as_deref(),
+            Some(
+                "provider response SSE stream ended with a cancelled semantic terminal finish_reason=provider_cancelled"
+            )
+        );
     }
 
     #[tokio::test]
