@@ -7,7 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -43,7 +43,7 @@ async fn upstream(State(peer): State<Arc<Peer>>, Json(body): Json<Value>) -> Res
                 "application/json",
                 r#"{"error":{"message":"owned private provider cause"}}"#.to_owned(),
             )
-        } else if input.contains("response-failure") {
+        } else if input.contains("response-failure") && body["model"] != "wire-recover" {
             (
                 StatusCode::OK,
                 "text/event-stream",
@@ -76,13 +76,30 @@ impl Entry {
         format!("http://{}", self.handle.listeners[0].addr)
     }
     async fn stop(self) {
-        assert!(self.handle.shutdown().await.is_empty());
-        self.shutdown.send(()).unwrap();
-        timeout(Duration::from_secs(5), self.peer)
+        let failures = self.cleanup().await;
+        assert!(
+            failures.is_empty(),
+            "owned fixture cleanup failed: {failures:?}"
+        );
+    }
+    async fn cleanup(self) -> Vec<String> {
+        let mut failures = self
+            .handle
+            .shutdown()
             .await
-            .unwrap()
-            .unwrap();
+            .into_iter()
+            .map(|failure| format!("{failure:?}"))
+            .collect::<Vec<_>>();
+        if self.shutdown.send(()).is_err() {
+            failures.push("owned upstream shutdown receiver was already closed".to_string());
+        }
+        match timeout(Duration::from_secs(5), self.peer).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("owned upstream task failed: {error}")),
+            Err(_) => failures.push("owned upstream task did not stop".to_string()),
+        }
         std::env::remove_var("FA22072_BOUNDARY_KEY");
+        failures
     }
 }
 async fn start(process: &str, recovery: bool) -> Entry {
@@ -143,6 +160,7 @@ targets = {targets}
 [debug]
 log_console = false
 snapshots = true
+codex_samples = true
 "#
     );
     let manifest =
@@ -324,6 +342,331 @@ async fn response_decode_failure_aborts_json_and_sse_and_releases_activity() {
         }
         entry.stop().await;
     }
+}
+
+#[tokio::test]
+async fn a83b3ce_recover_only_positive_control_at_public_entry() {
+    let _guard = TEST_LOCK.lock().await;
+    for process in ["direct", "chat"] {
+        let mut entry = start(process, true).await;
+        let body = json!({
+            "model":"test.recover",
+            "input":"response-failure",
+            "stream":false
+        })
+        .to_string();
+        let wire = raw(
+            &entry,
+            "/v1/responses",
+            &format!(
+                "Content-Type: application/json\r\nContent-Length: {}\r\n",
+                body.len()
+            ),
+            &body,
+        )
+        .await;
+        let capture = timeout(Duration::from_secs(5), entry.captures.recv())
+            .await
+            .expect("recover-only capture must arrive")
+            .expect("recover-only candidate must receive transport");
+        assert_eq!(capture["model"], "wire-recover");
+        let text = String::from_utf8_lossy(&wire);
+        assert!(
+            text.contains("business error word survives"),
+            "{process}: {text}"
+        );
+        assert!(
+            timeout(Duration::from_millis(100), entry.captures.recv())
+                .await
+                .is_err(),
+            "recover-only request must not start another candidate"
+        );
+        entry.stop().await;
+    }
+}
+
+fn request_dirs(samples_root: &Path, marker: &str) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(samples_root)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    std::fs::read_to_string(path.join("request.json"))
+                        .is_ok_and(|request| request.contains(marker))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn completed_terminal(content_type: &str, body: &str) -> bool {
+    if content_type.starts_with("application/json") {
+        return serde_json::from_str::<Value>(body).is_ok_and(|value| {
+            value["status"] == "completed" || value["response"]["status"] == "completed"
+        });
+    }
+    if !content_type.starts_with("text/event-stream") {
+        return false;
+    }
+    body.split("\n\n").any(|event| {
+        let data = event
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim_start)
+            .collect::<Vec<_>>()
+            .join("\n");
+        serde_json::from_str::<Value>(&data).is_ok_and(|value| {
+            value["type"] == "response.completed" && value["response"]["status"] == "completed"
+        })
+    })
+}
+
+async fn collect_a83b3ce_local_response_decode_failure_recovery(
+    process: &str,
+    home: &test_home::TestHomeGuard,
+) -> Vec<String> {
+    let mut controls = Vec::new();
+    let mut entry = start(process, true).await;
+    let samples_root = home.codex_samples_root(entry.handle.listeners[0].addr.port());
+    let marker = format!(
+        "response-failure-{process}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let body = json!({
+        "input":marker,
+        "stream":false
+    });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .header("x-session-id", "owned-failure")
+        .json(&body)
+        .send()
+        .await;
+    let (status, content_type, text) = match response {
+        Ok(response) => {
+            let status = response.status();
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            match response.text().await {
+                Ok(text) => (Some(status), content_type, text),
+                Err(error) => {
+                    controls.push(format!("{process}: response body read failed: {error}"));
+                    (Some(status), content_type, String::new())
+                }
+            }
+        }
+        Err(error) => {
+            controls.push(format!("{process}: public request failed: {error}"));
+            (None, String::new(), String::new())
+        }
+    };
+    let first = timeout(Duration::from_secs(5), entry.captures.recv()).await;
+    let second = timeout(Duration::from_secs(5), entry.captures.recv()).await;
+    let third = timeout(Duration::from_millis(100), entry.captures.recv()).await;
+    eprintln!(
+        "a83b3ce process={process} status={status:?} content_type={content_type} first={first:?} second={second:?} wire={text}",
+        first = first,
+        second = second,
+    );
+    match first {
+        Ok(Some(ref capture)) if capture["model"] == "wire-owned" => {}
+        other => controls.push(format!(
+            "{process}: first provider capture was not wire-owned: {other:?}"
+        )),
+    }
+    match second {
+        Ok(Some(ref capture)) if capture["model"] == "wire-recover" => {}
+        other => controls.push(format!(
+            "{process}: second provider capture was not wire-recover: {other:?}"
+        )),
+    }
+    if third.is_ok() {
+        controls.push(format!(
+            "{process}: unexpected third provider capture: {third:?}"
+        ));
+    }
+
+    if status != Some(StatusCode::OK) {
+        controls.push(format!(
+            "{process}: recovered response status must be 200, got {status:?}"
+        ));
+    }
+    let expected_content_type = if process == "direct" {
+        "text/event-stream"
+    } else {
+        "application/json"
+    };
+    if !content_type.starts_with(expected_content_type) {
+        controls.push(format!(
+            "{process}: expected content-type {expected_content_type}, got {content_type}"
+        ));
+    }
+    if !completed_terminal(&content_type, &text) {
+        controls.push(format!(
+            "{process}: response lacked a completed terminal: {text}"
+        ));
+    }
+    if !text.contains("business error word survives") {
+        controls.push(format!("{process}: business content missing: {text}"));
+    }
+    for leaked in [
+        "network_error",
+        "unparseable-json",
+        "owned private provider cause",
+        "response failed",
+    ] {
+        if text.contains(leaked) {
+            controls.push(format!("{process}: leaked {leaked}: {text}"));
+        }
+    }
+
+    match entry.handle.wait_for_codex_sample_persistence().await {
+        Ok(()) => {}
+        Err(error) => controls.push(format!(
+            "{process}: codex sample persistence did not drain: {error}"
+        )),
+    }
+    let dirs = request_dirs(&samples_root, &marker);
+    if dirs.len() != 1 {
+        controls.push(format!(
+            "{process}: exact request sample missing or duplicated: {dirs:?}"
+        ));
+    } else {
+        let request_id = dirs[0].file_name().unwrap().to_string_lossy();
+        let logs = client
+            .get(format!("{}/_routecodex/debug/logs", entry.base()))
+            .send()
+            .await;
+        let logs = match logs {
+            Ok(response) => response.json::<Value>().await.ok(),
+            Err(_) => None,
+        };
+        let nodes: Vec<&str> = logs
+            .as_ref()
+            .and_then(|logs| logs["logs"].as_array())
+            .into_iter()
+            .flatten()
+            .filter(|event| event["request_id"].as_str() == Some(request_id.as_ref()))
+            .filter_map(|event| event["node_id"].as_str())
+            .collect();
+        if !nodes.contains(&"V3TargetLocalReselected") {
+            controls.push(format!(
+                "{process}: request {request_id} lacks typed reselection: {nodes:?}"
+            ));
+        }
+        let expected_chain = [
+            "V3Error01SourceRaised",
+            "V3Error02Classified",
+            "V3Error03TargetLocalAction",
+            "V3Error04TargetExhaustionDecision",
+            "V3Error05ExecutionDecision",
+            "V3TargetLocalReselected",
+        ];
+        if process == "direct"
+            && !nodes
+                .windows(expected_chain.len())
+                .any(|window| window == expected_chain)
+        {
+            controls.push(format!(
+                "{process}: request {request_id} lacks ordered recovery chain: {nodes:?}"
+            ));
+        }
+        let artifact_path = dirs[0].join("provider-failed-attempts.json");
+        let artifact = std::fs::read_to_string(&artifact_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+        match artifact {
+            Some(artifact) => {
+                let request_id = dirs[0]
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if artifact["object"] != "routecodex.v3.provider_failed_attempt_evidence"
+                    || artifact["request_id"] != request_id
+                {
+                    controls.push(format!(
+                        "{process}: failure artifact is not bound to request {request_id}: {artifact}"
+                    ));
+                }
+                let attempts = artifact["attempts"].as_array();
+                if attempts.map_or(true, |attempts| attempts.len() != 1) {
+                    controls.push(format!(
+                        "{process}: expected one failed attempt in artifact: {artifact}"
+                    ));
+                } else if let Some(attempt) = attempts.and_then(|attempts| attempts.first()) {
+                    let expected_stage = if process == "direct" {
+                        "V3ProviderResp14Raw"
+                    } else {
+                        "V3ProviderRespInbound01Raw"
+                    };
+                    let expected_code = if process == "direct" {
+                        "provider_response_sse_event_invalid"
+                    } else {
+                        "provider_response_event_codec_failure"
+                    };
+                    if attempt["provider_id"] != "test"
+                        || attempt["model_id"] != "test"
+                        || attempt["auth_alias"] != "key"
+                        || attempt["diagnostic_source"]["source_kind"] != "provider_failure"
+                        || attempt["diagnostic_source"]["source_stage"] != expected_stage
+                        || attempt["diagnostic_source"]["code"] != expected_code
+                        || attempt["error_type"] != expected_code
+                        || attempt["action"] != "switch_provider"
+                        || attempt["next_provider_key"] != "test:default:key:recover"
+                    {
+                        controls.push(format!(
+                            "{process}: failed attempt witness does not bind identity, decode classification, and successor: {attempt}"
+                        ));
+                    }
+                }
+            }
+            None => controls.push(format!(
+                "{process}: provider-failed-attempts.json missing or invalid at {artifact_path:?}"
+            )),
+        }
+    }
+
+    let cleanup_failures = entry.cleanup().await;
+    controls.extend(cleanup_failures);
+    controls
+}
+
+#[tokio::test]
+async fn a83b3ce_direct_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry(
+) {
+    let (home, _lock) = TEST_LOCK.lock().await;
+    let controls = collect_a83b3ce_local_response_decode_failure_recovery("direct", &home).await;
+    drop(home);
+    assert!(
+        controls.is_empty(),
+        "Direct recovery controls failed: {controls:?}"
+    );
+}
+
+#[tokio::test]
+async fn a83b3ce_relay_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry()
+{
+    let (home, _lock) = TEST_LOCK.lock().await;
+    let controls = collect_a83b3ce_local_response_decode_failure_recovery("chat", &home).await;
+    drop(home);
+    assert!(
+        controls.is_empty(),
+        "Relay recovery controls failed: {controls:?}"
+    );
 }
 
 #[tokio::test]

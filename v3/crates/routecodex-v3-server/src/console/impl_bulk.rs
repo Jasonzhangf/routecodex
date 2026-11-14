@@ -867,11 +867,14 @@ pub(crate) fn emit_v3_direct_frame_console_lines(
         V3Server16Body::Sse(_) | V3Server16Body::CommittedSse(_)
     );
     let default_observability = crate::V3RuntimeObservability::default();
-    let error_observability = observability.as_ref().unwrap_or(&default_observability);
     // Typed WebUI projection: terminal for non-SSE frames (Completed/Failed).
     // SSE streams defer terminal ownership to their console finalizer so the
     // final outcome (Completed/Failed/Cancelled) reflects stream closeout.
-    let observability = observability?;
+    let observability = if is_sse {
+        observability.unwrap_or(default_observability)
+    } else {
+        observability?
+    };
     // The direct lane ran the typed Error path in-process, so a non-SSE error
     // frame already holds real typed truth in `frame.error_chain`: record it here
     // as the terminal Error06 observation, before the shared emitter runs, which
@@ -1091,6 +1094,17 @@ impl V3SseConsoleFinalizer {
 }
 
 impl V3DirectSseConsoleFinalizer {
+    fn semantic_terminal(
+        &self,
+    ) -> Result<Option<routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal>, String> {
+        Ok(self
+            .stream_observation
+            .as_ref()
+            .map(routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservation::semantic_terminal)
+            .transpose()?
+            .flatten())
+    }
+
     pub(crate) fn complete(mut self) {
         if let Err(error) = self.merge_stream_observation() {
             emit_v3_runtime_observability_contract_failure(
@@ -1100,7 +1114,61 @@ impl V3DirectSseConsoleFinalizer {
             );
             return;
         }
-        self.emit_direct_sse_complete_console_lines();
+        let terminal = match self.semantic_terminal() {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                emit_v3_runtime_observability_contract_failure(
+                    &self.context,
+                    &self.observability,
+                    error,
+                );
+                return;
+            }
+        };
+        match terminal {
+            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Success) => {
+                self.emit_direct_sse_complete_console_lines();
+            }
+            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Failure) => {
+                // A Responses `incomplete` terminal (for example the protocol
+                // `content_filter` reason, or a length stop) is the provider's
+                // own legal terminal, not a provider failure. It is forwarded
+                // to the client as business content and must not be replaced
+                // with a locally generated failure; only a real failed or
+                // cancelled terminal owns the failure path.
+                if is_v3_legal_business_incomplete_terminal(
+                    self.observability.response_status.as_deref(),
+                ) {
+                    self.emit_direct_sse_complete_console_lines();
+                } else {
+                    self.emit_direct_sse_semantic_failure_console_line();
+                }
+            }
+            None => {
+                // A transport EOF and [DONE] are not a semantic terminal. The
+                // collector rejects this before commit; a late no-observability
+                // closeout must retain the same truthful failure instead of
+                // fabricating request.completed/success.
+                let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+                    routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+                    "V3ProviderResp14Raw",
+                    "provider_response_sse_stream",
+                    "provider response SSE stream ended without a terminal semantic event",
+                    routecodex_v3_error::V3ExternalErrorLink {
+                        kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+                        status: None,
+                        code: Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL".to_string()),
+                        provider_id: None,
+                        upstream_request_id: None,
+                        message: Some(
+                            "provider response SSE stream ended without a terminal semantic event"
+                                .to_string(),
+                        ),
+                    },
+                );
+                self.emit_direct_sse_failure_source_console_line(source);
+            }
+        }
     }
 
     pub(crate) fn emit_direct_sse_complete_console_lines(self) {
@@ -1139,13 +1207,8 @@ impl V3DirectSseConsoleFinalizer {
             );
             return;
         }
-        let semantic_terminal = match self
-            .stream_observation
-            .as_ref()
-            .map(routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservation::semantic_terminal)
-            .transpose()
-        {
-            Ok(terminal) => terminal.flatten(),
+        let semantic_terminal = match self.semantic_terminal() {
+            Ok(terminal) => terminal,
             Err(error) => {
                 emit_v3_runtime_observability_contract_failure(
                     &self.context,
@@ -1210,6 +1273,73 @@ impl V3DirectSseConsoleFinalizer {
             result,
         );
     }
+
+    fn emit_direct_sse_semantic_failure_console_line(self) {
+        // A genuine failure is a typed stream error at the provider/runtime
+        // boundary; the post-commit stream wrapper owns its original cause.
+        // A clean EOF without that typed source is an observability gap.
+        let response_status = self
+            .observability
+            .response_status
+            .as_deref()
+            .unwrap_or("unreported");
+        emit_v3_runtime_observability_contract_failure(
+            &self.context,
+            &self.observability,
+            format!(
+                "semantic failure terminal lacks typed Error01 source response_status={response_status}"
+            ),
+        );
+    }
+
+    fn emit_direct_sse_failure_source_console_line(
+        self,
+        source: routecodex_v3_error::V3Error01SourceRaised,
+    ) {
+        let result = routecodex_v3_runtime::foundation::project_v3_post_commit_sse_source_via_sdk(
+            source.clone(),
+            599,
+        );
+        match result {
+            Ok(projected) => {
+                emit_v3_error_console_line_for_context(
+                    &self.context,
+                    &self.observability,
+                    projected.status,
+                    &projected.chain,
+                    Some(&projected.body),
+                );
+                if let Err(error) = record_v3_webui_error_for_context(
+                    &self.context,
+                    projected.status,
+                    None,
+                    V3ObsErrorProjection {
+                        execution_mode: Some(self.observability.execution_mode.as_str()),
+                        exposed: true,
+                        error_class: Some(projected.error_class),
+                        observed_source: Some("error01_provider_terminal"),
+                        error_chain: &projected.chain,
+                        health_action: projected.health_action.as_ref(),
+                        diagnostic_source: Some(&source),
+                        terminal_typed_status_cleared: true,
+                        ..Default::default()
+                    },
+                ) {
+                    emit_v3_webui_projection_failure(&self.context, &error);
+                }
+            }
+            Err(fault) => {
+                self.emit_direct_sse_failure_console_line(Err(fault));
+            }
+        }
+    }
+}
+
+fn is_v3_legal_business_incomplete_terminal(response_status: Option<&str>) -> bool {
+    matches!(
+        response_status.map(str::trim),
+        Some(status) if status.eq_ignore_ascii_case("incomplete")
+    )
 }
 
 pub(crate) fn emit_v3_post_commit_sse_source_console_line_for_context(
@@ -1728,5 +1858,416 @@ pub(crate) fn parse_v3_console_provider_key(
         ),
         [provider] => (Some((*provider).to_string()), None, None),
         [] => (None, None, None),
+    }
+}
+
+#[cfg(test)]
+mod direct_sse_observability_none_tests {
+    use super::*;
+    use crate::webui_observability::build_v3_obs_request_key;
+    use futures_util::StreamExt;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    fn test_listener_state(port: u16) -> Arc<V3ListenerState> {
+        let mut servers = BTreeMap::new();
+        let server = V3ServerManifest {
+            id: format!("server-{port}"),
+            enabled: true,
+            bind: "127.0.0.1".to_string(),
+            port,
+            routing_group: "controlled".to_string(),
+            endpoints: vec!["responses".to_string()],
+            features: BTreeMap::new(),
+            execution: None,
+            http_sse_keepalive_ms: 3_000,
+            expose_models: Vec::new(),
+            provider_priority_schedule: Default::default(),
+        };
+        servers.insert(server.id.clone(), server.clone());
+        let manifest = Arc::new(V3Config05ManifestPublished {
+            version: 3,
+            hub_v1: None,
+            servers,
+            providers: BTreeMap::new(),
+            forwarders: BTreeMap::new(),
+            route_groups: BTreeMap::new(),
+            features: BTreeMap::new(),
+            debug: V3DebugManifest {
+                log_console: false,
+                log_file: None,
+                projection_drop_log_file: None,
+                snapshots: false,
+                codex_samples: false,
+                snapshot_stages: None,
+                snapshot_direct: true,
+                dry_run: false,
+                retention: BTreeMap::new(),
+                full_codex_sampling: false,
+            },
+            error: routecodex_v3_config::V3ErrorManifest {
+                policies: BTreeMap::new(),
+                provider_error_action_policy: Vec::new(),
+                provider_error_default_path: Vec::new(),
+            },
+            memory_raw_capture: Default::default(),
+        });
+        let debug = build_v3_debug_runtime_from_manifest(&manifest.debug).unwrap();
+        Arc::new(V3ListenerState {
+            server,
+            manifest_version: manifest.version,
+            manifest: Arc::clone(&manifest),
+            debug,
+            console_enabled: false,
+            sse_dump_enabled: false,
+            request_counter: Arc::new(Mutex::new(V3RequestIdCounter {
+                state_file: std::env::temp_dir().join(format!(
+                    "routecodex-v3-direct-sse-no-observability-{port}-{}.json",
+                    std::process::id()
+                )),
+                state: V3RequestCounterState::default(),
+                loaded: false,
+            })),
+            codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
+                false,
+                routecodex_v3_debug::V3_CODEX_SAMPLE_REQUEST_RETENTION,
+                false,
+            )),
+            provider_health: Arc::new(
+                V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest),
+            ),
+            realtime_cooled_provider_keys: Arc::new(Mutex::new(BTreeMap::new())),
+            request_activity_gate: Arc::new(V3ServerRequestActivityGate::default()),
+            front_transport_broker: V3FrontTransportBroker::new(1),
+            webui_observability: V3WebuiObservability::new(),
+        })
+    }
+
+    fn test_context(state: &Arc<V3ListenerState>, request_id: &str) -> V3ConsoleEmissionContext {
+        V3ConsoleEmissionContext {
+            state: Arc::clone(state),
+            entry_protocol: "responses".to_string(),
+            endpoint: "/v1/responses".to_string(),
+            request_identity: V3AllocatedRequestIdentity {
+                request_id: request_id.to_string(),
+                pipeline_id: format!("pipeline-{request_id}"),
+                total_count: 1,
+                daily_count: 1,
+            },
+            identity: V3ConsoleLogIdentity {
+                color_key: None,
+                session_id: "direct-sse-no-observability".to_string(),
+                project_path: Some("/tmp/rules".to_string()),
+            },
+            realtime_provider_failure_event_keys: Arc::new(Mutex::new(BTreeSet::new())),
+            realtime_route_selection_keys: Arc::new(Mutex::new(BTreeSet::new())),
+        }
+    }
+
+    fn live_sse_frame_with_observation(
+        body: V3Server16Body,
+        stream_observation: V3RuntimeStreamObservation,
+    ) -> V3Server16HttpFrame {
+        V3Server16HttpFrame {
+            status: 200,
+            content_type: "text/event-stream".to_string(),
+            body,
+            debug_node: "V3Debug01NodeEventRegistered",
+            error_node: "none",
+            error_chain: Vec::new(),
+            error_body: None,
+            diagnostic_source: None,
+            diagnostic_cause: None,
+            node_trace: vec!["V3DirectResp15ClientPayloadReady"],
+            observability: None,
+            stream_observation: Some(stream_observation),
+        }
+    }
+
+    fn live_sse_frame(body: V3Server16Body) -> V3Server16HttpFrame {
+        live_sse_frame_with_observation(body, V3RuntimeStreamObservation::default())
+    }
+
+    fn observation_with_terminal(
+        response_status: &str,
+        finish_reason: Option<&str>,
+    ) -> V3RuntimeStreamObservation {
+        let observation = V3RuntimeStreamObservation::default();
+        observation
+            .merge_snapshot(
+                &routecodex_v3_runtime::hub_v1::V3RuntimeStreamObservationSnapshot {
+                    response_status: Some(response_status.to_string()),
+                    finish_reason: finish_reason.map(str::to_string),
+                    ..Default::default()
+                },
+            )
+            .expect("test observation must accept a terminal response status");
+        observation
+    }
+
+    fn success_observation() -> V3RuntimeStreamObservation {
+        observation_with_terminal("completed", None)
+    }
+
+    fn delta_stream() -> V3ClientSseStream {
+        Box::pin(futures_util::stream::iter(vec![Ok::<
+            Vec<u8>,
+            routecodex_v3_error::V3Error01SourceRaised,
+        >(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+        )]))
+    }
+
+    #[tokio::test]
+    async fn direct_sse_clean_eof_without_semantic_terminal_records_failed_terminal() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-missing-terminal";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame(V3Server16Body::Sse(delta_stream()));
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        assert!(
+            finalizer.is_some(),
+            "Direct SSE must keep a terminal owner when observability is absent"
+        );
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+        assert!(stream.next().await.is_none(), "stream must reach EOF");
+
+        let rows = state.webui_observability.rows().unwrap();
+        assert_eq!(rows.len(), 1, "one request must fold to one terminal row");
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("clean EOF must record a terminal ledger row");
+        assert_eq!(
+            row.event_type, "request.failed",
+            "a clean EOF without a semantic terminal must not record success: {}",
+            row.event_type
+        );
+        assert_eq!(row.result.as_deref(), Some("error"));
+        assert_eq!(
+            row.meta
+                .observed_error
+                .as_ref()
+                .and_then(|truth| truth.external_error_code.as_deref()),
+            Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL")
+        );
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("provider_response_sse_stream"),
+            "a genuinely absent terminal keeps its own typed cause: {row:?}"
+        );
+        assert_ne!(
+            row.meta.provider_status,
+            Some(502),
+            "a missing semantic terminal must not fabricate a provider HTTP 502"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_clean_eof_with_semantic_terminal_records_completed_terminal() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-eof";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            success_observation(),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        assert!(
+            finalizer.is_some(),
+            "Direct SSE must keep a terminal owner when observability is absent"
+        );
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+        assert!(stream.next().await.is_none(), "stream must reach EOF");
+
+        let rows = state.webui_observability.rows().unwrap();
+        assert_eq!(rows.len(), 1, "one request must fold to one terminal row");
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("clean EOF after a semantic terminal must record a terminal ledger row");
+        assert_eq!(row.event_type, "request.completed", "{}", row.event_type);
+        assert_eq!(row.result.as_deref(), Some("success"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_legal_incomplete_terminal_is_not_recorded_as_provider_failure() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-content-filter";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            observation_with_terminal("incomplete", Some("content_filter")),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        while stream.next().await.is_some() {}
+
+        let rows = state.webui_observability.rows().unwrap();
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("legal incomplete terminal must record a terminal ledger row");
+        assert_eq!(
+            row.event_type, "request.completed",
+            "a provider-legal incomplete/content_filter terminal is not a proxy failure: {}",
+            row.event_type
+        );
+        assert_ne!(
+            row.meta.error_category.as_deref(),
+            Some("provider_response_sse_stream"),
+            "the legal terminal must not be rewritten as a missing-terminal failure"
+        );
+        assert_eq!(row.meta.response_status.as_deref(), Some("incomplete"));
+        assert_eq!(row.meta.finish_reason.as_deref(), Some("content_filter"));
+    }
+
+    #[tokio::test]
+    async fn direct_sse_failed_terminal_without_typed_source_reports_absence() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-missing-failure-source";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame_with_observation(
+            V3Server16Body::Sse(delta_stream()),
+            observation_with_terminal("failed", Some("error")),
+        );
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        while stream.next().await.is_some() {}
+
+        let rows = state.webui_observability.rows().unwrap();
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("a failed terminal must still close with a terminal ledger row");
+        assert_eq!(row.event_type, "request.failed", "{}", row.event_type);
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some("runtime_observability_contract"),
+            "a missing typed cause is exposed as an observability gap, not a provider cause: {row:?}"
+        );
+        assert_eq!(
+            row.meta.error_detail.as_deref(),
+            Some("semantic failure terminal lacks typed Error01 source response_status=failed")
+        );
+        assert_ne!(
+            row.meta.error_category.as_deref(),
+            Some("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL"),
+            "the existing semantic terminal must not be reclassified as absent: {row:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_client_drop_without_observability_records_cancelled_terminal() {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-drop";
+        let context = test_context(&state, request_id);
+        let frame = live_sse_frame(V3Server16Body::Sse(delta_stream()));
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        assert!(
+            finalizer.is_some(),
+            "Direct SSE must keep a terminal owner when observability is absent"
+        );
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+        drop(stream);
+
+        let rows = state.webui_observability.rows().unwrap();
+        assert_eq!(rows.len(), 1, "one request must fold to one terminal row");
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("client drop must record a terminal ledger row");
+        assert_eq!(row.event_type, "request.cancelled", "{}", row.event_type);
+        assert_eq!(row.result.as_deref(), Some("cancelled"));
+        assert_ne!(
+            row.meta.provider_status,
+            Some(502),
+            "a no-response client drop must not fabricate provider HTTP 502"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_sse_stream_error_without_observability_records_failed_terminal_without_client_provider_payload(
+    ) {
+        let state = test_listener_state(7777);
+        let request_id = "req-direct-sse-no-observability-stream-error";
+        let context = test_context(&state, request_id);
+        let source = routecodex_v3_error::build_v3_error_01_source_raised(
+            routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+            "V3ProviderRespInbound01Raw",
+            "upstream_midstream_reset",
+            "controlled provider stream reset after commit",
+        );
+        let frame = live_sse_frame(V3Server16Body::Sse(Box::pin(futures_util::stream::iter(vec![
+            Ok::<Vec<u8>, routecodex_v3_error::V3Error01SourceRaised>(
+                b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n".to_vec(),
+            ),
+            Err(source),
+        ]))));
+
+        let finalizer = emit_v3_direct_frame_console_lines(&context, &frame, Instant::now());
+        assert!(
+            finalizer.is_some(),
+            "Direct SSE must keep a terminal owner when observability is absent"
+        );
+        let client_stream = match frame.body {
+            V3Server16Body::Sse(stream) => stream,
+            _ => unreachable!("test frame owns Direct live SSE body"),
+        };
+        let mut stream: V3IoSseStream =
+            wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
+        assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
+        let failure = stream
+            .next()
+            .await
+            .expect("stream must surface its terminal transport error")
+            .expect_err("stream error must stay an error, not provider payload");
+        assert!(
+            !failure
+                .to_string()
+                .contains("controlled provider stream reset"),
+            "client transport error must not carry the provider error body: {failure}"
+        );
+        assert!(
+            stream.next().await.is_none(),
+            "stream must close after its terminal error"
+        );
+
+        let rows = state.webui_observability.rows().unwrap();
+        assert_eq!(rows.len(), 1, "one request must fold to one terminal row");
+        let row = rows
+            .get(&build_v3_obs_request_key(7777, request_id))
+            .expect("stream error must record a terminal ledger row");
+        assert_eq!(row.event_type, "request.failed", "{}", row.event_type);
+        assert_eq!(row.result.as_deref(), Some("error"));
     }
 }
