@@ -1551,6 +1551,108 @@ mod tests {
     }
 
     #[test]
+    fn wire_keeps_reasoning_summary_key_for_gpt_responses_target() {
+        // 缺陷 f4bd01c：openai-official（type=responses，上游 api.openai.com）的
+        // 目标是 gpt 家族，wire.rs 的 gpt 门控让该目标整体跳过请求侧 reasoning
+        // 兜底。当历史 reasoning 条目只剩 encrypted_content（summary/content 均
+        // 缺失）时，构造出的 item 没有 `summary` 键，上游返回 400
+        // `Missing required parameter: 'input[N].summary'`
+        // （code=missing_required_parameter）。
+        //
+        // OpenAI Responses 的 reasoning input item 要求 `summary` 键存在；缺失时
+        // 补空数组是最小形态补全，不删除任何客户端可转发字段。
+        let mut target = target();
+        target.provider_id = "openai-official".into();
+        target.provider_type = "responses".into();
+        target.canonical_model_id = "gpt-6.1-sol".into();
+        target.wire_model = "gpt-6.1-sol".into();
+        target.base_url = "https://api.openai.com/v1".into();
+        let body = json!({
+            "model": "gpt-6.1-sol", "input": [
+                {"type": "reasoning", "id": "rs_summary", "summary": [{"type": "summary_text", "text": "plain summary"}], "encrypted_content": "rsn_cipher"},
+                {"type": "reasoning", "id": "rs_encrypted_only", "encrypted_content": "rsn_only", "summary": null},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-gpt-summary", target, body)
+            .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        assert_eq!(input.len(), 3);
+        assert_eq!(
+            input[0]["summary"],
+            json!([{"type": "summary_text", "text": "plain summary"}]),
+            "gpt target keeps the client summary byte-identical"
+        );
+        assert_eq!(
+            input[0]["encrypted_content"], "rsn_cipher",
+            "gpt target keeps official ciphertext for provider-side reasoning reconstruction"
+        );
+        assert!(
+            input[1].get("summary").is_some(),
+            "reasoning item with no summary must still carry a summary key for the OpenAI Responses endpoint: {}",
+            input[1]
+        );
+        assert_eq!(
+            input[1]["summary"],
+            json!([]),
+            "missing summary is completed as an empty array, not invented content"
+        );
+        assert_eq!(
+            input[1]["encrypted_content"], "rsn_only",
+            "completing the summary key must not drop the forwarded ciphertext"
+        );
+    }
+
+    #[test]
+    fn wire_keeps_reasoning_summary_key_deterministic_for_gpt_target() {
+        // 同上缺陷：补全必须确定性，重复构建字节不变，否则上游缓存前缀漂移。
+        let mut target = target();
+        target.canonical_model_id = "gpt-5.5".into();
+        target.wire_model = "gpt-5.5".into();
+        let body = json!({
+            "model": "gpt-5.5", "input": [
+                {"type": "reasoning", "id": "rs_encrypted_only", "encrypted_content": "rsn_only", "summary": null},
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]}
+            ]
+        });
+        let first =
+            build_v3_provider_12_responses_wire_payload("req-1", target.clone(), body.clone())
+                .unwrap();
+        let second = build_v3_provider_12_responses_wire_payload("req-2", target, body).unwrap();
+        assert_eq!(
+            first.body(),
+            second.body(),
+            "summary completion must be deterministic for upstream cache prefixes"
+        );
+        assert_eq!(first.body()["input"][0]["summary"], json!([]));
+    }
+
+    #[test]
+    fn wire_does_not_inject_summary_key_into_non_reasoning_gpt_items() {
+        // 控制样本：补全只作用于 reasoning 条目，不得给 message / tool 条目
+        // 注入 summary 键，也不得给非 gpt 目标强加该键。
+        let mut gpt_target = target();
+        gpt_target.canonical_model_id = "gpt-6.1-sol".into();
+        gpt_target.wire_model = "gpt-6.1-sol".into();
+        let body = json!({
+            "model": "gpt-6.1-sol", "input": [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "user turn"}]},
+                {"type": "function_call", "name": "exec_command", "call_id": "call_1", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_1", "output": "file.txt"}
+            ]
+        });
+        let wire = build_v3_provider_12_responses_wire_payload("req-control", gpt_target, body)
+            .unwrap();
+        let input = wire.body()["input"].as_array().unwrap();
+        for item in input {
+            assert!(
+                item.get("summary").is_none(),
+                "only reasoning items may gain a summary key: {item}"
+            );
+        }
+    }
+
+    #[test]
     fn wire_keeps_narrow_encrypted_cleanup_for_other_non_gpt_responses_target() {
         // 非 deepseek 的 responses 目标只保留既有窄清理（剥历史密文 + 空条目占位），
         // 不做 summary -> content.reasoning_text 重写；该重写只在已证明需要的
