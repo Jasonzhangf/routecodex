@@ -1,7 +1,6 @@
 use super::V3ProviderCompatErrorClassification;
 use super::*;
 use crate::nodes::{V3ClientBody, V3Resp15ClientPayload};
-use crate::provider_action_gate::V3ProviderActionPermit;
 use crate::provider_failure_runtime_policy::{
     V3ProviderFailureRuntimeHealth, V3RelayProviderFailureRetryPolicy,
 };
@@ -350,7 +349,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
         auth_alias: String,
         model_id: String,
         recorded: bool,
-        permit: Option<V3ProviderActionPermit>,
     ) -> V3GeminiSseProviderOutcome {
         V3GeminiSseProviderOutcome {
             response_control: V3RuntimeStreamObservation::default(),
@@ -361,7 +359,6 @@ impl V3RelayProtocolCodec for V3GeminiRelayCodec {
             auth_alias,
             model_id,
             recorded,
-            _provider_action_permit: permit,
         }
     }
 
@@ -757,7 +754,6 @@ pub(crate) struct V3GeminiSseProviderOutcome {
     auth_alias: String,
     model_id: String,
     recorded: bool,
-    _provider_action_permit: Option<V3ProviderActionPermit>,
 }
 
 impl V3GeminiSseProviderOutcome {
@@ -765,7 +761,6 @@ impl V3GeminiSseProviderOutcome {
         if self.recorded || self.response_control.has_response_governance_failure()? {
             return Ok(());
         }
-        drop(self._provider_action_permit.take());
         let source = build_v3_error_01_source_raised(
             V3ErrorSourceKind::ProviderFailure,
             "V3ProviderResp14Raw",

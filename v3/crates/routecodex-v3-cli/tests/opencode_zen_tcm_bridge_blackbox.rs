@@ -85,9 +85,9 @@ fn check_wire(body: &Value, peer: &Peer, stage: usize) -> Result<(), String> {
             .filter(|part| part["type"] == "image_url")
             .map(|part| part["image_url"]["url"].as_str())
             .collect();
-        if images != vec![Some(IMAGE)] {
+        if images != vec![Some("data:image/png;base64,OLD_HISTORY"), Some(IMAGE)] {
             return Err(format!(
-                "latest view_image bytes lost or historical image restored: {images:?}"
+                "historical image bytes or latest view_image bytes lost or reordered: {images:?}"
             ));
         }
         let calls: Vec<_> = messages

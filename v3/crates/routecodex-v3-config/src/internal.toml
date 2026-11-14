@@ -226,11 +226,6 @@ port = 8777
   error_samples_only = true
   error_sample_skip_statuses = [401, 402, 403, 429, 503]
 
-# 请求独立的池空恢复节奏；容量或健康恢复通知可提前唤醒，不占业务 lease。
-[target_recovery]
-  backoff_wait_ms = [1000, 3000, 15000, 35000, 90000]
-  steady_wait_ms = 1000
-
 # Real 429 observations, scoped to listener/provider/interface/model/key.
 [rate_limit_recovery]
   observation_window_ms = 120000

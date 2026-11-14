@@ -235,7 +235,20 @@ edges:
       side_channel_reads:
         - v3.runtime.responses_timing_observability
       side_channel_writes: []
+  - step_id: v3-runtime-timing-refill-summary
+    from_node: V3RuntimeTimingTerminal
+    to_node: V3RuntimeTimingStreamObservation
+    status: anchored
+    owner_feature_id: v3.runtime_timing_observability
+    binding_pending: null
+    split_binding_id: null
+    resource_flow:
+      consumes: [v3.runtime.responses_timing_observability]
+      produces: [v3.runtime.responses_observability]
+      side_channel_reads: [v3.runtime.responses_timing_observability]
+      side_channel_writes: [v3.runtime.responses_observability]
 verification:
+  refill_summary: Completed execution timing is summed once by the Direct refill wrapper and published equally in output and the final stream snapshot; repeated snapshot projection does not accumulate.
   required_gates:
     - npm run verify:architecture-mainline-call-map
     - npm run verify:architecture-mainline-manifest-sync

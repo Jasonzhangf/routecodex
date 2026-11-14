@@ -266,22 +266,12 @@ supports_streaming = true
 max_tokens = 4096
 max_context_tokens = 128000
 
-[route_groups.default.pools.retry]
+[route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, models = ["{CLIENT_MODEL}"] }}
 targets = [
   {{ kind = "provider_model", provider = "retry_fail", model = "{WIRE_MODEL}", key = "key", priority = 3 }},
   {{ kind = "provider_model", provider = "retry_ok", model = "{WIRE_MODEL}", key = "key", priority = 1 }},
 ]
-
-[route_groups.default.pools.followup]
-selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, models = ["{FOLLOWUP_MODEL}"] }}
-targets = [{{ kind = "provider_model", provider = "retry_ok", model = "{WIRE_MODEL}", key = "key", priority = 1 }}]
-
-[route_groups.default.pools.default]
-selection = {{ strategy = "priority" }}
-targets = [{{ kind = "provider_model", provider = "retry_ok", model = "{WIRE_MODEL}", key = "key", priority = 1 }}]
 "#
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -450,7 +440,13 @@ async fn responses_direct_prepare_tool_thinking_enabled_and_continuation_through
         .await
         .expect("public follow-up request must complete");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let failed_followup = recv_capture(&mut upstream.captures).await;
     let capture = recv_capture(&mut upstream.captures).await;
+    assert!(
+        failed_followup.path.starts_with("/fail/"),
+        "{}",
+        failed_followup.path
+    );
     assert!(capture.path.starts_with("/ok/"), "{}", capture.path);
     assert_eq!(capture.body["input"], followup["input"], "tool result");
     assert_eq!(

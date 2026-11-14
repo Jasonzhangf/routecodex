@@ -455,13 +455,26 @@ async fn expired_request_never_dispatches_or_cools_backup_candidate() {
     let pool = cooldown_pool(&entry).await;
     let entries = pool["entries"].as_array().unwrap();
     assert!(
-        !entries.is_empty(),
-        "attempted provider must be cooled: {pool}"
+        entries.is_empty(),
+        "pre-cool observation must not commit cooldown: {pool}"
     );
     assert!(
         entries.iter().all(|item| item["model_id"] != "recover"),
         "unattempted backup cooled: {pool}"
     );
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"input":"deadline-no-backup-budget","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.text().await.unwrap().contains("sibling-success"));
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover",
+        "held identity must route the next request to the healthy backup"
+    );
+    assert!(entry.captures.try_recv().is_err());
     let response = reqwest::Client::new()
         .post(format!("{}/v1/responses", entry.base()))
         .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))

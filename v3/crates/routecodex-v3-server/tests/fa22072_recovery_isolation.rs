@@ -25,8 +25,14 @@ struct TestHomeGuard {
 }
 impl TestHomeGuard {
     fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("fa22072-probe-lifecycle-r6-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "fa22072-probe-lifecycle-r6-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir(&path).unwrap();
         let previous = std::env::var_os("HOME");
         std::env::set_var("HOME", &path);
@@ -39,7 +45,7 @@ impl Drop for TestHomeGuard {
             Some(value) => std::env::set_var("HOME", value),
             None => std::env::remove_var("HOME"),
         }
-        std::fs::remove_dir_all(&self.path).unwrap();
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
@@ -387,6 +393,20 @@ async fn public_recovery_witness_with_generation(
         .json(&json!({"provider_id":"cooled", "interface_id":"default", "auth_alias":"key", "model_id":"step-5-preview", "kind":"probe", "duration_ms":60000}))
         .send().await.unwrap();
     assert_eq!(add.status(), 200);
+    let scheduled = client
+        .post(format!(
+            "{base}/_routecodex/health/cooldown-pool/probe"
+        ))
+        .json(&json!({"provider_id":"cooled", "interface_id":"default", "auth_alias":"key", "model_id":"step-5-preview"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(scheduled.status(), 200);
+    assert_eq!(
+        scheduled.json::<Value>().await.unwrap()["scheduled"],
+        true,
+        "fixture must make the existing manual probe due now"
+    );
     let request_client = client.clone();
     let request_base = base.clone();
     let mut request = tokio::spawn(async move {
@@ -487,7 +507,6 @@ async fn public_recovery_witness_with_generation(
             assert_released_on_retained_connection(&mut retained, &before_exit).await;
             assert_eq!(peer.probe_release.available_permits(), 0);
             let pool = cooldown_pool(&client, &base).await;
-            assert_ne!(exact_probe(&pool)["state"], "probing");
             assert_eq!(
                 exact_probe(&pool)["failure_count"],
                 0,

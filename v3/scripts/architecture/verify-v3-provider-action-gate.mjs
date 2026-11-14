@@ -280,7 +280,7 @@ if (
 for (const token of [
   'pub struct V3Error05RecoveryAdmissionWitness',
   'pub enum V3Error05ExecutionAction',
-  'WaitThenReselect',
+  'ReevaluateTarget',
   'ProjectTerminal',
   'pub struct V3Error05TerminalDecision',
   'pub fn try_into_terminal',
@@ -323,73 +323,26 @@ if (
   );
 }
 
+// e37891a: request paths are nonblocking. They may consume typed Error05
+// actions, but must never re-acquire admission or wait for provider recovery.
 for (const [name, source, rel] of [
   ['Direct', text.direct, files.direct],
   ['Responses Relay', text.responses, files.responses],
   ['Anthropic Relay', text.anthropic, files.anthropic],
+  ['Relay Skeleton', `${text.relayCore}\n${text.relayShared}`, `${files.relayCore} + ${files.relayShared}`],
 ]) {
-  requireText(source, rel, 'wait_for_error05_recovery');
-  requireText(source, rel, 'V3ProviderActionGateAdmission');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::Superseded');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::ReleasedBySuccess');
-  requireText(source, rel, 'V3ProviderActionGateTerminalReevaluation');
-  const successReleaseRearm =
-    /V3ProviderActionRecoveryTransition::ReleasedBySuccess\(ticket\)[\s\S]{0,80}?=>\s*\{[\s\S]{0,480}?pending_provider_action_recovery\s*=[\s\S]{0,220}?ticket[\s\S]{0,120}?recovery_witness\(\)/u;
-  if (!successReleaseRearm.test(source)) {
-    failures.push(
-      `${rel}: ${name} must re-arm the exact retained recovery ticket after provider success releases a queued waiter`,
-    );
-  }
   if (!source.includes('V3Error05ExecutionAction')) {
     failures.push(`${rel}: ${name} must consume typed Error05 actions`);
   }
-  requireText(source, rel, 'let mut pending_provider_action_recovery = None;');
-  const recoveryOnlyWait = /if\s+let\s+Some\(recovery\)\s*=\s*pending_provider_action_recovery\.take\(\)\s*\{[\s\S]{0,700}?wait_for_error05_recovery/u;
-  if (!recoveryOnlyWait.test(source)) {
-    failures.push(
-      `${rel}: ${name} must wait on the provider action gate only after the current request enters Error05 recovery`,
-    );
-  }
-  if (source.includes('pending_provider_action_gate')) {
-    failures.push(`${rel}: ${name} must not retain bool-only provider action recovery state`);
-  }
-  if (source.includes('wait_for_selected_provider_action')) {
-    failures.push(`${rel}: ${name} must not select a recovery lane by latest routing-group state`);
-  }
-}
-// openai_chat/gemini 已收敛到统一 relay 骨架：完整 provider action gate 语义
-// 分布在骨架（recovery 等待/重试循环）与共享失败策略（Error05 action 消费）中。
-{
-  const source = `${text.relayCore}\n${text.relayShared}`;
-  const rel = `${files.relayCore} + ${files.relayShared}`;
-  const name = 'Relay Skeleton';
-  requireText(source, rel, 'wait_for_error05_recovery');
-  requireText(source, rel, 'V3ProviderActionGateAdmission');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::Superseded');
-  requireText(source, rel, 'V3ProviderActionRecoveryTransition::ReleasedBySuccess');
-  requireText(source, rel, 'V3ProviderActionGateTerminalReevaluation');
-  const successReleaseRearm =
-    /V3ProviderActionRecoveryTransition::ReleasedBySuccess\(ticket\)[\s\S]{0,80}?=>\s*\{[\s\S]{0,480}?pending_provider_action_recovery\s*=[\s\S]{0,220}?ticket[\s\S]{0,120}?recovery_witness\(\)/u;
-  if (!successReleaseRearm.test(source)) {
-    failures.push(
-      `${rel}: ${name} must re-arm the exact retained recovery ticket after provider success releases a queued waiter`,
-    );
-  }
-  if (!source.includes('V3Error05ExecutionAction')) {
-    failures.push(`${rel}: ${name} must consume typed Error05 actions`);
-  }
-  requireText(source, rel, 'let mut pending_provider_action_recovery = None;');
-  const recoveryOnlyWait = /if\s+let\s+Some\(recovery\)\s*=\s*pending_provider_action_recovery\.take\(\)\s*\{[\s\S]{0,700}?wait_for_error05_recovery/u;
-  if (!recoveryOnlyWait.test(source)) {
-    failures.push(
-      `${rel}: ${name} must wait on the provider action gate only after the current request enters Error05 recovery`,
-    );
-  }
-  if (source.includes('pending_provider_action_gate')) {
-    failures.push(`${rel}: ${name} must not retain bool-only provider action recovery state`);
-  }
-  if (source.includes('wait_for_selected_provider_action')) {
-    failures.push(`${rel}: ${name} must not select a recovery lane by latest routing-group state`);
+  for (const forbidden of [
+    'wait_for_error05_recovery',
+    'pending_provider_action_recovery',
+    'wait_for_selected_provider_action',
+    'V3ProviderActionGateTerminalReevaluation',
+  ]) {
+    if (source.includes(forbidden)) {
+      failures.push(`${rel}: ${name} must not wait or admit on the request path (${forbidden})`);
+    }
   }
 }
 requireText(text.directSse, files.directSse, 'classify_v3_provider_sse_json_data(');
@@ -455,7 +408,6 @@ if (text.providerSseJsonCodec.includes('matches!(event_type, "response.completed
     `${files.providerSseJsonCodec}: provider response.done must not satisfy the response.completed terminal contract`,
   );
 }
-requireOccurrenceCount(text.direct, files.direct, 'drop(provider_action_permit.take());', 3);
 requireText(
   text.direct,
   files.direct,
@@ -479,37 +431,6 @@ for (const forbidden of [
     failures.push(`${files.direct} + ${files.directSse}: forbidden removed Direct lifecycle symbol ${forbidden}`);
   }
 }
-requireOccurrenceCount(
-  text.responses,
-  files.responses,
-  'drop(_provider_action_permit.take());',
-  9,
-);
-// openai_chat/gemini 的局部变量 permit drop（每协议 4 处）已收敛到统一 relay 骨架。
-requireOccurrenceCount(
-  text.relayCore,
-  files.relayCore,
-  'drop(provider_action_permit.take());',
-  4,
-);
-requireOccurrenceCount(
-  text.openaiChat,
-  files.openaiChat,
-  'drop(self._provider_action_permit.take());',
-  1,
-);
-requireOccurrenceCount(
-  text.anthropic,
-  files.anthropic,
-  'drop(_provider_action_permit.take());',
-  7,
-);
-requireOccurrenceCount(
-  text.gemini,
-  files.gemini,
-  'drop(self._provider_action_permit.take());',
-  1,
-);
 for (const [name, source, rel] of [
   ['Anthropic Relay', text.anthropic, files.anthropic],
 ]) {
@@ -533,7 +454,7 @@ for (const [name, source, rel] of [
 requireText(
   findFunctionBody(text.policy, 'V3ProviderFailureRuntimeHealth::from', files.policy),
   files.policy,
-  'action_gate: V3ProviderActionGate::process_shared()',
+  'action_gate: V3ProviderActionGate::default()',
 );
 for (const token of [
   'project_v3_client_disconnect',
@@ -597,7 +518,7 @@ for (const token of [
 }
 for (const testName of [
   'sse_client_disconnect_is_health_neutral_and_never_enters_action_wait',
-  'validated_terminal_sse_releases_action_lane_for_a_fresh_request',
+  'malformed_then_terminal_sse_keeps_fresh_request_immediate',
 ]) {
   assertRustTest(text.geminiTests, files.geminiTests, testName);
 }
@@ -609,7 +530,7 @@ assertRustTest(
 assertRustTest(
   text.geminiTests,
   files.geminiTests,
-  'provider_error_enters_error01_06_without_success_projection',
+  'final_provider_error_stays_health_neutral_and_terminal',
 );
 assertRustTest(
   text.responsesRelayTests,
@@ -647,7 +568,7 @@ assertRustTest(
 assertRustTest(
   text.protocolModeLockTests,
   files.protocolModeLockTests,
-  'direct_generic_provider_http_400_terminal_exhaustion_has_no_health_or_wait',
+  'direct_generic_provider_http_400_exhaustion_records_exact_identity_without_wait',
 );
 requireText(
   text.directHelpers,
@@ -712,13 +633,7 @@ for (const [nodeId, owner] of [
   ['V3ProviderReqOutbound08WirePayload', 'routecodex-v3-runtime'],
   ['V3Error01SourceRaised', 'routecodex-v3-error'],
   ['V3Error05ExecutionDecision', 'routecodex-v3-error'],
-  ['V3Error05RecoveryWitness', 'routecodex-v3-error'],
-  ['V3ProviderActionGateAdmission', 'routecodex-v3-runtime'],
-  ['V3ProviderActionGateTerminalAdmission', 'routecodex-v3-runtime'],
   ['V3ProviderActionGateTerminalCommitted', 'routecodex-v3-runtime'],
-  ['V3ProviderActionPermitInFlight', 'routecodex-v3-runtime'],
-  ['V3ProviderActionPermitAbandonRequested', 'routecodex-v3-runtime'],
-  ['V3ProviderActionPermitAbandoned', 'routecodex-v3-runtime'],
   ['V3ProviderActionSuccessObserved', 'routecodex-v3-runtime'],
   ['V3ProviderActionFailureObserved', 'routecodex-v3-runtime'],
   ['V3ProviderActionSuccessFinalize', 'routecodex-v3-runtime'],
@@ -741,11 +656,9 @@ assertExactStrings(
 assertExactStrings(
   manifest?.return_path,
   [
-    'V3ProviderActionPermitInFlight',
     'V3ProviderActionGateTerminalCommitted',
     'V3ProviderActionSuccessRecorded',
     'V3ProviderActionFailureRecorded',
-    'V3ProviderActionPermitAbandoned',
   ],
   `${files.manifest}: return_path`,
 );
@@ -760,8 +673,8 @@ const resource = asArray(resourceMap.resources).find(
 const v3Chain = asArray(mainlineMap.chains).find(
   (row) => row?.chain_id === 'v3.provider_action_gate.mainline',
 );
-if (feature?.status !== 'active' || feature?.runtime_status !== 'source_active_live_verification_required') {
-  failures.push(`${files.functionMap}: v3.provider_action_gate must be active with live verification explicit`);
+if (feature?.status !== 'background_observation_only' || feature?.runtime_status !== 'source_active_live_verification_required') {
+  failures.push(`${files.functionMap}: v3.provider_action_gate must remain background observation only with live verification explicit`);
 }
 if (
   feature?.owner_crate !== 'routecodex-v3-runtime'
@@ -779,8 +692,8 @@ assertIncludes(
   ['v3.error.execution_decision', 'v3.error.provider_action_gate', 'v3.provider.health_state'],
   `${files.functionMap}: v3.provider_action_gate.resource_bindings`,
 );
-if (verification?.status !== 'source_active_live_verification_required') {
-  failures.push(`${files.verificationMap}: v3.provider_action_gate status must retain pending live proof`);
+if (verification?.status !== 'background_observation_only') {
+  failures.push(`${files.verificationMap}: v3.provider_action_gate must remain background observation only`);
 }
 assertExactStrings(
   verification?.mainline_bindings,
@@ -803,9 +716,9 @@ if (resource?.binding_status !== 'anchored') {
   failures.push(`${files.resourceMap}: V3 provider action gate resource must be anchored`);
 }
 if (
-  resource?.resource_kind !== 'process_local_control_side_channel'
+  resource?.resource_kind !== 'process_local_background_observation'
   || resource?.owner_crate !== 'routecodex-v3-runtime'
-  || resource?.owner_node !== 'V3ProviderActionGateAdmission'
+  || resource?.owner_node !== 'V3ProviderActionFailureRecorded'
   || resource?.lifecycle !== 'v3.provider_action_gate.mainline'
   || v3Chain?.owner_feature_id !== 'v3.provider_action_gate'
   || manifest?.lifecycle_id !== 'v3.provider_action_gate.mainline'
@@ -826,24 +739,18 @@ if (
 assertIncludes(
   resource?.allowed_writers,
   [
-    'V3ProviderActionGate::abandon_admission',
+    'V3ProviderFailureRuntimeHealth::defer_provider_health_action',
+    'V3ProviderFailureRuntimeHealth::managed_precool_probe',
     'V3ProviderActionGate::commit_terminal_admission',
     'V3ProviderActionGate::record_failure_and_commit_terminal_projection',
   ],
   `${files.resourceMap}: v3.error.provider_action_gate.allowed_writers`,
 );
-if (
-  manifest?.admission_permit?.owner_type !== 'V3ProviderActionPermit'
-  || manifest?.admission_permit?.wall_clock_expiry !== 'forbidden'
-  || manifest?.admission_permit?.fresh_request_consumes_active_recovery_lane !== 'http_429_only'
-  || manifest?.admission_permit?.waiter_order !== 'fifo_ticket'
-) {
-  failures.push(
-    `${files.manifest}: admission_permit must lock explicit ownership, no wall-clock expiry, FIFO, and fresh-request sharing only for HTTP 429`,
-  );
+if (Object.hasOwn(manifest, 'admission_permit') || Object.hasOwn(manifest, 'admission_lease')) {
+  failures.push(`${files.manifest}: request-path admission contracts must be physically removed`);
 }
-if (Object.hasOwn(manifest, 'admission_lease')) {
-  failures.push(`${files.manifest}: disproved admission_lease contract must be physically removed`);
+if (manifest?.request_independence?.request_path_admission_or_wait !== 'forbidden') {
+  failures.push(`${files.manifest}: request-path admission and wait must stay forbidden`);
 }
 assertIncludes(
   resource?.required_gates,
@@ -854,8 +761,8 @@ assertIncludes(
   ],
   `${files.resourceMap}: v3.error.provider_action_gate.required_gates`,
 );
-if (manifest.status !== 'active') {
-  failures.push('provider action gate V3 manifest must be active');
+if (manifest.status !== 'background_observation_only') {
+  failures.push('provider action gate V3 manifest must remain background observation only');
 }
 const v3WikiMermaid = extractSingleMermaidBlock(text.wiki, files.wiki);
 assertExactStrings(
@@ -866,57 +773,22 @@ assertExactStrings(
 for (const [stepId, fromAlias, toAlias] of [
   ['v3-provider-action-gate-01', 'Compat', 'E05'],
   ['v3-provider-action-gate-02', 'Wire', 'E05'],
-  ['v3-provider-action-gate-03', 'E05', 'Witness'],
-  ['v3-provider-action-gate-04', 'Witness', 'Gate'],
   ['v3-provider-action-gate-05', 'E05', 'E06'],
-  ['v3-provider-action-gate-06', 'TerminalAdmission', 'TerminalCommit'],
-  ['v3-provider-action-gate-07', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-08', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-10', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-11', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-12', 'Witness', 'Gate'],
-  ['v3-provider-action-gate-13', 'Witness', 'Gate'],
+  ['v3-provider-action-gate-06', 'E05', 'TerminalCommit'],
   ['v3-provider-action-gate-14', 'E01', 'E05'],
   ['v3-provider-action-gate-15', 'E01', 'E05'],
   ['v3-provider-action-gate-16', 'E01', 'E05'],
-  ['v3-provider-action-gate-19', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-20', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-21', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-22', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-23', 'Gate', 'Permit'],
-  ['v3-provider-action-gate-24', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-25', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-26', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-27', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-28', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-29', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-30', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-31', 'Permit', 'AbandonRequest'],
-  ['v3-provider-action-gate-32', 'AbandonRequest', 'Abandoned'],
-  ['v3-provider-action-gate-33', 'Permit', 'SuccessObserved'],
+  ['v3-provider-action-gate-33', 'ProviderRaw', 'SuccessObserved'],
   ['v3-provider-action-gate-34', 'SuccessObserved', 'SuccessRecorded'],
-  ['v3-provider-action-gate-35', 'Abandoned', 'FailureObserved'],
   ['v3-provider-action-gate-36', 'FailureObserved', 'FailureRecorded'],
-  ['v3-provider-action-gate-37', 'Permit', 'SuccessObserved'],
+  ['v3-provider-action-gate-37', 'ProviderRaw', 'SuccessObserved'],
   ['v3-provider-action-gate-38', 'SuccessObserved', 'SuccessRecorded'],
-  ['v3-provider-action-gate-39', 'Permit', 'FailureObserved'],
-  ['v3-provider-action-gate-40', 'Abandoned', 'FailureRecorded'],
-  ['v3-provider-action-gate-41', 'Permit', 'SuccessObserved'],
-  ['v3-provider-action-gate-42', 'SuccessObserved', 'SuccessRecorded'],
-  ['v3-provider-action-gate-43', 'Permit', 'FailureObserved'],
-  ['v3-provider-action-gate-44', 'Abandoned', 'FailureRecorded'],
-  ['v3-provider-action-gate-45', 'Permit', 'SuccessRecorded'],
-  ['v3-provider-action-gate-46', 'Permit', 'SuccessFinalize'],
+  ['v3-provider-action-gate-46', 'ProviderRaw', 'SuccessFinalize'],
   ['v3-provider-action-gate-47', 'SuccessFinalize', 'SuccessRecorded'],
   ['v3-provider-action-gate-48', 'ProviderRaw', 'ProviderCodec'],
   ['v3-provider-action-gate-49', 'ProviderCodec', 'ProviderOutcome'],
   ['v3-provider-action-gate-50', 'ProviderRaw', 'ProviderCodec'],
   ['v3-provider-action-gate-51', 'ProviderCodec', 'ProviderOutcome'],
-  ['v3-provider-action-gate-52', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-53', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-54', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-55', 'Wire', 'Witness'],
-  ['v3-provider-action-gate-56', 'Wire', 'Witness'],
 ]) {
   assertWikiEdge(v3WikiMermaid, files.wiki, stepId, fromAlias, toAlias);
 }

@@ -161,6 +161,13 @@ fn add_cooldown(port: u16, model: &str, duration_ms: u64) {
         assert_eq!(response.status(),200);
     });
 }
+
+fn trigger_probe_now(port: u16, model: &str) {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let response = reqwest::Client::new().post(format!("http://127.0.0.1:{port}/_routecodex/health/cooldown-pool/probe")).json(&serde_json::json!({"provider_id":"rollback","interface_id":"default","auth_alias":"key","model_id":model})).send().await.unwrap();
+        assert_eq!(response.status(),200);
+    });
+}
 fn cooled(pool: &Value, model: &str) -> Value {
     pool["entries"]
         .as_array()
@@ -245,6 +252,7 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
     rollback_business(ports[0], root.path(), &state, "auto");
     eprintln!("FA22072 healthy pre-cooldown success control completed");
     add_cooldown(ports[0], "test", 5000);
+    trigger_probe_now(ports[0], "test");
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let response = reqwest::Client::new().post(format!("http://127.0.0.1:{}/v1/chat/completions", ports[0]))
             .json(&serde_json::json!({"model":"auto","messages":[{"role":"user","content":"uncached connection probe"}],"stream":false}))
@@ -258,6 +266,7 @@ targets = [{{ kind = "provider_model", provider = "rollback", model = "test", ke
         http_get_json(ports[0], "/_routecodex/health/cooldown-pool")
     );
     peer.next_probe(Duration::from_secs(2));
+    add_cooldown(ports[0], "test", 5000);
     let before = cooled(
         &http_get_json(ports[0], "/_routecodex/health/cooldown-pool"),
         "test",

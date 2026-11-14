@@ -1476,21 +1476,21 @@ dry_run = false
 retention = {{ raw_requests = 64, raw_responses = 64, events = 128 }}
 [route_groups.default.pools.chat_handoff]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "openai_chat", models = ["chat-alpha-wire"] }}
+match = {{ precedence = 10, entry_protocol = "openai_chat", required_capabilities = ["thinking"] }}
 targets = [
   {{ kind = "provider_model", provider = "chat_alpha", model = "chat-alpha-wire", key = "key", priority = 2 }},
   {{ kind = "provider_model", provider = "responses_ok", model = "responses-wire", key = "key", priority = 1 }}
 ]
 [route_groups.default.pools.anthropic_handoff]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "anthropic", models = ["anthropic-alpha-wire"] }}
+match = {{ precedence = 10, entry_protocol = "anthropic", required_capabilities = ["thinking"] }}
 targets = [
   {{ kind = "provider_model", provider = "anthropic_alpha", model = "anthropic-alpha-wire", key = "key", priority = 2 }},
   {{ kind = "provider_model", provider = "chat_ok", model = "chat-ok-wire", key = "key", priority = 1 }}
 ]
 [route_groups.default.pools.gemini_handoff]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "gemini", models = ["gemini-alpha-wire"] }}
+match = {{ precedence = 10, entry_protocol = "gemini", required_capabilities = ["thinking"] }}
 targets = [
   {{ kind = "provider_model", provider = "gemini_alpha", model = "gemini-alpha-wire", key = "key", priority = 2 }},
   {{ kind = "provider_model", provider = "chat_ok", model = "chat-ok-wire", key = "key", priority = 1 }}
@@ -2357,40 +2357,6 @@ async fn start_controlled_held_upstream() -> (
     )
 }
 
-async fn start_controlled_probe_failing_held_upstream() -> (
-    String,
-    mpsc::UnboundedReceiver<ProviderCapture>,
-    Arc<Semaphore>,
-    oneshot::Sender<()>,
-) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let (captures_tx, captures_rx) = mpsc::unbounded_channel();
-    let release = Arc::new(Semaphore::new(0));
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let app = Router::new()
-        .route("/v1/responses", post(controlled_held_responses_upstream))
-        .with_state(Arc::new(HeldProviderState {
-            captures: captures_tx,
-            release: Arc::clone(&release),
-            fail_probes: true,
-        }));
-    tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
-            })
-            .await
-            .unwrap();
-    });
-    (
-        format!("http://{address}/v1"),
-        captures_rx,
-        release,
-        shutdown_tx,
-    )
-}
-
 async fn start_controlled_responses_relay_tool_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
@@ -3013,13 +2979,7 @@ async fn start_controlled_status_upstream(
     (format!("http://{address}/v1"), shutdown_tx)
 }
 
-/// A real upstream 502 must be recorded as provider-private evidence, not
-/// reported as "no provider response".
-///
-/// Bug `705d624` keeps the 502 out of every client response; that rule decides
-/// what the client may see and must not decide what the evidence records. The
-/// upstream here really did answer 502 with a body and headers, so the artifact
-/// has to say `external_http` and carry the real status, headers, and body.
+/// A final candidate's real upstream 502 stays internal and ends the client stream.
 #[tokio::test]
 async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -3037,20 +2997,21 @@ async fn p6_real_upstream_502_is_recorded_as_provider_private_evidence() {
             .unwrap();
     let port = handle.listeners[0].addr.port();
 
-    // The client boundary stays a transport break: no upstream status, code, or
-    // body is projected, and no proxy 502 is fabricated for the entry either.
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
         .json(&json!({"model":"client-test","input":"hello","stream":true}))
         .send()
         .await
-        .expect("a streaming client must receive the SSE response head");
+        .expect("the streaming transport head must be established");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["content-type"], "text/event-stream");
-    let body = response.text().await;
+    let client_error = response
+        .text()
+        .await
+        .expect_err("the exhausted provider stream must end without a normal terminal");
     assert!(
-        body.is_err(),
-        "an upstream 502 must abort the streaming body, not project the upstream response: {body:?}"
+        !client_error.to_string().contains("controlled_bad_gateway"),
+        "the provider error body must remain internal: {client_error}"
     );
 
     let evidence =
@@ -7208,14 +7169,14 @@ fn spawn_concurrency_client(
 }
 
 #[tokio::test]
-async fn responses_provider_concurrency_full_switches_without_queueing() {
+async fn responses_provider_concurrency_is_not_admission_gated() {
     let _test_guard = TEST_LOCK.lock().await;
     // This case counts upstream provider attempts, so the Chat Process
     // continuation must not add an extra execution.
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
     let (first_url, mut first_captures, first_release, first_shutdown) =
         start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
+    let (second_url, mut second_captures, _second_release, second_shutdown) =
         start_controlled_held_upstream().await;
     std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-switch");
     let handle = spawn_v3_server_aggregate(concurrency_switch_manifest(&first_url, &second_url))
@@ -7228,20 +7189,20 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
         .unwrap()
         .unwrap();
     let second = spawn_concurrency_client(&endpoint, "concurrency-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
+    timeout(Duration::from_millis(500), first_captures.recv())
         .await
-        .expect("a full first provider must immediately switch to the second provider")
+        .expect("a held provider must still receive the independent second request immediately")
         .unwrap();
     assert!(
         !first.is_finished(),
         "the first provider must still be held"
     );
     assert!(
-        first_captures.try_recv().is_err(),
-        "the full provider must receive no extra request"
+        second_captures.try_recv().is_err(),
+        "the healthy lower-priority provider must receive no request while the first provider is available"
     );
     first_release.add_permits(1);
-    second_release.add_permits(1);
+    first_release.add_permits(1);
     for task in [first, second] {
         let (status, body) = timeout(Duration::from_secs(2), task)
             .await
@@ -7251,84 +7212,6 @@ async fn responses_provider_concurrency_full_switches_without_queueing() {
         assert!(body.contains("response.completed"), "{body}");
         assert_responses_sse_delivered_business_text(&body, "held response released");
     }
-    let third = spawn_concurrency_client(&endpoint, "concurrency-after-release");
-    timeout(Duration::from_millis(500), first_captures.recv())
-        .await
-        .expect("released capacity must restore the first provider's priority")
-        .unwrap();
-    assert!(second_captures.try_recv().is_err());
-    first_release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), third)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("response.completed"));
-    assert_responses_sse_delivered_business_text(&body, "held response released");
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_all_full_exhausts_after_wait_budget() {
-    let _test_guard = TEST_LOCK.lock().await;
-    // This case counts upstream provider attempts, so the Chat Process
-    // continuation must not add an extra execution.
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) =
-        start_controlled_held_upstream().await;
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-exhaustion");
-    let mut manifest = concurrency_switch_manifest(&first_url, &second_url);
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
-    let first = spawn_concurrency_client(&endpoint, "concurrency-held-first");
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let second = spawn_concurrency_client(&endpoint, "concurrency-held-second");
-    timeout(Duration::from_millis(500), second_captures.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    let wait_started = std::time::Instant::now();
-    let exhausted = timeout(
-        Duration::from_millis(500),
-        reqwest::Client::new()
-            .post(&endpoint)
-            .header("session-id", "concurrency-exhausted")
-            .header("thread-id", "concurrency-exhausted")
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    .expect("all full must finish after its declared wait budget");
-    assert!(wait_started.elapsed() >= Duration::from_millis(100));
-    assert!(
-        exhausted.is_err(),
-        "selection exhaustion must preserve the existing transport-break boundary"
-    );
-    assert!(first_captures.try_recv().is_err());
-    assert!(second_captures.try_recv().is_err());
-    assert!(!first.is_finished() && !second.is_finished());
-    first_release.add_permits(1);
-    second_release.add_permits(1);
-    for task in [first, second] {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-    }
-    assert!(first_captures.try_recv().is_err());
     assert!(second_captures.try_recv().is_err());
     handle.shutdown().await;
     first_shutdown.send(()).unwrap();
@@ -7387,415 +7270,6 @@ async fn wait_for_concurrency_failure_source(samples_root: &std::path::Path) -> 
         sleep(Duration::from_millis(25)).await;
     }
     panic!("provider failure source evidence must appear under {samples_root:?}");
-}
-
-async fn concurrency_cooldown_entries(client: &reqwest::Client, base: &str) -> Vec<Value> {
-    let pool: Value = client
-        .get(format!("{base}/_routecodex/health/cooldown-pool"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    pool["entries"]
-        .as_array()
-        .cloned()
-        .unwrap_or_else(|| panic!("cooldown pool must return entries: {pool}"))
-}
-
-fn concurrency_cooldown_signature(entries: &[Value]) -> Vec<String> {
-    let mut signature = entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}|{}|{}|{}|{}",
-                entry["provider_id"].as_str().unwrap_or("-"),
-                entry["interface_id"].as_str().unwrap_or("-"),
-                entry["auth_alias"].as_str().unwrap_or("-"),
-                entry["model_id"].as_str().unwrap_or("-"),
-                entry["kind"].as_str().unwrap_or("-"),
-            )
-        })
-        .collect::<Vec<_>>();
-    signature.sort();
-    signature
-}
-
-fn assert_no_concurrency_business_capture(
-    captures: &mut mpsc::UnboundedReceiver<ProviderCapture>,
-    allow_recovery_probes: bool,
-    label: &str,
-) {
-    while let Ok(capture) = captures.try_recv() {
-        assert!(
-            allow_recovery_probes && capture.body.to_string().contains("ping; reply pong"),
-            "{label} must receive no business request: {capture:?}"
-        );
-    }
-}
-
-async fn assert_concurrency_execution_mode(
-    client: &reqwest::Client,
-    base: &str,
-    request_id: &str,
-    expected_mode: &str,
-) {
-    let logs: Value = client
-        .get(format!("{base}/_routecodex/debug/logs"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let events = logs["logs"]
-        .as_array()
-        .unwrap_or_else(|| panic!("debug logs must return events: {logs}"));
-    let event = events
-        .iter()
-        .find(|event| {
-            event["request_id"] == request_id
-                && event["node_id"] == "V3Server03HttpRequestRaw"
-                && event["event"] == "received"
-        })
-        .unwrap_or_else(|| {
-            panic!("missing V3Server03HttpRequestRaw event for request {request_id}: {logs}")
-        });
-    assert_eq!(
-        event["details"]["execution_mode"], expected_mode,
-        "actual request execution mode must be {expected_mode}, not inferred from the port: {event}"
-    );
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ConcurrencyExhaustionShape {
-    PureAllBusy,
-    MixedBusyAndExcluded,
-}
-
-async fn run_concurrency_typed_source_case(
-    execution_mode: V3EntryProtocolExecutionMode,
-    shape: ConcurrencyExhaustionShape,
-    label: &str,
-) {
-    let _test_guard = TEST_LOCK.lock().await;
-    let home_guard = TestHomeGuard::new(label);
-    let (first_url, mut first_captures, first_release, first_shutdown) =
-        start_controlled_held_upstream().await;
-    let (second_url, mut second_captures, second_release, second_shutdown) = match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => start_controlled_held_upstream().await,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            start_controlled_probe_failing_held_upstream().await
-        }
-    };
-    std::env::set_var("V3_P6_TEST_KEY", "secret-concurrency-typed-source");
-
-    let mut manifest =
-        concurrency_switch_manifest_with_mode(&first_url, &second_url, execution_mode);
-    // Exercise the terminal source after a real bounded wait, rather than
-    // requiring immediate all-busy rejection (superseded by issue44cc3af).
-    for provider in manifest.providers.values_mut() {
-        provider.concurrency.as_mut().unwrap().acquire_timeout_ms = 150;
-    }
-    let second_id = format!("concurrency_second_{}", manifest.servers["a"].port);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
-    let base = format!("http://{}", handle.listeners[0].addr);
-    let endpoint = format!("{base}/v1/responses");
-    let client = reqwest::Client::new();
-
-    let baseline_entries = match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => {
-            let entries = concurrency_cooldown_entries(&client, &base).await;
-            assert!(
-                entries.is_empty(),
-                "pure all-busy baseline must not contain health exclusions: {entries:?}"
-            );
-            entries
-        }
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            let response = client
-                .post(format!("{base}/_routecodex/health/cooldown-pool/add"))
-                .json(&json!({
-                    "provider_id": second_id,
-                    "interface_id": "default",
-                    "auth_alias": "key",
-                    "model_id": "test",
-                    "kind": "auth_key",
-                    "duration_ms": 60_000
-                }))
-                .send()
-                .await
-                .unwrap();
-            let status = response.status();
-            let body = response.text().await.unwrap();
-            assert_eq!(status, StatusCode::OK, "{body}");
-
-            let entries = concurrency_cooldown_entries(&client, &base).await;
-            assert_eq!(
-                entries.len(),
-                2,
-                "mixed case must start with the typed auth-key cooldown/probe pair: {entries:?}"
-            );
-            for entry in &entries {
-                assert_eq!(entry["provider_id"], second_id.as_str());
-                assert_eq!(entry["interface_id"], "default");
-                assert_eq!(entry["auth_alias"], "key");
-                assert!(entry["model_id"].is_null());
-            }
-            let cooldown = entries
-                .iter()
-                .find(|entry| entry["kind"] == "auth_key")
-                .expect("mixed case must retain the auth-key cooldown entry");
-            assert_eq!(cooldown["state"], "auth_key_cooldown");
-            let probe = entries
-                .iter()
-                .find(|entry| entry["kind"] == "probe")
-                .expect("mixed case must retain the provider cooldown probe entry");
-            assert!(
-                matches!(
-                    probe["state"].as_str(),
-                    Some("blocked" | "waiting" | "probing")
-                ),
-                "mixed case probe must remain in a cooldown substate: {probe}"
-            );
-            entries
-        }
-    };
-    let baseline_health = concurrency_cooldown_signature(&baseline_entries);
-
-    let first = spawn_concurrency_client(&endpoint, &format!("{label}-held-first"));
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .expect("first provider must receive its held request")
-        .expect("first provider capture channel must stay open");
-
-    let second = if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
-        let task = spawn_concurrency_client(&endpoint, &format!("{label}-held-second"));
-        timeout(Duration::from_secs(2), second_captures.recv())
-            .await
-            .expect("second provider must receive its held request")
-            .expect("second provider capture channel must stay open");
-        Some(task)
-    } else {
-        None
-    };
-
-    let exhausted = match timeout(
-        Duration::from_millis(500),
-        client
-            .post(&endpoint)
-            .header("session-id", format!("{label}-exhausted"))
-            .header("thread-id", format!("{label}-exhausted"))
-            .json(&json!({"model":"client-test","input":"no-capacity","stream":false}))
-            .send(),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => {
-            let first_activity = first_captures.try_recv().ok();
-            let second_activity = second_captures.try_recv().ok();
-            panic!(
-                "capacity exhaustion must complete after the declared wait budget; first_activity={first_activity:?} second_activity={second_activity:?}"
-            );
-        }
-    };
-    let error = exhausted.expect_err(
-        "a capacity terminal must break the client transport without an error payload or normal completion",
-    );
-    assert!(
-        !error.is_status(),
-        "the client must not receive a synthetic status payload: {error}"
-    );
-
-    if let Ok(capture) = first_captures.try_recv() {
-        panic!("the busy first provider must receive no extra request: {capture:?}");
-    }
-    match shape {
-        ConcurrencyExhaustionShape::PureAllBusy => {
-            if let Ok(capture) = second_captures.try_recv() {
-                panic!("the busy second provider must receive no extra request: {capture:?}");
-            }
-        }
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded => {
-            let capture = second_captures
-                .try_recv()
-                .expect("the mixed case must perform exactly one recovery probe");
-            assert!(
-                capture.body.to_string().contains("ping; reply pong"),
-                "the excluded second provider must receive no business retry: {capture:?}"
-            );
-        }
-    }
-
-    let samples_root = home_guard.codex_samples_root(handle.listeners[0].addr.port());
-    let evidence = wait_for_concurrency_failure_source(&samples_root).await;
-    let request_id = evidence["request_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("failure evidence must carry request_id: {evidence}"));
-    assert_eq!(
-        evidence["attempts"],
-        json!([]),
-        "capacity rejection must not record or perform an upstream attempt: {evidence}"
-    );
-    let (expected_mode, expected_source_kind, expected_code) = match (execution_mode, shape) {
-        (V3EntryProtocolExecutionMode::Direct, ConcurrencyExhaustionShape::PureAllBusy) => (
-            "direct",
-            "target_pool_exhausted",
-            "provider_concurrency_busy",
-        ),
-        (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::PureAllBusy) => (
-            "relay",
-            "target_pool_exhausted",
-            "provider_concurrency_busy",
-        ),
-        (
-            V3EntryProtocolExecutionMode::Direct,
-            ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        )
-        | (V3EntryProtocolExecutionMode::Relay, ConcurrencyExhaustionShape::MixedBusyAndExcluded) => {
-            (
-                if execution_mode == V3EntryProtocolExecutionMode::Direct {
-                    "direct"
-                } else {
-                    "relay"
-                },
-                "provider_failure",
-                "selected_target_exhausted",
-            )
-        }
-        _ => panic!("unsupported concurrency typed-source case"),
-    };
-    assert_eq!(
-        evidence["terminal_source"]["source_kind"], expected_source_kind,
-        "{expected_mode} {shape:?} must retain the expected typed source kind: {evidence}"
-    );
-    assert_eq!(
-        evidence["terminal_source"]["code"], expected_code,
-        "{expected_mode} {shape:?} must retain the expected typed source code: {evidence}"
-    );
-    assert_concurrency_execution_mode(&client, &base, request_id, expected_mode).await;
-
-    let after_entries = concurrency_cooldown_entries(&client, &base).await;
-    if matches!(shape, ConcurrencyExhaustionShape::PureAllBusy) {
-        assert_eq!(
-            concurrency_cooldown_signature(&after_entries),
-            baseline_health,
-            "pure capacity rejection must not add, remove, or replace health exclusions: before={baseline_entries:?} after={after_entries:?}"
-        );
-    } else {
-        assert!(
-            after_entries
-                .iter()
-                .all(|entry| entry["provider_id"] == second_id.as_str()),
-            "mixed capacity rejection must not mutate first-provider health: before={baseline_entries:?} after={after_entries:?}"
-        );
-    }
-    assert_eq!(
-        after_entries.len(),
-        baseline_entries.len(),
-        "capacity rejection must not mutate cooldown entry count"
-    );
-    assert!(
-        !first.is_finished(),
-        "the first provider holder must remain pending before release"
-    );
-    if let Some(second) = &second {
-        assert!(
-            !second.is_finished(),
-            "the second provider holder must remain pending before release"
-        );
-    }
-
-    first_release.add_permits(1);
-    if second.is_some() {
-        second_release.add_permits(1);
-    }
-    let mut held = vec![first];
-    if let Some(second) = second {
-        held.push(second);
-    }
-    for task in held {
-        let (status, body) = timeout(Duration::from_secs(2), task)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.contains("response.completed"), "{body}");
-    }
-    let after_release = spawn_concurrency_client(&endpoint, &format!("{label}-after-release"));
-    timeout(Duration::from_secs(2), first_captures.recv())
-        .await
-        .expect("released capacity must admit a subsequent normal request")
-        .expect("first provider capture channel must stay open");
-    assert_no_concurrency_business_capture(
-        &mut second_captures,
-        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
-        "the subsequent normal request on the second provider",
-    );
-    first_release.add_permits(1);
-    let (status, body) = timeout(Duration::from_secs(2), after_release)
-        .await
-        .expect("the subsequent normal request must complete after release")
-        .expect("the subsequent request task must not panic");
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("response.completed"), "{body}");
-    assert_no_concurrency_business_capture(
-        &mut first_captures,
-        false,
-        "the exhausted request on the first provider",
-    );
-    assert_no_concurrency_business_capture(
-        &mut second_captures,
-        matches!(shape, ConcurrencyExhaustionShape::MixedBusyAndExcluded),
-        "the exhausted request on the second provider",
-    );
-
-    handle.shutdown().await;
-    first_shutdown.send(()).unwrap();
-    second_shutdown.send(()).unwrap();
-    std::env::remove_var("V3_P6_TEST_KEY");
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_direct_all_busy_preserves_typed_source() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Direct,
-        ConcurrencyExhaustionShape::PureAllBusy,
-        "concurrency-direct-all-busy-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_direct_mixed_exclusion_stays_generic() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Direct,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        "concurrency-direct-mixed-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_relay_all_busy_preserves_typed_source() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Relay,
-        ConcurrencyExhaustionShape::PureAllBusy,
-        "concurrency-relay-all-busy-red",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn responses_provider_concurrency_relay_mixed_exclusion_stays_generic() {
-    run_concurrency_typed_source_case(
-        V3EntryProtocolExecutionMode::Relay,
-        ConcurrencyExhaustionShape::MixedBusyAndExcluded,
-        "concurrency-relay-mixed-red",
-    )
-    .await;
 }
 
 #[tokio::test]

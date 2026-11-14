@@ -107,7 +107,11 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .post(format!("http://127.0.0.1:{success_port}/v1/responses"))
         .json(&json!({
             "model":"client-tools",
-            "input":"matched optional",
+            "input":[
+                {"type":"message","role":"user","content":"matched optional"},
+                {"type":"function_call","name":"run","call_id":"call-1","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call-1","output":"ok"}
+            ],
             "tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
         }))
         .send()
@@ -125,7 +129,11 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
         .post(format!("http://127.0.0.1:{exhausted_port}/v1/responses"))
         .json(&json!({
             "model":"client-tools",
-            "input":"exhaust complete plan",
+            "input":[
+                {"type":"message","role":"user","content":"exhaust complete plan"},
+                {"type":"function_call","name":"run","call_id":"call-1","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call-1","output":"ok"}
+            ],
             "tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
         }))
         .send()
@@ -273,7 +281,7 @@ capabilities = ["text", "tools"]
 
 [route_groups.vr_success.pools.tools]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["client-tools"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
 targets = [{{ kind = "provider_model", provider = "optional", model = "test", key = "key", priority = 1 }}]
 [route_groups.vr_success.pools.default]
 selection = {{ strategy = "priority" }}
@@ -281,7 +289,7 @@ targets = [{{ kind = "provider_model", provider = "default", model = "test", key
 
 [route_groups.vr_exhausted.pools.tools]
 selection = {{ strategy = "priority" }}
-match = {{ precedence = 10, entry_protocol = "responses", models = ["client-tools"], required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
+match = {{ precedence = 10, entry_protocol = "responses", required_capabilities = ["tools"], min_input_tokens = 1, max_input_tokens = 100 }}
 targets = [{{ kind = "provider_model", provider = "exhaust_optional", model = "test", key = "key", priority = 1 }}]
 [route_groups.vr_exhausted.pools.default]
 selection = {{ strategy = "priority" }}

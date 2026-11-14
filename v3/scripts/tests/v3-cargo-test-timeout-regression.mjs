@@ -18,7 +18,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const source = readFileSync(join(root, 'scripts', 'run-v3-cargo-test.mjs'), 'utf8');
-const { executeCargo, isUnreapedProcessGroupError } = await import('../run-v3-cargo-test.mjs');
+const {
+  executeCargo,
+  isUnreapedProcessGroupError,
+} = await import('../run-v3-cargo-test.mjs');
 const CLEANUP_FAILURE_EXIT = 86;
 
 const signalErrorPrelude = [
@@ -366,7 +369,7 @@ function startCargoTestDriver(probeExpression, {
     '    probeCommand,',
     '  });',
     '};',
-    'const code = await runV3CargoTest([], { execute, probeCommand });',
+    'const code = await runV3CargoTest([], { execute, probeCommand, activeBuilders: async () => [] });',
     'await new Promise((resolve) => setTimeout(resolve, 100));',
     ...(driverExitCleanup ? [driverExitCleanup] : []),
     "if (unhandled.length > 0) { console.error('[driver] unhandled rejections: ' + unhandled.length); process.exit(97); }",

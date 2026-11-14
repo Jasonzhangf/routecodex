@@ -54,8 +54,11 @@ The channel owner is the independent module
    keepalive per keepalive interval while the runtime outcome is pending, and then
    hands the client transport to the projected outcome body.
 4. The committed body owns the pending runtime task. When the client transport
-   goes away, `Drop` aborts that task, so a client disconnect still cancels the
-   in-flight runtime request.
+   goes away while the outcome is pending, `Drop` takes the existing disconnect
+   recorder once, records cancellation, then aborts that request's task. This
+   applies before the first business frame as well as after it. Headers and
+   keepalives do not suppress cancellation. An outcome already resolved or
+   closed stays with its existing finalizer; other requests are unaffected.
 
 The commit decision owner is the Server entry `pending_model_request`:
 
