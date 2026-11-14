@@ -87,6 +87,59 @@ test('generateRccConfig authors the runtime candidate as a real provider model',
   }
 });
 
+test('generateRccConfig authors two auth identities under one target', async () => {
+  const workRoot = mkdtempSync(join(tmpdir(), 'lifecycle-auth-aliases-test-'));
+  const generated = await generateRccConfig({
+    mockPort: 12345,
+    rccPort: 12346,
+    adminPort: 12375,
+    providerProtocol: 'responses',
+    mode: 'relay',
+    workRoot,
+    runtimeSetup: {
+      provider_id: 'mock-responses',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: ['mock-responses/mock.responses-model'],
+      auth_aliases: ['key1', 'key2'],
+    },
+  });
+  try {
+    assert.equal(generated.provider_files.length, 1);
+    assert.deepEqual(
+      generated.candidate_identity_receipts.candidates[0].auth_entries,
+      [
+        { alias: 'key1', token: 'fake-loopback-token-mock-responses-1' },
+        { alias: 'key2', token: 'fake-loopback-token-mock-responses-2' },
+      ],
+    );
+    const providerText = readFileSync(generated.provider_path, 'utf8');
+    assert.match(providerText, /\[provider\.auth\]/);
+    assert.match(providerText, /entries = \[/);
+    assert.match(providerText, /alias = "key1", apiKey = "fake-loopback-token-mock-responses-1"/);
+    assert.match(providerText, /alias = "key2", apiKey = "fake-loopback-token-mock-responses-2"/);
+    await assert.rejects(
+      generateRccConfig({
+        mockPort: 12345,
+        rccPort: 12346,
+        providerProtocol: 'responses',
+        workRoot,
+        runtimeSetup: {
+          provider_id: 'mock-responses-a',
+          model: 'mock.responses-model',
+          wire_model: 'responses-model',
+          candidate_ids: ['mock-responses-a/mock.responses-model', 'mock-responses-b/mock.responses-model'],
+          auth_aliases: ['key1', 'key2'],
+        },
+      }),
+      /auth_aliases is supported only with one provider\/model target/,
+    );
+  } finally {
+    generated.cleanup();
+    rmSync(workRoot, { recursive: true, force: true });
+  }
+});
+
 test('generateRccConfig writes a supported execution policy and receipts the written mode', async () => {
   for (const mode of ['direct', 'relay']) {
     const generated = await generateRccConfig({

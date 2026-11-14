@@ -969,7 +969,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     .compatibility_profile
                                     .as_deref(),
                                 retain_response_cipher: is_v3_retain_response_cipher(
-                                    selected.route.target_plan.len(),
+                                    retained_expanded.candidates.len(),
                                     &selected.candidate.model_id,
                                 ),
                             },
@@ -1288,7 +1288,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     .compatibility_profile
                                     .as_deref(),
                                 retain_response_cipher: is_v3_retain_response_cipher(
-                                    selected.route.target_plan.len(),
+                                    retained_expanded.candidates.len(),
                                     &selected.candidate.model_id,
                                 ),
                             },

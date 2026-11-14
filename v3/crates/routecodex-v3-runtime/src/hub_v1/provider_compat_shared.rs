@@ -234,12 +234,15 @@ pub(crate) fn is_v3_gpt_canonical_model(model_id: &str) -> bool {
     routecodex_v3_config::internal::is_v3_gpt_family_model(model_id)
 }
 
-/// 请求侧 VR 路由决策统一判定"是否保留响应密文"：仅当目标是 gpt 模型**且**该模型
-/// 只有单一 provider 候选时保留（Codex 客户端需要官方密文重建 reasoning 历史；
+/// 请求侧 VR 路由决策统一判定"是否保留响应密文"：仅当目标是 gpt 模型**且**完整
+/// 展开后只有一个具体候选时保留（Codex 客户端需要官方密文重建 reasoning 历史；
 /// 跨 provider 或非 gpt 场景一律 Resp03 剥离）。该标记在 VR 初始化时算一次，
 /// 写入响应侧 profile，响应侧只消费此结果，不重复判定。
-pub(crate) fn is_v3_retain_response_cipher(target_plan_len: usize, model_id: &str) -> bool {
-    target_plan_len == 1 && is_v3_gpt_canonical_model(model_id)
+pub(crate) fn is_v3_retain_response_cipher(
+    expanded_candidate_count: usize,
+    model_id: &str,
+) -> bool {
+    expanded_candidate_count == 1 && is_v3_gpt_canonical_model(model_id)
 }
 
 #[cfg(test)]
