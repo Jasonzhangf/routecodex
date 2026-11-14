@@ -1938,6 +1938,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-sse --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_sse_tree --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime openai_chat_sse_tree --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue9b6133c_late_tool_call_id_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_consumers --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_sse --lib
   - npm run verify:v3-relay-hook-resources
