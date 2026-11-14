@@ -200,6 +200,43 @@ async fn upstream(
             .body(Body::from_stream(stream))
             .unwrap();
     }
+    if input.contains("cancelled-terminal") {
+        let delta = json!({
+            "type": "response.output_text.delta",
+            "delta": "cancelled-terminal-prefix",
+            "item_id": "msg_7517a07_cancelled",
+            "output_index": 0,
+            "content_index": 0,
+            "sequence_number": 1
+        });
+        let cancelled = json!({
+            "type": "response.cancelled",
+            "response": {
+                "id": "resp_7517a07_cancelled",
+                "object": "response",
+                "status": "cancelled",
+                "model": "wire-7517a07",
+                "error": {
+                    "code": "provider_cancelled",
+                    "message": "controlled provider cancellation"
+                },
+                "output": []
+            }
+        });
+        let stream = stream::iter([
+            Ok::<Bytes, Infallible>(Bytes::from(format!(
+                "event: response.output_text.delta\ndata: {delta}\n\n"
+            ))),
+            Ok::<Bytes, Infallible>(Bytes::from(format!(
+                "event: response.cancelled\ndata: {cancelled}\n\n"
+            ))),
+        ]);
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
     if input.contains("missing-terminal") {
         let delta = json!({
             "type": "response.output_text.delta",
@@ -1002,6 +1039,75 @@ async fn issue7517a07_direct_sse_failed_terminal_is_not_missing_terminal() {
         terminal["meta"]["provider_status"],
         json!(502),
         "a failed SSE terminal must not fabricate provider HTTP 502: {terminal}"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+/// A Provider-owned `response.cancelled` terminal keeps its own cause after
+/// post-commit closeout. It is not a missing terminal, a client disconnect, or
+/// a Provider HTTP error payload.
+#[tokio::test]
+async fn issue7517a07_direct_sse_cancelled_terminal_is_not_missing_terminal() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let entry = start().await;
+    let server_port = entry.handle.listeners[0].addr.port();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+    let mut response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "model": CLIENT_MODEL,
+            "input": "cancelled-terminal public regression",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut wire = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => wire.extend_from_slice(&chunk),
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
+    let wire_text = String::from_utf8_lossy(&wire);
+    assert!(
+        !wire_text.contains("response.cancelled") && !wire_text.contains("network_error"),
+        "a provider cancellation must not be projected as a client error payload: {wire_text}"
+    );
+
+    let path = request_records_path(&home, server_port);
+    let rows = wait_terminal(&path, Duration::from_secs(15)).await;
+    let terminals = dump_rows("issue7517a07-cancelled-terminal", &rows);
+    let terminal = terminals
+        .iter()
+        .find(|terminal| terminal["event_type"] == json!("request.failed"))
+        .unwrap_or_else(|| {
+            panic!("a provider cancelled terminal must record request.failed: {terminals:#?}")
+        });
+    assert_eq!(
+        terminal["meta"]["error_category"],
+        json!("provider_cancelled"),
+        "a real cancelled terminal keeps its own typed cause: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["error_detail"],
+        json!("controlled provider cancellation"),
+        "the Provider cancellation cause is preserved: {terminal}"
+    );
+    assert_ne!(
+        terminal["meta"]["provider_status"],
+        json!(502),
+        "a cancelled SSE terminal must not fabricate provider HTTP 502: {terminal}"
     );
 
     entry.stop().await;
