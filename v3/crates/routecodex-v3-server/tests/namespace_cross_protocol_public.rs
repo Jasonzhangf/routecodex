@@ -61,6 +61,11 @@ const UNDECLARED_DESCRIPTION: &str = "undeclared evaluator";
 const FUNCTION_ARGUMENTS: &str =
     r#"{"left":19,"right":23,"note":"complete arguments on the wire"}"#;
 const CUSTOM_INPUT: &str = "19+23";
+const A3511DF_MARKER: &str = "a3511df additional tools refresh";
+const A3511DF_STALE_DESCRIPTION: &str = "a3511df stale functions.exec declaration";
+const A3511DF_CURRENT_DESCRIPTION: &str = "a3511df current functions.exec declaration";
+const A3511DF_CALL_ID: &str = "toolu_a3511df_refresh";
+const A3511DF_INPUT: &str = "19+23";
 
 /// The aggregate server persists debug samples under `$HOME/.rcc`. Point HOME
 /// at a temporary directory so a sandboxed run never touches the operator's
@@ -275,6 +280,9 @@ async fn controlled_upstream(
                 json!({"error":{"message":violations.join("; ")}}).to_string(),
             ))
             .unwrap();
+    }
+    if state.target == Target::Anthropic && request_marker(&body).contains(A3511DF_MARKER) {
+        return a3511df_refresh_answer(&body);
     }
     if state.target == Target::Anthropic {
         if let Some(response) = anthropic_invalid::answer(&body, &declared) {
@@ -1493,4 +1501,239 @@ async fn responses_client_reaches_gemini_and_anthropic_namespace_targets() {
         "namespace round trip violations:\n{}",
         violations.join("\n")
     );
+}
+
+fn a3511df_additional_tools_request() -> Value {
+    json!({
+        "model": Target::Anthropic.client_model(),
+        "stream": false,
+        "tool_choice": "auto",
+        "input": [
+            {"type":"additional_tools","role":"developer","tools":[{
+                "type":"namespace","name":"functions","tools":[{
+                    "type":"custom","name":"exec",
+                    "description":A3511DF_STALE_DESCRIPTION,
+                    "format":{"type":"text"}
+                }]
+            }]},
+            {"role":"user","content":A3511DF_MARKER},
+            {"type":"additional_tools","role":"developer","tools":[{
+                "type":"namespace","name":"functions","tools":[{
+                    "type":"custom","name":"exec",
+                    "description":A3511DF_CURRENT_DESCRIPTION,
+                    "format":{"type":"text"}
+                }]
+            }]}
+        ]
+    })
+}
+
+fn a3511df_blocks(body: &Value) -> Vec<&Value> {
+    body["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|message| message["content"].as_array().into_iter().flatten())
+        .collect()
+}
+
+fn a3511df_violations(body: &Value) -> Vec<String> {
+    let mut violations = Vec::new();
+    if body["model"] != Target::Anthropic.wire_model() {
+        violations.push(format!("Anthropic model identity changed: {body}"));
+    }
+    let tools = body["tools"].as_array().cloned().unwrap_or_default();
+    if tools.len() != 1 {
+        violations.push(format!(
+            "provider must receive exactly one effective functions.exec declaration: {tools:?}"
+        ));
+    }
+    let tool = tools.first();
+    if !tool.is_some_and(|tool| {
+        tool["name"] == "functions__exec"
+            && tool["description"].as_str().is_some_and(|description| {
+                description.starts_with(A3511DF_CURRENT_DESCRIPTION)
+                    && !description.contains(A3511DF_STALE_DESCRIPTION)
+            })
+            && tool["input_schema"]["type"] == "object"
+            && tool["input_schema"]["properties"]["input"]["type"] == "string"
+            && tool["input_schema"]["required"] == json!(["input"])
+    }) {
+        violations.push(format!(
+            "the current functions.exec declaration did not win: {tools:?}"
+        ));
+    }
+
+    let blocks = a3511df_blocks(body);
+    let uses = blocks
+        .iter()
+        .filter(|block| block["type"] == "tool_use")
+        .collect::<Vec<_>>();
+    let results = blocks
+        .iter()
+        .filter(|block| block["type"] == "tool_result")
+        .collect::<Vec<_>>();
+    if !has_tool_result(body) {
+        if !uses.is_empty() || !results.is_empty() {
+            violations.push(format!(
+                "first provider turn must not contain tool history: {body}"
+            ));
+        }
+    } else {
+        if uses.len() != 1 || results.len() != 1 {
+            violations.push(format!(
+                "follow-up must carry one paired tool_use and tool_result: {body}"
+            ));
+        }
+        if let (Some(call), Some(result)) = (uses.first(), results.first()) {
+            if call["id"] != A3511DF_CALL_ID
+                || call["name"] != "functions__exec"
+                || call["input"] != json!({"input":A3511DF_INPUT})
+            {
+                violations.push(format!("tool history identity/input changed: {call}"));
+            }
+            if result["tool_use_id"] != A3511DF_CALL_ID
+                || !serde_json::to_string(&result["content"])
+                    .unwrap_or_default()
+                    .contains("42")
+            {
+                violations.push(format!("paired tool result changed: {result}"));
+            }
+        }
+    }
+    violations
+}
+
+fn a3511df_refresh_answer(body: &Value) -> Response<Body> {
+    let violations = a3511df_violations(body);
+    if !violations.is_empty() {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                json!({"error":{"message":violations.join("; ")}}).to_string(),
+            ))
+            .unwrap();
+    }
+    if has_tool_result(body) {
+        return ok_json(json!({
+            "id":"msg_a3511df_followup",
+            "type":"message",
+            "role":"assistant",
+            "model":Target::Anthropic.wire_model(),
+            "content":[{"type":"text","text":"a3511df result=42"}],
+            "stop_reason":"end_turn"
+        }));
+    }
+    ok_json(json!({
+        "id":"msg_a3511df_refresh",
+        "type":"message",
+        "role":"assistant",
+        "model":Target::Anthropic.wire_model(),
+        "content":[{
+            "type":"tool_use",
+            "id":A3511DF_CALL_ID,
+            "name":"functions__exec",
+            "input":{"input":A3511DF_INPUT}
+        }],
+        "stop_reason":"tool_use"
+    }))
+}
+
+#[tokio::test]
+async fn responses_additional_tools_refreshes_same_namespace_custom_tool_before_anthropic_projection(
+) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new("a3511df-refresh");
+    let (base_url, mut captures, upstream_shutdown) = spawn_upstream(Target::Anthropic).await;
+    let handle = spawn_v3_server_aggregate(manifest(
+        Target::Anthropic,
+        test_ports::free_port(),
+        &base_url,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = http_client();
+    let payload = a3511df_additional_tools_request();
+
+    let (first_result, first_capture) =
+        request(&client, &endpoint, &payload, &mut captures, "a3511df_FIRST").await;
+    let first_capture = first_capture.expect("valid refreshed declaration must reach Anthropic");
+    assert!(
+        captured_violations(&first_capture).is_empty(),
+        "{first_capture}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "one first-turn provider attempt"
+    );
+    let (first_status, first_text) = first_result.expect("public request must complete");
+    let first_body = parsed(first_status, &first_text).expect("first Responses business body");
+    let first_items = output_items(&first_body).expect("first Responses output items");
+    let calls = first_items
+        .iter()
+        .filter(|item| item["type"] == "custom_tool_call")
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "{first_body}");
+    let call = calls[0];
+    assert_eq!(call["namespace"], "functions", "{call}");
+    assert_eq!(call["name"], "exec", "{call}");
+    assert_eq!(call["call_id"], A3511DF_CALL_ID, "{call}");
+    assert_eq!(call["input"], A3511DF_INPUT, "{call}");
+    let (left, right) = call["input"]
+        .as_str()
+        .and_then(|input| input.split_once('+'))
+        .expect("delivered custom input must be executable");
+    let receipt = left.parse::<i64>().unwrap() + right.parse::<i64>().unwrap();
+    assert_eq!(receipt, 42);
+    eprintln!(
+        "EVIDENCE_A3511DF_CONSUMER call_id={} input={} output={receipt}",
+        call["call_id"], call["input"]
+    );
+
+    let mut followup = payload.clone();
+    let input = followup["input"].as_array_mut().unwrap();
+    input.push(call.clone());
+    input.push(json!({
+        "type":"custom_tool_call_output",
+        "call_id":call["call_id"],
+        "output":receipt.to_string()
+    }));
+    let (followup_result, followup_capture) = request(
+        &client,
+        &endpoint,
+        &followup,
+        &mut captures,
+        "a3511df_FOLLOWUP",
+    )
+    .await;
+    let followup_capture =
+        followup_capture.expect("refreshed declaration must reach Anthropic on follow-up");
+    assert!(
+        captured_violations(&followup_capture).is_empty(),
+        "{followup_capture}"
+    );
+    assert!(
+        captures.try_recv().is_err(),
+        "one follow-up provider attempt"
+    );
+    let (followup_status, followup_text) =
+        followup_result.expect("paired public follow-up must complete");
+    let followup_body =
+        parsed(followup_status, &followup_text).expect("follow-up Responses business body");
+    assert_eq!(followup_body["status"], "completed", "{followup_body}");
+    assert!(
+        followup_body["output"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|item| serde_json::to_string(item)
+                .unwrap_or_default()
+                .contains("a3511df result=42")),
+        "paired follow-up must return real business text: {followup_body}"
+    );
+
+    handle.shutdown().await;
+    upstream_shutdown.send(()).unwrap();
 }
