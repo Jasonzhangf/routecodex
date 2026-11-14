@@ -131,14 +131,14 @@ fn openai_chat_relay_provider_http_400_derives_external_code_from_status() {
         "the body-derived type stays the policy/health input",
     );
     assert_eq!(
-        failure.client_response["error"]["upstream_extra"],
-        "kept",
+        failure.client_response["error"]["upstream_extra"], "kept",
         "upstream body must stay lossless in the typed failure",
     );
-    let witness =
-        routecodex_v3_error::V3ExternalHttpWitness::new(400, vec![], body.to_vec());
-    let terminal =
-        crate::hub_v1::relay_runtime_shared::terminalize_provider_failure(failure, Some(witness.clone()));
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(400, vec![], body.to_vec());
+    let terminal = crate::hub_v1::relay_runtime_shared::terminalize_provider_failure(
+        failure,
+        Some(witness.clone()),
+    );
     assert_eq!(
         terminal.terminal_disposition,
         Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),

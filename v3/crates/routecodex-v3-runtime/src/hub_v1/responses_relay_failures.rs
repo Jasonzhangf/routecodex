@@ -1090,8 +1090,7 @@ mod tests {
             failure.policy_error_type, "invalid_request_error",
             "the body-derived type stays the policy/health input",
         );
-        let witness =
-            routecodex_v3_error::V3ExternalHttpWitness::new(400, vec![], body.to_vec());
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(400, vec![], body.to_vec());
         let terminalized =
             terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));
         assert_eq!(
