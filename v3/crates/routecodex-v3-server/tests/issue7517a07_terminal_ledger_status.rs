@@ -1289,10 +1289,15 @@ async fn issue7517a07_direct_sse_missing_terminal_is_failed() {
         json!(502),
         "a missing terminal must not fabricate provider HTTP 502: {terminal}"
     );
-    assert_ne!(
+    assert_eq!(
         terminal["meta"]["error_category"],
+        json!("provider_response_sse_stream"),
+        "a genuinely absent terminal keeps its typed provider stream category: {terminal}"
+    );
+    assert_eq!(
+        terminal["meta"]["observed_error"]["external_error_code"],
         json!("PROVIDER_RESPONSE_SSE_MISSING_TERMINAL"),
-        "the public stream-error lane keeps its own transport cause: {terminal}"
+        "the public stream-error lane keeps its exact typed cause: {terminal}"
     );
 
     entry.stop().await;
