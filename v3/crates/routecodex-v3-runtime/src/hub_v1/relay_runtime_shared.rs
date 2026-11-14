@@ -443,8 +443,16 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         model_id: event.candidate.model_id.clone(),
         status: event.status,
         error_type: event.error_type.clone(),
-        external_error_kind: None,
-        external_error_code: event.error_type.clone(),
+        external_error_kind: event
+            .diagnostic_source
+            .external_error
+            .as_ref()
+            .map(|external| relay_external_kind_label(&external.kind).to_string()),
+        external_error_code: event
+            .diagnostic_source
+            .external_error
+            .as_ref()
+            .and_then(|external| external.code.clone()),
         // The real upstream HTTP status; `None` for a response-less failure.
         external_error_status: event.provider_status,
         internal_code: None,
@@ -460,6 +468,15 @@ pub(crate) fn build_v3_runtime_provider_failure_observation_from_policy_event(
         wait_ms: event.wait_ms,
         diagnostic_source: Some(event.diagnostic_source.clone()),
         failed_attempt_evidence: event.failed_attempt_evidence.clone(),
+    }
+}
+
+fn relay_external_kind_label(kind: &V3ExternalErrorKind) -> &'static str {
+    match kind {
+        V3ExternalErrorKind::Provider => "provider",
+        V3ExternalErrorKind::Upstream => "upstream",
+        V3ExternalErrorKind::Client => "client",
+        V3ExternalErrorKind::Transport => "transport",
     }
 }
 
@@ -970,6 +987,22 @@ pub fn failure_error_type(failure: &V3RelayProviderFailure) -> Option<String> {
     (failure.error_type_fn)(&failure.client_response)
 }
 
+/// 外部分类只由「真实上游 HTTP status」派生：source code 用
+/// `provider_http_{status}`，external link code 用 `HTTP_{status}`。响应体
+/// 类型继续只作为 policy/health 与 typed diagnostics 证据。
+fn failure_external_classification(
+    failure: &V3RelayProviderFailure,
+) -> (Option<String>, Option<String>) {
+    if let Some(status) = failure.provider_status {
+        return (
+            Some(format!("provider_http_{status}")),
+            Some(format!("HTTP_{status}")),
+        );
+    }
+    let code = failure_error_type(failure);
+    (code.clone(), code)
+}
+
 /// 从 failure 提取错误消息（共享版；走协议提取函数字段）。
 pub fn provider_failure_message(failure: &V3RelayProviderFailure) -> String {
     (failure.error_message_fn)(&failure.client_response)
@@ -1035,19 +1068,18 @@ pub fn terminalize_provider_failure(
     if failure.error_operator_fault.is_some() {
         return failure;
     }
+    let (external_code, external_link_code) = failure_external_classification(&failure);
     let source = crate::shared::direct_source_error(
         V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
-        failure_error_type(&failure)
-            .as_deref()
-            .unwrap_or("provider_error"),
+        external_code.as_deref().unwrap_or("provider_error"),
         provider_failure_message(&failure),
         match failure.provider_status {
             Some(status) => {
                 crate::operation_runner::V3Err01SourceInput::External(V3ExternalErrorLink {
                     kind: V3ExternalErrorKind::Provider,
                     status: Some(status),
-                    code: failure_error_type(&failure),
+                    code: external_link_code,
                     provider_id: None,
                     upstream_request_id: None,
                     message: Some(provider_failure_message(&failure)),
@@ -1596,8 +1628,57 @@ mod tests {
             routecodex_v3_error::V3ExternalErrorKind::Provider
         );
         assert_eq!(external.status, Some(429));
-        assert_eq!(external.code.as_deref(), Some("rate_limit_error"));
+        assert_eq!(
+            external.code.as_deref(),
+            Some("HTTP_429"),
+            "the real upstream HTTP status owns the external link code; the body is evidence only",
+        );
         assert_eq!(external.message.as_deref(), Some("slow down"));
+    }
+
+    #[test]
+    fn terminalizer_uses_real_http_status_after_internal_projection_status_changes() {
+        for (status, body) in [
+            (
+                400,
+                br#"{"error":{"code":"invalid_request_error","message":"bad input"}}"#.as_slice(),
+            ),
+            (
+                429,
+                br#"{"error":{"code":"rate_limit_error","message":"slow down"}}"#.as_slice(),
+            ),
+            (
+                503,
+                br#"{"error":{"code":"server_error","message":"unavailable"}}"#.as_slice(),
+            ),
+        ] {
+            let mut failure = provider_http_failure(status, body, "provider-a");
+            failure.status = 502;
+            let witness =
+                routecodex_v3_error::V3ExternalHttpWitness::new(status, vec![], body.to_vec());
+
+            let terminal = terminalize_provider_failure(failure, Some(witness.clone()));
+            assert_eq!(
+                terminal.terminal_disposition,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+            );
+            let projection = terminal
+                .terminal_projection
+                .expect("raw Relay terminalization must retain Error06 projection");
+            assert_eq!(
+                projection.diagnostic_source.code,
+                format!("provider_http_{status}")
+            );
+            let external = projection
+                .diagnostic_source
+                .external_error
+                .expect("real upstream HTTP status must stay linked in Error01");
+            assert_eq!(external.status, Some(status));
+            assert_eq!(
+                external.code.as_deref(),
+                Some(format!("HTTP_{status}").as_str())
+            );
+        }
     }
 
     #[test]

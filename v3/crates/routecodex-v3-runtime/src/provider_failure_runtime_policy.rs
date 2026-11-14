@@ -950,6 +950,17 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     provider_body_read_failure: Option<&str>,
 ) -> Result<V3RelayProviderFailurePolicyResult, Result<String, V3RelayErrorOperatorFault>> {
     let candidate_key = v3_relay_provider_candidate_key(&selected.candidate);
+    // The external classification belongs to a real upstream HTTP status: the
+    // source code is `provider_http_{status}` and the external link code is
+    // `HTTP_{status}`. The body-derived `error_type` stays the policy/health
+    // input, so the cooldown ladder is unchanged.
+    let is_real_http_failure = provider_status == Some(status);
+    let external_error_type = if is_real_http_failure {
+        Some(format!("provider_http_{status}"))
+    } else {
+        error_type.clone()
+    };
+    let external_link_code = is_real_http_failure.then(|| format!("HTTP_{status}"));
     // Permanent request exclusions are recorded only after classification.
     // Recoverable failures remain owned by typed observation/health state.
     // Preserve the original typed Error01 source of this provider attempt before
@@ -979,9 +990,10 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
         build_v3_relay_provider_attempt_source(
             &selected,
             source_stage,
-            error_type.as_deref(),
+            external_error_type.as_deref(),
             &message,
             provider_status,
+            external_link_code.as_deref(),
         )
     }
     .map_err(Err)?;
@@ -1091,7 +1103,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         V3RelayProviderFailurePolicyEventInput {
                             candidate: selected.candidate,
                             status,
-                            error_type,
+                            error_type: error_type.clone(),
                             message,
                             health_record,
                             action: "switch_provider",
@@ -1189,7 +1201,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 V3RelayProviderFailurePolicyEventInput {
                     candidate: selected.candidate,
                     status,
-                    error_type,
+                    error_type: error_type.clone(),
                     message,
                     health_record,
                     action: "terminal_request_local_provider_compat_exhausted",
@@ -1230,7 +1242,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             V3RelayProviderFailurePolicyEventInput {
                 candidate: selected.candidate,
                 status,
-                error_type,
+                error_type: error_type.clone(),
                 message,
                 health_record,
                 action: "terminal_route_and_default_exhausted",
@@ -1396,6 +1408,7 @@ fn build_v3_relay_provider_attempt_source(
     error_type: Option<&str>,
     message: &str,
     provider_status: Option<u16>,
+    external_link_code: Option<&str>,
 ) -> Result<(Value, V3Error01SourceRaised), V3RelayErrorOperatorFault> {
     let code = error_type.unwrap_or("provider_failure").to_string();
     // The numeric policy status also represents synthesized request/transport
@@ -1409,7 +1422,11 @@ fn build_v3_relay_provider_attempt_source(
         V3Err01SourceInput::External(V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: provider_status,
-            code: Some(code),
+            code: Some(
+                external_link_code
+                    .map(str::to_string)
+                    .unwrap_or_else(|| code.clone()),
+            ),
             provider_id: Some(selected.candidate.provider_id.clone()),
             upstream_request_id: None,
             message: Some(message.to_string()),

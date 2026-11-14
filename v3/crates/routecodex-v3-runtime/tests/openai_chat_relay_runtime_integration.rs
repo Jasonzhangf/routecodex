@@ -2636,7 +2636,11 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
         .external_error
         .as_ref()
         .expect("the terminal source must retain the actual upstream failure");
-    assert_eq!(external.code.as_deref(), Some("provider_failure"));
+    assert_eq!(
+        external.code.as_deref(),
+        Some("HTTP_503"),
+        "the real upstream HTTP status owns the external link code; the body remains diagnostic evidence",
+    );
     assert_eq!(external.provider_id.as_deref(), Some(secondary.as_str()));
     assert!(
         external

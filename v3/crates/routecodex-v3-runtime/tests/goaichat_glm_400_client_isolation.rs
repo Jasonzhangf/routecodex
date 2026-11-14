@@ -197,6 +197,25 @@ fn assert_glm_400_stayed_internal(
         "sample error_type must stay on the internal event, got {:?}",
         glm_event.error_type
     );
+    // 35aa0d1: the owning external classification comes from the real
+    // upstream HTTP status; the body-derived type above stays the
+    // health/policy input.
+    assert_eq!(
+        glm_event.external_error_kind.as_deref(),
+        Some("provider"),
+        "external kind must come from the real upstream HTTP failure"
+    );
+    assert_eq!(
+        glm_event.external_error_code.as_deref(),
+        Some("HTTP_400"),
+        "external link code must be derived from the upstream status"
+    );
+    assert_eq!(glm_event.external_error_status, Some(400));
+    let diagnostic = glm_event
+        .diagnostic_source
+        .as_ref()
+        .expect("glm HTTP 400 must keep its typed diagnostic source");
+    assert_eq!(diagnostic.code, "provider_http_400");
     let captures = transport.captures.lock().unwrap();
     assert_eq!(captures.len(), 2);
     assert_eq!(captures[0].0, "goaichat");
