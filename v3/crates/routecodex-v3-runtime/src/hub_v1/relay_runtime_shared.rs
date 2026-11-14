@@ -993,10 +993,10 @@ pub fn failure_error_type(failure: &V3RelayProviderFailure) -> Option<String> {
 fn failure_external_classification(
     failure: &V3RelayProviderFailure,
 ) -> (Option<String>, Option<String>) {
-    if failure.provider_status == Some(failure.status) {
+    if let Some(status) = failure.provider_status {
         return (
-            Some(format!("provider_http_{}", failure.status)),
-            Some(format!("HTTP_{}", failure.status)),
+            Some(format!("provider_http_{status}")),
+            Some(format!("HTTP_{status}")),
         );
     }
     let code = failure_error_type(failure);
@@ -1634,6 +1634,51 @@ mod tests {
             "the real upstream HTTP status owns the external link code; the body is evidence only",
         );
         assert_eq!(external.message.as_deref(), Some("slow down"));
+    }
+
+    #[test]
+    fn terminalizer_uses_real_http_status_after_internal_projection_status_changes() {
+        for (status, body) in [
+            (
+                400,
+                br#"{"error":{"code":"invalid_request_error","message":"bad input"}}"#.as_slice(),
+            ),
+            (
+                429,
+                br#"{"error":{"code":"rate_limit_error","message":"slow down"}}"#.as_slice(),
+            ),
+            (
+                503,
+                br#"{"error":{"code":"server_error","message":"unavailable"}}"#.as_slice(),
+            ),
+        ] {
+            let mut failure = provider_http_failure(status, body, "provider-a");
+            failure.status = 502;
+            let witness =
+                routecodex_v3_error::V3ExternalHttpWitness::new(status, vec![], body.to_vec());
+
+            let terminal = terminalize_provider_failure(failure, Some(witness.clone()));
+            assert_eq!(
+                terminal.terminal_disposition,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+            );
+            let projection = terminal
+                .terminal_projection
+                .expect("raw Relay terminalization must retain Error06 projection");
+            assert_eq!(
+                projection.diagnostic_source.code,
+                format!("provider_http_{status}")
+            );
+            let external = projection
+                .diagnostic_source
+                .external_error
+                .expect("real upstream HTTP status must stay linked in Error01");
+            assert_eq!(external.status, Some(status));
+            assert_eq!(
+                external.code.as_deref(),
+                Some(format!("HTTP_{status}").as_str())
+            );
+        }
     }
 
     #[test]

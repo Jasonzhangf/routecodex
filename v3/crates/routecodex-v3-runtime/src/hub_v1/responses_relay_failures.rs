@@ -396,28 +396,25 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
     // A real upstream HTTP status owns the external classification. The typed
     // policy error type stays body-derived so policy matching and provider
     // health keep the same cooldown classification.
-    let is_real_http_failure = failure.provider_status == Some(failure.status);
-    let external_code = if is_real_http_failure {
-        format!("provider_http_{}", failure.status)
-    } else {
-        failure.policy_error_type.clone()
-    };
-    let external_link_code = if is_real_http_failure {
-        format!("HTTP_{}", failure.status)
-    } else {
-        failure.policy_error_type.clone()
-    };
+    let external_code = failure
+        .provider_status
+        .map(|status| format!("provider_http_{status}"))
+        .or_else(|| Some(failure.policy_error_type.clone()));
+    let external_link_code = failure
+        .provider_status
+        .map(|status| format!("HTTP_{status}"))
+        .or_else(|| Some(failure.policy_error_type.clone()));
     let source = crate::shared::direct_source_error(
         routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
         failure.source_stage,
-        external_code,
+        external_code.as_deref().unwrap_or("provider_error"),
         &failure.policy_error_message,
         match failure.provider_status {
             Some(status) => crate::operation_runner::V3Err01SourceInput::External(
                 routecodex_v3_error::V3ExternalErrorLink {
                     kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
                     status: Some(status),
-                    code: Some(external_link_code),
+                    code: external_link_code,
                     provider_id: None,
                     upstream_request_id: None,
                     message: Some(failure.policy_error_message.clone()),
