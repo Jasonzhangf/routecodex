@@ -75,12 +75,12 @@ pub(super) fn expected_relay_b() -> V3Error01SourceRaised {
     build_v3_error_01_source_raised_external(
         V3ErrorSourceKind::ProviderFailure,
         "V3ProviderReqOutbound09TransportRequest",
-        "owned_b_503",
+        "provider_http_503",
         "OWNED_B_503_PRIVATE",
         V3ExternalErrorLink {
             kind: V3ExternalErrorKind::Provider,
             status: Some(503),
-            code: Some("owned_b_503".into()),
+            code: Some("HTTP_503".into()),
             provider_id: Some("beta".into()),
             upstream_request_id: None,
             message: Some("OWNED_B_503_PRIVATE".into()),
