@@ -798,14 +798,13 @@ fn validate_case_artifact(case: &CaseOutcome, failures: &mut Vec<String>) {
         failures.push(format!("{}: original transport cause was lost", case.name));
     }
     if case.name == "json_http_503" {
-        // The typed external link records the real received upstream status and
-        // provider identity. It must not be replaced by a reduced generic
-        // provider failure, and it is independent from the retained wire bytes.
+        // The typed external link classifies the real received HTTP head.
+        // The body-derived error type remains only in the retained wire bytes.
         let external = &source["external_error"];
         if external["kind"].as_str() != Some("provider")
             || external["status"].as_u64() != Some(503)
             || external["provider_id"].as_str() != Some("alpha")
-            || external["code"].as_str() != Some("server_error")
+            || external["code"].as_str() != Some("HTTP_503")
             || external["message"].as_str() != Some(ALPHA_PRIVATE_CAUSE)
         {
             failures.push(format!(
