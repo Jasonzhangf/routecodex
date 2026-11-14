@@ -7,7 +7,7 @@ use futures_util::{SinkExt, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -76,13 +76,30 @@ impl Entry {
         format!("http://{}", self.handle.listeners[0].addr)
     }
     async fn stop(self) {
-        assert!(self.handle.shutdown().await.is_empty());
-        self.shutdown.send(()).unwrap();
-        timeout(Duration::from_secs(5), self.peer)
+        let failures = self.cleanup().await;
+        assert!(
+            failures.is_empty(),
+            "owned fixture cleanup failed: {failures:?}"
+        );
+    }
+    async fn cleanup(self) -> Vec<String> {
+        let mut failures = self
+            .handle
+            .shutdown()
             .await
-            .unwrap()
-            .unwrap();
+            .into_iter()
+            .map(|failure| format!("{failure:?}"))
+            .collect::<Vec<_>>();
+        if self.shutdown.send(()).is_err() {
+            failures.push("owned upstream shutdown receiver was already closed".to_string());
+        }
+        match timeout(Duration::from_secs(5), self.peer).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("owned upstream task failed: {error}")),
+            Err(_) => failures.push("owned upstream task did not stop".to_string()),
+        }
         std::env::remove_var("FA22072_BOUNDARY_KEY");
+        failures
     }
 }
 async fn start(process: &str, recovery: bool) -> Entry {
@@ -143,6 +160,7 @@ targets = {targets}
 [debug]
 log_console = false
 snapshots = true
+codex_samples = true
 "#
     );
     let manifest =
@@ -367,255 +385,249 @@ async fn a83b3ce_recover_only_positive_control_at_public_entry() {
     }
 }
 
-async fn assert_a83b3ce_local_response_decode_failure_recovers(process: &str) {
-    let mut entry = start(process, true).await;
-    let body = json!({
-        "input":"response-failure",
-        "stream":false
-    })
-    .to_string();
-    let wire = raw(
-        &entry,
-        "/v1/responses",
-        &format!(
-            "Content-Type: application/json\r\nContent-Length: {}\r\n",
-            body.len()
-        ),
-        &body,
-    )
-    .await;
-    let first = timeout(Duration::from_secs(5), entry.captures.recv())
-        .await
-        .expect("first candidate capture must arrive")
-        .expect("first candidate must receive transport");
-    let second = timeout(Duration::from_secs(5), entry.captures.recv())
-        .await
-        .ok()
-        .flatten();
-    let text = String::from_utf8_lossy(&wire);
-    let logs: Value = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .unwrap()
-        .get(format!("{}/_routecodex/debug/logs", entry.base()))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    eprintln!(
-        "a83b3ce process={process} first={} second={} wire={text} logs={}",
-        first,
-        second
-            .as_ref()
-            .map_or_else(|| "none".to_string(), Value::to_string),
-        serde_json::to_string(&logs).unwrap()
-    );
-    assert_eq!(first["model"], "wire-owned");
-    assert_eq!(
-        second.as_ref().map(|capture| &capture["model"]),
-        Some(&json!("wire-recover")),
-        "local response-processing failure must try the next eligible candidate"
-    );
-
-    // P1 review: recovered response must reach the client as HTTP 200, not a
-    // fabricated 4xx/5xx error frame. The runtime currently emits SSE framing
-    // (content-type text/event-stream) for the recovered provider path even
-    // when the client requested stream=false; this is acceptable transparent
-    // transport framing as long as status=200 and the body carries a
-    // successful Responses payload. We assert both the status line and the
-    // presence of a business result, without depending on which compatible
-    // frame the recovered path chose.
-    assert!(
-        text.starts_with("HTTP/1.1 200"),
-        "{process} recovered response must use HTTP 200; got: {text}"
-    );
-    let header_end = text.find("\r\n\r\n").unwrap_or_else(|| {
-        panic!("{process} recovered response must be a complete HTTP frame: {text}")
-    });
-    let headers = &text[..header_end];
-    let raw_body = &text[header_end + 4..];
-    let content_type_json = headers.to_ascii_lowercase().contains("application/json");
-    let content_type_sse = headers.to_ascii_lowercase().contains("text/event-stream");
-    assert!(
-        content_type_json || content_type_sse,
-        "{process} recovered response must declare a supported content type; got: {text}"
-    );
-    // Decode the body: handle chunked transfer-encoding then accept either a
-    // single JSON document or SSE data frames that include a successful
-    // response payload (response.completed / response.output_item / status=completed).
-    let decoded: String = if headers
-        .to_ascii_lowercase()
-        .contains("transfer-encoding: chunked")
-    {
-        let mut acc = String::new();
-        let mut cursor = raw_body;
-        loop {
-            let trimmed = cursor.trim_start_matches('\n').trim_start_matches('\r');
-            let Some(size_end) = trimmed.find("\r\n") else {
-                break;
-            };
-            let size_str = &trimmed[..size_end];
-            let Ok(size) = usize::from_str_radix(size_str.trim(), 16) else {
-                break;
-            };
-            if size == 0 {
-                break;
-            }
-            let data_start = size_end + 2;
-            if trimmed.len() < data_start + size {
-                break;
-            }
-            acc.push_str(&trimmed[data_start..data_start + size]);
-            cursor = &trimmed[data_start + size..];
-        }
-        acc
-    } else {
-        raw_body.to_string()
-    };
-    let body_carries_success = if content_type_sse {
-        decoded.contains("response.completed")
-            || decoded.contains("response.output_item")
-            || decoded.contains("\"status\":\"completed\"")
-    } else {
-        serde_json::from_str::<Value>(decoded.trim())
-            .map(|v| {
-                v["status"].as_str().map_or(false, |s| s == "completed")
-                    || v.get("output").is_some()
-            })
-            .unwrap_or(false)
-    };
-    assert!(
-        body_carries_success,
-        "{process} recovered body must carry a successful Responses payload; decoded: {decoded}"
-    );
-
-    assert!(text.contains("business error word survives"), "{text}");
-    for leaked in ["response failed", "network_error", "unparseable-json"] {
-        assert!(!text.contains(leaked), "{process} leaked {leaked}: {text}");
-    }
-
-    // P1 review: the failing wire-owned attempt's typed Error chain must remain
-    // visible in the diagnostic surface as an ordered sequence ending in
-    // V3TargetLocalReselected. The public debug/logs surface emits
-    // per-node events with sequence numbers rather than a single
-    // error_chain field; we verify the typed-node sequence for the failed
-    // attempt (Error01 -> Error05 -> reselect) inside the same request.
-    let events = logs["logs"].as_array().expect("debug logs array");
-    let reselect_indices: Vec<usize> = events
-        .iter()
-        .enumerate()
-        .filter_map(|(i, e)| {
-            if e["node_id"] == "V3TargetLocalReselected" {
-                Some(i)
-            } else {
-                None
-            }
+fn request_dirs(samples_root: &Path, marker: &str) -> Vec<std::path::PathBuf> {
+    std::fs::read_dir(samples_root)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    std::fs::read_to_string(path.join("request.json"))
+                        .is_ok_and(|request| request.contains(marker))
+                })
+                .collect()
         })
-        .collect();
-    assert!(
-        !reselect_indices.is_empty(),
-        "{process}: missing V3TargetLocalReselected event"
-    );
-    // Direct lane emits the full Error01..Error05 typed chain up to the
-    // reselection event. Relay lane records a compact reselection without
-    // each intermediate Error-class node; both still expose the reselect
-    // event itself plus the second ConcreteProviderSelected.
-    if process == "direct" {
-        let failed_attempt_chain_present = reselect_indices.iter().any(|idx| {
-            let Some(window) = events.get(idx.saturating_sub(5)..=*idx) else {
-                return false;
-            };
-            let node_seq: Vec<&str> = window
-                .iter()
-                .filter_map(|e| e["node_id"].as_str())
-                .collect();
-            let expected = [
-                "V3Error01SourceRaised",
-                "V3Error02Classified",
-                "V3Error03TargetLocalAction",
-                "V3Error04TargetExhaustionDecision",
-                "V3Error05ExecutionDecision",
-                "V3TargetLocalReselected",
-            ];
-            node_seq == expected
+        .unwrap_or_default()
+}
+
+fn completed_terminal(content_type: &str, body: &str) -> bool {
+    if content_type.starts_with("application/json") {
+        return serde_json::from_str::<Value>(body).is_ok_and(|value| {
+            value["status"] == "completed" || value["response"]["status"] == "completed"
         });
-        assert!(
-            failed_attempt_chain_present,
-            "{process}: V3TargetLocalReselected must follow an Error01..Error05 typed node sequence (events total={})",
-            events.len()
-        );
+    }
+    if !content_type.starts_with("text/event-stream") {
+        return false;
+    }
+    body.split("\n\n").any(|event| {
+        let data = event
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim_start)
+            .collect::<Vec<_>>()
+            .join("\n");
+        serde_json::from_str::<Value>(&data).is_ok_and(|value| {
+            value["type"] == "response.completed" && value["response"]["status"] == "completed"
+        })
+    })
+}
+
+async fn collect_a83b3ce_local_response_decode_failure_recovery(
+    process: &str,
+    home: &test_home::TestHomeGuard,
+) -> Vec<String> {
+    let mut controls = Vec::new();
+    let mut entry = start(process, true).await;
+    let samples_root = home.codex_samples_root(entry.handle.listeners[0].addr.port());
+    let marker = format!(
+        "response-failure-{process}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let body = json!({
+        "input":marker,
+        "stream":false
+    });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .header("x-session-id", "owned-failure")
+        .json(&body)
+        .send()
+        .await;
+    let (status, content_type, text) = match response {
+        Ok(response) => {
+            let status = response.status();
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            match response.text().await {
+                Ok(text) => (Some(status), content_type, text),
+                Err(error) => {
+                    controls.push(format!("{process}: response body read failed: {error}"));
+                    (Some(status), content_type, String::new())
+                }
+            }
+        }
+        Err(error) => {
+            controls.push(format!("{process}: public request failed: {error}"));
+            (None, String::new(), String::new())
+        }
+    };
+    let first = timeout(Duration::from_secs(5), entry.captures.recv()).await;
+    let second = timeout(Duration::from_secs(5), entry.captures.recv()).await;
+    let third = timeout(Duration::from_millis(100), entry.captures.recv()).await;
+    eprintln!(
+        "a83b3ce process={process} status={status:?} content_type={content_type} first={first:?} second={second:?} wire={text}",
+        first = first,
+        second = second,
+    );
+    match first {
+        Ok(Some(ref capture)) if capture["model"] == "wire-owned" => {}
+        other => controls.push(format!(
+            "{process}: first provider capture was not wire-owned: {other:?}"
+        )),
+    }
+    match second {
+        Ok(Some(ref capture)) if capture["model"] == "wire-recover" => {}
+        other => controls.push(format!(
+            "{process}: second provider capture was not wire-recover: {other:?}"
+        )),
+    }
+    if third.is_ok() {
+        controls.push(format!(
+            "{process}: unexpected third provider capture: {third:?}"
+        ));
     }
 
-    // ConcreteProviderSelected is emitted once per Direct invocation;
-    // the Relay lane high-level hub step covers both attempts through a
-    // single ConcreteProviderSelected record. The cross-attempt signal
-    // that holds for both lanes is "V3TargetLocalReselected" fired once,
-    // and the upstream fixture capture list contains both wire-owned
-    // and wire-recover (asserted above via first/second model checks).
-    let target_selection_count = events
-        .iter()
-        .filter(|e| e["node_id"] == "V3Target10ConcreteProviderSelected")
-        .count();
-    assert!(
-        target_selection_count >= 1,
-        "{process}: must see at least one ConcreteProviderSelected event, got {target_selection_count}"
-    );
-    let provider_raw_count = events
-        .iter()
-        .filter(|e| {
-            e["node_id"] == "V3ProviderResp14Raw" || e["node_id"] == "V3ProviderRespInbound01Raw"
-        })
-        .count();
-    assert!(
-        provider_raw_count >= 1,
-        "{process}: must see at least one provider response event"
-    );
+    if status != Some(StatusCode::OK) {
+        controls.push(format!(
+            "{process}: recovered response status must be 200, got {status:?}"
+        ));
+    }
+    let expected_content_type = if process == "direct" {
+        "text/event-stream"
+    } else {
+        "application/json"
+    };
+    if !content_type.starts_with(expected_content_type) {
+        controls.push(format!(
+            "{process}: expected content-type {expected_content_type}, got {content_type}"
+        ));
+    }
+    if !completed_terminal(&content_type, &text) {
+        controls.push(format!(
+            "{process}: response lacked a completed terminal: {text}"
+        ));
+    }
+    if !text.contains("business error word survives") {
+        controls.push(format!("{process}: business content missing: {text}"));
+    }
+    for leaked in [
+        "network_error",
+        "unparseable-json",
+        "owned private provider cause",
+        "response failed",
+    ] {
+        if text.contains(leaked) {
+            controls.push(format!("{process}: leaked {leaked}: {text}"));
+        }
+    }
 
-    // P1 r2 review: bind the failed wire-owned attempt's upstream HTTP witness
-    // to the local response-decode classification that triggered reselection.
-    // The current runtime emits V3Error01SourceRaised with details=null on this
-    // path, so the upstream HTTP 200 is not yet exposed as a typed diagnostic
-    // field. The behavioural witness we can prove from the public surface is:
-    // (a) the request was processed by the failing candidate (upstream fixture
-    //     captured wire-owned model + response-failure input), and
-    // (b) the local typed chain reached V3Error05ExecutionDecision and
-    //     V3TargetLocalReselected on the Direct lane (which only happens for
-    //     local response-processing failures with alternatives available).
-    // A real upstream HTTP 200 witness as a typed diagnostic field is a
-    // separate observability gap that, if addressed, should be tracked in its
-    // own issue rather than expanded ad hoc into this P0 candidate.
-    let wire_owned_response_failure_witness = events.iter().any(|e| {
-        e["node_id"] == "V3Provider12ResponsesWirePayload"
-            && e["details"].as_object().is_some_and(|details| {
-                details
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .map_or(false, |m| m == "wire-owned")
-            })
-    });
-    // If the wire-payload node is not exposed with the selected model, fall
-    // back to the upstream request capture (still a behavioural identity
-    // witness on the failing attempt) which the test already proves via first
-    // and second capture assertions above.
-    let _ = wire_owned_response_failure_witness;
+    match entry.handle.wait_for_codex_sample_persistence().await {
+        Ok(()) => {}
+        Err(error) => controls.push(format!(
+            "{process}: codex sample persistence did not drain: {error}"
+        )),
+    }
+    let dirs = request_dirs(&samples_root, &marker);
+    if dirs.len() != 1 {
+        controls.push(format!(
+            "{process}: exact request sample missing or duplicated: {dirs:?}"
+        ));
+    } else {
+        let artifact_path = dirs[0].join("provider-failed-attempts.json");
+        let artifact = std::fs::read_to_string(&artifact_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+        match artifact {
+            Some(artifact) => {
+                let request_id = dirs[0]
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if artifact["object"] != "routecodex.v3.provider_failed_attempt_evidence"
+                    || artifact["request_id"] != request_id
+                {
+                    controls.push(format!(
+                        "{process}: failure artifact is not bound to request {request_id}: {artifact}"
+                    ));
+                }
+                let attempts = artifact["attempts"].as_array();
+                if attempts.map_or(true, |attempts| attempts.len() != 1) {
+                    controls.push(format!(
+                        "{process}: expected one failed attempt in artifact: {artifact}"
+                    ));
+                } else if let Some(attempt) = attempts.and_then(|attempts| attempts.first()) {
+                    let expected_stage = if process == "direct" {
+                        "V3ProviderResp14Raw"
+                    } else {
+                        "V3ProviderRespInbound01Raw"
+                    };
+                    let expected_code = if process == "direct" {
+                        "provider_response_sse_event_invalid"
+                    } else {
+                        "provider_response_event_codec_failure"
+                    };
+                    if attempt["provider_id"] != "test"
+                        || attempt["model_id"] != "test"
+                        || attempt["auth_alias"] != "key"
+                        || attempt["diagnostic_source"]["source_kind"] != "provider_failure"
+                        || attempt["diagnostic_source"]["source_stage"] != expected_stage
+                        || attempt["diagnostic_source"]["code"] != expected_code
+                        || attempt["error_type"] != expected_code
+                        || attempt["action"] != "switch_provider"
+                        || attempt["next_provider_key"] != "test:default:key:recover"
+                    {
+                        controls.push(format!(
+                            "{process}: failed attempt witness does not bind identity, decode classification, and successor: {attempt}"
+                        ));
+                    }
+                }
+            }
+            None => controls.push(format!(
+                "{process}: provider-failed-attempts.json missing or invalid at {artifact_path:?}"
+            )),
+        }
+    }
 
-    entry.stop().await;
+    let cleanup_failures = entry.cleanup().await;
+    controls.extend(cleanup_failures);
+    controls
 }
 
 #[tokio::test]
 async fn a83b3ce_direct_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry(
 ) {
-    let _guard = TEST_LOCK.lock().await;
-    assert_a83b3ce_local_response_decode_failure_recovers("direct").await;
+    let (home, _lock) = TEST_LOCK.lock().await;
+    let controls = collect_a83b3ce_local_response_decode_failure_recovery("direct", &home).await;
+    drop(home);
+    assert!(
+        controls.is_empty(),
+        "Direct recovery controls failed: {controls:?}"
+    );
 }
 
 #[tokio::test]
 async fn a83b3ce_relay_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry()
 {
-    let _guard = TEST_LOCK.lock().await;
-    assert_a83b3ce_local_response_decode_failure_recovers("chat").await;
+    let (home, _lock) = TEST_LOCK.lock().await;
+    let controls = collect_a83b3ce_local_response_decode_failure_recovery("chat", &home).await;
+    drop(home);
+    assert!(
+        controls.is_empty(),
+        "Relay recovery controls failed: {controls:?}"
+    );
 }
 
 #[tokio::test]
