@@ -1511,78 +1511,12 @@ fn observe_sse_usage_frame(
 }
 
 fn provider_body_source(error: V3ProviderError) -> V3DirectSourceError {
-    let message = error.to_string();
-    match error {
-        V3ProviderError::ClientDisconnect { provider_id, .. } => direct_plain_error(
-            V3ErrorSourceKind::ClientDisconnect,
-            "V3ProviderResp14Raw",
-            "client_disconnect",
-            format!("client disconnected while reading provider {provider_id} response"),
-        ),
-        V3ProviderError::ResponseBody {
-            provider_id,
-            reason,
-            ..
-        } => direct_external_error(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_body_error",
-            message,
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: None,
-                code: Some("PROVIDER_RESPONSE_BODY".to_string()),
-                provider_id: Some(provider_id.clone()),
-                upstream_request_id: None,
-                message: Some(reason.clone()),
-            },
-        ),
-        V3ProviderError::MalformedSse {
-            provider_id,
-            reason,
-            ..
-        } => direct_external_error(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_malformed_sse",
-            message,
-            V3ExternalErrorLink {
-                kind: V3ExternalErrorKind::Provider,
-                status: None,
-                code: Some("PROVIDER_MALFORMED_SSE".to_string()),
-                provider_id: Some(provider_id.clone()),
-                upstream_request_id: None,
-                message: Some(reason.clone()),
-            },
-        ),
-        V3ProviderError::InternalTransport { lane, .. } => {
-            let stage = match lane {
-                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Request => {
-                    "V3Transport13ResponsesHttpRequest"
-                }
-                routecodex_v3_provider_responses::V3ProviderInternalTransportLane::Response => {
-                    "V3ProviderResp14Raw"
-                }
-            };
-            direct_internal_error(
-                V3ErrorSourceKind::RuntimeFailure,
-                stage,
-                "provider_internal_transport_error",
-                message,
-                if stage == "V3Transport13ResponsesHttpRequest" {
-                    V3InternalErrorCode::V3Transport13ResponsesHttpRequest
-                } else {
-                    V3InternalErrorCode::V3ProviderResp14Raw
-                },
-            )
-        }
-        _ => direct_plain_error(
-            V3ErrorSourceKind::ProviderFailure,
-            "V3ProviderResp14Raw",
-            "provider_response_body_error",
-            message,
-        ),
-    }
+    // The Direct SSE path previously rebuilt this mapping locally and dropped the
+    // typed external link for `Transport`/`HttpStatus` (Plain fallback), so the
+    // failure event lost the transport kind plus the received HTTP status/header
+    // evidence and the global real-error counter skipped it. Reuse the single
+    // provider-error -> Error01 mapper so the wire cause is preserved here too.
+    crate::hooks::build_v3_provider_error_source("V3ProviderResp14Raw", error)
 }
 
 fn sse_transport_source(provider_id: &str, error: SseTransportError) -> V3DirectSourceError {
@@ -1663,6 +1597,91 @@ mod tests {
             assert_eq!(accepted.next().await.unwrap().unwrap(), wire);
             assert!(accepted.next().await.is_none());
         }
+    }
+
+    // Regression for the provider-stream provenance loss: a real provider
+    // transport `Err` delivered through the production Direct SSE guard must
+    // keep its typed `External(Transport)` link. Before the fix, the `_`
+    // fallback in `provider_body_source` rebuilt it as a Plain source, so the
+    // failure event lost the transport kind and the global real-error counter
+    // skipped it.
+    #[tokio::test]
+    async fn stream_failure_provenance_direct_initial_transport_error() {
+        let transport: V3ProviderSseStream =
+            Box::pin(stream::iter([Err(V3ProviderError::Transport {
+                request_id: "req-direct-transport".into(),
+                provider_id: "provider-transport".into(),
+                reason: "connection reset before first semantic event".into(),
+            })]));
+        let result = guard_initial_direct_sse_provider_failure_with_timeout(
+            "provider-transport",
+            transport,
+            std::time::Duration::from_secs(1),
+            None,
+            crate::hub_v1::V3HubProviderWireProtocol::Responses,
+        )
+        .await;
+        let source = match result {
+            Err(Ok(source)) => source,
+            Err(Err(fault)) => panic!("unexpected SDK fault: {fault:?}"),
+            Ok(_) => panic!("a provider transport Err must not yield a stream"),
+        };
+        let external = source
+            .external_error
+            .as_ref()
+            .expect("a real provider transport error must retain its external source");
+        assert_eq!(
+            external.kind,
+            V3ExternalErrorKind::Transport,
+            "actual provider transport error must keep the typed Transport kind"
+        );
+        assert_eq!(
+            external.status, None,
+            "a response-less transport failure must not invent an upstream HTTP status"
+        );
+        assert_eq!(
+            external.provider_id.as_deref(),
+            Some("provider-transport"),
+            "the external link must keep the failing provider identity"
+        );
+    }
+
+    // A provider HTTP status failure carries the received status and the
+    // request-id response header as provenance. The shared mapper must keep
+    // both so the failure event's `external_error_status`/`upstream_request_id`
+    // are not nulled out.
+    #[test]
+    fn stream_failure_provenance_direct_http_status_keeps_header_evidence() {
+        let source = match provider_body_source(V3ProviderError::HttpStatus {
+            response: Box::new(routecodex_v3_provider_responses::V3ProviderHttpFailure {
+                request_id: "req-direct-http".into(),
+                provider_id: "provider-http".into(),
+                status: 503,
+                headers: vec![V3ProviderResponseHeader {
+                    name: "x-request-id".into(),
+                    value: b"upstream-req-42".to_vec(),
+                }],
+                body: b"{\"error\":\"busy\"}".to_vec(),
+                body_read_failure: None,
+            }),
+        }) {
+            Ok(source) => source,
+            Err(fault) => panic!("unexpected SDK fault: {fault:?}"),
+        };
+        let external = source
+            .external_error
+            .as_ref()
+            .expect("a provider HTTP status failure must keep its external source");
+        assert_eq!(
+            external.status,
+            Some(503),
+            "the received upstream HTTP status must survive into the source"
+        );
+        assert_eq!(
+            external.upstream_request_id.as_deref(),
+            Some("upstream-req-42"),
+            "the upstream request-id response header must survive as provenance"
+        );
     }
 
     #[test]
