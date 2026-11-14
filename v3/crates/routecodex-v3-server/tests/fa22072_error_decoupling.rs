@@ -546,6 +546,45 @@ async fn collect_a83b3ce_local_response_decode_failure_recovery(
             "{process}: exact request sample missing or duplicated: {dirs:?}"
         ));
     } else {
+        let request_id = dirs[0].file_name().unwrap().to_string_lossy();
+        let logs = client
+            .get(format!("{}/_routecodex/debug/logs", entry.base()))
+            .send()
+            .await;
+        let logs = match logs {
+            Ok(response) => response.json::<Value>().await.ok(),
+            Err(_) => None,
+        };
+        let nodes: Vec<&str> = logs
+            .as_ref()
+            .and_then(|logs| logs["logs"].as_array())
+            .into_iter()
+            .flatten()
+            .filter(|event| event["request_id"].as_str() == Some(request_id.as_ref()))
+            .filter_map(|event| event["node_id"].as_str())
+            .collect();
+        if !nodes.contains(&"V3TargetLocalReselected") {
+            controls.push(format!(
+                "{process}: request {request_id} lacks typed reselection: {nodes:?}"
+            ));
+        }
+        let expected_chain = [
+            "V3Error01SourceRaised",
+            "V3Error02Classified",
+            "V3Error03TargetLocalAction",
+            "V3Error04TargetExhaustionDecision",
+            "V3Error05ExecutionDecision",
+            "V3TargetLocalReselected",
+        ];
+        if process == "direct"
+            && !nodes
+                .windows(expected_chain.len())
+                .any(|window| window == expected_chain)
+        {
+            controls.push(format!(
+                "{process}: request {request_id} lacks ordered recovery chain: {nodes:?}"
+            ));
+        }
         let artifact_path = dirs[0].join("provider-failed-attempts.json");
         let artifact = std::fs::read_to_string(&artifact_path)
             .ok()
