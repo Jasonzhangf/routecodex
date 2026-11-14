@@ -438,22 +438,7 @@ async fn p0_error_leak_family_precommit_sse_reselect_or_transport_break() {
 
         let mut exhaustion = start(process, false).await;
         let wire = raw(&exhaustion, "/v1/responses", &headers, &body).await;
-        let text = String::from_utf8_lossy(&wire);
-        if !wire.is_empty() {
-            assert!(
-                text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
-                "{process}: exhaustion must only break an accepted SSE transport: {text}"
-            );
-            assert!(
-                !text.contains("data:")
-                    && !text.contains("event:")
-                    && !text.contains("network_error")
-                    && !text.contains("unparseable-json")
-                    && !text.contains("[DONE]")
-                    && !wire.ends_with(b"0\r\n\r\n"),
-                "{process}: exhaustion leaked a client error or fabricated terminal: {text}"
-            );
-        }
+        assert_exhaustion_breaks_sse_transport(process, &wire);
         assert_eq!(
             exhaustion.captures.recv().await.unwrap()["model"],
             "wire-owned"
@@ -468,6 +453,89 @@ async fn p0_error_leak_family_precommit_sse_reselect_or_transport_break() {
         drained(&exhaustion).await;
         exhaustion.stop().await;
     }
+}
+
+/// Accepts only the two contract-legal shapes for a failed SSE request: a
+/// pre-header connection close, or an accepted SSE response whose chunked body
+/// ends before any legal HTTP/1.1 message terminator. A clean Content-Length
+/// completion, a complete chunked terminator with optional trailers, or a
+/// server error head would all be fabricated success/error, not a transport
+/// break.
+fn assert_exhaustion_breaks_sse_transport(process: &str, wire: &[u8]) {
+    if wire.is_empty() {
+        // The client SSE channel was never accepted, so nothing can be
+        // completed or fabricated; the closed connection is the detectable
+        // transport termination.
+        return;
+    }
+    let text = String::from_utf8_lossy(wire);
+    assert!(
+        text.starts_with("HTTP/1.1 200") && text.contains("text/event-stream"),
+        "{process}: exhaustion must only break an accepted SSE transport: {text}"
+    );
+    assert!(
+        !text.contains("data:")
+            && !text.contains("event:")
+            && !text.contains("network_error")
+            && !text.contains("unparseable-json")
+            && !text.contains("[DONE]"),
+        "{process}: exhaustion leaked a client error or fabricated terminal: {text}"
+    );
+    let (head, body) = text
+        .split_once("\r\n\r\n")
+        .unwrap_or_else(|| panic!("{process}: accepted SSE response head missing: {text}"));
+    let head_lower = head.to_ascii_lowercase();
+    assert!(
+        !head_lower.contains("content-length:"),
+        "{process}: exhaustion must not complete a Content-Length response: {text}"
+    );
+    assert!(
+        head_lower.contains("transfer-encoding: chunked"),
+        "{process}: exhaustion must keep the accepted chunked SSE transport: {text}"
+    );
+    assert!(
+        !chunked_message_is_complete(body.as_bytes()),
+        "{process}: exhaustion must break before the chunked terminator or trailers: {text}"
+    );
+}
+
+fn chunked_message_is_complete(body: &[u8]) -> bool {
+    let mut rest = body;
+    loop {
+        let Some(line_end) = find_crlf(rest) else {
+            return false;
+        };
+        let size_line = &rest[..line_end];
+        let size_text = size_line.split(|byte| *byte == b';').next().unwrap_or(&[]);
+        let Ok(size_text) = std::str::from_utf8(size_text) else {
+            return false;
+        };
+        let Ok(size) = usize::from_str_radix(size_text.trim(), 16) else {
+            return false;
+        };
+        let after_size = &rest[line_end + 2..];
+        if size == 0 {
+            let mut trailers = after_size;
+            loop {
+                let Some(trailer_end) = find_crlf(trailers) else {
+                    return false;
+                };
+                let (trailer, next) = trailers.split_at(trailer_end);
+                if trailer.is_empty() {
+                    return true;
+                }
+                trailers = &next[2..];
+            }
+        }
+        if after_size.len() < size + 2 || &after_size[size..size + 2] != b"\r\n" {
+            return false;
+        }
+        rest = &after_size[size + 2..];
+    }
+}
+
+fn find_crlf(bytes: &[u8]) -> Option<usize> {
+    bytes.windows(2).position(|window| window == b"\r\n")
 }
 
 fn request_dirs(samples_root: &Path, marker: &str) -> Vec<std::path::PathBuf> {
