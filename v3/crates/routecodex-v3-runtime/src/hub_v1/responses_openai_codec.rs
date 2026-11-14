@@ -43,6 +43,13 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
         messages.push(json!({"role":"system","content":instructions}));
     }
 
+    // The declaration registry owns the current declaration surface. It merges
+    // the root `tools` and every `additional_tools` source in source order, so
+    // a later source refreshes an earlier one and one client identity keeps
+    // one effective schema. The canonical Chat request carries exactly one
+    // declaration source, so re-appending the raw `additional_tools` children
+    // here would place two different schemas for one identity into that single
+    // source and turn a representable request into a local conflict.
     let mut tools = resolve_responses_tool_declarations(payload)?;
     for (input_index, item) in input.iter().enumerate() {
         let item = item.as_object().ok_or_else(|| {
@@ -59,7 +66,16 @@ pub(crate) fn build_v3_chat_canonical_request_from_responses_payload(
                         .to_string()
                 })?;
                 for tool in embedded {
-                    tools.push(tool.clone());
+                    // Only declarations the identity registry does not manage
+                    // stay here, such as the native discovery declaration and
+                    // hosted tools. Identity declarations are already merged
+                    // into one effective declaration per client identity.
+                    if !matches!(
+                        tool.get("type").and_then(Value::as_str),
+                        Some("namespace" | "function" | "custom")
+                    ) {
+                        tools.push(tool.clone());
+                    }
                 }
             }
             "web_search" => {
