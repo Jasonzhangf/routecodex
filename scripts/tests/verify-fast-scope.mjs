@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const repo = process.cwd();
@@ -591,6 +591,90 @@ try {
   }
 } finally {
   rmSync(unsupportedRustRoot, { recursive: true, force: true });
+}
+
+function runShellSyntaxFixture(relative, contents, { stubs = false } = {}) {
+  const fixtureRoot = mkdtempSync(join(repo, 'playground', '.verify-fast-shell-syntax-'));
+  const target = join(fixtureRoot, relative);
+  mkdirSync(join(target, '..'), { recursive: true });
+  writeFileSync(target, contents);
+  symlinkSync(join(repo, 'node_modules'), join(fixtureRoot, 'node_modules'), 'dir');
+  execFileSync('git', ['init', '-q'], { cwd: fixtureRoot });
+  execFileSync('git', ['add', relative], { cwd: fixtureRoot });
+  const env = { ...process.env, ROUTECODEX_GATE_DIFF_MODE: 'staged', ROUTECODEX_GATE_SCOPE_ONLY: '1' };
+  let interpreterLog = null;
+  if (stubs) {
+    const binDir = join(fixtureRoot, '.interpreter-stubs');
+    interpreterLog = join(fixtureRoot, '.interpreter-calls.log');
+    writeFileSync(interpreterLog, '');
+    mkdirSync(binDir, { recursive: true });
+    for (const name of ['sh', 'bash']) {
+      const stubPath = join(binDir, name);
+      writeFileSync(stubPath, `#!/bin/sh\nprintf '%s\\n' '${name}' >> '${interpreterLog}'\ncat >/dev/null\nexit 0\n`);
+      chmodSync(stubPath, 0o755);
+    }
+    env.PATH = `${binDir}:${process.env.PATH}`;
+  }
+  try {
+    const result = spawnSync(process.execPath, [verifier], { cwd: fixtureRoot, encoding: 'utf8', env });
+    return {
+      status: result.status,
+      output: `${result.stdout || ''}\n${result.stderr || ''}`,
+      calls: interpreterLog ? readFileSync(interpreterLog, 'utf8').split('\n').filter(Boolean) : [],
+    };
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+const shellSyntaxCases = [
+  {
+    relative: 'scripts/bash-array-valid.sh',
+    contents: '#!/usr/bin/env bash\nset -euo pipefail\nitems=(alpha beta)\nprintf \'%s\\n\' "${items[@]}"\n',
+    expect: 'pass',
+  },
+  {
+    relative: 'scripts/bash-syntax-invalid.sh',
+    contents: '#!/bin/bash\nif true; then\necho open\n',
+    expect: 'fail',
+  },
+  {
+    relative: 'scripts/posix-valid.sh',
+    contents: '#!/bin/sh\nset -eu\necho ok\n',
+    expect: 'pass',
+  },
+  {
+    relative: 'scripts/posix-syntax-invalid.sh',
+    contents: '#!/bin/sh\nif true; then\necho open\n',
+    expect: 'fail',
+  },
+];
+for (const { relative, contents, expect } of shellSyntaxCases) {
+  const result = runShellSyntaxFixture(relative, contents);
+  if (expect === 'pass' && result.status !== 0) {
+    failures.push(`shell syntax must accept ${relative}, got status=${result.status}\n${result.output}`);
+  } else if (expect === 'fail' && (result.status === 0 || !result.output.includes('shell syntax check failed'))) {
+    failures.push(`shell syntax must reject ${relative}, got status=${result.status}\n${result.output}`);
+  }
+}
+
+const interpreterSelectionCases = [
+  { relative: 'scripts/selected-bash.sh', contents: '#!/usr/bin/env bash\ntrue\n', expected: 'bash' },
+  { relative: 'scripts/selected-env-bash-split.sh', contents: '#!/usr/bin/env -S bash -e\ntrue\n', expected: 'bash' },
+  { relative: 'scripts/env-split-flags-bash.sh', contents: '#!/usr/bin/env -S -i bash -e\ntrue\n', expected: 'bash' },
+  { relative: 'scripts/env-split-assignment-bash.sh', contents: '#!/usr/bin/env -S FOO=bar bash -e\ntrue\n', expected: 'bash' },
+  { relative: 'scripts/selected-posix.sh', contents: '#!/bin/sh\ntrue\n', expected: 'sh' },
+  { relative: 'scripts/comment-bash-not-shebang.sh', contents: '# bash helper\nitems=(alpha beta)\n', expected: 'sh' },
+  { relative: 'scripts/python-with-bash-argument.sh', contents: '#!/usr/bin/python bash\nitems=(alpha beta)\n', expected: 'sh' },
+  { relative: 'scripts/env-unset-value-bash.sh', contents: '#!/usr/bin/env -u bash python\nitems=(alpha beta)\n', expected: 'sh' },
+  { relative: 'scripts/env-argv0-bash-python.sh', contents: '#!/usr/bin/env --argv0 bash python\nitems=(alpha beta)\n', expected: 'sh' },
+  { relative: '.githooks/pre-commit', contents: '#!/usr/bin/env sh\ntrue\n', expected: 'sh' },
+];
+for (const { relative, contents, expected } of interpreterSelectionCases) {
+  const result = runShellSyntaxFixture(relative, contents, { stubs: true });
+  if (result.status !== 0 || result.calls.length !== 1 || result.calls[0] !== expected) {
+    failures.push(`shell syntax must run ${expected} -n for ${relative}, got status=${result.status} calls=${JSON.stringify(result.calls)}\n${result.output}`);
+  }
 }
 
 if (failures.length > 0) {
