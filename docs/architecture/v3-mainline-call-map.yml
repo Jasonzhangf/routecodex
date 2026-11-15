@@ -7978,6 +7978,43 @@ chains:
       side_channel_reads: [v3.observability.webui_store]
       side_channel_writes: []
 
+- chain_id: v3.admin.observability_status_projection
+  owner_feature_id: v3.admin_observability_aggregation
+  summary: Admin reads retained observability rows without mutation, derives one terminal display status from the stored Error06 chain and declared legacy error mapping, and returns the same status through records facets, filters, and the served usage view.
+  edges:
+  - step_id: v3-admin-observability-status-01
+    from_node: V3AdminObservabilityAggregation
+    to_node: V3AdminErrorRowStatus
+    caller_symbol: records
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    callee_symbol: row_status_code
+    callee_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    status: anchored
+    owner_feature_id: v3.admin_observability_aggregation
+    semantic_input: retained observability QueryRow with original result and meta
+    semantic_output: error-row terminal display label without store mutation
+    resource_flow:
+      consumes: [v3.observability.webui_store]
+      produces: []
+      side_channel_reads: [v3.observability.webui_store]
+      side_channel_writes: []
+  - step_id: v3-admin-observability-status-02
+    from_node: V3AdminErrorRowStatus
+    to_node: V3AdminUsageRenderedStatus
+    caller_symbol: renderEntriesPanel
+    caller_file: v3/admin-webui/app/views/usage.js
+    callee_symbol: statusText
+    callee_file: v3/admin-webui/app/views/usage.js
+    status: anchored
+    owner_feature_id: v3.admin_observability_aggregation
+    semantic_input: records API row with original meta and projected error origin
+    semantic_output: rendered request-row status label
+    resource_flow:
+      consumes: [v3.observability.webui_store]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+
 - chain_id: v3.route_policy.condition_evaluation
   owner_feature_id: v3.route_policy_condition_evaluation
   summary: Typed turn observations are projected into a bounded history window and evaluated
