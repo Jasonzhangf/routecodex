@@ -3554,6 +3554,7 @@ features:
   - Structured Chat reasoning and reasoning_text remain preserved alongside deliverable output but do not authorize success alone. Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
   - b878f6c_compact_responses_message_fields_are_business_content preserves compact message text with optional reasoning exactly for JSON and SSE, makes one business attempt without provider cooldown, and retains true-empty JSON/SSE transport-abort controls; issuee63d2f2 separately locks reasoning-only failure.
   - b878f6c_compact_responses_reach_real_chat_consumer projects Responses compact text, reasoning_content, reasoning_text and mixed message shapes through the public Chat JSON/SSE consumer on the first attempt without cooldown or duplicate text; compact_chat_message_projection_preserves_text_and_reasoning_once binds the same mapping and unchanged source extensions without loopback.
+  - p0_error_leak_family_precommit_sse_reselect_or_transport_break locks the shared error-leak family at the public entry: a precommit provider-stream failure on a client SSE request is recovered by the declared eligible successor candidate, and request-level exhaustion of that same candidate ends the accepted transport detectably without a client error status, error body, SSE error frame, fabricated completion, [DONE] or normal chunked terminator.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
@@ -3571,6 +3572,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test local599_consumer_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib local599_output -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server request_boundary_error_makes_no_provider_attempt_and_no_health_mutation -- --exact --test-threads=1 --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling p0_error_leak_family_precommit_sse_reselect_or_transport_break -- --exact --nocapture --test-threads=1
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
