@@ -561,10 +561,33 @@ fn status_code_label(value: Option<&Value>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+fn projected_error06_status_code(row: &QueryRow) -> Option<String> {
+    row.meta
+        .get("observed_error")?
+        .get("chain")?
+        .as_array()?
+        .iter()
+        .find(|node| {
+            node.get("node").and_then(Value::as_str) == Some("V3Error06ClientProjected")
+                && node.get("state").and_then(Value::as_str) == Some("projected")
+        })?
+        .get("code")
+        .and_then(|code| {
+            code.as_str()
+                .and_then(|code| code.parse::<u16>().ok())
+                .or_else(|| code.as_u64().and_then(|code| u16::try_from(code).ok()))
+        })
+        .filter(|code| (400..=599).contains(code))
+        .map(|code| code.to_string())
+}
+
 fn error_category_status_code(category: Option<&str>) -> Option<String> {
     let category = category?.trim();
     if let Some(code) = category.strip_prefix("provider_http_") {
-        if code.parse::<u16>().is_ok() {
+        if code
+            .parse::<u16>()
+            .is_ok_and(|code| (400..=599).contains(&code))
+        {
             return Some(code.to_string());
         }
     }
@@ -721,30 +744,43 @@ fn row_error_origin_opt(row: &QueryRow) -> Option<&'static str> {
 }
 
 fn row_status_code(row: &QueryRow) -> String {
-    // Error rows display their typed error identity first. A local conversion
-    // failure stays visibly local even when a legacy carrier still records a
-    // numeric provider status (e.g. an internal 400 that never reached the
-    // provider). Only a numeric typed identity may replace the provider status:
-    // non-numeric labels such as `network` describe a transport failure but must
-    // not split one status bucket away from its other origins.
-    if matches!(
+    let is_error = matches!(
         row.result.as_deref(),
         Some("error") | Some("failed-attempt")
-    ) {
-        if let Some(code) =
-            error_category_status_code(row.meta.get("error_category").and_then(Value::as_str))
+    );
+    if is_error {
+        if let Some(code) = projected_error06_status_code(row) {
+            return code;
+        }
+    }
+    let category_status =
+        error_category_status_code(row.meta.get("error_category").and_then(Value::as_str));
+    if is_error {
+        if let Some(code) = category_status
+            .as_deref()
+            .filter(|code| code.chars().all(|character| character.is_ascii_digit()))
         {
-            if code.chars().all(|character| character.is_ascii_digit()) {
-                return code;
-            }
+            return code.to_string();
         }
     }
     let provider_status = status_code_label(row.meta.get("provider_status"));
-    if provider_status != "unknown" {
+    if !is_error {
+        if provider_status != "unknown" {
+            return provider_status;
+        }
+        return error_category_status_code(row.meta.get("error_category").and_then(Value::as_str))
+            .unwrap_or_else(|| "599".to_string());
+    }
+    if provider_status
+        .parse::<u16>()
+        .is_ok_and(|code| (400..=599).contains(&code))
+    {
         return provider_status;
     }
-    error_category_status_code(row.meta.get("error_category").and_then(Value::as_str))
-        .unwrap_or_else(|| "599".to_string())
+    if category_status.as_deref() == Some("network") {
+        return "network".to_string();
+    }
+    "unknown".to_string()
 }
 
 fn facet_add_status_code_label(
