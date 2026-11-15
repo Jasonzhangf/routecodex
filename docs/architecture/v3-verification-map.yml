@@ -3218,6 +3218,8 @@ features:
   - Public Responses Direct JSON and SSE requests recover from a Provider A HTTP 502 to a distinct Provider B business response while retaining A's admitted ordinal, provider request projection, actual response head, body bytes, and original typed source in the final private artifact; Provider B does not overwrite or duplicate A's failed attempt.
   - A declared provider pin receives text and image requests according to pool selection; capability labels do not reject the passable request or divert it to the unrelated default pool.
   - 'Seeded Chat Relay success and terminal failure record the receiving output authoritative sequence once: original Direct failure A followed by later Relay failure B, preserving their exact typed sources and order.'
+  - issue23fe689_openai_chat_direct_provider_terminal_ledger_terminal, issue23fe689_openai_chat_relay_provider_terminal_ledger_terminal, issue23fe689_anthropic_direct_provider_terminal_ledger_terminal, issue23fe689_anthropic_relay_provider_terminal_ledger_terminal, issue23fe689_gemini_direct_provider_terminal_ledger_terminal and issue23fe689_gemini_relay_provider_terminal_ledger_terminal each pin the declared execution mode, write exactly one failed terminal row with the real provider HTTP status and error category, and expose only a client transport break without provider error payload.
+  - issue23fe689_recovered_candidate_is_not_closed_early proves a failed first candidate followed by a healthy successor completes the public client request, writes one completed terminal row, and never writes an early failed terminal.
   - The existing compaction early-return branch records any preceding typed failures before returning, without moving or reusing a consumed handoff and without changing its existing client behavior.
   required_negative:
   - Clean successes without a failed attempt or terminal source do not force failure evidence persistence.
@@ -3592,6 +3594,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib local599_output -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server request_boundary_error_makes_no_provider_attempt_and_no_health_mutation -- --exact --test-threads=1 --nocapture
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling p0_error_leak_family_precommit_sse_reselect_or_transport_break -- --exact --nocapture --test-threads=1
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue23fe689_provider_terminal_ledger_row -- --nocapture --test-threads=1
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
