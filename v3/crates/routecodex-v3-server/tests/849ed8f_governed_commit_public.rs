@@ -911,7 +911,7 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
 }
 
 #[tokio::test]
-async fn declared_tool_request_projects_first_business_delta_before_terminal() {
+async fn declared_tool_request_buffers_business_delta_until_provider_terminal() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     // The DSH harness always declares tools and omits `tool_choice`, so a
@@ -944,8 +944,8 @@ async fn declared_tool_request_projects_first_business_delta_before_terminal() {
         .expect("the attempt must project its terminal");
     let lead = completed_at.saturating_sub(first_delta_at);
     assert!(
-        lead >= Duration::from_millis(300),
-        "a declared-tool request must project its first business delta before the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
+        lead < Duration::from_millis(100),
+        "provider business content must remain buffered until the complete attempt is accepted; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
     );
     assert_no_client_error(&text);
     entry.stop().await;

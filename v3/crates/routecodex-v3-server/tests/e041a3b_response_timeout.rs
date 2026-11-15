@@ -14,13 +14,14 @@ use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
 use std::{
     convert::Infallible,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::{mpsc, oneshot},
-    time::timeout,
+    time::{sleep, timeout},
 };
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -58,6 +59,26 @@ async fn upstream(
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
     let input = body["input"].as_str().unwrap_or_default();
+    if input.contains("cross-candidate-repeat") {
+        let (status, body) = match body["model"].as_str() {
+            Some("wire-e041a3b") => (
+                StatusCode::TOO_MANY_REQUESTS,
+                r#"{"error":"first identity exhausted"}"#,
+            ),
+            Some("wire-intermediate") => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                r#"{"error":"intermediate identity exhausted"}"#,
+            ),
+            _ => (StatusCode::OK, ""),
+        };
+        if status != StatusCode::OK {
+            return Response::builder()
+                .status(status)
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+        }
+    }
     if input.contains("committed-deadline") {
         let delta = json!({
             "type": "response.output_text.delta",
@@ -141,6 +162,35 @@ async fn start() -> Entry {
 }
 
 async fn start_with(residence_ms: u64, timeout_ms: u64, recovery: bool, health: bool) -> Entry {
+    start_with_timeouts(residence_ms, timeout_ms, timeout_ms, recovery, health).await
+}
+
+async fn start_with_timeouts(
+    residence_ms: u64,
+    request_timeout_ms: u64,
+    first_frame_timeout_ms: u64,
+    recovery: bool,
+    health: bool,
+) -> Entry {
+    start_with_timeouts_and_intermediate(
+        residence_ms,
+        request_timeout_ms,
+        first_frame_timeout_ms,
+        recovery,
+        health,
+        false,
+    )
+    .await
+}
+
+async fn start_with_timeouts_and_intermediate(
+    residence_ms: u64,
+    request_timeout_ms: u64,
+    first_frame_timeout_ms: u64,
+    recovery: bool,
+    health: bool,
+    include_intermediate: bool,
+) -> Entry {
     std::env::set_var("E041A3B_DEADLINE_KEY", "owned-fixture-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
@@ -167,7 +217,12 @@ async fn start_with(residence_ms: u64, timeout_ms: u64, recovery: bool, health: 
     );
     let port = test_ports::free_port();
     let backup_target = if recovery {
-        ",{kind=\"provider_model\",provider=\"test\",model=\"recover\",key=\"key\",priority=1}"
+        ",{kind=\"provider_model\",provider=\"backup\",model=\"recover\",key=\"key\",priority=1}"
+    } else {
+        ""
+    };
+    let intermediate_target = if include_intermediate {
+        ",{kind=\"provider_model\",provider=\"intermediate\",model=\"intermediate\",key=\"key\",priority=2}"
     } else {
         ""
     };
@@ -188,8 +243,8 @@ default_model = "test"
 auth = {{type="api_key",entries=[{{alias="key",env="E041A3B_DEADLINE_KEY"}}]}}
 health = {{enabled={health},failure_threshold=1,cooldown_ms=5000}}
 responses = {{process="direct",streaming="always"}}
-request_timeout_ms = {timeout_ms}
-sse_first_frame_timeout_ms = {timeout_ms}
+request_timeout_ms = {request_timeout_ms}
+sse_first_frame_timeout_ms = {first_frame_timeout_ms}
 [providers.test.models.test]
 wire_name = "wire-e041a3b"
 capabilities = ["text"]
@@ -198,9 +253,35 @@ supports_streaming = true
 wire_name = "wire-recover"
 capabilities = ["text"]
 supports_streaming = true
+[providers.intermediate]
+type = "responses"
+base_url = "http://{upstream_addr}/v1"
+default_model = "intermediate"
+auth = {{type="api_key",entries=[{{alias="key",env="E041A3B_DEADLINE_KEY"}}]}}
+health = {{enabled={health},failure_threshold=1,cooldown_ms=5000}}
+responses = {{process="direct",streaming="always"}}
+request_timeout_ms = {request_timeout_ms}
+sse_first_frame_timeout_ms = {first_frame_timeout_ms}
+[providers.intermediate.models.intermediate]
+wire_name = "wire-intermediate"
+capabilities = ["text"]
+supports_streaming = true
+[providers.backup]
+type = "responses"
+base_url = "http://{upstream_addr}/v1"
+default_model = "recover"
+auth = {{type="api_key",entries=[{{alias="key",env="E041A3B_DEADLINE_KEY"}}]}}
+health = {{enabled={health},failure_threshold=1,cooldown_ms=5000}}
+responses = {{process="direct",streaming="always"}}
+request_timeout_ms = {request_timeout_ms}
+sse_first_frame_timeout_ms = {first_frame_timeout_ms}
+[providers.backup.models.recover]
+wire_name = "wire-recover"
+capabilities = ["text"]
+supports_streaming = true
 [route_groups.default.pools.default]
 selection = {{strategy="priority"}}
-targets = [{{kind="provider_model",provider="test",model="test",key="key",priority=2}}{backup_target}]
+targets = [{{kind="provider_model",provider="test",model="test",key="key",priority=3}}{intermediate_target}{backup_target}]
 [debug]
 log_console = false
 snapshots = true
@@ -228,6 +309,39 @@ async fn public_logs(entry: &Entry) -> Value {
         .json()
         .await
         .unwrap()
+}
+
+fn request_records_path(home: &Path, port: u16) -> PathBuf {
+    home.join(".rcc")
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"))
+}
+
+fn read_request_records(path: &Path) -> Vec<Value> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| line.get("row").cloned())
+        .collect()
+}
+
+async fn wait_request_records(path: &Path, budget: Duration) -> Vec<Value> {
+    let deadline = Instant::now() + budget;
+    loop {
+        let rows = read_request_records(path);
+        if rows.iter().any(|row| {
+            matches!(
+                row["event_type"].as_str(),
+                Some("request.completed" | "request.failed" | "request.cancelled")
+            )
+        }) || Instant::now() >= deadline
+        {
+            return rows;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
 }
 
 async fn raw_deadline_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Result<usize>) {
@@ -477,7 +591,7 @@ async fn expired_request_never_dispatches_or_cools_backup_candidate() {
     assert!(entry.captures.try_recv().is_err());
     let response = reqwest::Client::new()
         .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
+        .json(&json!({"model":"backup.recover","input":"healthy-sibling","stream":true}))
         .send()
         .await
         .unwrap();
@@ -525,7 +639,7 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn committed_first_frame_then_residence_deadline_breaks_transport_without_backup_dispatch() {
+async fn business_delta_before_terminal_stays_buffered_and_residence_deadline_stops_it() {
     let _guard = TEST_LOCK.lock().await;
     let mut entry = start_with(250, 5000, true, true).await;
 
@@ -551,10 +665,9 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
         wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),
         "unexpected client transport framing: {wire_text}"
     );
-    assert_eq!(
-        wire_text.matches("committed-business-delta").count(),
-        1,
-        "client must receive the certified committed business delta exactly once: {wire_text}"
+    assert!(
+        !wire_text.contains("committed-business-delta"),
+        "full buffering leaked the incomplete provider attempt to the client: {wire_text}"
     );
     assert!(
         !wire_text.contains("response.completed")
@@ -593,7 +706,7 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
         .unwrap();
     let response = client
         .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
+        .json(&json!({"model":"backup.recover","input":"healthy-sibling","stream":true}))
         .send()
         .await
         .unwrap();
@@ -604,4 +717,154 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
     eprintln!("e041a3b-committed sibling={sibling}");
 
     entry.stop().await;
+}
+
+#[tokio::test]
+async fn inter_frame_stall_selects_a_different_provider_and_keeps_failed_attempt_private() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .expect("fixture HOME must remain scoped to the public-entry test");
+    let mut entry = start_with_timeouts(45_000, 45_000, 30_000, true, true).await;
+    let started = Instant::now();
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(44))
+        .build()
+        .unwrap()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "input": "deadline-inter-frame-switch",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed >= Duration::from_millis(29_000),
+        "inter-frame recovery happened before the fixed 30s budget: {elapsed:?}"
+    );
+    assert!(
+        elapsed <= Duration::from_secs(44),
+        "inter-frame recovery exceeded the request residence budget: {elapsed:?}"
+    );
+    assert!(
+        body.contains("sibling-success") && body.contains("response.completed"),
+        "replacement provider did not complete the public response: {body}"
+    );
+    assert!(
+        !body.contains("deadline-reasoning")
+            && !body.contains("provider_response_sse_inter_event_timeout")
+            && !body.contains("\"error\"")
+            && !body.contains("network_error")
+            && !body.contains("502")
+            && !body.contains("598")
+            && !body.contains("599"),
+        "failed attempt frames or errors leaked to the client: {body}"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-e041a3b"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover"
+    );
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "failed provider identity was retried"
+    );
+
+    let records = wait_request_records(
+        &request_records_path(&home, entry.handle.listeners[0].addr.port()),
+        Duration::from_secs(3),
+    )
+    .await;
+    let records_text = serde_json::to_string(&records).unwrap();
+    assert!(
+        records_text.contains("provider_response_sse_inter_event_timeout"),
+        "typed inter-frame timeout evidence is missing from the listener request records: {records_text}"
+    );
+    eprintln!(
+        "e041a3b-inter-frame elapsed_ms={} switched=2",
+        elapsed.as_millis()
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+#[tokio::test]
+async fn cross_candidate_failures_never_retry_prior_provider_identity() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .expect("fixture HOME must remain scoped to the public-entry test");
+    let mut entry =
+        start_with_timeouts_and_intermediate(15_000, 5_000, 5_000, true, true, true).await;
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .unwrap()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({
+            "input": "cross-candidate-repeat",
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+
+    assert!(
+        body.contains("sibling-success") && body.contains("response.completed"),
+        "three-candidate recovery did not complete on the final provider: {body}"
+    );
+    assert!(
+        !body.contains("first identity exhausted")
+            && !body.contains("intermediate identity exhausted")
+            && !body.contains("provider_response")
+            && !body.contains("\"error\"")
+            && !body.contains("network_error")
+            && !body.contains("502")
+            && !body.contains("599"),
+        "failed provider responses leaked through the public entry: {body}"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-e041a3b"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-intermediate"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover"
+    );
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "a failed provider identity was selected again after the intermediate candidate"
+    );
+
+    let records = wait_request_records(
+        &request_records_path(&home, entry.handle.listeners[0].addr.port()),
+        Duration::from_secs(3),
+    )
+    .await;
+    let records_text = serde_json::to_string(&records).unwrap();
+    assert!(
+        records_text.contains("429") && records_text.contains("503"),
+        "typed failed-attempt statuses are missing from the public request records: {records_text}"
+    );
+    eprintln!("e041a3b-cross-candidate order=[wire-e041a3b,wire-intermediate,wire-recover]");
+
+    entry.stop().await;
+    drop(home_guard);
 }

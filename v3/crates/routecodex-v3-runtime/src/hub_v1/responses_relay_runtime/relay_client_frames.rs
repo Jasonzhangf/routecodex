@@ -231,6 +231,10 @@ pub(crate) type V3RelayClientProjectionHandle =
 pub(crate) struct V3RelayChatClientStreamProjector {
     sink: V3CommittedClientFrameSink,
     budget: V3AttemptBudget,
+    /// Full buffering keeps the existing frame construction and ledger, but
+    /// leaves every byte in the attempt until its sealed terminal. A failed
+    /// attempt therefore drops its pending frames without committing the sink.
+    defer_client_sink_until_seal: bool,
     builder: Option<V3CommittedClientSseBuilder>,
     /// Frames produced before the commit point. They stay droppable with the
     /// attempt until a business frame certifies it.
@@ -275,6 +279,7 @@ impl V3RelayChatClientStreamProjector {
         Self {
             sink,
             budget,
+            defer_client_sink_until_seal: false,
             builder: None,
             pending: Vec::new(),
             committed: false,
@@ -298,6 +303,15 @@ impl V3RelayChatClientStreamProjector {
             think_open: None,
             thinking_reasoning_seen: false,
         }
+    }
+
+    pub(crate) fn new_fully_buffered(
+        sink: V3CommittedClientFrameSink,
+        budget: V3AttemptBudget,
+    ) -> Self {
+        let mut projector = Self::new(sink, budget);
+        projector.defer_client_sink_until_seal = true;
+        projector
     }
 
     pub(crate) fn is_committed(&self) -> bool {
@@ -339,7 +353,9 @@ impl V3RelayChatClientStreamProjector {
         for frame in std::mem::take(&mut self.pending) {
             builder.push(frame).map_err(|error| error.to_string())?;
         }
-        builder.commit_client_stream(self.sink.clone());
+        if !self.defer_client_sink_until_seal {
+            builder.commit_client_stream(self.sink.clone());
+        }
         self.builder = Some(builder);
         self.committed = true;
         Ok(())
@@ -1714,6 +1730,13 @@ impl V3RelayChatClientStreamProjector {
             .builder
             .take()
             .ok_or_else(|| "relay client stream did not commit".to_string())?;
+        if self.defer_client_sink_until_seal {
+            // The complete response passed governance and the reconciler. Only
+            // now may the first business byte become visible to the client.
+            // The terminal is then pushed while flush is held, preserving the
+            // sealed replay's single terminal delivery.
+            builder.commit_client_stream(self.sink.clone());
+        }
         builder.hold_client_flush();
         let status = terminal.get("status").and_then(Value::as_str);
         let event = match status {
@@ -1753,8 +1776,12 @@ impl V3RelayChatClientStreamProjector {
         builder
             .mark_last_frame_as_terminal()
             .map_err(|error| error.to_string())?;
-        builder
+        let sealed = builder
             .seal_after_validated_terminal()
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        if self.defer_client_sink_until_seal {
+            return Ok(sealed);
+        }
+        Ok(sealed)
     }
 }

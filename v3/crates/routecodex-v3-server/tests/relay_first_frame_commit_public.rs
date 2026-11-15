@@ -1,8 +1,7 @@
-//! Public-entry regression for the Responses Relay first-frame commit gate.
+//! Public-entry regression for complete Responses Relay attempt buffering.
 //!
-//! A real HTTP listener and raw client socket prove the first business frame
-//! crosses the client SSE channel while the OpenAI Chat provider stream is
-//! still open, before the provider terminal arrives.
+//! A real HTTP listener and raw client socket prove provider business frames
+//! stay inside the attempt until its terminal has passed acceptance.
 
 use axum::{
     body::{Body, Bytes},
@@ -386,7 +385,7 @@ async fn timed_request(entry: &Entry) -> TimedWire {
         };
         wire.extend_from_slice(&chunk[..count]);
         let seen = String::from_utf8_lossy(&wire);
-        if first_delta_at.is_none() && seen.contains("response.output_text.delta") {
+        if first_delta_at.is_none() && seen.contains("early-progressive-text") {
             first_delta_at = Some(started.elapsed());
         }
         if completed_at.is_none() && seen.contains("response.completed") {
@@ -401,7 +400,7 @@ async fn timed_request(entry: &Entry) -> TimedWire {
 }
 
 #[tokio::test]
-async fn relay_first_business_frame_precedes_provider_terminal_at_public_http_entry() {
+async fn relay_business_frame_waits_for_provider_terminal_at_public_http_entry() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start().await;
     let timed = timed_request(&entry).await;
@@ -416,8 +415,8 @@ async fn relay_first_business_frame_precedes_provider_terminal_at_public_http_en
         .expect("the relay attempt must project its terminal");
     let lead = completed_at.saturating_sub(first_delta_at);
     assert!(
-        lead >= Duration::from_millis(300),
-        "Relay must project its first business delta before the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
+        lead < Duration::from_millis(100),
+        "Relay must buffer its business delta until the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
     );
     assert!(
         !text.contains("\"error\"") && !text.contains("network_error"),

@@ -278,39 +278,55 @@ fn provider_request_timeout_must_cover_sse_first_frame_timeout() {
 }
 
 #[test]
-fn remote_provider_first_byte_timeout_above_120_seconds_is_rejected() {
+fn remote_provider_first_byte_timeout_above_30_seconds_is_rejected() {
     let invalid = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
-        "responses = { process = \"chat\", streaming = \"always\" }\nrequest_timeout_ms = 300000\nsse_first_frame_timeout_ms = 300000",
+        "responses = { process = \"chat\", streaming = \"always\" }\nrequest_timeout_ms = 60000\nsse_first_frame_timeout_ms = 30001",
     );
     let error =
         compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
     assert!(
         error
             .to_string()
-            .contains("120000ms remote first-byte budget"),
+            .contains("30000ms remote first-byte budget"),
         "{error}"
     );
 }
 
 #[test]
-fn remote_provider_may_keep_a_total_request_budget_above_120_seconds() {
+fn remote_provider_may_wait_30_seconds_for_the_first_frame() {
     let valid = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
-        "responses = { process = \"chat\", streaming = \"always\" }\nrequest_timeout_ms = 300000\nsse_first_frame_timeout_ms = 120000",
+        "responses = { process = \"chat\", streaming = \"always\" }\nrequest_timeout_ms = 300000\nsse_first_frame_timeout_ms = 30000",
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&valid).unwrap())
-        .expect("only the first-byte budget is capped; the whole-request budget may stay longer");
+        .expect("a remote provider may use the complete 30-second first-byte budget");
 }
 
 #[test]
-fn declared_local_provider_may_exceed_the_remote_first_byte_budget() {
+fn declared_local_provider_may_wait_600_seconds_for_the_first_frame() {
     let valid = FULL_CONFIG.replace(
         "responses = { process = \"chat\", streaming = \"always\" }",
-        "responses = { process = \"chat\", streaming = \"always\" }\nlocal = true\nrequest_timeout_ms = 900000\nsse_first_frame_timeout_ms = 900000",
+        "responses = { process = \"chat\", streaming = \"always\" }\nlocal = true\nrequest_timeout_ms = 900000\nsse_first_frame_timeout_ms = 600000",
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&valid).unwrap())
-        .expect("a provider declared local may keep a longer first-byte budget");
+        .expect("a provider declared local may use the ten-minute first-byte budget");
+}
+
+#[test]
+fn declared_local_provider_first_byte_timeout_above_600_seconds_is_rejected() {
+    let invalid = FULL_CONFIG.replace(
+        "responses = { process = \"chat\", streaming = \"always\" }",
+        "responses = { process = \"chat\", streaming = \"always\" }\nlocal = true\nrequest_timeout_ms = 900000\nsse_first_frame_timeout_ms = 600001",
+    );
+    let error =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&invalid).unwrap()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("600000ms local first-byte budget"),
+        "{error}"
+    );
 }
 
 #[test]

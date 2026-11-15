@@ -301,7 +301,7 @@ where
             }
         };
         *C::body_mut(&mut standardized) = planned_request;
-        failed_candidates = plan.request_local_excluded_candidates;
+        failed_candidates.extend(plan.request_local_excluded_candidates);
         request_local_busy_candidates = BTreeSet::new();
         let expanded = plan.expanded;
         target_source =
