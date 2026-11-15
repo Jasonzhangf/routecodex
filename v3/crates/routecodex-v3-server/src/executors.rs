@@ -334,6 +334,18 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         };
         persist_v3_chat_failure_evidence(state, "openai_chat", &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.take() {
+            record_v3_provider_terminal_request_row(
+                state,
+                "openai_chat",
+                &path,
+                &request_id,
+                relay_output.status,
+                relay_output.error_chain.as_deref().unwrap_or(&[]),
+                relay_output.diagnostic_source.as_ref(),
+                &disposition,
+                relay_output.error_class,
+                false,
+            );
             return provider_terminal_response(
                 state,
                 front_connection_identity,
@@ -438,6 +450,18 @@ pub(crate) async fn execute_v3_openai_chat_direct_server_outcome(
         output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
+        record_v3_provider_terminal_request_row(
+            state,
+            "openai_chat",
+            &path,
+            &request_id,
+            output.client_payload.status,
+            output.error_chain.as_deref().unwrap_or(&[]),
+            output.diagnostic_source.as_ref(),
+            &disposition,
+            None,
+            true,
+        );
         return provider_terminal_response(
             state,
             front_connection_identity,
@@ -641,6 +665,18 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         };
         persist_v3_anthropic_relay_failure_evidence(state, &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.clone() {
+            record_v3_provider_terminal_request_row(
+                state,
+                "anthropic",
+                &path,
+                &request_id,
+                relay_output.status,
+                relay_output.error_chain.as_deref().unwrap_or(&[]),
+                relay_output.diagnostic_source.as_ref(),
+                &disposition,
+                None,
+                false,
+            );
             return provider_terminal_response(
                 state,
                 front_connection_identity,
@@ -717,6 +753,18 @@ pub(crate) async fn execute_v3_anthropic_direct_server_outcome(
         output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
+        record_v3_provider_terminal_request_row(
+            state,
+            "anthropic",
+            &path,
+            &request_id,
+            output.client_payload.status,
+            output.error_chain.as_deref().unwrap_or(&[]),
+            output.diagnostic_source.as_ref(),
+            &disposition,
+            None,
+            true,
+        );
         return provider_terminal_response(
             state,
             front_connection_identity,
@@ -845,6 +893,18 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         };
         persist_v3_gemini_relay_failure_evidence(state, &path, &request_id, &relay_output);
         if let Some(disposition) = relay_output.terminal_disposition.clone() {
+            record_v3_provider_terminal_request_row(
+                state,
+                "gemini",
+                &path,
+                &request_id,
+                relay_output.status,
+                relay_output.error_chain.as_deref().unwrap_or(&[]),
+                relay_output.diagnostic_source.as_ref(),
+                &disposition,
+                None,
+                false,
+            );
             return provider_terminal_response(
                 state,
                 front_connection_identity,
@@ -936,6 +996,18 @@ pub(crate) async fn execute_v3_gemini_direct_server_outcome(
         output.diagnostic_cause.as_ref(),
     );
     if let Some(disposition) = output.terminal_disposition {
+        record_v3_provider_terminal_request_row(
+            state,
+            "gemini",
+            &path,
+            &request_id,
+            output.client_payload.status,
+            output.error_chain.as_deref().unwrap_or(&[]),
+            output.diagnostic_source.as_ref(),
+            &disposition,
+            None,
+            true,
+        );
         return provider_terminal_response(
             state,
             front_connection_identity,
