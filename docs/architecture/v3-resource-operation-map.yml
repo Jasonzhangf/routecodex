@@ -2173,7 +2173,7 @@ resources:
     may_enter_client_body: false
     may_enter_metadata_center: false
     binding_status: anchored
-    required_gates: [npm --prefix v3 run test:distribution, npm --prefix v3 run test:install-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
+    required_gates: [npm --prefix v3 run test:distribution, npm --prefix v3 run test:installer-config-consumer, npm --prefix v3 run test:install-cleanup, npm run verify:v3-resource-map, npm run verify:v3-module-boundaries]
 
   - resource_id: v3.build.node_dependency_lock
     resource_kind: build_dependency_lock

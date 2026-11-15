@@ -4511,9 +4511,12 @@ features:
   - v3/scripts/install-cli.mjs
   - v3/tests/scripts/v3-cli-distribution.spec.mjs
   - v3/tests/scripts/install-lifecycle-boundary.spec.mjs
+  - v3/tests/scripts/installer-config-consumer.spec.mjs
   - scripts/ensure-cli-command-shim.mjs
   - scripts/ensure-cli-executable.mjs
   - scripts/install-global.sh
+  - scripts/install-release.sh
+  - docs/architecture/dags/v3.installer_config_verification.graph.json
   - v3/crates/routecodex-v3-config/Cargo.toml
   - v3/crates/routecodex-v3-config/build.rs
   - v3/crates/routecodex-v3-config/src/lib.rs
@@ -4534,6 +4537,9 @@ features:
   - scripts/ensure-cli-command-shim.mjs
   - scripts/ensure-cli-executable.mjs
   - scripts/install-global.sh
+  - scripts/install-release.sh
+  - v3/tests/scripts/installer-config-consumer.spec.mjs
+  - docs/architecture/dags/v3.installer_config_verification.graph.json
   - tests/scripts/v3-cli-distribution.spec.mjs
   - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
   - v3/crates/routecodex-v3-config/Cargo.toml
@@ -4541,6 +4547,7 @@ features:
   - v3/crates/routecodex-v3-config/src/lib.rs
   - package.json
   - package-lock.json
+  - v3/package.json
   - src/build-info.ts
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
@@ -4560,6 +4567,7 @@ features:
   - ~/.rcc/install
   required_gates:
   - npm --prefix v3 run test:distribution
+  - npm --prefix v3 run test:installer-config-consumer
   - npm --prefix v3 run test:install-cleanup
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries

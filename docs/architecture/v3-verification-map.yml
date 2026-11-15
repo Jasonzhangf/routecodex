@@ -139,7 +139,7 @@ features:
   status: source_active_live_verification_required
   change_risk: high
   owner_kind: build_and_runtime_install_control
-  owner_scope: Direct publication of the self-contained Rust V3 binary and its local command aliases.
+  owner_scope: Direct publication of the self-contained Rust V3 binary and aliases, plus public installer verification against the selected V3 authoring config.
   owner_modules:
   - v3-global-binary-install
   contract:
@@ -150,20 +150,26 @@ features:
   - Installed rccv3 path is ~/.local/bin/rccv3 and reports the embedded RouteCodex build version.
   - routecodex and rcc execute the same installed binary.
   - Aggregate restart and every configured listener health endpoint succeed after installation.
+  - Both public installers default to $HOME/.rcc/config.toml and give ROUTECODEX_INSTALL_VERIFY_CONFIG precedence over RCC_INSTALL_VERIFY_CONFIG.
+  - Global config verification and optional restart consume the same selected config path.
   required_negative:
   - Installation does not create ~/.rcc/install/current or ~/.rcc/install/releases.
   - Command aliases do not fall back to a repository build, npm global package, or release snapshot.
   - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
   - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
   - CI build consumes the declared package version without changing package.json or package-lock.json; version mutation belongs to the explicit release operation.
+  - A missing or invalid selected config fails without an installer success claim; a valid legacy config does not mask a missing default config.toml.
+  - The isolated public-entry gate performs no real install, restart, start, stop, network request, or real HOME mutation.
   required_gates:
   - npm --prefix v3 run test:distribution
+  - npm --prefix v3 run test:installer-config-consumer
   - npm --prefix v3 run test:install-cleanup
   - npm --prefix v3 run verify:v3-resource-map
   - npm --prefix v3 run verify:v3-module-boundaries
   completion_rule:
-    source: Distribution and owned-target tests plus architecture gates pass.
+    source: Distribution, owned-target, installer public-entry, and architecture gates pass. The installer gate reaches the real candidate V3 Config consumer while isolating all package, lifecycle, network, and HOME side effects.
     runtime: Direct global install, aggregate restart, all-listener health, command path, version, and absence of ~/.rcc/install are verified.
+    forbidden_claim: Isolated public-installer evidence does not prove production installation or runtime acceptance.
 - feature_id: v3.config_management
   status: implementation_active_pending_release_rollover
   change_risk: medium
