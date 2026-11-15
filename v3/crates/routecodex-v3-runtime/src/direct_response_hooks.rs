@@ -94,23 +94,26 @@ pub(crate) fn apply_v3_direct_response_projection_hooks(
     retain_response_cipher: bool,
     provider_protocol: V3HubProviderWireProtocol,
 ) {
-    if !retain_response_cipher {
-        match provider_protocol {
-            // Anthropic signature 由 typed wire witness 保留，不按密文形状猜测来源。
-            V3HubProviderWireProtocol::Anthropic => {
-                routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
-                    payload, false, true,
-                );
-            }
-            // Responses wire 全剥非工具密文（fe1ec4b 契约），function_call_output 保留。
-            V3HubProviderWireProtocol::Responses => {
+    match provider_protocol {
+        // Anthropic signature 由 typed wire witness 保留，且该来源边界不能
+        // 被唯一 GPT 候选例外绕过；无论 retain_response_cipher 是否为 true，
+        // 都只保留 reasoning 上的合法签名并删除其他密文。
+        V3HubProviderWireProtocol::Anthropic => {
+            routecodex_v3_provider_responses::apply_v3_response_cipher_policy(payload, false, true);
+        }
+        // Responses wire：唯一 GPT 候选才保留官方密文，其余全剥非工具密文
+        // （fe1ec4b 契约），function_call_output 保留。
+        V3HubProviderWireProtocol::Responses => {
+            if !retain_response_cipher {
                 routecodex_v3_provider_responses::apply_v3_response_cipher_policy(
                     payload, false, false,
                 );
             }
-            // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）；只清理
-            // Codex 本地密文前缀，其余 opaque 值原样进入客户端。
-            V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+        }
+        // Chat wire 的 reasoning 业务形状必须存活（b878f6c 契约）；只清理
+        // Codex 本地密文前缀，其余 opaque 值原样进入客户端。
+        V3HubProviderWireProtocol::OpenAiChat | V3HubProviderWireProtocol::Gemini => {
+            if !retain_response_cipher {
                 routecodex_v3_provider_responses::apply_v3_chat_reasoning_cipher_policy(
                     payload, false,
                 );
@@ -521,17 +524,31 @@ mod tests {
     #[test]
     fn direct_response_projection_keeps_signature_for_typed_anthropic_source() {
         let mut payload = json!({
-            "output": [{
-                "type": "reasoning",
-                "encrypted_content": "typed-anthropic-signature",
-                "summary": [{"type": "summary_text", "text": "signed thought"}]
-            }]
+            "output": [
+                {
+                    "type": "reasoning",
+                    "encrypted_content": "typed-anthropic-signature",
+                    "summary": [{"type": "summary_text", "text": "signed thought"}]
+                },
+                {
+                    "type": "message",
+                    "encrypted_content": "ordinary-message-cipher",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "visible answer",
+                            "encrypted_content": "ordinary-part-cipher"
+                        },
+                        {"type": "encrypted_content", "data": "typed-protocol-cipher"}
+                    ]
+                }
+            ]
         });
 
         apply_v3_direct_response_projection_hooks(
             &mut payload,
             false,
-            false,
+            true,
             V3HubProviderWireProtocol::Anthropic,
         );
 
@@ -540,6 +557,12 @@ mod tests {
             "typed-anthropic-signature"
         );
         assert_eq!(payload["output"][0]["summary"][0]["text"], "signed thought");
+        assert!(payload["output"][1].get("encrypted_content").is_none());
+        assert!(payload["output"][1]["content"][0]
+            .get("encrypted_content")
+            .is_none());
+        assert_eq!(payload["output"][1]["content"].as_array().unwrap().len(), 1);
+        assert_eq!(payload["output"][1]["content"][0]["text"], "visible answer");
     }
 
     #[test]

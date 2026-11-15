@@ -1063,6 +1063,95 @@ async fn direct_sse_text_anthropic_terminal_still_seals() {
     assert!(text.contains("done"), "{text}");
 }
 
+#[tokio::test]
+async fn direct_sse_anthropic_terminal_records_semantic_terminal() {
+    // A legal Anthropic protocol terminal must become a typed semantic
+    // terminal in the stream observation. The console finalizer reads that
+    // typed fact; without it a completed client stream is recorded as a
+    // missing-terminal failure.
+    let observation = V3RuntimeStreamObservation::default();
+    let timing = V3RuntimeTimingState::start();
+    timing.start_external().unwrap();
+    let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_text\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    )]));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream =
+        Box::pin(provider.map(|item| item.map_err(Ok)));
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        observation.clone(),
+        timing,
+        false,
+        false,
+        V3HubProviderWireProtocol::Anthropic,
+    );
+    collect_direct_sse_attempt_after_terminal(
+        projected,
+        V3HubProviderWireProtocol::Anthropic,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await
+    .expect("a text-bearing Direct SSE attempt must seal");
+    assert_eq!(
+        observation.semantic_terminal().unwrap(),
+        Some(crate::hub_v1::V3RuntimeSemanticTerminal::Success),
+        "a legal Anthropic message_stop must be a typed Success terminal"
+    );
+}
+
+#[tokio::test]
+async fn direct_sse_delta_only_eof_records_no_semantic_terminal() {
+    // The negative control: a stream that ends after visible deltas without
+    // any protocol terminal must not claim a semantic terminal, so the
+    // terminal ledger can still record the real missing-terminal failure.
+    let observation = V3RuntimeStreamObservation::default();
+    let timing = V3RuntimeTimingState::start();
+    timing.start_external().unwrap();
+    let provider: V3ClientSseStream = Box::pin(stream::iter([Ok(
+        concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_text\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude\",\"content\":[]}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+        )
+        .as_bytes()
+        .to_vec(),
+    )]));
+    let source: crate::nodes::V3ProviderAttemptSseInnerStream =
+        Box::pin(provider.map(|item| item.map_err(Ok)));
+    let projected = wrap_direct_sse_provider_event_json_observation_stream(
+        V3ProviderAttemptSseStream::new(source),
+        observation.clone(),
+        timing,
+        false,
+        false,
+        V3HubProviderWireProtocol::Anthropic,
+    );
+    let result = collect_direct_sse_attempt_after_terminal(
+        projected,
+        V3HubProviderWireProtocol::Anthropic,
+        crate::nodes::V3AttemptBudget::process_default(),
+    )
+    .await;
+    assert!(result.is_err(), "delta-only EOF must not seal");
+    assert_eq!(
+        observation.semantic_terminal().unwrap(),
+        None,
+        "a missing protocol terminal must not claim a semantic terminal"
+    );
+}
+
 /// Paced provider: the thinking delta arrives immediately, the terminal only
 /// after a delay. The client channel must observe a business frame before the
 /// provider terminal resolves, and the streamed bytes must equal the fully

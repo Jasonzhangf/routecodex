@@ -106,6 +106,10 @@
               "type": "output_text",
               "text": "json answer",
               "annotations": []
+            },
+            {
+              "type": "encrypted_content",
+              "data": "typed-part-json-cipher"
             }
           ]
         },
@@ -137,6 +141,7 @@
       "output.0.summary.0.text": "private uuid plan",
       "output.1.type": "reasoning",
       "output.1.summary.0.text": "private opaque plan",
+      "output.2.content.length": 1,
       "output.2.content.0.text": "json answer",
       "output.3.type": "function_call_output",
       "output.3.call_id": "call_fe1ec4b_json",
@@ -149,6 +154,7 @@
       "output.1.encrypted_content",
       "411bd3dd-47a6-49c0-8eef-6a826f349bf6-0",
       "113833ee-native-cipher",
+      "typed-part-json-cipher",
       "provider_error",
       "internal_error",
       "routecodex_internal",
@@ -161,6 +167,7 @@
       "turn_id": "fe1ec4b-json-response",
       "expected_client_must": {
         "status": "completed",
+        "output.2.content.length": 1,
         "output.2.content.0.text": "json answer"
       }
     },
@@ -393,6 +400,10 @@
                         "type": "output_text",
                         "text": "sse answer",
                         "annotations": []
+                      },
+                      {
+                        "type": "encrypted_content",
+                        "data": "typed-part-sse-cipher"
                       }
                     ]
                   },
@@ -426,6 +437,7 @@
           "output_items.1.encrypted_content",
           "4228e7a1-8e3e-47f0-b32e-866459cdfb28-0",
           "opaque-sse-fe1ec4b-cipher",
+          "typed-part-sse-cipher",
           "provider_error",
           "internal_error",
           "routecodex_internal",
@@ -441,6 +453,7 @@
         "output_items.1.type": "reasoning",
         "output_items.1.summary.0.text": "sse opaque plan",
         "output_items.2.type": "message",
+        "output_items.2.content.length": 1,
         "output_items.3.type": "function_call_output",
         "output_items.3.call_id": "call_fe1ec4b_sse",
         "output_items.3.output.receipt": "business tool output preserved over SSE",

@@ -392,7 +392,8 @@ fn build_responses_wire_payload_with_registry(
 /// `encrypted_content`（Codex 客户端需要官方密文重建 reasoning 历史）；
 /// `preserve_anthropic_signature=true` 仅由 typed Anthropic provider source
 /// 派生，保留 Anthropic thinking/redacted thinking signature。其余场景递归删除
-/// 非工具业务子树中的 `encrypted_content`，保证跨 provider 密文不进入客户端。
+/// 非工具业务子树中的 `encrypted_content` 字段和 Responses `content` 数组中的
+/// `type=encrypted_content` 协议 part，保证跨 provider 密文不进入客户端。
 /// 工具调用与工具结果可能携带结构化参数或业务字段，必须完整保留。响应侧是密文
 /// 治理的唯一入口；本 hook 只消费判定结果。
 pub fn apply_v3_response_cipher_policy(
@@ -400,8 +401,14 @@ pub fn apply_v3_response_cipher_policy(
     retain_response_cipher: bool,
     preserve_anthropic_signature: bool,
 ) {
-    if !retain_response_cipher && !preserve_anthropic_signature {
-        strip_v3_response_encrypted_fields_recursive(payload, true);
+    if !retain_response_cipher {
+        if preserve_anthropic_signature {
+            // Anthropic source 只保留 reasoning 上的合法签名；普通对象与独立
+            // `type=encrypted_content` 协议块仍不得进入 Responses 客户端。
+            strip_v3_response_anthropic_signature_excluding_protocol_cipher(payload);
+        } else {
+            strip_v3_response_encrypted_fields_recursive(payload, true);
+        }
     }
 }
 
@@ -418,6 +425,48 @@ pub fn apply_v3_chat_reasoning_cipher_policy(payload: &mut Value, retain_respons
 /// 形状判定，删除所有非工具 `encrypted_content`；`strip_all=false`（Chat wire）
 /// 只删除 Codex 本地密文前缀。工具调用与工具结果属于业务数据，必须原样保留。
 fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bool) {
+    strip_v3_response_encrypted_fields(value, strip_all, false);
+}
+
+/// 对 typed Anthropic source 只保留 `type=reasoning` 上的非空字符串签名载体；
+/// 其余非工具对象上的 `encrypted_content` 字段和独立 `type=encrypted_content`
+/// 协议 part 都删除。工具业务子树按现有 owner 边界完整保留。
+fn strip_v3_response_anthropic_signature_excluding_protocol_cipher(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if map
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(is_v3_responses_tool_business_item)
+            {
+                return;
+            }
+            let is_reasoning = map.get("type").and_then(Value::as_str) == Some("reasoning");
+            let keep_signature = is_reasoning
+                && matches!(
+                    map.get("encrypted_content"),
+                    Some(Value::String(signature)) if !signature.trim().is_empty()
+                );
+            if !keep_signature {
+                map.remove("encrypted_content");
+            }
+            for child in map.values_mut() {
+                strip_v3_response_anthropic_signature_excluding_protocol_cipher(child);
+            }
+        }
+        Value::Array(items) => {
+            items.retain(|item| {
+                item.get("type").and_then(Value::as_str) != Some("encrypted_content")
+            });
+            for item in items {
+                strip_v3_response_anthropic_signature_excluding_protocol_cipher(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn strip_v3_response_encrypted_fields(value: &mut Value, strip_all: bool, in_content_array: bool) {
     match value {
         Value::Object(map) => {
             if map
@@ -437,13 +486,19 @@ fn strip_v3_response_encrypted_fields_recursive(value: &mut Value, strip_all: bo
             if remove {
                 map.remove("encrypted_content");
             }
-            for child in map.values_mut() {
-                strip_v3_response_encrypted_fields_recursive(child, strip_all);
+            for (key, child) in map.iter_mut() {
+                let child_is_content_array = key == "content" && matches!(child, Value::Array(_));
+                strip_v3_response_encrypted_fields(child, strip_all, child_is_content_array);
             }
         }
         Value::Array(items) => {
+            if strip_all && in_content_array {
+                items.retain(|item| {
+                    item.get("type").and_then(Value::as_str) != Some("encrypted_content")
+                });
+            }
             for item in items {
-                strip_v3_response_encrypted_fields_recursive(item, strip_all);
+                strip_v3_response_encrypted_fields(item, strip_all, false);
             }
         }
         _ => {}

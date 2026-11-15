@@ -426,7 +426,10 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     // 4. Real external truth and the real health effect, straight from the row.
     let observed = &detail["row"]["meta"]["observed_error"];
     assert_eq!(observed["source"], "error06_projection_not_exposed");
-    assert_eq!(observed["external_error_code"], "server_error");
+    assert_eq!(
+        observed["external_error_code"], "HTTP_503",
+        "the external code is derived from the real upstream HTTP status"
+    );
     assert_eq!(observed["external_error_status"], 503);
     assert_eq!(observed["failure_count"], 0);
     // The terminal candidate preserves the real error without changing health;

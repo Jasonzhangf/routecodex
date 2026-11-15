@@ -75,9 +75,9 @@ function upstreamToolCall(upstream) {
       .find((call) => call?.function?.arguments);
 }
 
-test('real corpus loads 78 fixtures sorted with exact identities', () => {
+test('real corpus loads 80 fixtures sorted with exact identities', () => {
   const loaded = loadFixtures(realFixtureRoot);
-  assert.equal(loaded.length, 78);
+  assert.equal(loaded.length, 80);
   const ids = loaded.map((entry) => entry.value.case_id);
   assert.equal(ids.length, new Set(ids).size);
   assert.equal(ids[0], 'anthropic-to-anthropic-json');
@@ -85,12 +85,12 @@ test('real corpus loads 78 fixtures sorted with exact identities', () => {
   assert.deepEqual(loaded.map((entry) => entry.relative), [...loaded.map((entry) => entry.relative)].sort());
   const report = inspectCorpus(realFixtureRoot);
   assert.equal(report.ok, true, report.findings.join('\n'));
-  assert.equal(report.case_count, 78);
+  assert.equal(report.case_count, 80);
   assert.deepEqual(report.findings, []);
   assert.equal(report.coverage.base_cells, 16);
   assert.equal(report.coverage.base_cells_covered, 16);
   assert.equal(report.coverage.base_variants_covered, 32);
-  assert.equal(report.extensions.length, 46);
+  assert.equal(report.extensions.length, 48);
   assert.equal(report.source_refs.checked, false);
   assert.deepEqual(report.source_refs.stale_files, []);
   assert.deepEqual(report.source_refs.stale_tests, []);
@@ -112,6 +112,8 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
   assert.equal(primary.turns[1].expected_provider.paths[0], '/v1/responses');
   assert.ok(primary.expected_client.body_must_not.includes('411bd3dd-47a6-49c0-8eef-6a826f349bf6-0'));
   assert.ok(primary.expected_client.body_must_not.includes('113833ee-native-cipher'));
+  assert.equal(primary.expected_client.body_must['output.2.content.length'], 1);
+  assert.ok(primary.expected_client.body_must_not.includes('typed-part-json-cipher'));
   assert.equal(primary.expected_client.body_must['output.3.output.encrypted_content'], 'tool-business-cipher-json');
   assert.equal(primary.expected_client.body_must['output.3.output.nested.opaque'], 'keep-json-business-value');
   assert.ok(primary.turns[1].expected_provider.body_must_not.includes('input.1.encrypted_content'));
@@ -123,6 +125,8 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
     primary.turns[1].expected_client_must['output_items.3.output.encrypted_content'],
     'tool-business-cipher-sse',
   );
+  assert.equal(primary.turns[1].expected_client_must['output_items.2.content.length'], 1);
+  assert.ok(primary.turns[1].expected_client_contract.body_must_not.includes('typed-part-sse-cipher'));
   const toolFollowup = byId.get('fe1ec4b-responses-tool-cipher-json-sse-followup');
   assert.ok(toolFollowup);
   assert.equal(toolFollowup.tool_followup.consumer, 'structured-echo');
@@ -136,6 +140,25 @@ test('fe1ec4b fixtures bind public JSON/SSE evidence and typed countercases', ()
     'call_fe1ec4b_tool',
   );
   assert.equal(toolFollowup.turns[1].expected_provider.body_must['input.2.output'], 'ping');
+
+  const authExpanded = byId.get('fe1ec4b-responses-auth-expanded-cipher-relay-json');
+  assert.ok(authExpanded);
+  assert.deepEqual(authExpanded.runtime_setup.auth_aliases, ['key1', 'key2']);
+  assert.equal(authExpanded.upstream_response.body.output[0].encrypted_content, 'gpt-auth-expanded-cipher');
+  assert.equal(
+    authExpanded.upstream_response.body.output[1].content[1].data,
+    'typed-part-auth-expanded-cipher',
+  );
+  assert.ok(authExpanded.expected_client.body_must_not.includes('gpt-auth-expanded-cipher'));
+  assert.ok(authExpanded.expected_client.body_must_not.includes('typed-part-auth-expanded-cipher'));
+
+  const uniqueGpt = byId.get('fe1ec4b-responses-unique-gpt-cipher-relay-json');
+  assert.ok(uniqueGpt);
+  assert.equal(uniqueGpt.runtime_setup.candidate_ids.length, 1);
+  assert.equal(
+    uniqueGpt.expected_client.body_must['output.0.encrypted_content'],
+    'gpt-unique-retained-cipher',
+  );
 
   for (const caseId of [
     'fe1ec4b-responses-anthropic-signature-json',
@@ -547,6 +570,19 @@ test('runtime_setup accepts single and multi-candidate typed declarations', () =
   withFixture({ 'valid-case': multi }, validManifest(['valid-case']), (root) => {
     assert.deepEqual(inspectCorpus(root).findings, []);
   });
+
+  const aliased = baseCase({
+    runtime_setup: {
+      provider_id: 'mock-responses',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: ['mock-responses/mock.responses-model'],
+      auth_aliases: ['key1', 'key2'],
+    },
+  });
+  withFixture({ 'valid-case': aliased }, validManifest(['valid-case']), (root) => {
+    assert.deepEqual(inspectCorpus(root).findings, []);
+  });
 });
 
 test('runtime_setup rejects unsupported or inconsistent typed declarations', () => {
@@ -563,6 +599,32 @@ test('runtime_setup rejects unsupported or inconsistent typed declarations', () 
     const message = findingsOf(root);
     assert.match(message, /runtime_setup\.unsupported is not a supported field/);
     assert.match(message, /runtime_setup\.candidate_ids must be unique/);
+  });
+
+  const aliasedMulti = baseCase({
+    runtime_setup: {
+      provider_id: 'mock-responses-a',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: ['mock-responses-a/mock.responses-model', 'mock-responses-b/mock.responses-model'],
+      auth_aliases: ['key1', 'key2'],
+    },
+  });
+  withFixture({ 'valid-case': aliasedMulti }, validManifest(['valid-case']), (root) => {
+    assert.match(findingsOf(root), /runtime_setup\.auth_aliases is supported only with one provider\/model target/);
+  });
+
+  const duplicateAliases = baseCase({
+    runtime_setup: {
+      provider_id: 'mock-responses',
+      model: 'mock.responses-model',
+      wire_model: 'responses-model',
+      candidate_ids: ['mock-responses/mock.responses-model'],
+      auth_aliases: ['key1', 'key1'],
+    },
+  });
+  withFixture({ 'valid-case': duplicateAliases }, validManifest(['valid-case']), (root) => {
+    assert.match(findingsOf(root), /runtime_setup\.auth_aliases must declare exactly two non-empty unique aliases/);
   });
 });
 

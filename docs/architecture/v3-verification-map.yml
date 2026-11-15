@@ -1241,6 +1241,7 @@ features:
     JSON as client SSE without treating provider inbound transport as client protocol truth
   - Client stream requests keep text/event-stream for Error06 and success frames; non-stream requests keep JSON while valid provider JSON may omit top-level finish_reason
   required_gates:
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling a83b3ce_direct_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry -- --exact
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_dsml_ -- --nocapture
   # f665809: exact prefixed invoke grammar is harvested by the shared parser
   # through registered Direct hooks; executable truncation uses processing Error.
@@ -1503,6 +1504,8 @@ features:
     - final_provider_final_key_429_stays_health_neutral_and_ends_transport
     - remaining_same_provider_key_is_attempted_after_first_key_failure
     - last_of_two_failing_keys_keep_errors_internal_and_end_transport
+    - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_direct
+    - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_relay
   jenny_sse_nonblocking_blackbox:
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e37891a_jenny_sse -- --nocapture --test-threads=1
     test_ids:
@@ -1535,6 +1538,10 @@ features:
   - The selected pool's complete tier sequence precedes its declared default successor;
     candidates retain their original pool provenance and genuine media requirements
     without default-tier media projection or reclassification
+  - All expanded visible candidates remain attemptable in declared order. A visible
+    candidate ordinal, including the ninth or later, is never an attempt ceiling and
+    never creates a recovery wait; failed provider errors remain internal while the
+    next candidate can complete the client response.
   - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding
       never hard-reject a candidate
@@ -1937,6 +1944,7 @@ features:
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-sse --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime responses_sse_tree --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime openai_chat_sse_tree --lib
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue9b6133c_late_tool_call_id_public -- --nocapture
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime direct_sse_consumers --lib
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime provider_sse --lib
   - npm run verify:v3-relay-hook-resources
@@ -2050,7 +2058,7 @@ features:
     - fe23457_relay_preserves_false_absent_and_distinct_tool_extensions
     - fe23457_strict_provider_rejects_dropped_declaration_field
     - fe23457_relay_preserves_tool_call_and_paired_result
-    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issuefe23457_anthropic_tool_preservation_public -- --nocapture --test-threads=1
+    command: CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issuefe23457_anthropic_tool_preservation_public -- --nocapture
   owner_kind: rust_v3_protocol_codec_field_parity
   owner_scope: Lossless field parity for V3 Relay protocol conversion and Responses Direct; structured latest user/tool images survive across Chat, Responses and Anthropic. Chat projects tool images to adjacent user content, Responses to function_call_output.output and Anthropic to tool_result.content, without server/SSE/MetadataCenter repair owners.
   compatibility_exceptions:
@@ -2198,7 +2206,9 @@ features:
     nodes.
   required_blackbox:
   - responses_additional_tools_refreshes_same_namespace_tool_before_chat_projection
+  - responses_additional_tools_refreshes_same_namespace_custom_tool_before_anthropic_projection
   - responses_direct_declared_namespace_restores_mcp_identity_for_public_consumer
+  - responses_direct_additional_tools_declarations_execute_and_follow_up_once
   - responses_direct_namespace_identity_covers_declaration_sources_and_collisions_for_public_consumer
   - namespace_wire_bindings_preserve_plain_calls_colliding_paths_and_native_custom
   - namespace_target_bindings_keep_kind_choice_history_and_inverse
@@ -2269,6 +2279,8 @@ features:
   - responses_inbound_does_not_rewrite_same_named_user_tool_schema
   - responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext
   - fe1ec4b-responses-ciphertext-json-sse-two-turn
+  - fe1ec4b-responses-auth-expanded-cipher-relay-json
+  - fe1ec4b-responses-unique-gpt-cipher-relay-json
   - fe1ec4b-responses-tool-cipher-json-sse-followup
   - fe1ec4b-responses-anthropic-signature-json
   - fe1ec4b-responses-anthropic-signature-sse
@@ -2457,6 +2469,8 @@ features:
   - Responses Relay last default retries exactly twice with fixed 5s delay and projects on the third failure
   - provider/client payloads do not leak session metadata_center resource or routecodex control fields
   required_gates:
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling a83b3ce_relay_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry -- --exact
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue955d28d_next_candidate_public -- --nocapture --test-threads=1
   - CARGO_NET_OFFLINE=true cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime terminal_merge --lib -- --nocapture
   - npm run test:v3-5520-duplicate-tool-identity
   - npm run test:v3-hub-relay-runtime-closeout
@@ -3546,6 +3560,7 @@ features:
   - Structured Chat reasoning and reasoning_text remain preserved alongside deliverable output but do not authorize success alone. Gemini filtering finishReason or promptFeedback remain business results; candidate-less Gemini prompt filtering is a real JSON/SSE terminal and seals typed control without inventing payload fields.
   - b878f6c_compact_responses_message_fields_are_business_content preserves compact message text with optional reasoning exactly for JSON and SSE, makes one business attempt without provider cooldown, and retains true-empty JSON/SSE transport-abort controls; issuee63d2f2 separately locks reasoning-only failure.
   - b878f6c_compact_responses_reach_real_chat_consumer projects Responses compact text, reasoning_content, reasoning_text and mixed message shapes through the public Chat JSON/SSE consumer on the first attempt without cooldown or duplicate text; compact_chat_message_projection_preserves_text_and_reasoning_once binds the same mapping and unchanged source extensions without loopback.
+  - p0_error_leak_family_precommit_sse_reselect_or_transport_break locks the shared error-leak family at the public entry: a precommit provider-stream failure on a client SSE request is recovered by the declared eligible successor candidate, and request-level exhaustion of that same candidate ends the accepted transport detectably without a client error status, error body, SSE error frame, fabricated completion, [DONE] or normal chunked terminator.
   required_negative:
   - Id model and metadata strings cannot trigger content matching.
   - Error policy directive cannot enter normal provider/client payload MetadataCenter or SSE/Server ownership.
@@ -3563,6 +3578,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test local599_consumer_blackbox -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib local599_output -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server request_boundary_error_makes_no_provider_attempt_and_no_health_mutation -- --exact --test-threads=1 --nocapture
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling p0_error_leak_family_precommit_sse_reselect_or_transport_break -- --exact --nocapture --test-threads=1
   - npm run test:v3-provider-action-gate
   - npm run verify:v3-provider-action-gate
   - npm run test:v3-provider-action-gate-red-fixtures
@@ -3622,6 +3638,7 @@ features:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-virtual-router
   - npm run verify:v3-resource-map
   - npm run verify:v3-module-boundaries
+  - npm run test:verify-fast-scope
   - git diff --check
   completion_boundary:
     source_controlled: true
@@ -3824,11 +3841,48 @@ features:
     curl_is_diagnostic_only: true
     agy_review: required
 
+- feature_id: v3.admin_observability_aggregation
+  status: source_active_runtime_pending_live_ui_replay
+  owner_kind: rust_v3_admin_observability_status_projection
+  owner_scope: Admin reads the retained per-listener JSONL store, projects provider attempts and terminal rows, and derives the displayed terminal status from typed Error06 truth plus declared legacy carriers. It never rewrites the stored rows.
+  unit:
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/admin-webui/app/views/usage.js
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_observability.rs
+  - v3/admin-webui/records-error-terminal-status-smoke.mjs
+  contract:
+  - docs/architecture/dags/v3.admin_error_row_status.graph.json
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - A retained error row with error_category=http_200, provider_status=200, and no stored typed terminal status renders the terminal status unknown in both the records API facets/filter and the served usage.js status label, while result=error, error_origin=local, and the original meta fields stay unchanged.
+  - The retained error row is selected by status=error&error_status_code=unknown&error_origin=local and is not selected by the same filter with error_status_code=200.
+  - A successful request with provider_status=200 still renders 200, carries no error origin, and contributes no error facet.
+  - A real upstream provider_http_502 failed attempt still renders 502 with origin upstream.
+  - A stored projected V3Error06ClientProjected code of 599 renders 599 even when provider_status=200, and takes precedence over a conflicting internal_request_lane category.
+  required_negative:
+  - An error row never renders a successful carrier such as provider_status=200; missing typed terminal status renders unknown, not 5xx, 598, 599, or a fabricated status.
+  - An observed V3Error06ClientProjected code outside the 400..599 error range (for example 200) is not selected as the terminal status.
+  - Reading records does not rewrite the stored rows; the store is byte-identical before and after the GET.
+  - Detail-endpoint not_reached placeholders, internal_code, Error02 class, and external_error_status are not read as a client terminal status.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_observability observability_error_row_terminal_status_never_uses_success_carrier -- --exact --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
+  - npm run verify:webui-smoke
+  - npm run verify:v3-architecture-ci
+  - dagpipe graph validate docs/architecture/dags/v3.admin_error_row_status.graph.json
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+
 - feature_id: v3.server_internal_observability_projection
-  status: source_active_live_verified
+  status: source_controlled_runtime_pending_live_replay
   owner_kind: rust_v3_bounded_internal_observability_projection
   owner_scope: Server appends typed lifecycle rows to a per-listener JSONL store; Admin reads the same store directly and no public observability API is registered on ordinary listeners.
   unit:
+  - v3/crates/routecodex-v3-server/src/console/impl_webui_projection.rs
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
   contract:
@@ -3840,6 +3894,7 @@ features:
   - Every accepted lifecycle event appends one typed row to the per-listener JSONL store.
   - Folded reader returns the latest lifecycle row per request_key; raw reader preserves every lifecycle row so failed provider attempts stay visible.
   - Each listener writes its own isolated request-records file and never leaks another listener's port.
+  - A provider-attempt row with a real external HTTP status records provider_http_<status> before any body-derived error type; a status-less failure keeps the existing transport/provider error identity and body text remains diagnostic detail.
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - A provider failure followed by a switch writes exactly one provider_attempt_failed row; the provider_switched row does not repeat the failed attempt's provider_status, error_category, error_detail, or observed_error.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
@@ -3852,10 +3907,13 @@ features:
   - An oversized new row or corrupt existing JSONL fails explicitly without overwriting the store.
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib provider_attempt_category_uses_real_http_status_before_body_error_type -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_relay_openai_chat_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup
   - npm run verify:v3-resource-map
-  - npm run verify-architecture-mainline-call-map
+  - npm run verify:architecture-mainline-call-map
   - git diff --check
   completion_boundary:
     source_controlled: true

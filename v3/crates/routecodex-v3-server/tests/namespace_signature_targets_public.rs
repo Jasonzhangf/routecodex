@@ -102,6 +102,36 @@ struct Upstream {
 
 fn check(body: &Value, target: &str) -> Vec<String> {
     let mut errors = Vec::new();
+    if target == "responses" {
+        fn collect_names(tools: &[Value], prefix: &str, names: &mut Vec<String>) {
+            for tool in tools {
+                let Some(name) = tool["name"].as_str() else {
+                    continue;
+                };
+                let name = format!("{prefix}{name}");
+                if tool["type"] == "namespace" {
+                    collect_names(
+                        tool["tools"].as_array().unwrap(),
+                        &format!("{name}__"),
+                        names,
+                    );
+                } else {
+                    names.push(name);
+                }
+            }
+        }
+        let mut names = Vec::new();
+        collect_names(body["tools"].as_array().unwrap(), "", &mut names);
+        for item in body["input"].as_array().into_iter().flatten() {
+            if item["type"] == "additional_tools" {
+                collect_names(item["tools"].as_array().unwrap(), "", &mut names);
+            }
+        }
+        let unique: std::collections::BTreeSet<_> = names.iter().collect();
+        if unique.len() != names.len() {
+            errors.push(format!("duplicate executable tool declarations: {names:?}"));
+        }
+    }
     if target != "responses" {
         let wire = body.to_string();
         for forbidden in [
@@ -254,7 +284,7 @@ async fn upstream(State(state): State<Upstream>, Json(body): Json<Value>) -> Res
         .unwrap()
 }
 
-async fn run(target: &'static str) {
+async fn run(target: &'static str, direct_mode: bool) {
     let _lock = LOCK.lock().await;
     let home = Home::new(target);
     let (captures, mut receiver) = mpsc::unbounded_channel();
@@ -280,7 +310,12 @@ async fn run(target: &'static str) {
         .find(|line| line.contains("entry_protocol = \"responses\""))
         .unwrap();
     let relay = r#"  { entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" },"#;
-    let declaration = declaration.replace(direct, relay);
+    let declaration = if direct_mode {
+        declaration
+    } else {
+        declaration.replace(direct, relay)
+    };
+    let process = if direct_mode { "direct" } else { "chat" };
     let port = test_ports::free_port();
     let execution = hub_v1_fixture::hub_v1_server_execution("signature");
     let source = format!(
@@ -299,7 +334,7 @@ base_url = "{base}"
 default_model = "signature-wire"
 auth = {{ type = "api_key", entries = [{{ alias = "controlled", env = "V3_SIGNATURE_TARGET_KEY" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "chat", streaming = "always" }}
+responses = {{ process = "{process}", streaming = "client" }}
 [providers.signature.models.signature-wire]
 wire_name = "signature-wire"
 aliases = ["signature-client"]
@@ -320,12 +355,25 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap();
-    let result = client.post(&endpoint).json(&request(&calls())).send().await;
+    let mut first_request = request(&calls());
+    if target == "responses" {
+        first_request["input"].as_array_mut().unwrap().insert(0,
+            json!({"type":"additional_tools","role":"developer","tools":tools(),"opaque":"retained"}));
+        first_request["tools"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"function","name":"ordinary","parameters":{"type":"object"}}));
+    }
+    let result = client.post(&endpoint).json(&first_request).send().await;
     let capture = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
         .await
         .unwrap()
         .unwrap();
     eprintln!("SIGNATURE_TARGET_WIRE target={target} {capture}");
+    if direct_mode {
+        assert_eq!(capture["body"]["input"][0], first_request["input"][0]);
+        assert_eq!(capture["body"]["tools"][0]["name"], "ordinary");
+    }
     let mut errors: Vec<String> = capture["errors"]
         .as_array()
         .unwrap()
@@ -348,9 +396,12 @@ targets = [{{ kind = "provider_model", provider = "signature", model = "signatur
                 assert_eq!(call["type"], original["type"]);
                 assert_eq!(execute(call), "42");
             }
+            let mut followup_request = request(calls);
+            followup_request["input"].as_array_mut().unwrap().insert(0,
+                json!({"type":"additional_tools","role":"developer","tools":tools(),"opaque":"retained"}));
             let followup = client
                 .post(&endpoint)
-                .json(&request(calls))
+                .json(&followup_request)
                 .send()
                 .await
                 .unwrap();
@@ -418,13 +469,18 @@ fn super_call(call: &Value) -> Value {
 
 #[tokio::test]
 async fn signed_namespace_history_responses_exact_projection_consumer() {
-    run("responses").await;
+    run("responses", false).await;
+}
+
+#[tokio::test]
+async fn responses_direct_additional_tools_declarations_execute_and_follow_up_once() {
+    run("responses", true).await;
 }
 #[tokio::test]
 async fn signed_namespace_history_anthropic_declared_drop_diagnostic() {
-    run("anthropic").await;
+    run("anthropic", false).await;
 }
 #[tokio::test]
 async fn signed_namespace_history_chat_declared_drop_diagnostic() {
-    run("openai_chat").await;
+    run("openai_chat", false).await;
 }

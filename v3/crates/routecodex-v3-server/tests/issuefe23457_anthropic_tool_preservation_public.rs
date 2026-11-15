@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::{
     ffi::OsString,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
     time::Duration,
 };
 use tokio::sync::oneshot;
@@ -24,15 +24,22 @@ struct TestHomeGuard {
     previous_home: Option<OsString>,
     previous_key: Option<OsString>,
     path: PathBuf,
+    _environment_lock: MutexGuard<'static, ()>,
 }
 
 impl TestHomeGuard {
-    fn new() -> Self {
+    fn new(test_name: &str) -> Self {
+        // HOME and the provider-key environment are process-wide. Keep the
+        // fixture environment scoped to one complete server lifetime under
+        // the test runner's normal parallel selection. Each test owns a
+        // distinct directory.
+        let environment_lock = test_environment_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = std::env::temp_dir().join(format!(
-            "routecodex-fe23457-anthropic-public-{}",
+            "routecodex-fe23457-anthropic-public-{}-{test_name}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).unwrap();
         let previous_home = std::env::var_os("HOME");
         let previous_key = std::env::var_os(PROVIDER_KEY_ENV);
@@ -42,8 +49,14 @@ impl TestHomeGuard {
             previous_home,
             previous_key,
             path,
+            _environment_lock: environment_lock,
         }
     }
+}
+
+fn test_environment_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 impl Drop for TestHomeGuard {
@@ -355,7 +368,7 @@ async fn http_client() -> reqwest::Client {
 
 #[tokio::test]
 async fn fe23457_relay_preserves_complete_declarations_first_attempt() {
-    let _guard = TestHomeGuard::new();
+    let _guard = TestHomeGuard::new("complete-declarations");
     let fixture = RunningFixture::start().await;
     let client = http_client().await;
     let ingress = initial_request();
@@ -383,7 +396,7 @@ async fn fe23457_relay_preserves_complete_declarations_first_attempt() {
 
 #[tokio::test]
 async fn fe23457_relay_preserves_false_absent_and_distinct_tool_extensions() {
-    let _guard = TestHomeGuard::new();
+    let _guard = TestHomeGuard::new("false-absent-and-distinct-extensions");
     let fixture = RunningFixture::start().await;
     let client = http_client().await;
     let response = client
@@ -421,7 +434,7 @@ async fn fe23457_strict_provider_rejects_dropped_declaration_field() {
 
 #[tokio::test]
 async fn fe23457_relay_preserves_tool_call_and_paired_result() {
-    let _guard = TestHomeGuard::new();
+    let _guard = TestHomeGuard::new("tool-call-and-paired-result");
     let fixture = RunningFixture::start().await;
     let client = http_client().await;
     let first = client
