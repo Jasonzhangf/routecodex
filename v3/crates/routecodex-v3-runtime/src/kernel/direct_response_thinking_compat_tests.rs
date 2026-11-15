@@ -43,6 +43,62 @@ fn direct_thinking_sse_mixed_body_emits_appended_reasoning() {
     assert!(wire.contains("answer"));
 }
 
+#[test]
+fn direct_thinking_attempt_drops_in_progress_snapshot_with_partial_marker() {
+    let frames = vec![
+        direct_thinking_event_frame(
+            "response.in_progress",
+            json!({
+                "type":"response.in_progress",
+                "response":{
+                    "output":[message_output_item("m", "safe <thin")]
+                }
+            }),
+        ),
+        sse_frames(&tagged_sse(
+            &["safe <thinking>private</thinking>answer"],
+            "safe <thinking>private</thinking>answer",
+        ))
+        .into_iter()
+        .last()
+        .unwrap(),
+    ];
+    let (rewritten, _) = rewrite_v3_direct_thinking_attempt(&frames).unwrap();
+    let wire = String::from_utf8(rewritten.concat()).unwrap();
+    assert!(!wire.contains("safe <thin"), "{wire}");
+    assert!(wire.contains("response.completed"), "{wire}");
+    assert!(wire.contains("response.reasoning_summary_text.delta"), "{wire}");
+    assert!(wire.contains("answer"), "{wire}");
+}
+
+#[test]
+fn direct_thinking_attempt_preserves_in_progress_snapshot_with_ordinary_text_suffix() {
+    let frames = vec![
+        direct_thinking_event_frame(
+            "response.in_progress",
+            json!({
+                "type":"response.in_progress",
+                "response":{
+                    "output":[message_output_item("m", "closing>")]
+                }
+            }),
+        ),
+        sse_frames(&tagged_sse(
+            &["closing> <thinking>private</thinking>answer"],
+            "closing> <thinking>private</thinking>answer",
+        ))
+        .into_iter()
+        .last()
+        .unwrap(),
+    ];
+    let (rewritten, _) = rewrite_v3_direct_thinking_attempt(&frames).unwrap();
+    let wire = String::from_utf8(rewritten.concat()).unwrap();
+    assert!(wire.contains("response.in_progress"), "{wire}");
+    assert!(wire.contains("\"text\":\"closing>\""), "{wire}");
+    assert!(wire.contains("response.reasoning_summary_text.delta"), "{wire}");
+    assert!(wire.contains("answer"), "{wire}");
+}
+
 fn message_output_item(id: &str, text: &str) -> Value {
     json!({
         "id": id,

@@ -152,6 +152,25 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
                 "committed-prefix <thinking>secret</thinking>"
             )])),
         ],
+        "ordinary-visible-secret-token" => {
+            let text = "ordinary secret remains visible";
+            vec![
+                delta(0, 0, text),
+                text_done(0, 0, text),
+                completed(json!([message(text)])),
+            ]
+        }
+        "failed-attempt-reasoning-before-seal" if model != "wire-recover" => {
+            let label = dsml_close();
+            let full = format!(
+                "<thinking>failed-attempt-reasoning</thinking>failed-attempt-visible\n{label}\n"
+            );
+            vec![
+                delta(0, 0, &full),
+                text_done(0, 0, &full),
+                completed(json!([message(&full)])),
+            ]
+        }
         "split-orphan-before-commit" if model != "wire-recover" => {
             let label = dsml_close();
             let (head, tail) = label.split_at(2);
@@ -653,6 +672,162 @@ fn projected_delta_text(wire: &[u8]) -> String {
     text
 }
 
+fn collect_message_output_text(item: &Value, texts: &mut Vec<String>) {
+    if item["type"] != "message" {
+        return;
+    }
+    if let Some(text) = item["text"].as_str() {
+        texts.push(text.to_owned());
+    }
+    for part in item["content"].as_array().into_iter().flatten() {
+        if part["type"] == "output_text" {
+            if let Some(text) = part["text"].as_str() {
+                texts.push(text.to_owned());
+            }
+        }
+    }
+}
+
+fn projected_visible_text_values(wire: &[u8]) -> Vec<String> {
+    let mut texts = Vec::new();
+    for event in response_sse_events(&decoded_chunked_body(wire)) {
+        match event["type"].as_str() {
+            Some("response.output_text.delta") => {
+                if let Some(delta) = event["delta"].as_str() {
+                    texts.push(delta.to_owned());
+                }
+            }
+            Some("response.output_text.done") => {
+                if let Some(text) = event["text"].as_str() {
+                    texts.push(text.to_owned());
+                }
+            }
+            Some("response.content_part.added" | "response.content_part.done") => {
+                if event.pointer("/part/type").and_then(Value::as_str) == Some("output_text") {
+                    if let Some(text) = event.pointer("/part/text").and_then(Value::as_str) {
+                        texts.push(text.to_owned());
+                    }
+                }
+            }
+            Some("response.output_item.added" | "response.output_item.done") => {
+                collect_message_output_text(&event["item"], &mut texts);
+            }
+            Some(
+                "response.created"
+                | "response.in_progress"
+                | "response.queued"
+                | "response.completed"
+                | "response.incomplete",
+            ) => {
+                for item in event
+                    .pointer("/response/output")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_message_output_text(item, &mut texts);
+                }
+            }
+            _ => {}
+        }
+    }
+    texts
+}
+
+fn terminal_reasoning_summary_texts(wire: &[u8]) -> Vec<String> {
+    let events = response_sse_events(&decoded_chunked_body(wire));
+    let Some(terminal) = events.iter().rev().find(|event| {
+        matches!(
+            event["type"].as_str(),
+            Some("response.completed" | "response.incomplete")
+        )
+    }) else {
+        return Vec::new();
+    };
+    let mut texts = Vec::new();
+    for item in terminal
+        .pointer("/response/output")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item["type"] == "reasoning")
+    {
+        for part in item["summary"].as_array().into_iter().flatten() {
+            if part["type"] == "summary_text" {
+                if let Some(text) = part["text"].as_str() {
+                    texts.push(text.to_owned());
+                }
+            }
+        }
+    }
+    texts
+}
+
+fn reasoning_summary_event_texts(wire: &[u8], event_type: &str) -> Vec<String> {
+    response_sse_events(&decoded_chunked_body(wire))
+        .into_iter()
+        .filter(|event| event["type"] == event_type)
+        .filter_map(|event| {
+            event["text"].as_str().map(str::to_owned).or_else(|| {
+                (event_type == "response.reasoning_summary_text.delta")
+                    .then(|| event["delta"].as_str().map(str::to_owned))
+                    .flatten()
+            })
+        })
+        .collect()
+}
+
+fn assert_governed_thinking(
+    wire: &[u8],
+    text: &str,
+    expected_visible: &[&str],
+    expected_reasoning: &[&str],
+) {
+    assert!(
+        !text.contains("<thinking>") && !text.contains("</thinking>") && !text.contains("<thin"),
+        "governance markers must not reach the client: {text}"
+    );
+
+    let visible = projected_visible_text_values(wire);
+    assert!(
+        !visible.is_empty(),
+        "client received no visible business text: {text}"
+    );
+    assert!(
+        visible.iter().all(|value| {
+            !value.contains("<thinking>")
+                && !value.contains("</thinking>")
+                && !value.contains("<thin")
+                && !value.contains("</thin")
+                && expected_reasoning
+                    .iter()
+                    .all(|reasoning| !value.contains(reasoning))
+        }),
+        "governed thinking body reached a visible text carrier: {visible:?}"
+    );
+    assert_eq!(
+        completed_output_texts(wire),
+        expected_visible,
+        "the terminal response must contain exactly the legitimate visible output"
+    );
+
+    let reasoning_deltas =
+        reasoning_summary_event_texts(wire, "response.reasoning_summary_text.delta");
+    let reasoning_done =
+        reasoning_summary_event_texts(wire, "response.reasoning_summary_text.done");
+    let terminal_reasoning = terminal_reasoning_summary_texts(wire);
+    for (name, values) in [
+        ("reasoning delta", &reasoning_deltas),
+        ("reasoning done", &reasoning_done),
+        ("terminal reasoning summary", &terminal_reasoning),
+    ] {
+        assert_eq!(
+            values, expected_reasoning,
+            "{name} must faithfully carry the governed thinking body"
+        );
+    }
+}
+
 fn assert_no_client_error(text: &str) {
     assert!(
         !text.contains("\"error\"")
@@ -664,25 +839,20 @@ fn assert_no_client_error(text: &str) {
     );
 }
 
-#[tokio::test]
-async fn post_commit_thinking_governance_breaks_before_completion() {
-    let _guard = TEST_LOCK.lock().await;
-    let entry = start(false).await;
-    let (wire, ended) = raw_request(
-        &entry,
-        "849ed8f-post-commit-thinking",
-        "post-commit-thinking-failure",
-    )
-    .await;
-    let text = wire_text(&wire);
-    eprintln!("849ed8f post-terminal wire={text}");
-
-    assert!(text.contains("committed-prefix"), "{text}");
+/// A fully buffered Relay attempt that fails before its request-level seal must
+/// not hand the client a single provider business byte. The listener may have
+/// accepted the SSE transport, so the client observes the transport head and a
+/// detectable body break, never semantic content or an error payload.
+fn assert_pre_seal_failure_delivered_no_business(wire: &[u8], ended: &std::io::Result<usize>) {
+    let text = wire_text(wire);
     assert!(
-        !text.contains("<thinking>") && !text.contains("secret"),
-        "{text}"
+        !text.contains("response.created"),
+        "a pre-seal failure must not deliver a response head: {text}"
     );
-    assert!(!text.contains("response.completed"), "{text}");
+    assert!(
+        !text.contains("response.output_text.delta") && !text.contains("response.completed"),
+        "a pre-seal failure must not deliver business frames: {text}"
+    );
     assert!(
         !text.ends_with("0\r\n\r\n"),
         "normal chunked completion leaked: {text}"
@@ -695,25 +865,80 @@ async fn post_commit_thinking_governance_breaks_before_completion() {
                 .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
         "unexpected transport ending: {ended:?}"
     );
+}
+
+#[tokio::test]
+async fn thinking_governance_projects_reasoning_and_preserves_committed_prefix() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, ended) = raw_request(
+        &entry,
+        "849ed8f-post-commit-thinking",
+        "post-commit-thinking-failure",
+    )
+    .await;
+    let text = wire_text(&wire);
+    eprintln!("849ed8f post-terminal wire={text}");
+
+    // Full buffering lets the complete-attempt thinking owner project the
+    // governed result before any byte reaches the client. The tags are control
+    // syntax; the enclosed model reasoning is legitimate deliverable content.
+    assert!(text.contains("committed-prefix"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "the governed attempt must seal normally: {text}"
+    );
+    assert_eq!(completed_output_texts(&wire), vec!["committed-prefix "]);
+    assert_governed_thinking(&wire, &text, &["committed-prefix "], &["secret"]);
+    assert_no_client_error(&text);
+    assert!(ended.is_ok(), "unexpected transport ending: {ended:?}");
     entry.stop().await;
 }
 
 #[tokio::test]
-async fn split_orphan_after_clean_commit_does_not_leak_label_or_completion() {
+async fn ordinary_visible_secret_token_is_preserved() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, ended) = raw_request(
+        &entry,
+        "849ed8f-ordinary-secret",
+        "ordinary-visible-secret-token",
+    )
+    .await;
+    let text = wire_text(&wire);
+    let expected = "ordinary secret remains visible";
+
+    assert_eq!(completed_output_texts(&wire), vec![expected]);
+    let visible = projected_visible_text_values(&wire);
+    assert!(
+        visible.iter().all(|value| value == expected),
+        "ordinary visible text must not be rewritten: {visible:?}"
+    );
+    assert!(
+        reasoning_summary_event_texts(&wire, "response.reasoning_summary_text.delta").is_empty(),
+        "untagged business text must not be fabricated as reasoning: {text}"
+    );
+    assert!(terminal_reasoning_summary_texts(&wire).is_empty(), "{text}");
+    assert_no_client_error(&text);
+    assert!(ended.is_ok(), "unexpected transport ending: {ended:?}");
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn split_orphan_before_seal_delivers_no_business_bytes() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, _) = raw_request(&entry, "849ed8f-orphan-after", "split-orphan-after-commit").await;
     let text = wire_text(&wire);
     eprintln!("849ed8f orphan-after wire={text}");
 
-    assert!(text.contains("hello"), "{text}");
+    assert_pre_seal_failure_delivered_no_business(&wire, &std::io::Result::Ok(0));
     assert!(!text.contains("tool_calls"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        !text.contains("hello"),
+        "the buffered business text must not reach the client: {text}"
     );
-    assert_no_client_error(&text);
     entry.stop().await;
 }
 
@@ -752,6 +977,55 @@ async fn split_orphan_before_commit_recovers_without_leaking() {
 }
 
 #[tokio::test]
+async fn failed_attempt_reasoning_is_not_projected_before_recovery() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start(true).await;
+    let (wire, _) = raw_request(
+        &entry,
+        "849ed8f-failed-attempt-reasoning",
+        "failed-attempt-reasoning-before-seal",
+    )
+    .await;
+    let text = wire_text(&wire);
+    eprintln!("849ed8f failed-attempt-reasoning wire={text}");
+
+    let first = entry.captures.recv().await.expect("first provider attempt");
+    let second = entry.captures.recv().await.expect("recovery attempt");
+    assert_eq!(first["model"], "wire-849ed8f");
+    assert_eq!(second["model"], "wire-recover");
+    assert_eq!(first["input"], "failed-attempt-reasoning-before-seal");
+    assert_eq!(second["input"], "failed-attempt-reasoning-before-seal");
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "exactly two provider attempts are expected"
+    );
+
+    assert_eq!(completed_output_texts(&wire), vec!["recovered"]);
+    assert!(
+        projected_visible_text_values(&wire)
+            .iter()
+            .all(|value| value == "recovered"),
+        "the failed attempt's visible text must not reach the client: {text}"
+    );
+    assert!(
+        !text.contains("failed-attempt-reasoning")
+            && !text.contains("failed-attempt-visible")
+            && !text.contains("<thinking>")
+            && !text.contains("</thinking>"),
+        "the failed attempt's reasoning or governed marker text leaked: {text}"
+    );
+    assert!(
+        reasoning_summary_event_texts(&wire, "response.reasoning_summary_text.delta").is_empty()
+            && reasoning_summary_event_texts(&wire, "response.reasoning_summary_text.done")
+                .is_empty()
+            && terminal_reasoning_summary_texts(&wire).is_empty(),
+        "the failed attempt's reasoning must not be projected: {text}"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
 async fn bare_residue_newline_is_removed_before_projection() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
@@ -768,34 +1042,34 @@ async fn bare_residue_newline_is_removed_before_projection() {
 }
 
 #[tokio::test]
-async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
+async fn snapshot_carrier_collision_projects_reasoning_and_completes() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) =
         raw_request(&entry, "849ed8f-snapshot-marker", "snapshot-split-marker").await;
     let text = wire_text(&wire);
 
+    // Full buffering rewrites the complete attempt before any byte reaches
+    // the client. The thinking body moves into the governed reasoning item;
+    // the split marker never appears as a literal tag in visible text.
     assert!(text.contains("safe-prefix"), "{text}");
-    assert!(!text.contains("<thin"), "{text}");
-    assert!(!text.contains("<thinking>"), "{text}");
-    assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.contains("response.completed"),
-        "the bounded truncation must not project completion: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the governed attempt must seal normally: {text}"
     );
-    assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["safe-prefix  tail", "ordinary"]
+    );
+    assert_governed_thinking(
+        &wire,
+        &text,
+        &["safe-prefix  tail", "ordinary"],
+        &["secret"],
     );
     assert_no_client_error(&text);
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
-    );
+    assert!(ended.is_ok(), "unexpected transport ending: {ended:?}");
     entry.stop().await;
 }
 
@@ -854,7 +1128,7 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
 }
 
 #[tokio::test]
-async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
+async fn clean_probe_terminal_acceptance_failure_before_seal_delivers_no_business_bytes() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) = raw_request(
@@ -865,48 +1139,45 @@ async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
     .await;
     let text = wire_text(&wire);
 
-    assert!(text.contains("clean-prefix"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        !text.contains("clean-prefix"),
+        "the buffered prefix must not reach the client: {text}"
     );
-    assert_no_client_error(&text);
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
-    );
+    assert_pre_seal_failure_delivered_no_business(&wire, &ended);
     entry.stop().await;
 }
 
 #[tokio::test]
-async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
+async fn interleaved_carriers_project_reasoning_and_complete() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) = raw_request(&entry, "849ed8f-interleaved", "interleaved-thinking").await;
     let text = wire_text(&wire);
     eprintln!("849ed8f interleaved wire={text}");
 
+    // Full buffering rewrites the complete attempt before any byte reaches
+    // the client. The thinking body moves into the governed reasoning item;
+    // the interleaved split marker never appears as a literal tag.
     assert!(text.contains("safe-prefix"), "{text}");
-    assert!(!text.contains("<thinking>"), "{text}");
-    assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "a fully buffered governed attempt must seal normally: {text}"
     );
+    let events = response_sse_events(&decoded_chunked_body(&wire));
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("terminal event");
+    let output = terminal["response"]["output"].as_array().unwrap();
+    assert_eq!(
+        output[0]["content"][0]["text"], "safe-prefix  tail",
+        "{terminal}"
+    );
+    assert_eq!(output[0]["content"][1]["text"], "other", "{terminal}");
+    assert_governed_thinking(&wire, &text, &["safe-prefix  tail", "other"], &["secret"]);
     assert_no_client_error(&text);
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "unexpected transport ending: {ended:?}"
-    );
+    assert!(ended.is_ok(), "unexpected transport ending: {ended:?}");
     entry.stop().await;
 }
 
