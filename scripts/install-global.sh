@@ -6,6 +6,7 @@ echo "🌍 全局安装 routecodex..."
 
 SOURCE_ROOT="$(pwd -P)"
 INSTALL_BUILD_ROOT=""
+VERIFY_CONFIG="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-$HOME/.rcc/config.toml}}"
 for arg in "$@"; do
     case "$arg" in
         *) echo "❌ 不支持的 install:global 参数: $arg"; exit 1 ;;
@@ -114,7 +115,7 @@ verify_direct_v3_install() {
         exit 1
     fi
     echo "✅ V3 command identity: $rccv3_version"
-    rccv3 config check -c "$HOME/.rcc/config.v3.toml"
+    rccv3 config check -c "$VERIFY_CONFIG"
 }
 
 
@@ -124,14 +125,13 @@ restart_managed_dev_server_if_requested() {
         return
     fi
 
-    local restart_config="${ROUTECODEX_INSTALL_VERIFY_CONFIG:-${RCC_INSTALL_VERIFY_CONFIG:-$HOME/.rcc/config.v3.toml}}"
     echo ""
     echo "🔄 尝试通过 V3 aggregate restart 刷新现有 RouteCodex 服务..."
-    if routecodex restart -c "$restart_config"; then
+    if routecodex restart -c "$VERIFY_CONFIG"; then
         echo "✅ V3 聚合服务已重启"
         return
     fi
-    echo "❌ V3 聚合重启失败: $restart_config"
+    echo "❌ V3 聚合重启失败: $VERIFY_CONFIG"
     exit 1
 }
 
