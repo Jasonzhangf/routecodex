@@ -53,13 +53,59 @@ fn completed() -> Value {
     })
 }
 
+fn cross_candidate_body(marker: &str) -> Value {
+    json!({
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": marker}]
+            },
+            {
+                "type": "function_call",
+                "call_id": "cross-candidate-call",
+                "name": "cross_candidate_probe",
+                "arguments": "{}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "cross-candidate-call",
+                "output": "probe complete"
+            }
+        ],
+        "tools": [{
+            "type": "function",
+            "name": "cross_candidate_probe",
+            "parameters": {"type": "object", "properties": {}}
+        }],
+        "stream": true
+    })
+}
+
+async fn read_body_until_transport_end(response: reqwest::Response) -> String {
+    let mut body = Vec::new();
+    let mut response = response;
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => body.extend_from_slice(&chunk),
+            Ok(None) | Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&body).into_owned()
+}
+
 async fn upstream(
     State(captures): State<mpsc::UnboundedSender<Value>>,
     Json(body): Json<Value>,
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
-    let input = body["input"].as_str().unwrap_or_default();
-    if input.contains("cross-candidate-repeat") {
+    let input_contains = |marker: &str| {
+        body.get("input").is_some_and(|input| match input {
+            Value::String(text) => text.contains(marker),
+            other => other.to_string().contains(marker),
+        })
+    };
+    if input_contains("cross-candidate-repeat") {
         let (status, body) = match body["model"].as_str() {
             Some("wire-e041a3b") => (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -79,7 +125,24 @@ async fn upstream(
                 .unwrap();
         }
     }
-    if input.contains("committed-deadline") {
+    if input_contains("cross-candidate-exhaust") {
+        let status = match body["model"].as_str() {
+            Some("wire-e041a3b") => StatusCode::TOO_MANY_REQUESTS,
+            Some("wire-intermediate") => StatusCode::SERVICE_UNAVAILABLE,
+            Some("wire-recover") => StatusCode::BAD_GATEWAY,
+            _ => StatusCode::OK,
+        };
+        if status != StatusCode::OK {
+            return Response::builder()
+                .status(status)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"error":"cross-candidate exhausted identity"}"#,
+                ))
+                .unwrap();
+        }
+    }
+    if input_contains("committed-deadline") {
         let delta = json!({
             "type": "response.output_text.delta",
             "delta": "committed-business-delta",
@@ -98,7 +161,7 @@ async fn upstream(
             .unwrap();
     }
 
-    if input.contains("deadline") && body["model"] != "wire-recover" {
+    if input_contains("deadline") && body["model"] != "wire-recover" {
         // The initial SSE guard waits for the provider's first semantic event
         // with the configured first-frame timeout, so a body that emits nothing
         // never reaches the attempt collector's residence deadline. Emit one
@@ -221,10 +284,29 @@ async fn start_with_timeouts_and_intermediate(
     } else {
         ""
     };
-    let intermediate_target = if include_intermediate {
-        ",{kind=\"provider_model\",provider=\"intermediate\",model=\"intermediate\",key=\"key\",priority=2}"
+    let (classification_pool, default_targets) = if include_intermediate {
+        (
+            r#"
+[route_groups.default.pools.cross_candidate]
+selection = { strategy="priority" }
+match = { precedence=10, entry_protocol="responses", required_capabilities=["tools"] }
+targets = [
+  {kind="provider_model",provider="test",model="test",key="key",priority=3},
+  {kind="provider_model",provider="intermediate",model="intermediate",key="key",priority=2}
+]
+"#
+            .to_string(),
+            format!(
+                "targets = [{{kind=\"provider_model\",provider=\"test\",model=\"test\",key=\"key\",priority=3}}{backup_target}]"
+            ),
+        )
     } else {
-        ""
+        (
+            String::new(),
+            format!(
+                "targets = [{{kind=\"provider_model\",provider=\"test\",model=\"test\",key=\"key\",priority=3}}{backup_target}]"
+            ),
+        )
     };
     let source = format!(
         r#"
@@ -247,7 +329,7 @@ request_timeout_ms = {request_timeout_ms}
 sse_first_frame_timeout_ms = {first_frame_timeout_ms}
 [providers.test.models.test]
 wire_name = "wire-e041a3b"
-capabilities = ["text"]
+capabilities = ["text", "tools"]
 supports_streaming = true
 [providers.test.models.recover]
 wire_name = "wire-recover"
@@ -264,7 +346,7 @@ request_timeout_ms = {request_timeout_ms}
 sse_first_frame_timeout_ms = {first_frame_timeout_ms}
 [providers.intermediate.models.intermediate]
 wire_name = "wire-intermediate"
-capabilities = ["text"]
+capabilities = ["text", "tools"]
 supports_streaming = true
 [providers.backup]
 type = "responses"
@@ -277,11 +359,12 @@ request_timeout_ms = {request_timeout_ms}
 sse_first_frame_timeout_ms = {first_frame_timeout_ms}
 [providers.backup.models.recover]
 wire_name = "wire-recover"
-capabilities = ["text"]
+capabilities = ["text", "tools"]
 supports_streaming = true
+{classification_pool}
 [route_groups.default.pools.default]
 selection = {{strategy="priority"}}
-targets = [{{kind="provider_model",provider="test",model="test",key="key",priority=3}}{intermediate_target}{backup_target}]
+{default_targets}
 [debug]
 log_console = false
 snapshots = true
@@ -521,7 +604,7 @@ async fn provider_timeout_recovers_while_residence_remains() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = response.text().await.unwrap();
+    let body = read_body_until_transport_end(response).await;
     assert!(
         body.contains("sibling-success") && body.contains("response.completed"),
         "{body}"
@@ -798,8 +881,13 @@ async fn inter_frame_stall_selects_a_different_provider_and_keeps_failed_attempt
     drop(home_guard);
 }
 
+/// Stable regression ID: `e742d27`.
+///
+/// The failed complete identity is also a member of the later default pool.
+/// A reset of the request-local exclusion set after the intermediate provider
+/// would therefore dispatch that identity a second time before the backup.
 #[tokio::test]
-async fn cross_candidate_failures_never_retry_prior_provider_identity() {
+async fn e742d27_cross_candidate_failures_never_retry_prior_provider_identity() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -812,15 +900,12 @@ async fn cross_candidate_failures_never_retry_prior_provider_identity() {
         .build()
         .unwrap()
         .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({
-            "input": "cross-candidate-repeat",
-            "stream": true
-        }))
+        .json(&cross_candidate_body("cross-candidate-repeat"))
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = response.text().await.unwrap();
+    let body = read_body_until_transport_end(response).await;
 
     assert!(
         body.contains("sibling-success") && body.contains("response.completed"),
@@ -833,6 +918,7 @@ async fn cross_candidate_failures_never_retry_prior_provider_identity() {
             && !body.contains("\"error\"")
             && !body.contains("network_error")
             && !body.contains("502")
+            && !body.contains("503")
             && !body.contains("599"),
         "failed provider responses leaked through the public entry: {body}"
     );
@@ -849,7 +935,9 @@ async fn cross_candidate_failures_never_retry_prior_provider_identity() {
         "wire-recover"
     );
     assert!(
-        entry.captures.try_recv().is_err(),
+        timeout(Duration::from_millis(500), entry.captures.recv())
+            .await
+            .is_err(),
         "a failed provider identity was selected again after the intermediate candidate"
     );
 
@@ -858,12 +946,129 @@ async fn cross_candidate_failures_never_retry_prior_provider_identity() {
         Duration::from_secs(3),
     )
     .await;
-    let records_text = serde_json::to_string(&records).unwrap();
-    assert!(
-        records_text.contains("429") && records_text.contains("503"),
-        "typed failed-attempt statuses are missing from the public request records: {records_text}"
+    let attempts = records
+        .iter()
+        .filter(|row| row["event_type"] == "request.provider_attempt_failed")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attempts.len(),
+        2,
+        "the request must record exactly two failed provider attempts: {records:#?}"
     );
-    eprintln!("e041a3b-cross-candidate order=[wire-e041a3b,wire-intermediate,wire-recover]");
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|row| row["meta"]["provider_id"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["test", "intermediate"],
+        "provider failure order changed: {records:#?}"
+    );
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|row| row["meta"]["provider_status"].as_u64().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![429, 503],
+        "typed failed-attempt statuses are missing from the public request records: {records:#?}"
+    );
+    eprintln!(
+        "e742d27-cross-pool order=[wire-e041a3b,wire-intermediate,wire-recover], repeated_failed_identity=false"
+    );
+
+    entry.stop().await;
+    drop(home_guard);
+}
+
+/// Stable regression ID: `e742d27`.
+///
+/// Cross-pool exhaustion must preserve the same no-client-provider-error and
+/// no-identity-replay rules as the recoverable path. The final 502 stays in the
+/// typed request records and never becomes a client status or SSE error frame.
+#[tokio::test]
+async fn e742d27_cross_candidate_exhaustion_does_not_replay_failed_identity() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .expect("fixture HOME must remain scoped to the public-entry test");
+    let mut entry =
+        start_with_timeouts_and_intermediate(15_000, 5_000, 5_000, true, true, true).await;
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .unwrap()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&cross_candidate_body("cross-candidate-exhaust"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_body_until_transport_end(response).await;
+
+    assert!(
+        !body.contains("cross-candidate exhausted identity")
+            && !body.contains("first identity exhausted")
+            && !body.contains("intermediate identity exhausted")
+            && !body.contains("provider_response")
+            && !body.contains("\"error\"")
+            && !body.contains("network_error")
+            && !body.contains("502")
+            && !body.contains("503")
+            && !body.contains("599"),
+        "provider exhaustion leaked through the public entry: {body}"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-e041a3b"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-intermediate"
+    );
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover"
+    );
+    assert!(
+        timeout(Duration::from_millis(500), entry.captures.recv())
+            .await
+            .is_err(),
+        "an exhausted provider identity was selected again"
+    );
+
+    let records = wait_request_records(
+        &request_records_path(&home, entry.handle.listeners[0].addr.port()),
+        Duration::from_secs(3),
+    )
+    .await;
+    let attempts = records
+        .iter()
+        .filter(|row| row["event_type"] == "request.provider_attempt_failed")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        attempts.len(),
+        3,
+        "exhaustion must record exactly one failure per provider identity: {records:#?}"
+    );
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|row| row["meta"]["provider_id"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["test", "intermediate", "backup"],
+        "exhaustion provider order changed: {records:#?}"
+    );
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|row| row["meta"]["provider_status"].as_u64().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec![429, 503, 502],
+        "typed exhaustion statuses are missing from the public request records: {records:#?}"
+    );
+    eprintln!(
+        "e742d27-cross-pool-exhaust order=[wire-e041a3b,wire-intermediate,wire-recover], repeated_failed_identity=false, client_provider_error=false"
+    );
 
     entry.stop().await;
     drop(home_guard);

@@ -33,7 +33,7 @@ use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{convert::Infallible, path::PathBuf, time::Duration};
+use std::{convert::Infallible, ffi::OsString, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -51,9 +51,32 @@ mod test_ports;
 static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
 const AUTH_ENV: &str = "ISSUE_7517A07_LEDGER_KEY";
+const KEEPALIVE_ENV: &str = "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS";
 const CLIENT_MODEL: &str = "declared";
 const PROVIDER_A: &str = "primary7517";
 const PROVIDER_B: &str = "fallback7517";
+
+struct KeepaliveEnvGuard {
+    previous: Option<OsString>,
+}
+
+impl KeepaliveEnvGuard {
+    fn install(milliseconds: u64) -> Self {
+        let previous = std::env::var_os(KEEPALIVE_ENV);
+        std::env::set_var(KEEPALIVE_ENV, milliseconds.to_string());
+        Self { previous }
+    }
+}
+
+impl Drop for KeepaliveEnvGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            std::env::set_var(KEEPALIVE_ENV, previous);
+        } else {
+            std::env::remove_var(KEEPALIVE_ENV);
+        }
+    }
+}
 
 fn completed() -> Value {
     json!({
@@ -705,7 +728,12 @@ fn assert_no_terminal_keeps_provider_502(label: &str, terminals: &[Value]) {
 async fn issue7517a07_client_cancel_not_provider_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
-    let entry = start().await;
+    // The runtime must observe the transport close before its provider
+    // residence deadline. A shorter keepalive interval makes the real public
+    // path write again after the client drops the socket, without changing the
+    // cancellation or provider-error semantics under test.
+    let _keepalive = KeepaliveEnvGuard::install(50);
+    let entry = start_with(1_200, 5_000, 5_000).await;
     let server_port = entry.handle.listeners[0].addr.port();
     let addr = entry.handle.listeners[0].addr;
 
@@ -721,8 +749,8 @@ async fn issue7517a07_client_cancel_not_provider_502() {
         body.len()
     );
     socket.write_all(request.as_bytes()).await.unwrap();
-    // Read the response head, then drop the client socket before the provider
-    // attempt can commit any business content.
+    // Read the response head and transport keepalive, then drop the client
+    // socket before the provider attempt can commit any business content.
     let mut delivered = Vec::new();
     let read = timeout(Duration::from_secs(6), async {
         let mut buf = [0u8; 4096];
@@ -731,9 +759,11 @@ async fn issue7517a07_client_cancel_not_provider_502() {
                 break;
             }
             delivered.extend_from_slice(&buf[..n]);
-            if delivered.windows(b"text/event-stream".len()).any(|window| {
-                window == b"text/event-stream"
-            }) {
+            if delivered
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .is_some_and(|header_end| delivered.len() > header_end + 4)
+            {
                 break;
             }
         }
@@ -760,9 +790,10 @@ async fn issue7517a07_client_cancel_not_provider_502() {
     );
     assert!(
         delivered
-            .windows(b"text/event-stream".len())
-            .any(|window| window == b"text/event-stream"),
-        "the client must observe the SSE response head before closing: {}",
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .is_some_and(|header_end| delivered.len() > header_end + 4),
+        "the client must observe the SSE transport body before closing: {}",
         String::from_utf8_lossy(&delivered)
     );
     assert!(
@@ -1319,6 +1350,7 @@ async fn issue7517a07_direct_sse_missing_terminal_is_failed() {
 async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let _keepalive = KeepaliveEnvGuard::install(50);
     let mut entry = start_multi(3000, 5000, 5000).await;
     let server_port = entry.handle.listeners[0].addr.port();
     let addr = entry.handle.listeners[0].addr;
@@ -1352,9 +1384,11 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
                 break;
             }
             delivered.extend_from_slice(&buf[..n]);
-            if delivered.windows(b"text/event-stream".len()).any(|window| {
-                window == b"text/event-stream"
-            }) {
+            if delivered
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .is_some_and(|header_end| delivered.len() > header_end + 4)
+            {
                 break;
             }
         }
@@ -1369,9 +1403,10 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
     assert!(
         read.is_ok()
             && delivered
-                .windows(b"text/event-stream".len())
-                .any(|window| window == b"text/event-stream"),
-        "the client must observe the SSE response head before closing: {}",
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .is_some_and(|header_end| delivered.len() > header_end + 4),
+        "the client must observe the SSE transport body before closing: {}",
         String::from_utf8_lossy(&delivered)
     );
     assert!(
