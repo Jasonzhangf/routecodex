@@ -3935,3 +3935,105 @@ fn start_refuses_to_signal_unmanaged_listener_pid_that_owns_sibling_ports() {
         "sibling port must not be stopped when only one target port is configured"
     );
 }
+
+#[test]
+fn status_public_entry_keeps_reporting_running_after_config_content_changes() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state_root = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let config = write_config(&root, ports);
+    let binary = env!("CARGO_BIN_EXE_rccv3");
+
+    let start = run(binary, &state_root, &config, "start");
+    assert!(
+        start.status.success(),
+        "{}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+    assert_start_stdout(&start, "server start");
+    for port in ports {
+        wait_port(port, true);
+    }
+
+    let running = run_status_json_top_level(binary, &state_root, &config);
+    assert!(
+        running.status.success(),
+        "{}",
+        String::from_utf8_lossy(&running.stderr)
+    );
+    let running_record: Value = serde_json::from_slice(&running.stdout).unwrap();
+    assert_eq!(running_record["state"], "running");
+    let live_instance_id = running_record["instance_id"].as_str().unwrap().to_string();
+
+    // Edit the managed config content on disk while the runtime keeps serving the
+    // declaration it published. The instance identity derives from the config content, so
+    // the derived identity now differs from the live one; status must not claim stopped.
+    let original_config = fs::read_to_string(&config).unwrap();
+    fs::write(&config, format!("{original_config}\n# isolated config drift\n")).unwrap();
+
+    let drifted = run_status_json_top_level(binary, &state_root, &config);
+    assert!(
+        drifted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&drifted.stderr)
+    );
+    let drifted_record: Value = serde_json::from_slice(&drifted.stdout).unwrap();
+    assert_eq!(
+        drifted_record["state"], "running",
+        "a live runtime must not be reported as stopped: {drifted_record}"
+    );
+    assert_eq!(
+        drifted_record["instance_id"],
+        live_instance_id.as_str(),
+        "status must name the instance that is actually serving: {drifted_record}"
+    );
+    assert!(
+        drifted_record["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("config changed on disk"),
+        "status must explain the drift: {drifted_record}"
+    );
+
+    let human = run_top_level(binary, &state_root, &config, "status");
+    assert!(
+        human.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let human_stdout = String::from_utf8_lossy(&human.stdout);
+    assert!(
+        human_stdout.contains("[RouteCodexV3] Status state=running instance="),
+        "{human_stdout}"
+    );
+    assert!(
+        !human_stdout.contains("listeners refuse client requests"),
+        "{human_stdout}"
+    );
+
+    // Restore the exact original config so the subsequent stop targets the live identity.
+    fs::write(&config, original_config).unwrap();
+    let stop = run(binary, &state_root, &config, "stop");
+    assert!(
+        stop.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stop.stderr)
+    );
+    assert_stop_stdout(&stop, "server stop");
+    for port in ports {
+        wait_port(port, false);
+    }
+
+    let stopped = run_status_json_top_level(binary, &state_root, &config);
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    let stopped_record: Value = serde_json::from_slice(&stopped.stdout).unwrap();
+    assert_eq!(
+        stopped_record["state"], "stopped",
+        "a genuinely stopped runtime must still report stopped: {stopped_record}"
+    );
+}
