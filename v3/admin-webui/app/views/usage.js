@@ -22,6 +22,32 @@ function endpointLabel(endpoint) {
 }
 
 function statusText(row) {
+  if (row.result === "error" || row.result === "failed-attempt") {
+    const terminal = row.meta?.observed_error?.chain?.find((node) =>
+      node?.node === "V3Error06ClientProjected" && node?.state === "projected"
+    )?.code;
+    const terminalCode = typeof terminal === "number" ? terminal : Number(terminal);
+    if (/^\d+$/.test(String(terminal ?? "")) && terminalCode >= 400 && terminalCode <= 599) {
+      return String(terminalCode);
+    }
+
+    const errorCode = compactErrorReason(row);
+    const categoryCode = /^\d+$/.test(errorCode) ? Number(errorCode) : null;
+    if (categoryCode != null && categoryCode >= 400 && categoryCode <= 599) {
+      return String(categoryCode);
+    }
+
+    const http = row.meta?.provider_status;
+    const providerCode = Number(http);
+    if (http != null && Number.isInteger(providerCode) && providerCode >= 400 && providerCode <= 599) {
+      return String(providerCode);
+    }
+    if (errorCode === "network") {
+      return "network";
+    }
+    return "unknown";
+  }
+
   const errorCode = compactErrorReason(row);
   if (/^\d+$/.test(errorCode)) {
     return errorCode;
