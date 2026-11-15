@@ -1478,6 +1478,21 @@ fn record_direct_sse_provider_event_json_chunk(
             }
         };
         record_direct_sse_provider_event_json_frame(frame.frame().fields(), stream_observation)?;
+        if frame_disposition == V3SseFrameDisposition::SemanticTerminal
+            && !stream_observation
+                .has_semantic_terminal()
+                .map_err(provider_sse_failure_source)?
+        {
+            // The Direct SSE classifier owns protocol terminal admission, so a
+            // legal provider terminal is a typed Success fact for this attempt.
+            // The console finalizer reads this typed fact to separate a
+            // completed stream from a real missing terminal. A terminal that
+            // the event observation already classified (for example a legal
+            // Responses `response.incomplete`) keeps its own classification.
+            stream_observation
+                .record_semantic_terminal(crate::hub_v1::V3RuntimeSemanticTerminal::Success)
+                .map_err(provider_sse_failure_source)?;
+        }
         let original =
             build_v3_sse_transport_out_04_from_v3_sse_transport_in_03(&frame).into_bytes();
         let mut projected = process_sse_object_frame(&frame, content_consumer)

@@ -6673,6 +6673,131 @@ async fn responses_relay_provider_503_never_reaches_the_client() {
 }
 
 #[tokio::test]
+async fn responses_relay_503_failure_derives_status_external_classification() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("35aa0d1-relay-503-status-external");
+    let (failure_base_url, failure_shutdown) =
+        start_controlled_failure_upstream_all_protocols().await;
+    let (success_base_url, mut success_capture, success_shutdown) =
+        start_controlled_openai_chat_upstream().await;
+    std::env::set_var("V3_RELAY_503_FAIL_KEY", "secret-relay-503-fail");
+    std::env::set_var("V3_RELAY_503_OK_KEY", "secret-relay-503-ok");
+    let port_a = free_port();
+    let port_b = free_port();
+    let source = format!(
+        r#"
+version = 3
+{HUB_V1_TEST_DECLARATION}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{HUB_V1_TEST_SERVER_EXECUTION}
+[providers.relay_fail]
+type = "openai_chat"
+base_url = "{failure_base_url}"
+default_model = "relay-fail"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_RELAY_503_FAIL_KEY" }}] }}
+[providers.relay_fail.models.relay-fail]
+wire_name = "wire-relay-fail"
+[providers.relay_ok]
+type = "openai_chat"
+base_url = "{success_base_url}"
+default_model = "relay-ok"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_RELAY_503_OK_KEY" }}] }}
+[providers.relay_ok.models.relay-ok]
+wire_name = "wire-relay-ok"
+[forwarders.relay503]
+model = "client-test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "relay_fail", model = "relay-fail", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "relay_ok", model = "relay-ok", key = "key", priority = 1 }}
+]
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "relay503", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "relay503", priority = 1 }}]
+"#
+    );
+    let manifest =
+        compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap();
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let client = reqwest::Client::new();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    // Negative: the real relay provider 503 is provider-private and must not
+    // become a client error payload. Positive: the typed failure switches to
+    // the healthy candidate and the same client request completes.
+    let response = client
+        .post(&endpoint)
+        .json(&json!({
+            "model":"client-test",
+            "input":"relay 503 status classification",
+            "stream":false
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{response:?}");
+    let body: Value = response.json().await.unwrap();
+    assert!(body.get("error").is_none(), "{body}");
+    let ok_capture = success_capture.recv().await.unwrap();
+    assert_eq!(ok_capture.body["model"], "wire-relay-ok");
+
+    let evidence = wait_for_concurrency_failure_source(
+        &home_guard.codex_samples_root(handle.listeners[0].addr.port()),
+    )
+    .await;
+    let attempts = evidence["attempts"]
+        .as_array()
+        .unwrap_or_else(|| panic!("failure evidence must carry attempts: {evidence}"));
+    let attempt = attempts.first().unwrap_or_else(|| {
+        panic!("failure evidence must carry a real upstream attempt: {evidence}")
+    });
+    assert_eq!(attempt["status"], 503, "{attempt}");
+    assert_eq!(attempt["provider_status"], 503, "{attempt}");
+    assert_eq!(attempt["external_error_code"], "HTTP_503", "{attempt}");
+    assert_eq!(
+        attempt["diagnostic_source"]["code"], "provider_http_503",
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["diagnostic_source"]["external_error"]["code"], "HTTP_503",
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["diagnostic_source"]["external_error"]["status"], 503,
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+        "{attempt}"
+    );
+
+    std::env::remove_var("V3_RELAY_503_FAIL_KEY");
+    std::env::remove_var("V3_RELAY_503_OK_KEY");
+    handle.shutdown().await;
+    failure_shutdown.send(()).unwrap();
+    success_shutdown.send(()).unwrap();
+}
+
+#[tokio::test]
 // feature_id: v3.responses_inbound_websocket_proxy
 async fn responses_relay_websocket_uses_hub_relay_runtime_instead_of_direct_runtime() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -7145,6 +7270,422 @@ async fn wait_for_concurrency_failure_source(samples_root: &std::path::Path) -> 
         sleep(Duration::from_millis(25)).await;
     }
     panic!("provider failure source evidence must appear under {samples_root:?}");
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProviderHttpStatusCase {
+    status: StatusCode,
+    body_type: &'static str,
+}
+
+const PROVIDER_HTTP_STATUS_CASES: [ProviderHttpStatusCase; 3] = [
+    ProviderHttpStatusCase {
+        status: StatusCode::BAD_REQUEST,
+        body_type: "invalid_request_error",
+    },
+    ProviderHttpStatusCase {
+        status: StatusCode::TOO_MANY_REQUESTS,
+        body_type: "rate_limit_error",
+    },
+    ProviderHttpStatusCase {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        body_type: "server_error",
+    },
+];
+
+async fn wait_for_provider_http_status_failure_source(
+    samples_root: &std::path::Path,
+    status: u16,
+) -> Value {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let path = entry.path().join("provider-failed-attempts.json");
+                if let Ok(raw) = fs::read_to_string(&path) {
+                    if let Ok(evidence) = serde_json::from_str::<Value>(&raw) {
+                        let matches = evidence["attempts"].as_array().is_some_and(|attempts| {
+                            attempts.iter().any(|attempt| {
+                                attempt["provider_status"].as_u64() == Some(status as u64)
+                            })
+                        });
+                        if matches {
+                            return evidence;
+                        }
+                    }
+                }
+            }
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!("provider HTTP {status} failure evidence must appear under {samples_root:?}");
+}
+
+fn provider_http_status_case_body(case: ProviderHttpStatusCase) -> Vec<u8> {
+    format!(
+        r#"{{"error":{{"type":"{}","message":"controlled {}"}}}}"#,
+        case.body_type,
+        case.status.as_u16()
+    )
+    .into_bytes()
+}
+
+fn assert_provider_http_status_failure_evidence(
+    evidence: &Value,
+    case: ProviderHttpStatusCase,
+    expected_body: &[u8],
+) {
+    let status = case.status.as_u16();
+    let attempts = evidence["attempts"]
+        .as_array()
+        .unwrap_or_else(|| panic!("failure evidence must carry attempts: {evidence}"));
+    let attempt = attempts
+        .iter()
+        .find(|attempt| attempt["provider_status"].as_u64() == Some(status as u64))
+        .unwrap_or_else(|| panic!("missing HTTP {status} attempt: {evidence}"));
+    assert_eq!(attempt["status"], status, "{attempt}");
+    assert_eq!(attempt["provider_status"], status, "{attempt}");
+    assert_eq!(
+        attempt["diagnostic_source"]["code"],
+        format!("provider_http_{status}"),
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["external_error_code"],
+        format!("HTTP_{status}"),
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["diagnostic_source"]["external_error"]["code"],
+        format!("HTTP_{status}"),
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["diagnostic_source"]["external_error"]["status"], status,
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["failed_attempt_evidence"]["provider_response"]["status"], status,
+        "{attempt}"
+    );
+    assert_eq!(
+        attempt["failed_attempt_evidence"]["provider_response"]["body"]["bytes"],
+        json!(expected_body),
+        "provider body must stay in typed diagnostics: {attempt}"
+    );
+    let retained_body: Value = serde_json::from_slice(expected_body).unwrap();
+    assert_eq!(retained_body["error"]["type"], case.body_type, "{attempt}");
+}
+
+#[tokio::test]
+async fn responses_direct_provider_http_400_429_503_status_classification_public_gate() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("35aa0d1-direct-status-classification");
+
+    for case in PROVIDER_HTTP_STATUS_CASES {
+        let expected_body = provider_http_status_case_body(case);
+        let (failure_base_url, mut failure_captures, failure_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                case.status,
+                "application/json",
+                expected_body.clone(),
+            )
+            .await;
+        let (success_base_url, mut success_captures, success_shutdown) =
+            start_controlled_upstream().await;
+        std::env::set_var("V3_35AA_DIRECT_FAIL_KEY", "secret-direct-fail");
+        std::env::set_var("V3_35AA_DIRECT_OK_KEY", "secret-direct-ok");
+        let manifest = p6_reselection_manifest(
+            free_port(),
+            free_port(),
+            &failure_base_url,
+            &success_base_url,
+            "V3_35AA_DIRECT_FAIL_KEY",
+            "V3_35AA_DIRECT_OK_KEY",
+        );
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let port = handle.listeners[0].addr.port();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let response = client
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .json(&json!({
+                "model": "client-test",
+                "input": format!("direct status {}", case.status),
+                "stream": false
+            }))
+            .send()
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "healthy direct candidate must complete after HTTP {}: {error}",
+                    case.status
+                )
+            });
+        assert_eq!(response.status(), StatusCode::OK, "{case:?}");
+        let response_body: Value = response.json().await.unwrap();
+        assert_eq!(response_body["output_text"], "ok", "{response_body}");
+        assert_eq!(response_body["status"], "completed", "{response_body}");
+        assert!(response_body.get("error").is_none(), "{response_body}");
+
+        let failure_capture = timeout(Duration::from_secs(5), failure_captures.recv())
+            .await
+            .expect("the declared failing candidate must receive the original request")
+            .unwrap();
+        assert_eq!(failure_capture.body["model"], "wire-first");
+        let success_capture = timeout(Duration::from_secs(5), success_captures.recv())
+            .await
+            .expect("the healthy candidate must continue the original request")
+            .unwrap();
+        assert_eq!(success_capture.body["model"], "wire-second");
+        assert_eq!(success_capture.body["input"], failure_capture.body["input"]);
+        assert!(
+            timeout(Duration::from_millis(100), failure_captures.recv())
+                .await
+                .is_err(),
+            "a failed provider must not be retried for HTTP {}",
+            case.status
+        );
+
+        let evidence = wait_for_provider_http_status_failure_source(
+            &home_guard.codex_samples_root(port),
+            case.status.as_u16(),
+        )
+        .await;
+        assert_provider_http_status_failure_evidence(&evidence, case, &expected_body);
+
+        handle.shutdown().await;
+        failure_shutdown.send(()).unwrap();
+        success_shutdown.send(()).unwrap();
+        std::env::remove_var("V3_35AA_DIRECT_FAIL_KEY");
+        std::env::remove_var("V3_35AA_DIRECT_OK_KEY");
+    }
+}
+
+fn responses_relay_openai_chat_status_manifest(
+    port_a: u16,
+    port_b: u16,
+    failure_base_url: &str,
+    success_base_url: Option<&str>,
+    residence_timeout_ms: u64,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let hub_v1_declaration = HUB_V1_TEST_DECLARATION.replace(direct_binding, relay_binding);
+    let success_provider = success_base_url.map_or(String::new(), |base_url| {
+        format!(
+            r#"
+[providers.relay_ok]
+type = "openai_chat"
+base_url = "{base_url}"
+default_model = "relay-ok"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_35AA_RELAY_OK_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.relay_ok.models.relay-ok]
+wire_name = "wire-relay-ok"
+"#
+        )
+    });
+    let targets = if success_base_url.is_some() {
+        "{ kind = \"provider_model\", provider = \"relay_fail\", model = \"relay-fail\", key = \"key\", priority = 2 }, { kind = \"provider_model\", provider = \"relay_ok\", model = \"relay-ok\", key = \"key\", priority = 1 }"
+    } else {
+        "{ kind = \"provider_model\", provider = \"relay_fail\", model = \"relay-fail\", key = \"key\", priority = 1 }"
+    };
+    let source = format!(
+        r#"
+version = 3
+{hub_v1_declaration}
+[servers.a]
+bind = "127.0.0.1"
+port = {port_a}
+routing_group = "default"
+endpoints = ["responses"]
+[servers.b]
+bind = "127.0.0.1"
+port = {port_b}
+routing_group = "default"
+endpoints = ["responses"]
+{HUB_V1_TEST_SERVER_EXECUTION}
+[servers.a.execution.attempt_store]
+residence_timeout_ms = {residence_timeout_ms}
+[servers.b.execution.attempt_store]
+residence_timeout_ms = {residence_timeout_ms}
+[providers.relay_fail]
+type = "openai_chat"
+base_url = "{failure_base_url}"
+default_model = "relay-fail"
+auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_35AA_RELAY_FAIL_KEY" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.relay_fail.models.relay-fail]
+wire_name = "wire-relay-fail"
+{success_provider}
+[debug]
+log_console = false
+snapshots = true
+dry_run = true
+retention = {{ raw_requests = 8, raw_responses = 8, events = 128 }}
+[forwarders.relay_status]
+model = "client-test"
+aliases = ["client-test"]
+selection = {{ strategy = "priority" }}
+targets = [{targets}]
+[route_groups.default.pools.client_test]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, models = ["client-test"] }}
+targets = [{{ kind = "forwarder", id = "relay_status", priority = 1 }}]
+[route_groups.default.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [{{ kind = "forwarder", id = "relay_status", priority = 1 }}]
+"#
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+fn rename_manifest_provider(
+    manifest: &mut routecodex_v3_config::V3Config05ManifestPublished,
+    old_id: &str,
+    new_id: &str,
+) {
+    let mut provider = manifest
+        .providers
+        .remove(old_id)
+        .unwrap_or_else(|| panic!("manifest must declare provider {old_id}"));
+    provider.id = new_id.to_string();
+    manifest.providers.insert(new_id.to_string(), provider);
+    for group in manifest.route_groups.values_mut() {
+        for pool in group.pools.values_mut() {
+            for target in &mut pool.targets {
+                if target.provider.as_deref() == Some(old_id) {
+                    target.provider = Some(new_id.to_string());
+                }
+            }
+        }
+    }
+    for forwarder in manifest.forwarders.values_mut() {
+        for target in &mut forwarder.targets {
+            if target.provider.as_deref() == Some(old_id) {
+                target.provider = Some(new_id.to_string());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn responses_relay_openai_chat_provider_http_400_429_503_status_classification_public_gate() {
+    let _test_guard = TEST_LOCK.lock().await;
+    let home_guard = TestHomeGuard::new("35aa0d1-relay-status-classification");
+
+    for case in PROVIDER_HTTP_STATUS_CASES {
+        let expected_body = provider_http_status_case_body(case);
+        let (failure_base_url, mut failure_captures, failure_shutdown) =
+            start_controlled_terminal_upstream_with_body(
+                case.status,
+                "application/json",
+                expected_body.clone(),
+            )
+            .await;
+        let (success_base_url, mut success_captures, success_shutdown) =
+            start_controlled_openai_chat_upstream().await;
+        std::env::set_var("V3_35AA_RELAY_FAIL_KEY", "secret-relay-fail");
+        std::env::set_var("V3_35AA_RELAY_OK_KEY", "secret-relay-ok");
+        let mut manifest = responses_relay_openai_chat_status_manifest(
+            free_port(),
+            free_port(),
+            &failure_base_url,
+            Some(&success_base_url),
+            2_000,
+        );
+        rename_manifest_provider(
+            &mut manifest,
+            "relay_fail",
+            &format!("relay_fail_{}", case.status.as_u16()),
+        );
+        rename_manifest_provider(
+            &mut manifest,
+            "relay_ok",
+            &format!("relay_ok_{}", case.status.as_u16()),
+        );
+        let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+        let port = handle.listeners[0].addr.port();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let response = client
+            .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
+            .json(&json!({
+                "model": "client-test",
+                "input": format!("relay status {}", case.status.as_u16()),
+                "stream": false
+            }))
+            .send()
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "healthy Relay candidate must complete after HTTP {}: {error}",
+                    case.status.as_u16()
+                )
+            });
+        assert_eq!(response.status(), StatusCode::OK, "{case:?}");
+        let response_bytes = response.bytes().await.unwrap();
+        assert!(
+            !response_bytes
+                .windows(expected_body.len())
+                .any(|window| window == expected_body),
+            "provider error body must not reach the client for {case:?}"
+        );
+        let response_body: Value = serde_json::from_slice(&response_bytes).unwrap();
+        assert_eq!(
+            response_body["output_text"], "controlled chat JSON",
+            "{response_body}"
+        );
+        assert_eq!(response_body["status"], "completed", "{response_body}");
+        assert!(response_body.get("error").is_none(), "{response_body}");
+
+        let failure_capture = timeout(Duration::from_secs(5), failure_captures.recv())
+            .await
+            .expect("the declared failing Relay candidate must receive the original request")
+            .unwrap();
+        assert_eq!(failure_capture.body["model"], "wire-relay-fail");
+        assert_eq!(
+            failure_capture.body["messages"],
+            json!([{
+                "role": "user",
+                "content": format!("relay status {}", case.status.as_u16())
+            }]),
+            "Relay wire messages must preserve the original client input"
+        );
+        let success_capture = timeout(Duration::from_secs(5), success_captures.recv())
+            .await
+            .expect("the healthy Relay candidate must continue the original request")
+            .unwrap();
+        assert_eq!(success_capture.body["model"], "wire-relay-ok");
+        assert_eq!(
+            success_capture.body["messages"],
+            failure_capture.body["messages"]
+        );
+        assert!(
+            timeout(Duration::from_millis(100), failure_captures.recv())
+                .await
+                .is_err(),
+            "a failed Relay provider must not be retried for HTTP {}",
+            case.status.as_u16()
+        );
+
+        let evidence = wait_for_provider_http_status_failure_source(
+            &home_guard.codex_samples_root(port),
+            case.status.as_u16(),
+        )
+        .await;
+        assert_provider_http_status_failure_evidence(&evidence, case, &expected_body);
+
+        handle.shutdown().await;
+        failure_shutdown.send(()).unwrap();
+        success_shutdown.send(()).unwrap();
+        std::env::remove_var("V3_35AA_RELAY_FAIL_KEY");
+        std::env::remove_var("V3_35AA_RELAY_OK_KEY");
+    }
 }
 
 #[tokio::test]
@@ -9421,15 +9962,7 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
                 assert_eq!(attempt["status"], 503, "{attempt}");
                 assert_eq!(attempt["provider_status"], 503, "{attempt}");
                 assert_eq!(
-                    attempt["diagnostic_source"]["code"],
-                    if matches!(
-                        attempt["provider_id"].as_str(),
-                        Some("direct_second" | "direct_final")
-                    ) {
-                        "provider_http_503"
-                    } else {
-                        "provider_error"
-                    },
+                    attempt["diagnostic_source"]["code"], "provider_http_503",
                     "{attempt}"
                 );
                 assert_eq!(
