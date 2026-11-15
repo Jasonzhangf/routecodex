@@ -65,7 +65,6 @@ fn named_unpaired_tool_output_keeps_identity_without_fabricating_call_id() {
         "the exact output text must survive canonicalization: {request}"
     );
 }
-
 #[test]
 fn codex_client_metadata_keeps_source_identity_in_chat_extension() {
     let turn_metadata = "x".repeat(577);
@@ -86,7 +85,6 @@ fn codex_client_metadata_keeps_source_identity_in_chat_extension() {
     );
     assert!(extension.get("metadata").is_none());
 }
-
 #[test]
 fn responses_output_text_followed_by_function_call_stays_single_assistant_message() {
     let request = build_v3_chat_canonical_request_from_responses_payload(&json!({
@@ -1068,4 +1066,86 @@ fn responses_agent_message_with_encrypted_content_part_does_not_leak_ciphertext(
         !content.contains("rsn_FERNET_CIPHERTEXT_PAYLOAD"),
         "Fernet ciphertext must be discarded before provider wire: {content}"
     );
+}
+
+/// Regression for bug a3511df. A Responses request may declare the same
+/// client tool identity in more than one `additional_tools` source. The
+/// canonical Chat request carries one declaration source, so the sources must
+/// not be collapsed into one array that holds two different schemas for the
+/// same identity. The later source refreshes the earlier one.
+#[test]
+fn responses_multiple_additional_tools_sources_refresh_one_effective_declaration() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-6-luna",
+        "input": [
+            {"type": "additional_tools", "role": "developer", "tools": [{
+                "type": "namespace", "name": "functions", "tools": [{
+                    "type": "custom", "name": "exec", "format": {"type": "text"}
+                }]
+            }]},
+            {"type": "additional_tools", "role": "developer", "tools": [{
+                "type": "namespace", "name": "functions", "tools": [{
+                    "type": "custom", "name": "exec", "description": "current declaration",
+                    "format": {"type": "text"}
+                }]
+            }]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run pwd"}]}
+        ]
+    }))
+    .expect("two declaration sources for one client identity must canonicalize");
+
+    let tools = canonical["tools"].as_array().expect("canonical tools");
+    let exec_declarations: Vec<&Value> = tools
+        .iter()
+        .filter(|tool| tool["type"] == json!("namespace") && tool["name"] == json!("functions"))
+        .collect();
+    assert_eq!(
+        exec_declarations.len(),
+        1,
+        "distinct declaration sources must not collapse into duplicate declarations: {tools:?}"
+    );
+    let children = exec_declarations[0]["tools"]
+        .as_array()
+        .expect("namespace children");
+    assert_eq!(
+        children.len(),
+        1,
+        "one client identity must keep one effective declaration: {children:?}"
+    );
+    assert_eq!(
+        children[0]["description"],
+        json!("current declaration"),
+        "the later declaration source must remain effective: {children:?}"
+    );
+}
+
+/// Same bug a3511df, observed at the Anthropic projection boundary. The
+/// canonical Chat request must build the Anthropic registry without a
+/// same-source schema conflict, so the request can reach the provider instead
+/// of ending as a local malformed-tools error.
+#[test]
+fn responses_multiple_additional_tools_sources_build_anthropic_projection_context() {
+    let canonical = build_v3_chat_canonical_request_from_responses_payload(&json!({
+        "model": "gpt-6-luna",
+        "input": [
+            {"type": "additional_tools", "role": "developer", "tools": [{
+                "type": "namespace", "name": "functions", "tools": [{
+                    "type": "custom", "name": "exec", "format": {"type": "text"}
+                }]
+            }]},
+            {"type": "additional_tools", "role": "developer", "tools": [{
+                "type": "namespace", "name": "functions", "tools": [{
+                    "type": "custom", "name": "exec", "description": "current declaration",
+                    "format": {"type": "text"}
+                }]
+            }]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run pwd"}]}
+        ]
+    }))
+    .expect("two declaration sources for one client identity must canonicalize");
+
+    super::super::anthropic_codec::V3AnthropicResponsesProjectionContext::from_chat_canonical_request(
+        &canonical,
+    )
+    .expect("the canonical request must build the Anthropic projection context");
 }

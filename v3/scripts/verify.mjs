@@ -15,6 +15,7 @@ const { failures, warnings } = await runAll([
   },
   { label: 'isolation', command: 'node', args: ['scripts/verify-isolation.mjs'], severity: GATE_SEVERITY.BLOCK },
   { label: 'distribution', command: 'npm', args: ['run', 'test:distribution'], severity: GATE_SEVERITY.BLOCK },
+  { label: 'installer-config-consumer', command: 'npm', args: ['run', 'test:installer-config-consumer'], severity: GATE_SEVERITY.BLOCK },
   { label: 'install-cleanup', command: 'npm', args: ['run', 'test:install-cleanup'], severity: GATE_SEVERITY.BLOCK },
   {
     label: 'architecture-ci',

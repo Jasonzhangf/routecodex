@@ -21,6 +21,7 @@ const RUNTIME_SETUP_KEYS = new Set([
   'model',
   'wire_model',
   'candidate_ids',
+  'auth_aliases',
   'all_candidates_fail',
   'attempt_store',
   'process',
@@ -301,6 +302,17 @@ function validateRuntimeSetup(relative, setup, findings) {
   }
   if (new Set(setup.candidate_ids).size !== setup.candidate_ids.length) {
     fail('runtime_setup.candidate_ids must be unique');
+  }
+  if (setup.auth_aliases !== undefined) {
+    if (!Array.isArray(setup.auth_aliases)
+      || setup.auth_aliases.length !== 2
+      || setup.auth_aliases.some((alias) => typeof alias !== 'string' || alias.trim() === '')) {
+      fail('runtime_setup.auth_aliases must declare exactly two non-empty unique aliases');
+    } else if (new Set(setup.auth_aliases).size !== setup.auth_aliases.length) {
+      fail('runtime_setup.auth_aliases must declare exactly two non-empty unique aliases');
+    } else if (setup.candidate_ids.length !== 1) {
+      fail('runtime_setup.auth_aliases is supported only with one provider/model target');
+    }
   }
   const firstCandidate = `${setup.provider_id}/${setup.model}`;
   if (setup.candidate_ids[0] !== firstCandidate) {

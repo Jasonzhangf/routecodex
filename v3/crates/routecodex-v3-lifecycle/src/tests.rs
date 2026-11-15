@@ -1604,6 +1604,265 @@ fn foreign_control_record_is_never_reaped_from_terminal_state() {
     let _ = fs::remove_file(foreign_socket);
 }
 
+#[tokio::test]
+async fn status_finds_live_instance_after_config_content_changes() {
+    use std::time::Duration;
+
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+
+    // The identity the running runtime publishes from the current config content.
+    let (published, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&published.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+    write_status(
+        &instance_dir,
+        &published.instance_id,
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+
+    let start_nonce = "config-drift-live-test".to_string();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: published.instance_id.clone(),
+            pid: std::process::id(),
+            start_nonce: start_nonce.clone(),
+            started_at_epoch_ms: 0,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    let socket_path =
+        std::env::temp_dir().join(format!("routecodex-{}.sock", published.instance_id));
+    if socket_path.exists() {
+        fs::remove_file(&socket_path).unwrap();
+    }
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: published.instance_id.clone(),
+            socket_path: socket_path.display().to_string(),
+            start_nonce: start_nonce.clone(),
+        },
+    )
+    .unwrap();
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+    let control_loop = tokio::spawn({
+        let instance_dir = instance_dir.clone();
+        let published = published.clone();
+        let socket_path = socket_path.clone();
+        let nonce = start_nonce.clone();
+        async move {
+            let supervisor = V3HooksSidecarSupervisor::from_startup(
+                instance_dir.clone(),
+                tokio::spawn(async { Ok(None) }),
+            );
+            run_managed_control_loop(
+                &instance_dir,
+                &published,
+                &socket_path,
+                nonce,
+                listener,
+                None,
+                supervisor,
+                false,
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let probe = send_control(&instance_dir, &published, ControlOperation::Status).await;
+    match &probe {
+        Ok(response) => assert!(
+            response.accepted,
+            "control channel must accept the published identity: accepted={} state={:?} message={}",
+            response.accepted, response.state, response.message
+        ),
+        Err(error) => panic!("control channel must answer for the published identity: {error}"),
+    }
+
+    // Change the config content on disk while the runtime keeps serving the declaration it
+    // published: the identity derived from the config must move away from the live one.
+    let original_config = fs::read_to_string(&config).unwrap();
+    fs::write(&config, format!("{original_config}\n# config drift\n")).unwrap();
+    let (current, _) = lifecycle.declaration(&executable).unwrap();
+    assert_ne!(
+        current.instance_id, published.instance_id,
+        "a config content change must move the derived instance identity"
+    );
+
+    let status = lifecycle
+        .status(&executable)
+        .await
+        .expect("a live managed runtime must not be reported as stopped");
+    assert_eq!(status.state, V3ManagedRunState::Running);
+    assert_eq!(status.instance_id, published.instance_id);
+    let detail = status.detail.unwrap_or_default();
+    assert!(
+        detail.contains(&published.config_digest),
+        "detail: {detail}"
+    );
+    assert!(detail.contains(&current.config_digest), "detail: {detail}");
+
+    control_loop.abort();
+    let _ = fs::remove_file(socket_path);
+}
+
+/// Regression: a derived identity whose persisted `status.json` holds a terminal
+/// Stopped/Failed state must not mask an older live identity under the same config
+/// path and listener set after the config content changed on disk. Status keeps the
+/// `query_live`-first order, so a persisted terminal for the current identity is
+/// resolved only after the config-drift discovery finds the real live runtime.
+#[tokio::test]
+async fn status_prefers_live_drifted_instance_over_persisted_terminal_state() {
+    use std::time::Duration;
+
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+
+    // The live old identity under the config content that is about to drift.
+    let (published, _) = lifecycle.declaration(&executable).unwrap();
+    let instance_dir = state.join("instances").join(&published.instance_id);
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &published).unwrap();
+
+    let start_nonce = "drift-live-old-identity".to_string();
+    write_json_atomic(
+        &instance_dir.join("pid.cache"),
+        &V3ManagedPidCache {
+            schema_version: SCHEMA_VERSION,
+            instance_id: published.instance_id.clone(),
+            pid: std::process::id(),
+            start_nonce: start_nonce.clone(),
+            started_at_epoch_ms: 0,
+            process_start_token: None,
+        },
+    )
+    .unwrap();
+    let socket_path =
+        std::env::temp_dir().join(format!("routecodex-{}.sock", published.instance_id));
+    if socket_path.exists() {
+        fs::remove_file(&socket_path).unwrap();
+    }
+    write_json_atomic(
+        &instance_dir.join("control.json"),
+        &V3ManagedControlRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: published.instance_id.clone(),
+            socket_path: socket_path.display().to_string(),
+            start_nonce: start_nonce.clone(),
+        },
+    )
+    .unwrap();
+    let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+    let control_loop = tokio::spawn({
+        let instance_dir = instance_dir.clone();
+        let published = published.clone();
+        let socket_path = socket_path.clone();
+        let nonce = start_nonce.clone();
+        async move {
+            let supervisor = V3HooksSidecarSupervisor::from_startup(
+                instance_dir.clone(),
+                tokio::spawn(async { Ok(None) }),
+            );
+            run_managed_control_loop(
+                &instance_dir,
+                &published,
+                &socket_path,
+                nonce,
+                listener,
+                None,
+                supervisor,
+                false,
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Now drift the config on disk. The derived identity moves away from the live one.
+    let original_config = fs::read_to_string(&config).unwrap();
+    fs::write(
+        &config,
+        format!("{original_config}\n# stale terminal drift\n"),
+    )
+    .unwrap();
+    let (current, _) = lifecycle.declaration(&executable).unwrap();
+    assert_ne!(
+        current.instance_id, published.instance_id,
+        "a config content change must move the derived instance identity"
+    );
+
+    // Persisted terminal Stopped residue for the derived identity: historical state
+    // only. It must never mask the live runtime under config drift.
+    let stale_instance_dir = state.join("instances").join(&current.instance_id);
+    ensure_private_dir(&stale_instance_dir).unwrap();
+    write_json_atomic(&stale_instance_dir.join("instance.json"), &current).unwrap();
+    write_status(
+        &stale_instance_dir,
+        &current.instance_id,
+        V3ManagedRunState::Stopped,
+        Some("stale terminal residue under config drift".to_string()),
+    )
+    .unwrap();
+
+    let status = lifecycle
+        .status(&executable)
+        .await
+        .expect("a live drifted managed instance must not be masked by stale terminal state");
+    assert_eq!(status.state, V3ManagedRunState::Running);
+    assert_eq!(
+        status.instance_id, published.instance_id,
+        "status must report the live old identity under config drift"
+    );
+    let detail = status.detail.unwrap_or_default();
+    assert!(
+        detail.contains("config changed on disk"),
+        "detail: {detail}"
+    );
+
+    control_loop.abort();
+    let _ = fs::remove_file(socket_path);
+}
+
+#[tokio::test]
+async fn status_reports_stopped_when_no_managed_instance_is_live() {
+    let _guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("V3_LIFECYCLE_TEST_KEY", "controlled-secret");
+    let root = TempDir::new().unwrap();
+    let (config, executable, state) = fixture(&root);
+    let lifecycle = V3ManagedLifecycle::with_state_root(&config, &state);
+    let (current, _) = lifecycle.declaration(&executable).unwrap();
+    // Historical residue: a persisted Running state with no control record is not liveness.
+    let instance_dir = state
+        .join("instances")
+        .join(format!("{}-residue", current.instance_id));
+    ensure_private_dir(&instance_dir).unwrap();
+    write_json_atomic(&instance_dir.join("instance.json"), &current).unwrap();
+    write_status(
+        &instance_dir,
+        &current.instance_id,
+        V3ManagedRunState::Running,
+        None,
+    )
+    .unwrap();
+    let status = lifecycle.status(&executable).await.unwrap();
+    assert_eq!(status.state, V3ManagedRunState::Stopped);
+}
+
 #[test]
 fn stopped_instance_state_allows_release_snapshot_executable_rollover() {
     let _guard = TEST_ENV_LOCK.lock().unwrap();

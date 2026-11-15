@@ -472,6 +472,114 @@ fn terminal_provider_attempt_failure_is_persisted_in_row() {
     );
 }
 
+#[test]
+fn provider_switch_row_does_not_repeat_failure_fields_in_records() {
+    let dir = std::env::temp_dir().join(format!(
+        "v3-webui-records-switch-dedup-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("records.jsonl");
+    let observability = V3WebuiObservability::with_persistence_path(Some(path.clone()));
+    let key = build_v3_obs_request_key(5555, "r-switch-dedup");
+
+    record(
+        &observability,
+        V3ObsEventType::Started,
+        &key,
+        scope(5555),
+        meta_with_full("r-switch-dedup"),
+    )
+    .unwrap();
+
+    let mut failed = meta_with_full("r-switch-dedup");
+    failed.provider_status = Some(400);
+    failed.response_status = Some("error".to_string());
+    failed.finish_reason = Some("error".to_string());
+    failed.error_category = Some("provider_http_400".to_string());
+    failed.error_detail = Some("upstream rejected request".to_string());
+    failed.observed_error = Some(V3ObsErrorTruth {
+        source: "provider_attempt_failure".to_string(),
+        external_error_status: Some(400),
+        ..Default::default()
+    });
+    record(
+        &observability,
+        V3ObsEventType::ProviderAttemptFailed,
+        &key,
+        scope(5555),
+        failed,
+    )
+    .unwrap();
+
+    // The switch mirrors the runtime observation: it still sees the failed
+    // provider's upstream status, but contributes no failure category/detail of
+    // its own. The switch line must not repeat the attempt failure.
+    let mut switched = meta_with_full("r-switch-dedup");
+    switched.provider_status = Some(400);
+    switched.error_category = None;
+    switched.error_detail = None;
+    switched.observed_error = None;
+    record(
+        &observability,
+        V3ObsEventType::ProviderSwitched,
+        &key,
+        scope(5555),
+        switched,
+    )
+    .unwrap();
+
+    observability.flush_persistence().unwrap();
+    let body = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<serde_json::Value> = body
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect();
+    assert_eq!(
+        lines.len(),
+        3,
+        "started + failed + switched lifecycle lines"
+    );
+
+    let failed_rows: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|line| line["row"]["event_type"] == "request.provider_attempt_failed")
+        .collect();
+    assert_eq!(
+        failed_rows.len(),
+        1,
+        "one attempt => one failed-attempt line"
+    );
+    assert_eq!(failed_rows[0]["row"]["meta"]["provider_status"], 400);
+    assert_eq!(
+        failed_rows[0]["row"]["meta"]["error_category"],
+        "provider_http_400"
+    );
+
+    let switch_rows: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|line| line["row"]["event_type"] == "request.provider_switched")
+        .collect();
+    assert_eq!(switch_rows.len(), 1);
+    assert!(
+        switch_rows[0]["row"]["meta"]["provider_status"].is_null(),
+        "switch line must not repeat provider_status"
+    );
+    assert!(
+        switch_rows[0]["row"]["meta"]["error_category"].is_null(),
+        "switch line must not repeat error_category"
+    );
+    assert!(switch_rows[0]["row"]["meta"]["error_detail"].is_null());
+    assert!(switch_rows[0]["row"]["meta"]["observed_error"].is_null());
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn meta(req: &str) -> V3ObsRequestMeta {
     V3ObsRequestMeta {
         request_id: req.to_string(),

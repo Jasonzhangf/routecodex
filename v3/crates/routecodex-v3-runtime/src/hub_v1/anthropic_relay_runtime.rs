@@ -824,7 +824,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         // 该标记写入响应侧 profile，响应侧只消费此结果，不重复判定。
         response_hook_profile = response_hook_profile.clone().with_retain_response_cipher(
             is_v3_retain_response_cipher(
-                selected.route.target_plan.len(),
+                retained_expanded.candidates.len(),
                 &selected.candidate.model_id,
             ),
         );

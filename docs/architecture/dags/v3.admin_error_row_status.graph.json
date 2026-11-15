@@ -1,0 +1,180 @@
+{
+  "id": "v3.admin_error_row_status",
+  "version": "3",
+  "inputs": [
+    {
+      "id": "admin-observability-records-query",
+      "schema": "Object",
+      "schema_ref": "v3.admin_error_row_status.arc.records_query"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "admin_status_n01_retained_rows_read",
+      "operator": "routecodex.v3.debug.observability_store.v3_webui_observability_read_raw_rows_from",
+      "operator_version": "1",
+      "inputs": [
+        "admin-observability-records-query"
+      ],
+      "output": {
+        "id": "admin-retained-observability-rows",
+        "schema": "Object",
+        "schema_ref": "v3.admin_error_row_status.arc.retained_rows"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.observability.webui_store"
+        ],
+        "writes": []
+      }
+    },
+    {
+      "id": "admin_status_n02_query_rows_projected",
+      "operator": "routecodex.v3.admin.api.observability.project_query_rows",
+      "operator_version": "1",
+      "inputs": [
+        "admin-retained-observability-rows"
+      ],
+      "output": {
+        "id": "admin-query-rows",
+        "schema": "Object",
+        "schema_ref": "v3.admin_error_row_status.arc.query_rows"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    },
+    {
+      "id": "admin_status_n03_terminal_status_selected",
+      "operator": "routecodex.v3.admin.api.observability.row_status_code",
+      "operator_version": "1",
+      "inputs": [
+        "admin-query-rows"
+      ],
+      "output": {
+        "id": "admin-status-labeled-rows",
+        "schema": "Object",
+        "schema_ref": "v3.admin_error_row_status.arc.status_labeled_rows"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    },
+    {
+      "id": "admin_status_n04_records_response_projected",
+      "operator": "routecodex.v3.admin.api.observability.records",
+      "operator_version": "1",
+      "inputs": [
+        "admin-status-labeled-rows"
+      ],
+      "output": {
+        "id": "admin-records-response",
+        "schema": "Object",
+        "schema_ref": "v3.admin_error_row_status.arc.records_response"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    },
+    {
+      "id": "admin_status_n05_served_status_label",
+      "operator": "routecodex.v3.admin.webui.usage.statusText",
+      "operator_version": "1",
+      "inputs": [
+        "admin-records-response"
+      ],
+      "output": {
+        "id": "admin-rendered-row-status",
+        "schema": "Object",
+        "schema_ref": "v3.admin_error_row_status.arc.rendered_row_status"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [],
+        "writes": []
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "admin_status_n01_retained_rows_read",
+      "to": "admin_status_n02_query_rows_projected",
+      "arc_id": "admin-retained-observability-rows"
+    },
+    {
+      "from": "admin_status_n02_query_rows_projected",
+      "to": "admin_status_n03_terminal_status_selected",
+      "arc_id": "admin-query-rows"
+    },
+    {
+      "from": "admin_status_n03_terminal_status_selected",
+      "to": "admin_status_n04_records_response_projected",
+      "arc_id": "admin-status-labeled-rows"
+    },
+    {
+      "from": "admin_status_n04_records_response_projected",
+      "to": "admin_status_n05_served_status_label",
+      "arc_id": "admin-records-response"
+    }
+  ],
+  "outputs": [
+    "admin-rendered-row-status"
+  ]
+}

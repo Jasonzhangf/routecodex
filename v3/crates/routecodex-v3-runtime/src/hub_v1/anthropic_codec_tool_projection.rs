@@ -2,7 +2,9 @@ use super::anthropic_codec::{V3AnthropicCodecError, V3AnthropicResponsesProjecti
 use serde_json::{json, Map, Value};
 
 pub(super) fn anthropic_tool_as_responses_function_tool(tool: &Map<String, Value>) -> Value {
-    let mut output = Map::new();
+    // Start from the complete client declaration so every business member
+    // (defer_loading and any unknown field) stays attached to this exact tool.
+    let mut output = tool.clone();
     output.insert("type".to_string(), Value::String("function".to_string()));
     output.insert(
         "name".to_string(),
@@ -17,6 +19,9 @@ pub(super) fn anthropic_tool_as_responses_function_tool(tool: &Map<String, Value
             .cloned()
             .unwrap_or_else(|| json!({"type":"object"})),
     );
+    // `input_schema` is the canonical alias of `parameters`; it must not also
+    // ride along as an opaque member.
+    output.remove("input_schema");
     Value::Object(output)
 }
 

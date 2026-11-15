@@ -1122,6 +1122,19 @@ impl V3WebuiObservability {
         }
         inner.requests.insert(request_key.to_string(), row.clone());
         drop(inner);
+        // A provider switch is a lifecycle control event, not a second failure.
+        // The provider_attempt_failed row already carries this attempt's upstream
+        // status, category, detail and typed error truth; persisting them again on
+        // the switch line makes one failure look like two in request-records.jsonl
+        // and in every facet/streak consumer that reads the raw lifecycle lines.
+        // The in-memory row keeps its last-failure projection for the live table;
+        // only the persisted switch snapshot drops the duplicated failure fields.
+        if event_type == V3ObsEventType::ProviderSwitched {
+            row.meta.provider_status = None;
+            row.meta.error_category = None;
+            row.meta.error_detail = None;
+            row.meta.observed_error = None;
+        }
         if let Some(writer) = self.persistence_writer.as_ref() {
             writer.enqueue(row);
         }

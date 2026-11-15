@@ -3691,6 +3691,65 @@ fn provider_attempt_row_keeps_no_upstream_status_for_transport_failure() {
 }
 
 #[test]
+fn provider_attempt_category_uses_real_http_status_before_body_error_type() {
+    let log_file = test_v3_console_log_file("provider-http-status-before-body-type");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 7778);
+    let headers = test_direct_console_headers();
+
+    for (status, body_error_type) in [(429, "rate_limit_exceeded"), (503, "all_failed")] {
+        let request_id = format!("req-provider-http-{status}");
+        let context = test_v3_console_emission_context(
+            &state,
+            "responses",
+            "/v1/responses",
+            &request_id,
+            &headers,
+            &json!({"model":"gpt-5.5"}),
+        );
+        let sink = build_v3_provider_failure_event_sink(&context);
+        let mut event = test_provider_failure_observation();
+        event.status = 502;
+        event.error_type = Some(body_error_type.to_string());
+        event.external_error_code = Some(format!("HTTP_{status}"));
+        event.external_error_status = Some(status);
+        event.message = format!("controlled {status}");
+        let mut observability = test_direct_observability(vec![event.clone()]);
+        observability.provider_status = event.external_error_status;
+        observability.response_status = Some("failed".to_string());
+        sink(&observability, &event);
+
+        let row = state
+            .webui_observability
+            .rows()
+            .unwrap()
+            .remove(&format!("7778:{request_id}"))
+            .expect("provider attempt row");
+        let expected_category = format!("provider_http_{status}");
+        let expected_detail = format!("controlled {status}");
+        assert_eq!(
+            row.meta.error_category.as_deref(),
+            Some(expected_category.as_str()),
+            "the real provider HTTP status owns the ledger category"
+        );
+        assert_eq!(row.meta.provider_status, Some(status));
+        assert_eq!(
+            row.meta.error_detail.as_deref(),
+            Some(expected_detail.as_str()),
+            "the provider body message remains diagnostic detail"
+        );
+        assert_eq!(
+            row.meta
+                .observed_error
+                .as_ref()
+                .and_then(|observed| observed.external_error_status),
+            Some(status)
+        );
+    }
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
 fn openai_chat_relay_does_not_accept_sse_before_terminal_provider_outcome() {
     let source = include_str!("../executors.rs");
     assert!(

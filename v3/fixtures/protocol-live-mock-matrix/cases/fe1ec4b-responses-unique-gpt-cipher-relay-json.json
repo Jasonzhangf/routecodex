@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "case_id": "fe1ec4b-responses-unique-gpt-cipher-relay-json",
+  "cell": {
+    "entry_protocol": "responses",
+    "provider_protocol": "responses",
+    "transport": "json",
+    "mode": "relay"
+  },
+  "runtime_setup": {
+    "provider_id": "mock-responses",
+    "model": "gpt-5.6-sol",
+    "wire_model": "responses-model",
+    "candidate_ids": [
+      "mock-responses/gpt-5.6-sol"
+    ]
+  },
+  "client_request": {
+    "method": "POST",
+    "path": "/v1/responses",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "gpt-5.6-sol",
+      "input": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "retain the unique GPT Responses cipher"
+            }
+          ]
+        }
+      ],
+      "include": [
+        "reasoning.encrypted_content"
+      ],
+      "stream": false
+    }
+  },
+  "expected_provider": {
+    "paths": [
+      "/v1/responses"
+    ],
+    "method": "POST",
+    "auth_required": true,
+    "body_must": {
+      "model": "responses-model",
+      "input.0.content.0.text": "retain the unique GPT Responses cipher",
+      "include.0": "reasoning.encrypted_content",
+      "stream": false
+    },
+    "body_must_not": [
+      "routecodex_internal",
+      "metadata_center",
+      "debug_snapshot"
+    ],
+    "exact": null
+  },
+  "expected_client": {
+    "transport": "complete",
+    "status": 200,
+    "body_must": {
+      "status": "completed",
+      "output.0.type": "reasoning",
+      "output.0.summary.0.text": "unique GPT plan",
+      "output.0.encrypted_content": "gpt-unique-retained-cipher",
+      "output.1.type": "message",
+      "output.1.content.0.text": "unique GPT answer"
+    },
+    "body_must_not": [
+      "provider_error",
+      "internal_error",
+      "routecodex_internal",
+      "metadata_center"
+    ],
+    "semantic_terminal_required": true
+  },
+  "upstream_response": {
+    "protocol": "responses",
+    "mode": "json",
+    "status": 200,
+    "content_type": "application/json",
+    "body": {
+      "id": "resp_fe1ec4b_unique_gpt",
+      "object": "response",
+      "status": "completed",
+      "model": "responses-model",
+      "output": [
+        {
+          "id": "rs_fe1ec4b_unique_gpt",
+          "type": "reasoning",
+          "summary": [
+            {
+              "type": "summary_text",
+              "text": "unique GPT plan"
+            }
+          ],
+          "encrypted_content": "gpt-unique-retained-cipher"
+        },
+        {
+          "id": "msg_fe1ec4b_unique_gpt",
+          "type": "message",
+          "role": "assistant",
+          "status": "completed",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "unique GPT answer",
+              "annotations": []
+            }
+          ]
+        }
+      ],
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4,
+        "total_tokens": 14
+      }
+    }
+  },
+  "assertions": {
+    "provider_attempt_count": 1,
+    "probe_attempts_may_occur": true,
+    "no_control_leakage": true
+  },
+  "source": {
+    "files": [
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs",
+      "v3/crates/routecodex-v3-runtime/src/hub_v1/relay_runtime_core.rs"
+    ],
+    "tests": [
+      "v3/scripts/tests/v3-protocol-live-mock-matrix.mjs::--case fe1ec4b-responses-unique-gpt-cipher-relay-json"
+    ],
+    "adaptation": "Positive control for the existing exception: one concrete GPT provider/model/key candidate retains the Responses encrypted_content field through Relay."
+  },
+  "contract_differences": []
+}
