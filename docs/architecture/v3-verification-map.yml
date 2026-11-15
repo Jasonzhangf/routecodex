@@ -3056,7 +3056,7 @@ features:
   - A committed channel never closes the connection cleanly in place of the typed transport break.
   required_blackbox:
   - The real /v1/chat/completions entry returns a 200 text/event-stream head plus a keepalive comment while the controlled provider attempt is still gated.
-  - client_cancel_terminal_public covers Responses Direct, Responses Relay, and OpenAI Chat Direct. Responses Direct and Relay prove one cancelled terminal before first business output, one after a committed business prefix, and no cancelled terminal after a resolved normal outcome. OpenAI Chat Direct proves the shared recorder for a buffered whole-attempt mode through cancellation before first business output and a resolved normal outcome; it must not fabricate a business prefix before the provider terminal.
+  - client_cancel_terminal_public covers Responses Direct, Responses Relay, and OpenAI Chat Direct. Each mode proves one cancelled terminal before first business output, one after the upstream emitted a business prefix that the whole-attempt buffer still withheld, and no cancelled terminal after a resolved normal outcome. A buffered mode must not fabricate or project a business prefix before the provider terminal.
   - The buffered provider payload and the runtime terminal still stream through the committed channel once the provider is released.
   - A non-SSE client on the same entry receives no committed channel and still receives the runtime JSON outcome.
   - An SSE client whose released provider returns a complete JSON document receives that successful payload by SSE transport framing with no transport failure and no error frame.

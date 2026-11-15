@@ -2,7 +2,8 @@
 //!
 //! Stable test IDs:
 //! `client_cancel_before_business_records_one_cancel_and_session_recovers`,
-//! `client_cancel_after_business_prefix_records_one_cancel`, and
+//! `client_cancel_after_upstream_prefix_records_one_cancel_responses_direct`,
+//! `client_cancel_after_upstream_prefix_records_one_cancel_responses_relay`, and
 //! `normal_completion_body_drop_does_not_add_cancel`.
 //!
 //! Command:
@@ -11,12 +12,10 @@
 //! Each case enters a real SSE listener through one of three modes: Responses
 //! Direct, Responses Relay, or OpenAI Chat Direct. The controlled upstream
 //! holds each attempt at an explicit barrier so the client can close its socket
-//! before any business frame or, for the modes that commit a business prefix
-//! before the provider terminal, after that committed prefix. OpenAI Chat
-//! Direct buffers the whole attempt, so its applicable cases are cancellation
-//! before business output and a resolved normal outcome. The request ledger is
-//! read from the isolated test home and checked for one effective terminal, not
-//! just one final display row.
+//! before any business frame or after the upstream emitted a business prefix
+//! that the runtime still buffers. All three modes buffer the whole provider
+//! attempt, so a cancelled request records one effective terminal without
+//! projecting the prefix or polluting provider health.
 
 use axum::{
     body::{Body, Bytes},
@@ -709,7 +708,7 @@ async fn run_before_business(mode: Mode) {
     entry.stop().await;
 }
 
-async fn run_after_business_prefix(mode: Mode) {
+async fn run_after_upstream_prefix(mode: Mode) {
     let (_home_guard, _lock) = TEST_LOCK.lock().await;
     let _env = EnvGuard::install();
     let home = PathBuf::from(std::env::var("HOME").unwrap());
@@ -724,15 +723,10 @@ async fn run_after_business_prefix(mode: Mode) {
         .expect("the controlled provider must receive the prefix request")
         .expect("provider capture channel");
     assert_eq!(capture["stream"], json!(true));
-    let wire = read_until(
-        &mut socket,
-        AFTER_PREFIX_TEXT.as_bytes(),
-        Duration::from_secs(5),
-    )
-    .await;
+    let wire = read_until(&mut socket, KEEPALIVE_FRAME, Duration::from_secs(3)).await;
     assert!(
-        String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
-        "the client must receive the committed business prefix before closing"
+        !String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
+        "{mode:?} must keep the upstream business prefix buffered before the terminal"
     );
 
     drop(socket);
@@ -864,8 +858,8 @@ async fn client_cancel_before_business_records_one_cancel_and_session_recovers()
 }
 
 #[tokio::test]
-async fn client_cancel_after_business_prefix_records_one_cancel() {
-    run_after_business_prefix(Mode::ResponsesDirect).await;
+async fn client_cancel_after_upstream_prefix_records_one_cancel_responses_direct() {
+    run_after_upstream_prefix(Mode::ResponsesDirect).await;
 }
 
 #[tokio::test]
@@ -879,8 +873,8 @@ async fn client_cancel_before_business_records_one_cancel_responses_relay() {
 }
 
 #[tokio::test]
-async fn client_cancel_after_business_prefix_records_one_cancel_responses_relay() {
-    run_after_business_prefix(Mode::ResponsesRelay).await;
+async fn client_cancel_after_upstream_prefix_records_one_cancel_responses_relay() {
+    run_after_upstream_prefix(Mode::ResponsesRelay).await;
 }
 
 #[tokio::test]
