@@ -217,8 +217,9 @@ pub(crate) fn record_v3_webui_provider_failure(
     meta.finish_reason = Some("error".to_string());
     meta.error_category = Some(
         event
-            .error_type
-            .clone()
+            .external_error_status
+            .map(|status| format!("provider_http_{status}"))
+            .or_else(|| event.error_type.clone())
             .or_else(|| event.external_error_code.clone())
             .unwrap_or_else(|| format!("http_{status}")),
     );

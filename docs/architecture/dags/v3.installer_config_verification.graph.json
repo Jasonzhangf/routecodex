@@ -1,0 +1,75 @@
+{
+  "id": "v3.installer_config_verification",
+  "version": "1",
+  "description": "安装入口配置验证对象流：从一次公开 installer 调用选择非空验证配置，交由现有 V3 Config owner 编译，并把成功、失败或取消收敛为一次安装调用终态。图只描述配置消费者边界，不复制各 installer 的后续安装、restart 或 health 实现。",
+  "inputs": [
+    {
+      "id": "installer-invocation",
+      "schema": "Object",
+      "schema_ref": "v3.installer_config_verification.arc.invocation"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "select_installer_verification_config",
+      "operator": "routecodex.v3.install.select_installer_verification_config",
+      "operator_version": "1",
+      "inputs": ["installer-invocation"],
+      "output": {
+        "id": "selected-config-intent",
+        "schema": "Object",
+        "schema_ref": "v3.installer_config_verification.arc.selected_config_intent"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": [], "writes": [] },
+      "notes": "按 ROUTECODEX_INSTALL_VERIFY_CONFIG、RCC_INSTALL_VERIFY_CONFIG、$HOME/.rcc/config.toml 的非空优先级选择路径；不读取 legacy 默认文件。"
+    },
+    {
+      "id": "compile_selected_installer_config",
+      "operator": "routecodex.v3.config.load_v3_config_snapshot_from_path",
+      "operator_version": "1",
+      "inputs": ["selected-config-intent"],
+      "output": {
+        "id": "selected-config-snapshot",
+        "schema": "Object",
+        "schema_ref": "v3.installer_config_verification.arc.selected_config_snapshot"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": ["v3.user_config.file_source"], "writes": [] },
+      "notes": "复用 Config owner 的精确文件名 dispatcher；默认 config.toml 进入 V3UserConfigStore，显式 legacy 文件名仍按既有显式覆盖语义处理。"
+    },
+    {
+      "id": "publish_installer_config_disposition",
+      "operator": "routecodex.v3.install.publish_installer_config_disposition",
+      "operator_version": "1",
+      "inputs": ["selected-config-snapshot"],
+      "output": {
+        "id": "installer-config-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.installer_config_verification.arc.disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": { "reads": [], "writes": [] },
+      "notes": "成功、配置失败或调用取消都只产出一个最终 disposition；不把失败转换为成功，也不在图中形成重试回边。"
+    }
+  ],
+  "edges": [
+    {
+      "from": "select_installer_verification_config",
+      "to": "compile_selected_installer_config",
+      "arc_id": "selected-config-intent"
+    },
+    {
+      "from": "compile_selected_installer_config",
+      "to": "publish_installer_config_disposition",
+      "arc_id": "selected-config-snapshot"
+    }
+  ],
+  "outputs": ["installer-config-disposition"]
+}
