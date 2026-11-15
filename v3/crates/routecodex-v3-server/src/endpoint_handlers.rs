@@ -115,6 +115,22 @@ pub(crate) fn finish_v3_protocol_execution_plan_failure(
                 Some(&fault.policy_failure),
                 fault.original_source.as_ref(),
             );
+            // The Error06 projection operator itself failed, so there is no
+            // projected chain to carry; the typed policy source still names the
+            // terminal cause. 599 is the established internal
+            // projection-failure code, never a client-visible status.
+            record_v3_provider_terminal_request_row(
+                state,
+                entry_protocol,
+                path,
+                request_id,
+                599,
+                &[],
+                Some(&fault.policy_failure),
+                &routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                None,
+                false,
+            );
             return Err(provider_terminal_response(
                 state,
                 front_connection_identity,
@@ -371,6 +387,18 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     ) {
                         return response;
                     }
+                    record_v3_provider_terminal_request_row(
+                        &state,
+                        &entry_protocol,
+                        &path,
+                        &request_id,
+                        projected.status,
+                        &projected.chain,
+                        Some(&projected.diagnostic_source),
+                        &routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+                        Some(projected.error_class),
+                        true,
+                    );
                     return provider_terminal_response(
                         &state,
                         front_connection_identity,
@@ -1436,6 +1464,18 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 };
             persist_v3_chat_failure_evidence(state, entry_protocol, &path, &request_id, &output);
             if let Some(disposition) = output.terminal_disposition.clone() {
+                record_v3_provider_terminal_request_row(
+                    state,
+                    entry_protocol,
+                    &path,
+                    &request_id,
+                    output.status,
+                    output.error_chain.as_deref().unwrap_or(&[]),
+                    output.diagnostic_source.as_ref(),
+                    &disposition,
+                    output.error_class,
+                    false,
+                );
                 return provider_terminal_response(
                     state,
                     front_connection_identity,
@@ -1557,6 +1597,18 @@ fn execute_v3_non_responses_protocol_branch<'a>(
             };
             persist_v3_anthropic_relay_failure_evidence(state, &path, &request_id, &output);
             if let Some(disposition) = output.terminal_disposition.clone() {
+                record_v3_provider_terminal_request_row(
+                    state,
+                    entry_protocol,
+                    &path,
+                    &request_id,
+                    output.status,
+                    output.error_chain.as_deref().unwrap_or(&[]),
+                    output.diagnostic_source.as_ref(),
+                    &disposition,
+                    None,
+                    false,
+                );
                 return provider_terminal_response(
                     state,
                     front_connection_identity,
@@ -1687,6 +1739,18 @@ fn execute_v3_non_responses_protocol_branch<'a>(
                 };
             persist_v3_gemini_relay_failure_evidence(state, &path, &request_id, &output);
             if let Some(disposition) = output.terminal_disposition.clone() {
+                record_v3_provider_terminal_request_row(
+                    state,
+                    entry_protocol,
+                    &path,
+                    &request_id,
+                    output.status,
+                    output.error_chain.as_deref().unwrap_or(&[]),
+                    output.diagnostic_source.as_ref(),
+                    &disposition,
+                    None,
+                    false,
+                );
                 return provider_terminal_response(
                     state,
                     front_connection_identity,

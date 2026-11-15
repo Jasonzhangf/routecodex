@@ -1227,6 +1227,52 @@ pub(crate) fn project_v3_responses_relay_error_chain(
     )
 }
 
+/// Record the typed terminal for a lane that ends the transport before its
+/// normal frame or committed-stream closeout can run.
+///
+/// The caller supplies only facts already held at that boundary. In
+/// particular, this helper does not classify from the projected client status
+/// or reconstruct an Error01 source. The observability owner derives provider
+/// status and category from the typed terminal disposition/source.
+pub(crate) fn record_v3_provider_terminal_request_row(
+    state: &V3ListenerState,
+    entry_protocol: &str,
+    endpoint: &str,
+    request_id: &str,
+    client_status: u16,
+    error_chain: &[&'static str],
+    diagnostic_source: Option<&routecodex_v3_error::V3Error01SourceRaised>,
+    disposition: &routecodex_v3_error::V3ProviderTerminalDisposition,
+    error_class: Option<&str>,
+    error06_exposed: bool,
+) {
+    if let Err(error) = webui_observability::record_v3_webui_error_projection(
+        &state.webui_observability,
+        state.server.port,
+        request_id,
+        endpoint,
+        entry_protocol,
+        None,
+        None,
+        client_status,
+        None,
+        webui_observability::V3ObsErrorProjection {
+            exposed: error06_exposed,
+            error_class,
+            error_chain,
+            diagnostic_source,
+            terminal_disposition: Some(disposition),
+            ..Default::default()
+        },
+    ) {
+        let line = format_v3_console_timed_content(
+            "[webui-observability]",
+            &format!("req={request_id} error={error}"),
+        );
+        append_v3_human_console_line(state, &line);
+    }
+}
+
 pub(crate) fn finalize_v3_responses_relay_server_output(
     state: &Arc<V3ListenerState>,
     trace_scope: &V3DebugTraceScope,
