@@ -13,22 +13,27 @@ use axum::{
     routing::post,
     Json, Router,
 };
+use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-use routecodex_v3_server::spawn_v3_server_aggregate;
+use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
+    convert::Infallible,
+    ffi::OsString,
     ops::Deref,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
 use tokio::{
-    net::TcpListener,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
     sync::{Mutex, Semaphore},
     task::JoinHandle,
-    time::{timeout, Duration},
+    time::{sleep, timeout, Duration},
 };
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -44,6 +49,34 @@ const SECOND_AUTH_ENV: &str = "E37891A_SECOND_KEY";
 const SECOND_AUTH_SECRET: &str = "e37891a-second-key";
 const PROBE_MARKER: &str = "ping; reply pong";
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(15);
+const DECLARED_RETRY_BACKOFF_MS: u64 = 2_000;
+const IMMEDIATE_SWITCH_BOUND: Duration = Duration::from_secs(1);
+const RECOVERY_HOLD_RESIDENCE_MS: u64 = 5_000;
+const RECOVERY_DEADLINE_RESIDENCE_MS: u64 = 1_000;
+const RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS: u64 = 600;
+const SSE_KEEPALIVE_ENV: &str = "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS";
+
+struct EnvironmentValueGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvironmentValueGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvironmentValueGuard {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Capture {
@@ -58,6 +91,8 @@ struct Peer {
     captures: Mutex<Vec<Capture>>,
     business_attempt_order: Arc<Mutex<Vec<String>>>,
     rejected_keys: Mutex<BTreeMap<String, u16>>,
+    rejected_inputs: Mutex<BTreeMap<String, u16>>,
+    blocked_inputs: Mutex<BTreeSet<String>>,
     reject_blocked: AtomicBool,
     reject_entered: Semaphore,
     reject_release: Semaphore,
@@ -175,15 +210,26 @@ async fn peer_handler(
         probe,
     });
 
-    if let Some(status) = peer.rejected_keys.lock().await.get(&authorization).copied() {
+    let rejected_by_input = peer.rejected_inputs.lock().await.get(&input).copied();
+    let rejected_by_key = if rejected_by_input.is_some() {
+        None
+    } else {
+        peer.rejected_keys.lock().await.get(&authorization).copied()
+    };
+    let rejected_status = rejected_by_input.or(rejected_by_key);
+    if let Some(status) = rejected_status {
         peer.business_attempt_order
             .lock()
             .await
             .push(format!("{}:entered", peer.label));
-        if peer.reject_blocked.load(Ordering::SeqCst) {
+        let blocked_inputs = peer.blocked_inputs.lock().await;
+        if peer.reject_blocked.load(Ordering::SeqCst)
+            && (blocked_inputs.is_empty() || blocked_inputs.contains(&input))
+        {
             peer.reject_entered.add_permits(1);
             peer.reject_release.acquire().await.unwrap().forget();
         }
+        drop(blocked_inputs);
         peer.business_attempt_order
             .lock()
             .await
@@ -218,6 +264,29 @@ async fn peer_handler(
     if input == "holder" {
         peer.holder_entered.add_permits(1);
         peer.holder_release.acquire().await.unwrap().forget();
+    } else if input == "stream-holder" {
+        peer.holder_entered.add_permits(1);
+        peer.business_attempt_order.lock().await.push(format!(
+            "{}:{}",
+            peer.label,
+            StatusCode::OK.as_u16()
+        ));
+        let reasoning = json!({
+            "type": "response.reasoning_summary_text.delta",
+            "delta": "recovered-deadline-reasoning",
+            "item_id": "rs_e37891a_recovered_deadline",
+            "output_index": 0,
+            "summary_index": 0,
+            "sequence_number": 1
+        });
+        let frame = format!("event: response.reasoning_summary_text.delta\ndata: {reasoning}\n\n");
+        let stream =
+            stream::once(async move { Ok::<_, Infallible>(frame) }).chain(stream::pending());
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
     } else if input == "target" {
         peer.target_entered.add_permits(1);
     }
@@ -244,6 +313,8 @@ async fn spawn_peer_with_order(
         captures: Mutex::new(Vec::new()),
         business_attempt_order,
         rejected_keys: Mutex::new(BTreeMap::new()),
+        rejected_inputs: Mutex::new(BTreeMap::new()),
+        blocked_inputs: Mutex::new(BTreeSet::new()),
         reject_blocked: AtomicBool::new(false),
         reject_entered: Semaphore::new(0),
         reject_release: Semaphore::new(0),
@@ -377,11 +448,32 @@ fn manifest_with_provider_blocks(
     )
 }
 
+fn test_declaration(relay: bool) -> String {
+    let declaration = hub_v1_fixture::hub_v1_test_declaration();
+    if relay {
+        let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+        let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+        declaration.replace(direct_binding, relay_binding)
+    } else {
+        declaration
+    }
+}
+
 fn manifest_with_declaration(
     port: u16,
     declaration: &str,
     provider_blocks: &str,
     route_pools: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_with_execution(port, declaration, provider_blocks, route_pools, "")
+}
+
+fn manifest_with_execution(
+    port: u16,
+    declaration: &str,
+    provider_blocks: &str,
+    route_pools: &str,
+    execution_settings: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
     let source = format!(
         r#"
@@ -393,6 +485,7 @@ port = {port}
 routing_group = "owned"
 endpoints = ["responses"]
 {execution}
+{execution_settings}
 {provider_blocks}
 {route_pools}
 "#,
@@ -439,6 +532,670 @@ async fn wait_for_semaphore(semaphore: &Semaphore, wait: Duration) -> bool {
     } else {
         false
     }
+}
+
+async fn run_issue0afb440_immediate_switch(relay: bool) {
+    let (_home, _guard) = TEST_LOCK.lock().await;
+    std::env::set_var(AUTH_ENV, AUTH_SECRET);
+    let attempt_order = Arc::new(Mutex::new(Vec::new()));
+    let failing = spawn_peer_with_order("immediate-fail", attempt_order.clone()).await;
+    let healthy = spawn_peer_with_order("immediate-healthy", attempt_order.clone()).await;
+    failing
+        .rejected_inputs
+        .lock()
+        .await
+        .insert("target".to_string(), 503);
+    let providers = [
+        ("immediatefail", failing.base.as_str(), "wire-immediatefail"),
+        (
+            "immediatehealthy",
+            healthy.base.as_str(),
+            "wire-immediatehealthy",
+        ),
+    ];
+    let provider_blocks = providers
+        .iter()
+        .map(|(provider_id, base, wire_model)| {
+            if relay {
+                provider_block(provider_id, base, wire_model)
+            } else {
+                direct_provider_block(provider_id, base, wire_model)
+            }
+        })
+        .collect::<String>();
+    let route_pools = r#"
+[route_groups.owned.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "immediatefail", model = "model", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "immediatehealthy", model = "model", key = "key", priority = 1 }
+]
+
+[[error.provider_error_action_policy]]
+policy_id = "issue0afb440_immediate_switch"
+scope = { provider_id = "immediatefail" }
+match = { http_status = 503 }
+path = [
+  { step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = 2000 },
+  { step = "project", reason_code = "provider_failure" }
+]
+"#;
+    let handle = spawn_v3_server_aggregate(manifest_with_declaration(
+        free_port(),
+        &test_declaration(relay),
+        &provider_blocks,
+        route_pools,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let started = std::time::Instant::now();
+    let outcome = timeout(
+        IMMEDIATE_SWITCH_BOUND,
+        send_request(&client(), &endpoint, "target"),
+    )
+    .await;
+    let elapsed = started.elapsed();
+    let failing_captures = failing.captures.lock().await.clone();
+    let healthy_captures = healthy.captures.lock().await.clone();
+    let order = attempt_order.lock().await.clone();
+    handle.shutdown().await;
+    stop_peer(failing).await;
+    stop_peer(healthy).await;
+    std::env::remove_var(AUTH_ENV);
+
+    let outcome = outcome.unwrap_or_else(|_| {
+        panic!(
+            "{} must switch after the real 503 without waiting for the declared {DECLARED_RETRY_BACKOFF_MS}ms retry; elapsed={elapsed:?}",
+            if relay { "Relay" } else { "Direct" }
+        )
+    });
+    assert_eq!(
+        failing_captures
+            .iter()
+            .filter(|capture| capture.input == "target" && !capture.probe)
+            .count(),
+        1,
+        "the failed identity must receive exactly one business attempt: {failing_captures:?}"
+    );
+    assert_eq!(
+        healthy_captures
+            .iter()
+            .filter(|capture| {
+                capture.input == "target"
+                    && capture.model == "wire-immediatehealthy"
+                    && capture.authorization == format!("Bearer {AUTH_SECRET}")
+            })
+            .count(),
+        1,
+        "the declared successor must receive the request: {healthy_captures:?}"
+    );
+    assert_eq!(
+        order,
+        [
+            "immediate-fail:entered",
+            "immediate-fail:503",
+            "immediate-healthy:200",
+        ],
+        "the failed provider response must be observed before the successor attempt"
+    );
+    let ClientOutcome::Completed(value) = outcome else {
+        panic!("the successor business response must reach the client: {outcome:?}");
+    };
+    assert!(
+        value.to_string().contains("immediate-healthy-business-ok"),
+        "the successor business response must reach the client: {value}"
+    );
+    assert!(
+        !value.to_string().contains("owned-real-key-failure"),
+        "provider error content must stay internal: {value}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_non_last_failure_switches_immediately_direct() {
+    run_issue0afb440_immediate_switch(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_non_last_failure_switches_immediately_relay() {
+    run_issue0afb440_immediate_switch(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_healthy_sibling_completes_while_first_request_recovers() {
+    let (_home, _guard) = TEST_LOCK.lock().await;
+    std::env::set_var(AUTH_ENV, AUTH_SECRET);
+    let attempt_order = Arc::new(Mutex::new(Vec::new()));
+    let failing = spawn_peer_with_order("sibling-recovery-fail", attempt_order.clone()).await;
+    let healthy = spawn_peer_with_order("sibling-recovery-healthy", attempt_order.clone()).await;
+    failing
+        .rejected_inputs
+        .lock()
+        .await
+        .insert("target".to_string(), 503);
+    failing
+        .blocked_inputs
+        .lock()
+        .await
+        .insert("target".to_string());
+    let providers = [
+        (
+            "siblingrecoveryfail",
+            failing.base.as_str(),
+            "wire-siblingrecoveryfail",
+        ),
+        (
+            "siblingrecoveryhealthy",
+            healthy.base.as_str(),
+            "wire-siblingrecoveryhealthy",
+        ),
+    ];
+    let provider_blocks = providers
+        .iter()
+        .map(|(provider_id, base, wire_model)| provider_block(provider_id, base, wire_model))
+        .collect::<String>();
+    let route_pools = r#"
+[route_groups.owned.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "siblingrecoveryfail", model = "model", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "siblingrecoveryhealthy", model = "model", key = "key", priority = 1 }
+]
+"#;
+    let handle = spawn_v3_server_aggregate(manifest_with_provider_blocks(
+        free_port(),
+        &provider_blocks,
+        route_pools,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    failing.reject_blocked.store(true, Ordering::SeqCst);
+    let mut recovering = tokio::spawn({
+        let client = client();
+        let endpoint = endpoint.clone();
+        async move { send_request(&client, &endpoint, "target").await }
+    });
+    assert!(
+        wait_for_semaphore(&failing.reject_entered, Duration::from_secs(5)).await,
+        "the first request must reach its held provider failure"
+    );
+    let sibling = timeout(
+        Duration::from_secs(2),
+        send_request(&client(), &endpoint, "sibling"),
+    )
+    .await
+    .expect("a healthy sibling request must not wait for the held first request");
+    assert!(
+        !recovering.is_finished(),
+        "the first request must still be held at its own provider response"
+    );
+    failing.reject_release.add_permits(1);
+    let recovered = timeout(Duration::from_secs(5), &mut recovering)
+        .await
+        .expect("the first request must reselect its declared healthy successor")
+        .expect("the recovery task must not panic");
+    let failing_captures = failing.captures.lock().await.clone();
+    let healthy_captures = healthy.captures.lock().await.clone();
+    let order = attempt_order.lock().await.clone();
+    handle.shutdown().await;
+    stop_peer(failing).await;
+    stop_peer(healthy).await;
+    std::env::remove_var(AUTH_ENV);
+
+    assert!(
+        sibling.contains("sibling-recovery-fail-business-ok"),
+        "the sibling must finish on its independent fast path: {sibling:?}"
+    );
+    assert!(
+        recovered.contains("sibling-recovery-healthy-business-ok"),
+        "the held request must recover after its 503 returns: {recovered:?}"
+    );
+    assert_eq!(
+        failing_captures
+            .iter()
+            .filter(|capture| capture.input == "target" && !capture.probe)
+            .count(),
+        1,
+        "the held request must attempt the preferred candidate exactly once: {failing_captures:?}"
+    );
+    assert_eq!(
+        healthy_captures
+            .iter()
+            .filter(|capture| capture.input == "target" && !capture.probe)
+            .count(),
+        1,
+        "the recovered request must attempt the declared successor exactly once: {healthy_captures:?}"
+    );
+    assert_eq!(
+        order,
+        [
+            "sibling-recovery-fail:entered",
+            "sibling-recovery-fail:503",
+            "sibling-recovery-healthy:200",
+        ],
+        "the held upstream 503 must be observed before the successor succeeds"
+    );
+    assert!(
+        !sibling.contains("owned-real-key-failure")
+            && !recovered.contains("owned-real-key-failure"),
+        "provider error payloads must remain internal"
+    );
+}
+
+async fn start_recovery_hold(
+    relay: bool,
+    residence_ms: u64,
+) -> (
+    V3ServerAggregateHandle,
+    PeerHandle,
+    PeerHandle,
+    std::net::SocketAddr,
+    Arc<Mutex<Vec<String>>>,
+) {
+    let attempt_order = Arc::new(Mutex::new(Vec::new()));
+    let failing = spawn_peer_with_order("recovery-hold-fail", attempt_order.clone()).await;
+    let successor = spawn_peer_with_order("recovery-hold-successor", attempt_order.clone()).await;
+    failing
+        .rejected_inputs
+        .lock()
+        .await
+        .insert("stream-holder".to_string(), 503);
+    let providers = [
+        (
+            "recoveryholdfail",
+            failing.base.as_str(),
+            "wire-recoveryholdfail",
+        ),
+        (
+            "recoveryholdsuccessor",
+            successor.base.as_str(),
+            "wire-recoveryholdsuccessor",
+        ),
+    ];
+    let provider_blocks = providers
+        .iter()
+        .map(|(provider_id, base, wire_model)| {
+            if relay {
+                provider_block(provider_id, base, wire_model)
+            } else {
+                direct_provider_block(provider_id, base, wire_model)
+            }
+        })
+        .collect::<String>();
+    let route_pools = format!(
+        r#"
+[error]
+provider_error_default_path = [
+  {{ step = "wait_retry", retry_mode = "reselect_before_client_projection", max_attempts = 1, backoff_ms = {DECLARED_RETRY_BACKOFF_MS} }},
+  {{ step = "project", reason_code = "provider_failure" }}
+]
+
+[route_groups.owned.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "recoveryholdfail", model = "model", key = "key", priority = 2 }},
+  {{ kind = "provider_model", provider = "recoveryholdsuccessor", model = "model", key = "key", priority = 1 }}
+]
+"#
+    );
+    let handle = spawn_v3_server_aggregate(manifest_with_execution(
+        free_port(),
+        &test_declaration(relay),
+        &provider_blocks,
+        &route_pools,
+        &format!("attempt_store = {{ residence_timeout_ms = {residence_ms} }}"),
+    ))
+    .await
+    .unwrap();
+    let server_addr = handle.listeners[0].addr;
+    (handle, failing, successor, server_addr, attempt_order)
+}
+
+async fn open_streaming_responses_request(
+    server_addr: std::net::SocketAddr,
+    session_id: &str,
+) -> TcpStream {
+    let body = json!({
+        "model": "client-auto",
+        "input": "stream-holder",
+        "stream": true
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(server_addr).await.unwrap();
+    socket
+        .write_all(
+            format!(
+                "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: {session_id}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    socket
+}
+
+fn request_records_path(home: &Path, port: u16) -> PathBuf {
+    home.join(".rcc")
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"))
+}
+
+fn read_request_rows(path: &Path) -> Vec<Value> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter_map(|line| line.get("row").cloned())
+        .collect()
+}
+
+async fn wait_for_request_terminal(
+    path: &Path,
+    event_type: &str,
+    budget: Duration,
+) -> Option<Vec<Value>> {
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        let rows = read_request_rows(path);
+        if rows
+            .iter()
+            .any(|row| row["event_type"] == json!(event_type))
+        {
+            return Some(rows);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+async fn read_until_bytes(socket: &mut TcpStream, needle: &[u8], budget: Duration) -> Vec<u8> {
+    let mut wire = Vec::new();
+    timeout(budget, async {
+        while !wire.windows(needle.len()).any(|window| window == needle) {
+            let mut chunk = [0; 1024];
+            let count = socket.read(&mut chunk).await.unwrap();
+            assert_ne!(count, 0, "client transport closed before {needle:?}");
+            wire.extend_from_slice(&chunk[..count]);
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        panic!(
+            "timed out waiting for {:?}: {}",
+            String::from_utf8_lossy(needle),
+            String::from_utf8_lossy(&wire)
+        )
+    });
+    wire
+}
+
+async fn stop_recovery_hold(
+    handle: V3ServerAggregateHandle,
+    failing: PeerHandle,
+    successor: PeerHandle,
+) {
+    handle.shutdown().await;
+    stop_peer(failing).await;
+    stop_peer(successor).await;
+    std::env::remove_var(AUTH_ENV);
+}
+
+async fn run_issue0afb440_cancel_after_recovery(relay: bool) {
+    let (_home_guard, _guard) = TEST_LOCK.lock().await;
+    let _keepalive = EnvironmentValueGuard::set(SSE_KEEPALIVE_ENV, "50");
+    let home = PathBuf::from(std::env::var("HOME").unwrap());
+    std::env::set_var(AUTH_ENV, AUTH_SECRET);
+    let (handle, failing, successor, server_addr, attempt_order) =
+        start_recovery_hold(relay, RECOVERY_HOLD_RESIDENCE_MS).await;
+    let session_id = if relay {
+        "issue0afb440-cancel-relay"
+    } else {
+        "issue0afb440-cancel-direct"
+    };
+    let mut socket = open_streaming_responses_request(server_addr, session_id).await;
+    let wire = read_until_bytes(&mut socket, b"\r\n\r\n", Duration::from_secs(3)).await;
+    assert!(
+        String::from_utf8_lossy(&wire).starts_with("HTTP/1.1 200")
+            && !String::from_utf8_lossy(&wire).contains("owned-real-key-failure"),
+        "the request must have committed only its SSE transport before recovery: {}",
+        String::from_utf8_lossy(&wire)
+    );
+    assert!(
+        wait_for_semaphore(&successor.holder_entered, Duration::from_secs(5)).await,
+        "{} recovery must dispatch the successor before the client cancels",
+        if relay { "Relay" } else { "Direct" }
+    );
+    let request_counts = (
+        failing
+            .captures
+            .lock()
+            .await
+            .iter()
+            .filter(|capture| capture.input == "stream-holder" && !capture.probe)
+            .count(),
+        successor
+            .captures
+            .lock()
+            .await
+            .iter()
+            .filter(|capture| capture.input == "stream-holder" && !capture.probe)
+            .count(),
+    );
+    assert_eq!(
+        request_counts.0, 1,
+        "the failed identity must receive exactly one business attempt"
+    );
+    let order = attempt_order.lock().await.clone();
+    drop(socket);
+
+    let path = request_records_path(&home, server_addr.port());
+    let rows = wait_for_request_terminal(&path, "request.cancelled", Duration::from_secs(2)).await;
+    let cancelled = rows.as_ref().and_then(|rows| {
+        rows.iter()
+            .find(|row| row["event_type"] == json!("request.cancelled"))
+    });
+    let cancellation_recorded = cancelled.is_some();
+    if let Some(cancelled) = cancelled {
+        assert_eq!(
+            cancelled["meta"]["provider_id"],
+            json!("recoveryholdsuccessor"),
+            "the cancellation must belong to the held successor attempt: {cancelled}"
+        );
+        assert_eq!(
+            cancelled["meta"]["error_category"],
+            json!("client_disconnect"),
+            "client cancellation must retain its typed source: {cancelled}"
+        );
+        assert!(
+            cancelled["meta"]["provider_status"].is_null(),
+            "client cancellation must not carry a provider status: {cancelled}"
+        );
+    }
+    let preparation = timeout(Duration::from_secs(2), handle.prepare_exec_attempt())
+        .await
+        .expect("client cancellation must release request activity");
+    drop(preparation);
+
+    stop_recovery_hold(handle, failing, successor).await;
+    assert_eq!(
+        request_counts,
+        (1, 1),
+        "cancellation must not retry the failed identity or duplicate the successor: {request_counts:?}"
+    );
+    assert_eq!(
+        order,
+        [
+            "recovery-hold-fail:entered",
+            "recovery-hold-fail:503",
+            "recovery-hold-successor:200",
+        ],
+        "the real upstream 503 must be observed before the successor is cancelled"
+    );
+    assert!(
+        rows.as_ref().map_or(true, |rows| rows.iter().all(|row| {
+            row["event_type"] != json!("request.failed")
+                && row["event_type"] != json!("request.completed")
+        })),
+        "client cancellation must not also record a failed or completed terminal; rows={rows:#?}"
+    );
+    assert!(
+        cancellation_recorded,
+        "disconnect after successor recovery dispatch must produce request.cancelled; rows={rows:#?}"
+    );
+}
+
+async fn run_issue0afb440_deadline_after_recovery(relay: bool) {
+    let (_home_guard, _guard) = TEST_LOCK.lock().await;
+    let _keepalive = EnvironmentValueGuard::set(SSE_KEEPALIVE_ENV, "50");
+    let home = PathBuf::from(std::env::var("HOME").unwrap());
+    std::env::set_var(AUTH_ENV, AUTH_SECRET);
+    let (handle, failing, successor, server_addr, attempt_order) =
+        start_recovery_hold(relay, RECOVERY_DEADLINE_RESIDENCE_MS).await;
+    failing
+        .blocked_inputs
+        .lock()
+        .await
+        .insert("stream-holder".to_string());
+    failing.reject_blocked.store(true, Ordering::SeqCst);
+    let session_id = if relay {
+        "issue0afb440-deadline-relay"
+    } else {
+        "issue0afb440-deadline-direct"
+    };
+    let started = std::time::Instant::now();
+    let mut socket = open_streaming_responses_request(server_addr, session_id).await;
+    let initial_wire = read_until_bytes(&mut socket, b"\r\n\r\n", Duration::from_secs(3)).await;
+    assert!(
+        wait_for_semaphore(&failing.reject_entered, Duration::from_secs(5)).await,
+        "the initial candidate must reach its delayed upstream failure"
+    );
+    sleep(Duration::from_millis(
+        RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS,
+    ))
+    .await;
+    failing.reject_release.add_permits(1);
+    assert!(
+        wait_for_semaphore(&successor.holder_entered, Duration::from_secs(5)).await,
+        "{} recovery must dispatch the successor before the original deadline",
+        if relay { "Relay" } else { "Direct" }
+    );
+    let mut wire = Vec::new();
+    let ended = timeout(Duration::from_secs(3), socket.read_to_end(&mut wire)).await;
+    let elapsed = started.elapsed();
+    let wire_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&initial_wire),
+        String::from_utf8_lossy(&wire)
+    );
+    let path = request_records_path(&home, server_addr.port());
+    let rows = wait_for_request_terminal(&path, "request.failed", Duration::from_secs(2)).await;
+    let failed = rows.as_ref().and_then(|rows| {
+        rows.iter()
+            .find(|row| row["event_type"] == json!("request.failed"))
+    });
+    let failed_terminal_recorded = failed.is_some();
+    let failed_identity = failed
+        .map(|failed| failed["meta"]["provider_id"] == json!("recoveryholdsuccessor"))
+        .unwrap_or(false);
+    let request_counts = (
+        failing
+            .captures
+            .lock()
+            .await
+            .iter()
+            .filter(|capture| capture.input == "stream-holder" && !capture.probe)
+            .count(),
+        successor
+            .captures
+            .lock()
+            .await
+            .iter()
+            .filter(|capture| capture.input == "stream-holder" && !capture.probe)
+            .count(),
+    );
+    let order = attempt_order.lock().await.clone();
+    drop(socket);
+    stop_recovery_hold(handle, failing, successor).await;
+
+    let transport_ended = match ended.as_ref() {
+        Ok(Ok(_)) => true,
+        Ok(Err(error)) => error.kind() == std::io::ErrorKind::ConnectionReset,
+        Err(_) => false,
+    };
+    assert!(
+        transport_ended,
+        "deadline transport did not end within 3s of successor dispatch: {ended:?}; elapsed={elapsed:?}; {wire_text}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(RECOVERY_DEADLINE_RESIDENCE_MS - 100)
+            && elapsed
+                < Duration::from_millis(
+                    RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS
+                        + RECOVERY_DEADLINE_RESIDENCE_MS
+                        - 200,
+                )
+            && elapsed < Duration::from_millis(DECLARED_RETRY_BACKOFF_MS),
+        "the original {RECOVERY_DEADLINE_RESIDENCE_MS}ms residence deadline must survive the {RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS}ms first failure and end before a deadline reset or the declared {DECLARED_RETRY_BACKOFF_MS}ms retry delay: {elapsed:?}"
+    );
+    assert!(
+        failed_terminal_recorded && failed_identity,
+        "deadline recovery must record request.failed for the held successor; rows={rows:#?}"
+    );
+    assert!(
+        !wire_text.contains("response.completed")
+            && !wire_text.contains("\"status\":\"completed\"")
+            && !wire_text.contains("owned-real-key-failure")
+            && !wire_text.contains("\"error\"")
+            && !wire_text.contains("network_error")
+            && !wire_text.contains("502")
+            && !wire_text.contains("598")
+            && !wire_text.contains("599"),
+        "the client must not receive fabricated success or provider/proxy error semantics: {wire_text}"
+    );
+    assert!(
+        !wire.ends_with(b"0\r\n\r\n"),
+        "the expired transport must break instead of faking a normal completion: {wire_text}"
+    );
+    assert_eq!(
+        request_counts,
+        (1, 1),
+        "recovery must issue one attempt to each identity; failing/successor counts={request_counts:?}"
+    );
+    assert_eq!(
+        order,
+        [
+            "recovery-hold-fail:entered",
+            "recovery-hold-fail:503",
+            "recovery-hold-successor:200",
+        ],
+        "the delayed upstream 503 must be observed before the successor stream is held"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_client_cancel_after_recovery_direct() {
+    run_issue0afb440_cancel_after_recovery(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_client_cancel_after_recovery_relay() {
+    run_issue0afb440_cancel_after_recovery(true).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_original_deadline_after_recovery_direct() {
+    run_issue0afb440_deadline_after_recovery(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_original_deadline_after_recovery_relay() {
+    run_issue0afb440_deadline_after_recovery(true).await;
 }
 
 async fn wait_for_terminal_evidence(samples_root: &std::path::Path) -> Value {
