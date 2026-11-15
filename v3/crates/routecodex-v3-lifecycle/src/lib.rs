@@ -608,37 +608,123 @@ impl V3ManagedLifecycle {
         executable_path: impl AsRef<Path>,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
         let (declaration, _) = self.declaration(executable_path)?;
-        self.query_live(&declaration).await.or_else(|error| {
-            let path = self
-                .instance_dir(&declaration.instance_id)
-                .join("status.json");
-            if path.exists() {
-                let status: V3ManagedStatusRecord = read_json(&path)?;
-                if status.instance_id != declaration.instance_id {
-                    return Err(V3LifecycleError::IdentityMismatch(
-                        "status instance id differs from config identity".to_string(),
-                    ));
-                }
-                if matches!(
-                    status.state,
-                    V3ManagedRunState::Stopped | V3ManagedRunState::Failed
-                ) {
-                    Ok(status)
-                } else {
-                    Err(error)
-                }
-            } else {
-                Ok(V3ManagedStatusRecord {
-                    schema_version: SCHEMA_VERSION,
-                    instance_id: declaration.instance_id,
-                    state: V3ManagedRunState::Stopped,
-                    updated_at_epoch_ms: epoch_ms(),
-                    detail: Some(format!(
-                        "no managed runtime state; query_live failed: {error}"
-                    )),
-                })
+        let live_error = match self.query_live(&declaration).await {
+            Ok(status) => return Ok(status),
+            Err(error) => error,
+        };
+        let path = self
+            .instance_dir(&declaration.instance_id)
+            .join("status.json");
+        if path.exists() {
+            let status: V3ManagedStatusRecord = read_json(&path)?;
+            if status.instance_id != declaration.instance_id {
+                return Err(V3LifecycleError::IdentityMismatch(
+                    "status instance id differs from config identity".to_string(),
+                ));
             }
+            if matches!(
+                status.state,
+                V3ManagedRunState::Stopped | V3ManagedRunState::Failed
+            ) {
+                return Ok(status);
+            }
+            return Err(live_error);
+        }
+        // The published declaration is part of the instance identity: both the config path
+        // and the config content digest feed `instance_id`. Editing the config on disk while
+        // the managed runtime keeps serving therefore moves the identity derived from that
+        // config away from the identity the live runtime published. Reporting `stopped` for a
+        // runtime that is still serving clients is a false stop, so look for the runtime that
+        // is actually alive under this config path before synthesizing a stopped record.
+        if let Some(status) = self
+            .discover_live_instance_under_config_drift(&declaration)
+            .await
+        {
+            return Ok(status);
+        }
+        Ok(V3ManagedStatusRecord {
+            schema_version: SCHEMA_VERSION,
+            instance_id: declaration.instance_id,
+            state: V3ManagedRunState::Stopped,
+            updated_at_epoch_ms: epoch_ms(),
+            detail: Some(format!(
+                "no managed runtime state; query_live failed: {live_error}"
+            )),
         })
+    }
+
+    /// Find the managed runtime that is actually serving this config path after the config
+    /// content changed on disk, so its published identity no longer matches the identity
+    /// derived from the current config.
+    ///
+    /// Candidate narrowing stays file-only and cheap: a candidate must share the canonical
+    /// config path and publish the exact same listener set. In the real state root that
+    /// leaves a handful of candidates instead of every historical instance directory, so the
+    /// read-only control probe never reaches an unrelated runtime. Liveness is decided only by
+    /// the control channel; a persisted `status.json` state is historical residue and is never
+    /// treated as evidence of a live instance.
+    async fn discover_live_instance_under_config_drift(
+        &self,
+        declaration: &V3ManagedInstanceDeclaration,
+    ) -> Option<V3ManagedStatusRecord> {
+        let mut candidates: Vec<V3ManagedInstanceDeclaration> = Vec::new();
+        let entries = fs::read_dir(self.state_root.join("instances")).ok()?;
+        for entry in entries.flatten() {
+            let instance_dir = entry.path();
+            if !instance_dir.is_dir() {
+                continue;
+            }
+            let published: V3ManagedInstanceDeclaration =
+                match read_json(&instance_dir.join("instance.json")) {
+                    Ok(published) => published,
+                    Err(_) => continue,
+                };
+            if published.instance_id == declaration.instance_id {
+                continue;
+            }
+            if published.config_path != declaration.config_path {
+                continue;
+            }
+            if !same_managed_listener_set(&published.listeners, &declaration.listeners) {
+                continue;
+            }
+            candidates.push(published);
+        }
+        candidates.sort_by(|left, right| left.instance_id.cmp(&right.instance_id));
+        let mut live: Vec<(V3ManagedInstanceDeclaration, V3ManagedStatusRecord)> = Vec::new();
+        for published in candidates {
+            let status = match self.query_live(&published).await {
+                Ok(status) => status,
+                Err(_) => continue,
+            };
+            if !matches!(
+                status.state,
+                V3ManagedRunState::Starting
+                    | V3ManagedRunState::Running
+                    | V3ManagedRunState::Stopping
+            ) {
+                continue;
+            }
+            live.push((published, status));
+        }
+        let (published, mut status) = live.first()?.clone();
+        let live_ids = live
+            .iter()
+            .map(|(_, status)| status.instance_id.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let note = format!(
+            "config changed on disk; live managed instance {} keeps its published declaration \
+             (published config digest {} vs current {}); live candidates for this config path \
+             and listener set: {}",
+            status.instance_id, published.config_digest, declaration.config_digest, live_ids
+        );
+        let prior = status.detail.take();
+        status.detail = Some(match prior {
+            Some(prior) if !prior.is_empty() => format!("{prior}; {note}"),
+            _ => note,
+        });
+        Some(status)
     }
 
     pub async fn stop(
@@ -1189,6 +1275,27 @@ impl V3ManagedLifecycle {
             detail,
         })
     }
+}
+
+fn same_managed_listener_set(
+    left: &[V3ManagedListenerDeclaration],
+    right: &[V3ManagedListenerDeclaration],
+) -> bool {
+    fn normalize(listeners: &[V3ManagedListenerDeclaration]) -> Vec<(&str, &str, u16)> {
+        let mut normalized = listeners
+            .iter()
+            .map(|listener| {
+                (
+                    listener.server_id.as_str(),
+                    listener.bind.as_str(),
+                    listener.port,
+                )
+            })
+            .collect::<Vec<_>>();
+        normalized.sort();
+        normalized
+    }
+    normalize(left) == normalize(right)
 }
 
 fn managed_config_is_ephemeral(config_path: &Path) -> bool {
