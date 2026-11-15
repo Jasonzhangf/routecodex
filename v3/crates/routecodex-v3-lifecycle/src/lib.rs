@@ -626,6 +626,17 @@ impl V3ManagedLifecycle {
                 status.state,
                 V3ManagedRunState::Stopped | V3ManagedRunState::Failed
             ) {
+                // A persisted terminal state for the derived identity is historical residue
+                // when the config changed on disk: an older identity under the same config
+                // path and listener set may still be live. Never let a stale terminal mask
+                // a live drifted runtime; if no live instance is discovered, keep the
+                // persisted terminal as the truthful status.
+                if let Some(live) = self
+                    .discover_live_instance_under_config_drift(&declaration)
+                    .await
+                {
+                    return Ok(live);
+                }
                 return Ok(status);
             }
             return Err(live_error);
