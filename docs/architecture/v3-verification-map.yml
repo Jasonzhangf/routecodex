@@ -155,10 +155,13 @@ features:
   - Command aliases do not fall back to a repository build, npm global package, or release snapshot.
   - Installation state never enters request, response, provider wire, MetadataCenter, or Error payloads.
   - Direct binary installation is not blocked by unrelated in-progress provider/runtime feature gates; full architecture CI remains required by the build chain.
-  - CI build consumes the declared package version without changing package.json or package-lock.json; version mutation belongs to the explicit release operation.
+  - Every successful public build advances the build version exactly once through the shared version ledger; a failed build releases its reservation so the version is neither duplicated nor skipped.
+  - CI build resolves and embeds the ledger version without changing package.json or package-lock.json; build-time version allocation never mutates tracked source.
   required_gates:
   - npm --prefix v3 run test:distribution
   - npm --prefix v3 run test:install-cleanup
+  - npm --prefix v3 run test:v3-version-ledger
+  - npm --prefix v3 run test:v3-install-serialization
   - npm --prefix v3 run verify:v3-resource-map
   - npm --prefix v3 run verify:v3-module-boundaries
   completion_rule:

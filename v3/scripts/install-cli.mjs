@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { committedLedgerVersion } from './version-ledger.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const v3Root = path.resolve(__dirname, '..');
@@ -30,9 +31,179 @@ function readPackageVersion() {
   return version;
 }
 
+// The version this install publishes: the build context's version when present,
+// otherwise the ledger's *committed* version (seeded from package.json).
+//
+// Install is a publication consumer, not an allocation owner. It must never
+// publish a live reservation: that version still belongs to an in-flight build,
+// and if that build fails the version is released and reused, so publishing it
+// here would emit two successful artifacts with one version.
+export function resolveBuildVersion(sourceEnv = process.env, options = {}) {
+  const fromBuild = String(sourceEnv.ROUTECODEX_BUILD_VERSION ?? '').trim();
+  if (fromBuild) {
+    return fromBuild;
+  }
+  try {
+    return committedLedgerVersion({
+      declaredVersion: options.declaredVersion ?? readPackageVersion(),
+      ledgerPath: options.ledgerPath,
+      cwd: options.cwd ?? v3Root,
+    });
+  } catch (error) {
+    fail(`cannot resolve V3 build version: ${error.message}`);
+  }
+}
+
+function installLockDir() {
+  const override = String(process.env.ROUTECODEX_INSTALL_LOCK_DIR ?? '').trim();
+  return override || path.join(resolveHomeDir(), '.rcc', 'locks', 'install-lifecycle.lock');
+}
+
+// A crashed publisher must not block canonical publication forever. Reclaim is
+// bounded: only complete owner metadata with a dead pid is provably stale.
+const INSTALL_LOCK_STALE_MS = 6 * 60 * 60 * 1000;
+
+function installLockMetadata(lockDir) {
+  const read = (name) => {
+    try {
+      return fs.readFileSync(path.join(lockDir, name), 'utf8').trim();
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  };
+  let ownerFile = null;
+  try {
+    ownerFile = JSON.parse(fs.readFileSync(path.join(lockDir, 'owner.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const pid = ownerFile ? Number(ownerFile.pid) : NaN;
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+  return {
+    pid,
+    host: typeof ownerFile.host === 'string' ? ownerFile.host : null,
+    startedAt: Number(ownerFile.startedAt),
+  };
+}
+
+function writeInstallLockMetadata(lockDir) {
+  fs.writeFileSync(
+    path.join(lockDir, 'owner.json'),
+    `${JSON.stringify({
+      pid: process.pid,
+      host: os.hostname(),
+      startedAt: Date.now(),
+    })}\n`,
+  );
+  fs.writeFileSync(path.join(lockDir, 'pid'), `${process.pid}\n`);
+  fs.writeFileSync(path.join(lockDir, 'created_at_ms'), `${Date.now()}\n`);
+  fs.writeFileSync(path.join(lockDir, 'owner'), `pid-${process.pid}@${process.cwd()}\n`);
+}
+
+// Classify the recorded owner before any reclaim decision:
+// alive  - same host and the pid is still running (probe success or EPERM);
+// dead   - same host and the kernel reports no such process (ESRCH);
+// unknown- cross-host owner, or metadata that cannot be probed safely.
+function classifyInstallLockOwner(metadata) {
+  if (!metadata || metadata.host !== os.hostname()) {
+    return 'unknown';
+  }
+  try {
+    process.kill(metadata.pid, 0);
+    return 'alive';
+  } catch (error) {
+    if (error?.code === 'ESRCH') return 'dead';
+    // EPERM means the process exists but is not ours: it is alive.
+    return 'alive';
+  }
+}
+
+// Publication serialization. The shell wrappers hold this same lock across
+// `npm --prefix v3 run install`, so a nested install must not re-acquire it.
+export function acquireInstallLock() {
+  if (String(process.env.ROUTECODEX_INSTALL_LOCK_HELD ?? '') === '1') {
+    return { acquired: false, lockDir: installLockDir() };
+  }
+  const lockDir = installLockDir();
+  fs.mkdirSync(path.dirname(lockDir), { recursive: true });
+  try {
+    fs.mkdirSync(lockDir);
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    const metadata = installLockMetadata(lockDir);
+    const ownerState = classifyInstallLockOwner(metadata);
+    if (ownerState === 'alive') {
+      const pid = metadata?.pid ?? 'unknown';
+      fail(
+        `RouteCodex install already in progress by live owner pid ${pid}: ${lockDir}`,
+      );
+    }
+    if (ownerState === 'unknown') {
+      const lockAgeMs = Date.now() - fs.statSync(lockDir).mtimeMs;
+      if (lockAgeMs < INSTALL_LOCK_STALE_MS) {
+        fail(
+          `RouteCodex install lock has ambiguous or cross-host owner metadata and is younger than ${INSTALL_LOCK_STALE_MS}ms; refusing to reclaim: ${lockDir}`,
+        );
+      }
+    }
+    // The recorded owner is dead, or unknown and the lock is provably old.
+    // Rename is the atomic arbiter: only one reclaimer can move the lock into
+    // quarantine, and a lock that a live publisher just recreated cannot be
+    // renamed away.
+    const quarantineDir = `${lockDir}.reclaim-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      fs.renameSync(lockDir, quarantineDir);
+    } catch (reclaimError) {
+      if (reclaimError?.code === 'EEXIST' || reclaimError?.code === 'ENOENT') {
+        try {
+          fs.mkdirSync(lockDir);
+          writeInstallLockMetadata(lockDir);
+          return { acquired: true, lockDir };
+        } catch (retryError) {
+          if (retryError?.code === 'EEXIST') {
+            fail(`RouteCodex install already in progress: ${lockDir}`);
+          }
+          throw retryError;
+        }
+      }
+      throw reclaimError;
+    }
+    fs.rmSync(quarantineDir, { recursive: true, force: true });
+    try {
+      fs.mkdirSync(lockDir);
+    } catch (reclaimError) {
+      if (reclaimError?.code === 'EEXIST') {
+        fail(`RouteCodex install already in progress: ${lockDir}`);
+      }
+      throw reclaimError;
+    }
+  }
+  writeInstallLockMetadata(lockDir);
+  return { acquired: true, lockDir };
+}
+
+export function releaseInstallLock(lock) {
+  if (!lock?.acquired) {
+    return;
+  }
+  fs.rmSync(path.join(lock.lockDir, 'owner.json'), { force: true });
+  fs.rmSync(path.join(lock.lockDir, 'pid'), { force: true });
+  fs.rmSync(path.join(lock.lockDir, 'created_at_ms'), { force: true });
+  fs.rmSync(path.join(lock.lockDir, 'owner'), { force: true });
+  try {
+    fs.rmdirSync(lock.lockDir);
+  } catch {}
+}
+
 export function buildV3CargoEnv(sourceEnv = process.env) {
   const env = { ...sourceEnv };
-  env.ROUTECODEX_BUILD_VERSION = readPackageVersion();
+  // A build context (v3/scripts/build.mjs) reserves a version and exports it, so
+  // install must publish the artifact that was actually built. Standalone
+  // installs fall back to the ledger's current committed version.
+  env.ROUTECODEX_BUILD_VERSION = resolveBuildVersion(env);
   if (!Object.prototype.hasOwnProperty.call(env, 'CARGO_NET_OFFLINE')) {
     env.CARGO_NET_OFFLINE = 'true';
   }
@@ -322,33 +493,40 @@ async function main() {
     return;
   }
 
-  return withOwnedV3CargoTarget(async (build) => {
-    const sourceBin = await buildV3Cli(build);
-    copyExecutableAtomic(sourceBin, repoBin);
-    copyExecutableAtomic(path.join(path.dirname(sourceBin), adminBinaryName), repoAdminBin);
-    copyExecutableAtomic(path.join(path.dirname(sourceBin), hooksBinaryName), repoHooksBin);
-    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoBin)}`);
-    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoAdminBin)}`);
-    console.log(`[install-cli] installed repo ${path.relative(v3Root, repoHooksBin)}`);
+  // Hold the install lifecycle lock for the whole build+publish so two
+  // concurrent installs can never interleave publications into ~/.local/bin.
+  const lock = acquireInstallLock();
+  try {
+    return await withOwnedV3CargoTarget(async (build) => {
+      const sourceBin = await buildV3Cli(build);
+      copyExecutableAtomic(sourceBin, repoBin);
+      copyExecutableAtomic(path.join(path.dirname(sourceBin), adminBinaryName), repoAdminBin);
+      copyExecutableAtomic(path.join(path.dirname(sourceBin), hooksBinaryName), repoHooksBin);
+      console.log(`[install-cli] installed repo ${path.relative(v3Root, repoBin)}`);
+      console.log(`[install-cli] installed repo ${path.relative(v3Root, repoAdminBin)}`);
+      console.log(`[install-cli] installed repo ${path.relative(v3Root, repoHooksBin)}`);
 
-    const installBin = path.join(resolveInstallBinDir(), binaryName);
-    copyExecutableAtomic(repoBin, installBin, { sign: false });
-    const installAdminBin = path.join(resolveInstallBinDir(), adminBinaryName);
-    copyExecutableAtomic(repoAdminBin, installAdminBin, { sign: false });
-    const installHooksBin = path.join(resolveInstallBinDir(), hooksBinaryName);
-    copyExecutableAtomic(repoHooksBin, installHooksBin, { sign: false });
-    for (const alias of ['routecodex', 'rcc']) {
-      const aliasPath = path.join(resolveInstallBinDir(), alias);
-      installAliasAtomic(aliasPath, installBin);
-      if (fs.realpathSync(aliasPath) !== fs.realpathSync(installBin)) {
-        fail(`alias does not resolve to installed V3 binary: ${aliasPath}`);
+      const installBin = path.join(resolveInstallBinDir(), binaryName);
+      copyExecutableAtomic(repoBin, installBin, { sign: false });
+      const installAdminBin = path.join(resolveInstallBinDir(), adminBinaryName);
+      copyExecutableAtomic(repoAdminBin, installAdminBin, { sign: false });
+      const installHooksBin = path.join(resolveInstallBinDir(), hooksBinaryName);
+      copyExecutableAtomic(repoHooksBin, installHooksBin, { sign: false });
+      for (const alias of ['routecodex', 'rcc']) {
+        const aliasPath = path.join(resolveInstallBinDir(), alias);
+        installAliasAtomic(aliasPath, installBin);
+        if (fs.realpathSync(aliasPath) !== fs.realpathSync(installBin)) {
+          fail(`alias does not resolve to installed V3 binary: ${aliasPath}`);
+        }
       }
-    }
-    console.log(`[install-cli] installed ${installBin}`);
-    console.log(`[install-cli] installed ${installAdminBin}`);
-    console.log(`[install-cli] installed ${installHooksBin}`);
-    console.log('[install-cli] ok: installed direct V3 binary without root or release snapshot inputs');
-  });
+      console.log(`[install-cli] installed ${installBin}`);
+      console.log(`[install-cli] installed ${installAdminBin}`);
+      console.log(`[install-cli] installed ${installHooksBin}`);
+      console.log(`[install-cli] ok: installed direct V3 binary version ${build.env.ROUTECODEX_BUILD_VERSION}`);
+    });
+  } finally {
+    releaseInstallLock(lock);
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

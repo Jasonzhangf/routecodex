@@ -13,7 +13,6 @@
     "node": ">=20 <26"
   },
   "scripts": {
-    "bump-version": "node scripts/bump-version.mjs",
     "build": "node scripts/build.mjs",
     "test": "node scripts/test.mjs",
     "verify": "node scripts/verify.mjs",
@@ -177,7 +176,7 @@
     "test:v3-direct-response-observability": "CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test general_provider sse_request_accepts_json_provider_response_as_json_raw_body -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-provider-responses --test general_provider json_request_rejects_sse_provider_response_without_switching_response_kind -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib direct_frame_console_infers_stop_finish_reason_from_completed_json_status -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib direct_sse_console_closeout_uses_runtime_stream_observation_for_usage_and_finish -- --nocapture && CARGO_NET_OFFLINE=true node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib direct_stream_request_error06_projects_sse_error_not_json -- --nocapture",
     "verify:v3-cargo-fmt": "cargo fmt --all -- --check",
     "verify:v3-clippy": "CARGO_NET_OFFLINE=true cargo clippy --locked --workspace --all-targets",
-    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run test:v3-p5-router-target && npm run test:distribution && CARGO_NET_OFFLINE=true cargo build --locked -p routecodex-v3-cli",
+    "build:v3-cli": "npm run verify:v3-architecture-ci && npm run verify:v3-debug-payload-budget && npm run verify:v3-selected-provider-model-binding && npm run verify:v3-provider-action-gate && npm run verify:v3-console-request-count-visibility && npm run verify:v3-responses-session-admission && npm run test:v3-p5-router-target && npm run test:distribution && node scripts/build.mjs --cli",
     "verify:artifact-budget": "node scripts/architecture/verify-v3-build-test-artifact-budget.mjs",
     "test:artifact-budget:red": "node tests/scripts/v3-build-test-artifact-budget-red-fixtures.mjs",
     "verify:v3-build-test-artifact-budget": "node scripts/architecture/verify-v3-build-test-artifact-budget.mjs",
@@ -187,7 +186,9 @@
     "test:install-cleanup": "node --test tests/scripts/install-cli-target-cleanup.spec.mjs",
     "install": "node scripts/install-cli.mjs",
     "pack:dev": "node scripts/pack-release.mjs --mode dev",
-    "pack:npm": "node scripts/pack-release.mjs --mode npm"
+    "pack:npm": "node scripts/pack-release.mjs --mode npm",
+    "test:v3-version-ledger": "node --test tests/scripts/version-ledger.spec.mjs",
+    "test:v3-install-serialization": "node --test tests/scripts/install-serialization.spec.mjs"
   },
   "dependencies": {
     "yaml": "^2.8.1"
