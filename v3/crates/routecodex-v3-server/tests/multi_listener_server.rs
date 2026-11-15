@@ -7376,6 +7376,51 @@ fn assert_provider_http_status_failure_evidence(
     assert_eq!(retained_body["error"]["type"], case.body_type, "{attempt}");
 }
 
+async fn assert_provider_http_status_request_record(
+    home: &std::path::Path,
+    port: u16,
+    case: ProviderHttpStatusCase,
+) {
+    let status = case.status.as_u16();
+    let path = home
+        .join(".rcc")
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"));
+    for _ in 0..200 {
+        if let Ok(content) = fs::read_to_string(&path) {
+            for line in content.lines().filter(|line| !line.trim().is_empty()) {
+                let envelope: Value = serde_json::from_str(line).unwrap();
+                let row = &envelope["row"];
+                if row["event_type"] == "request.provider_attempt_failed"
+                    && row["meta"]["provider_status"].as_u64() == Some(status as u64)
+                {
+                    assert_eq!(
+                        row["meta"]["error_category"],
+                        format!("provider_http_{status}"),
+                        "the request record must use the real provider HTTP status: {row}"
+                    );
+                    assert!(
+                        row["meta"]["error_detail"]
+                            .as_str()
+                            .is_some_and(|detail| !detail.trim().is_empty()),
+                        "the typed provider failure detail remains diagnostic evidence: {row}"
+                    );
+                    assert_eq!(
+                        row["meta"]["observed_error"]["external_error_status"], status,
+                        "the observed attempt keeps the real provider HTTP status: {row}"
+                    );
+                    return;
+                }
+            }
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "provider HTTP {status} attempt row must appear in request records at {}",
+        path.display()
+    );
+}
+
 #[tokio::test]
 async fn responses_direct_provider_http_400_429_503_status_classification_public_gate() {
     let _test_guard = TEST_LOCK.lock().await;
@@ -7454,6 +7499,7 @@ async fn responses_direct_provider_http_400_429_503_status_classification_public
         )
         .await;
         assert_provider_http_status_failure_evidence(&evidence, case, &expected_body);
+        assert_provider_http_status_request_record(&home_guard.path, port, case).await;
 
         handle.shutdown().await;
         failure_shutdown.send(()).unwrap();
@@ -7679,6 +7725,7 @@ async fn responses_relay_openai_chat_provider_http_400_429_503_status_classifica
         )
         .await;
         assert_provider_http_status_failure_evidence(&evidence, case, &expected_body);
+        assert_provider_http_status_request_record(&home_guard.path, port, case).await;
 
         handle.shutdown().await;
         failure_shutdown.send(()).unwrap();

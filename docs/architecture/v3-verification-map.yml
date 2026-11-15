@@ -3835,10 +3835,11 @@ features:
     agy_review: required
 
 - feature_id: v3.server_internal_observability_projection
-  status: source_active_live_verified
+  status: source_controlled_runtime_pending_live_replay
   owner_kind: rust_v3_bounded_internal_observability_projection
   owner_scope: Server appends typed lifecycle rows to a per-listener JSONL store; Admin reads the same store directly and no public observability API is registered on ordinary listeners.
   unit:
+  - v3/crates/routecodex-v3-server/src/console/impl_webui_projection.rs
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
   contract:
@@ -3850,6 +3851,7 @@ features:
   - Every accepted lifecycle event appends one typed row to the per-listener JSONL store.
   - Folded reader returns the latest lifecycle row per request_key; raw reader preserves every lifecycle row so failed provider attempts stay visible.
   - Each listener writes its own isolated request-records file and never leaks another listener's port.
+  - A provider-attempt row with a real external HTTP status records provider_http_<status> before any body-derived error type; a status-less failure keeps the existing transport/provider error identity and body text remains diagnostic detail.
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - A provider failure followed by a switch writes exactly one provider_attempt_failed row; the provider_switched row does not repeat the failed attempt's provider_status, error_category, error_detail, or observed_error.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
@@ -3862,10 +3864,13 @@ features:
   - An oversized new row or corrupt existing JSONL fails explicitly without overwriting the store.
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib provider_attempt_category_uses_real_http_status_before_body_error_type -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_relay_openai_chat_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup
   - npm run verify:v3-resource-map
-  - npm run verify-architecture-mainline-call-map
+  - npm run verify:architecture-mainline-call-map
   - git diff --check
   completion_boundary:
     source_controlled: true

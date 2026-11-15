@@ -5723,6 +5723,7 @@ features:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_webui_projection.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
@@ -5733,6 +5734,7 @@ features:
   entry_symbols:
   - record_v3_observability_event
   - record_v3_webui_error_projection
+  - record_v3_webui_provider_failure
   - v3_webui_observability_append_row
   - v3_webui_observability_read_rows
   - v3_webui_observability_read_raw_rows_from
@@ -5744,6 +5746,7 @@ features:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-server/src/webui_observability_endpoints.rs
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_webui_projection.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
@@ -5755,6 +5758,9 @@ features:
   - protocol.metadata
   required_gates:
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib provider_attempt_category_uses_real_http_status_before_body_error_type -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_relay_openai_chat_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
   - npm run verify:v3-resource-map
   - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay
