@@ -1504,6 +1504,8 @@ features:
     - final_provider_final_key_429_stays_health_neutral_and_ends_transport
     - remaining_same_provider_key_is_attempted_after_first_key_failure
     - last_of_two_failing_keys_keep_errors_internal_and_end_transport
+    - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_direct
+    - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_relay
   jenny_sse_nonblocking_blackbox:
     command: node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e37891a_jenny_sse -- --nocapture --test-threads=1
     test_ids:
@@ -1536,6 +1538,10 @@ features:
   - The selected pool's complete tier sequence precedes its declared default successor;
     candidates retain their original pool provenance and genuine media requirements
     without default-tier media projection or reclassification
+  - All expanded visible candidates remain attemptable in declared order. A visible
+    candidate ordinal, including the ninth or later, is never an attempt ceiling and
+    never creates a recovery wait; failed provider errors remain internal while the
+    next candidate can complete the client response.
   - Request tool facts survive top-level tools and Responses additional_tools; Codex coding tools and tool_search calls become routing facts, while web_search requires strict current-turn keyword intent or an explicit model call and never activates from a declaration alone
   - Target candidate capability checks keep route separate from capability: only web_search/search and multimodal/vision can produce capability_mismatch; tools/tool_outputs/reasoning/thinking/coding
       never hard-reject a candidate
