@@ -1222,6 +1222,7 @@ pub(crate) fn project_v3_responses_relay_error_chain(
             error06_exposed: false,
             error_class: None,
             health_action: None,
+            diagnostic_source: output.diagnostic_source.as_ref(),
             upstream_request_id: None,
         },
     )

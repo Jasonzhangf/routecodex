@@ -36293,3 +36293,186 @@ Module boundary: all changes in v4/**. No v3/sharedmodule/root touched.
 - P2-3 and P2-4 are recorded, not changed. The two deleted public-entry tests are a real coverage reduction: the score-0 guarantee lives at store level (`hs03_zero_score_cools_exact_key_and_valid_probe_restores_100`) and the in-flight-success-before-probe case is covered indirectly. P2-4 is a diagnostics wart: an expired bounded hold keeps a `waiting` entry with `remaining_ms: 0` visible and, with `advisory_probe = true`, keeps the probe on the 5s cadence indefinitely. Neither affects selection, and the advisory switch is off in every live config, so they are follow-ups rather than blockers.
 - Second rebuild and restart for the P2-1 fix: version 0.90.4947, build PASS, installed, one formal restart reached running. Audit over 1591 rows: 385 completed, 19 in flight, 1 failed, and that failure is again the known pool-exhaustion 502. Fresh selection during a hold = 0 again.
 - Remaining: server suite confirmation, commit, merge into main, push, remote receipt, worktree cleanup.
+
+## 2026-11-15 c8bc12f issue handoff and production evidence correction
+
+### Long-term goal
+
+Prove the first divergence for issue `c8bc12f`, then deliver a minimal
+owner-scoped fix that preserves the real upstream HTTP 200, writes one truthful
+typed failed terminal for a local response-processing failure, and never sends
+a provider error payload or fabricated success to the client.
+
+### Issue and ownership
+
+- Canonical issue: `c8bc12f`, state `open`, title
+  `[P1] Relay HTTP 200 response-processing failure emits no typed terminal Error06`.
+- Source request:
+  `openai-responses-router-gpt-5.5-20261115T072614854-2716861-13483`.
+- Unique writer: current session.
+- Worktree:
+  `/Volumes/Intel/playground/routecodex/c8bc12f-relay-http200-error06-20261115`.
+- Branch: `codex/c8bc12f-relay-http200-error06-20261115`.
+- Base: `origin/main=82bbe91c58`.
+- Out of scope: the dirty main worktree, issue `88a3677` owned by Henry, the
+  three historical `UNVERIFIED` samples, cycle 33/35/36 close attribution, and
+  all further install or lifecycle actions.
+
+### Historical evidence boundary
+
+The retained ledger proves candidate A received HTTP 429 and the request
+switched to candidate B, which returned HTTP 200 while the request ended as
+`request.failed`. The retained `13483` sample directory is absent. Original
+client bytes, provider payload bytes, close direction, complete client
+delivery, and the exact historical local-processing stage remain
+`UNVERIFIED`. `error06_projection_not_exposed` is an observability absence
+marker, not proof that Error06 ran.
+
+### Candidate state
+
+- Independent Planner r2 accepted a minimal state-loss fix on existing graph
+  edges. The first controlled divergence is the malformed provider JSON branch
+  in `v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime_inner.rs`.
+- Runtime now copies the already-observed real provider status into the typed
+  `V3ProviderError::ResponseBody` failure before the existing Error policy runs.
+- Server observability now projects a typed 2xx body-processing failure as its
+  typed cause and keeps the real upstream status separate from the internal
+  projected client status.
+- Public `/v1/responses` Relay controls currently pass: completed HTTP 200
+  business content remains successful; malformed HTTP 200 content produces one
+  failed terminal with real status 200 and the complete ordered Error01-06
+  chain, while the client gets a detectable transport break with no provider
+  payload, proxy error event, or fabricated success.
+- Candidate verification, independent overall review, PR/CI, integration,
+  remote receipt, and issue disposition remain incomplete.
+
+### Production receipt correction
+
+- `npm run install:v3` succeeded and wrote the production-path artifact
+  `/Users/fanzhang/.local/bin/rccv3`. The earlier phrase “no production
+  mutation” was incorrect and is withdrawn.
+- Exactly one formal `rccv3 restart -c /Volumes/extension/.rcc/config.toml`
+  was issued and returned `managed lifecycle control timed out`. The
+  one-restart budget is spent. No retry, stop/start, kill, or live business
+  replay is authorized or planned.
+- There was no active configuration-file mutation. This does not make the
+  install non-mutating.
+- Read-only managed state currently reports instance
+  `v3-eb429a09a60cc1f24951` as `running` with PID `94267`.
+- The instance `pid.cache` records
+  `started_at_epoch_ms=1794755746790` (`2026-11-15T15:15:46Z`) and the OS
+  process start token `macos:1794573192:827197`
+  (`2026-11-13T12:33:12Z`). The different timestamps are consistent with an
+  exec-style replacement that preserves the PID and OS process start token.
+- `lsof` maps PID `94267` to text file
+  `/Users/fanzhang/.local/bin/rccv3`. `stat` reports inode `1519052562` and
+  mtime `2026-11-15T15:15:23Z`; `rccv3 --version` reports `0.90.4953`.
+- The installed binary contains the PR583 terminal-row symbol
+  `record_v3_provider_terminal_request_row`. This is binary-content evidence,
+  not a Git-source or commit binding.
+- Lifecycle acceptance remains `INCOMPLETE`. Health, version, PID/inode
+  mapping, and embedded symbols do not replace a successful restart command or
+  prove the exact PR583 source input.
+
+### Progress delta and next
+
+The production receipt now separates artifact installation, active-config
+immutability, PID-preserving exec evidence, the restart timeout, and unresolved
+Git-source provenance. The `c8bc12f` candidate remains isolated from
+production and from `88a3677`.
+
+Next: complete candidate-only affected gates and causal controls; then request
+one independent overall review. Keep the issue open until review, CI,
+integration, and applicable post-merge evidence pass.
+
+### Candidate verification update
+
+- The public Responses Relay control run completed on this candidate before this
+  continuation:
+  `CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test issue23fe689_provider_terminal_ledger_row issuec8bc12f_ -- --nocapture --test-threads=1`
+  Result: `2 passed; 0 failed; 7 filtered out`. The completed-business control
+  remained successful, and the malformed HTTP 200 response produced one failed
+  terminal with provider status 200, typed body-error category, and a detectable
+  client transport break without provider error payload or fabricated success.
+- Remaining in this continuation: run the full mapped terminal-ledger suite,
+  the complete WebUI observability unit suite, status-classification public
+  controls, and applicable architecture/resource/module/format gates. The test
+  chain is present in the terminal row; whether every recorded chain node came
+  from the actual typed runtime terminal remains a review focus, not inferred
+  from the chain names alone.
+- Production lifecycle remains unchanged: install wrote the installed binary;
+  the single formal restart timed out and exhausted its budget. No further
+  install, restart, stop/start, kill, or production request is permitted in
+  this run. Active-runtime candidate/source loading remains unproven.
+
+### Author verification complete for review entry
+
+- Full mapped terminal-ledger suite:
+  `CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs +stable -p routecodex-v3-server --test issue23fe689_provider_terminal_ledger_row -- --nocapture --test-threads=1`
+  result: `9 passed; 0 failed`.
+- WebUI observability unit suite:
+  `CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib webui_observability::tests -- --nocapture`
+  result: `22 passed; 0 failed`.
+- Existing public local response-decode recovery control:
+  `CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling a83b3ce_relay_local_response_decode_failure_tries_next_eligible_candidate_at_public_entry -- --exact --nocapture --test-threads=1`
+  result: `1 passed; 0 failed`.
+- Architecture umbrella:
+  `npm run verify:v3-architecture-ci`
+  result: exit `0`, `33/33` sub-gates green.
+- Additional mapped checks already passed: hub relay runtime closeout,
+  provider action gate, resource map, module boundaries, architecture docs,
+  Cargo formatting, and `git diff --check`.
+- Candidate build:
+  `npm --prefix v3 run build`
+  result: exit `0`, release build and `dist/bin/rccv3` copy completed,
+  version `0.90.4953`.
+- `git fetch origin` was repeated. `origin/main` remained
+  `82bbe91c58dbfa8a8037b7c37c69945429601f16`, so the candidate base and
+  existing evidence remain applicable.
+- Production lifecycle remains `INCOMPLETE`. The candidate build did not
+  install or restart anything. The spent restart budget is not retried, and
+  live source loading is still not proven.
+
+Next: independent overall review of the dirty two-owner candidate. Keep the
+issue open until review, PR CI, integration, remote receipt, and applicable
+post-merge evidence pass.
+
+### Independent review remediation
+
+- The independent reviewer returned one P1 and one P2 finding.
+- P1: the review contract referenced the required
+  `planner-r2/observation.md`, but the file was absent. The file is now present
+  and contains only the existing issue, request-ledger, task-log, observation,
+  and plan facts. It preserves the historical unknown and production-loading
+  boundaries.
+- P2: test-owned provider tasks and the process-local credential environment
+  were clean only after all assertions. A panic-safe cleanup guard now removes
+  the credential environment and aborts provider tasks on every drop path. The
+  normal path still waits for aggregate shutdown and provider task completion.
+- Re-ran the affected public controls: `2 passed; 0 failed`. The completed
+  HTTP 200 control remains successful. The malformed HTTP 200 control records
+  A `provider_http_429` independently, B `provider_response_body_error` with
+  real upstream status 200, one failed B terminal, the ordered Error01-06
+  chain, and a detectable client transport break without provider payload or
+  fabricated success.
+- Focused rustfmt and `git diff --check` passed.
+
+Focused independent re-review is the next gate. The issue remains open. No
+install, restart, stop/start, signal, active-config mutation, or live business
+replay was performed during remediation.
+
+### Focused independent review PASS
+
+- The same independent Codex OAuth reviewer model reviewed the two findings
+  and their affected evidence in a new focused session.
+- Review exit `0`, final JSON schema-valid, scope echoed
+  `mode=milestone`, `commit=null`, `base=82bbe91c58`.
+- Findings: none. Both the observation-evidence P1 and test-cleanup P2 are
+  closed.
+- Immediately before candidate delivery, `git fetch origin` left
+  `origin/main=82bbe91c58dbfa8a8037b7c37c69945429601f16`, so the reviewed
+  candidate base remains current.
+
+Remaining work is source delivery and CI. Production installation, restart,
+live same-entry replay, and exact active source loading remain out of this
+candidate run and `INCOMPLETE`/`UNVERIFIED` as applicable.

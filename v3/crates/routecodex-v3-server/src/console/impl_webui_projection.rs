@@ -218,6 +218,7 @@ pub(crate) fn record_v3_webui_provider_failure(
     meta.error_category = Some(
         event
             .external_error_status
+            .filter(|status| !(200..300).contains(status))
             .map(|status| format!("provider_http_{status}"))
             .or_else(|| event.error_type.clone())
             .or_else(|| event.external_error_code.clone())
