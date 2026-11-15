@@ -3832,6 +3832,42 @@ features:
     curl_is_diagnostic_only: true
     agy_review: required
 
+- feature_id: v3.admin_observability_aggregation
+  status: source_active_runtime_pending_live_ui_replay
+  owner_kind: rust_v3_admin_observability_status_projection
+  owner_scope: Admin reads the retained per-listener JSONL store, projects provider attempts and terminal rows, and derives the displayed terminal status from typed Error06 truth plus declared legacy carriers. It never rewrites the stored rows.
+  unit:
+  - v3/crates/routecodex-v3-admin/src/api/observability.rs
+  - v3/admin-webui/app/views/usage.js
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_observability.rs
+  - v3/admin-webui/records-error-terminal-status-smoke.mjs
+  contract:
+  - docs/architecture/dags/v3.admin_error_row_status.graph.json
+  - docs/architecture/v3-resource-operation-map.yml
+  - docs/architecture/v3-function-map.yml
+  - docs/architecture/v3-mainline-call-map.yml
+  required_positive:
+  - A retained error row with error_category=http_200, provider_status=200, and no stored typed terminal status renders the terminal status unknown in both the records API facets/filter and the served usage.js status label, while result=error, error_origin=local, and the original meta fields stay unchanged.
+  - The retained error row is selected by status=error&error_status_code=unknown&error_origin=local and is not selected by the same filter with error_status_code=200.
+  - A successful request with provider_status=200 still renders 200, carries no error origin, and contributes no error facet.
+  - A real upstream provider_http_502 failed attempt still renders 502 with origin upstream.
+  - A stored projected V3Error06ClientProjected code of 599 renders 599 even when provider_status=200, and takes precedence over a conflicting internal_request_lane category.
+  required_negative:
+  - An error row never renders a successful carrier such as provider_status=200; missing typed terminal status renders unknown, not 5xx, 598, 599, or a fabricated status.
+  - An observed V3Error06ClientProjected code outside the 400..599 error range (for example 200) is not selected as the terminal status.
+  - Reading records does not rewrite the stored rows; the store is byte-identical before and after the GET.
+  - Detail-endpoint not_reached placeholders, internal_code, Error02 class, and external_error_status are not read as a client terminal status.
+  required_gates:
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_observability observability_error_row_terminal_status_never_uses_success_carrier -- --exact --nocapture
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
+  - npm run verify:webui-smoke
+  - npm run verify:v3-architecture-ci
+  - dagpipe graph validate docs/architecture/dags/v3.admin_error_row_status.graph.json
+  - git diff --check
+  completion_boundary:
+    source_controlled: true
+    live_cutover: required
+
 - feature_id: v3.server_internal_observability_projection
   status: source_active_live_verified
   owner_kind: rust_v3_bounded_internal_observability_projection

@@ -1114,6 +1114,206 @@ async fn observability_local_conversion_and_upstream_400_remain_distinct() {
     assert_eq!(upstream_filtered["records"][0]["error_origin"], "upstream");
 }
 
+/// A retained error row can carry a legacy `provider_status=200` without a
+/// typed terminal code. Its error result and original metadata stay intact, but
+/// the Admin API and shipped WebUI must render the unavailable status as
+/// `unknown`. Typed Error06 state wins when it contains a real 4xx/5xx code.
+#[tokio::test]
+async fn observability_error_row_terminal_status_never_uses_success_carrier() {
+    let (base, _state, home) = bind_test_server().await;
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/e56edd5_terminal_http_200_row.json");
+    let retained: Value = serde_json::from_slice(
+        &std::fs::read(&fixture).expect("retained e56edd5 fixture"),
+    )
+    .expect("retained e56edd5 json");
+
+    let success = json!({
+        "request_key": "4444:success-control",
+        "event_type": "request.completed",
+        "started_epoch_ms": 1,
+        "updated_epoch_ms": 2,
+        "finished_epoch_ms": 2,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "success-control",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 200,
+            "finish_reason": "stop"
+        },
+        "scope": {"port": 4444},
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": null
+    });
+    let upstream502 = provider_attempt_failure_row("upstream-http-502");
+    let typed599 = json!({
+        "request_key": "4444:typed-error06-599",
+        "event_type": "request.failed",
+        "started_epoch_ms": 3,
+        "updated_epoch_ms": 4,
+        "finished_epoch_ms": 4,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "typed-error06-599",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 200,
+            "error_category": "http_200",
+            "observed_error": {
+                "source": "error06_projection",
+                "chain": [
+                    {"node": "V3Error06ClientProjected", "state": "projected", "code": "599"}
+                ]
+            }
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+    let conflict599 = json!({
+        "request_key": "4444:typed-conflict-599",
+        "event_type": "request.failed",
+        "started_epoch_ms": 5,
+        "updated_epoch_ms": 6,
+        "finished_epoch_ms": 6,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "typed-conflict-599",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 200,
+            "error_category": "internal_request_lane",
+            "observed_error": {
+                "source": "error06_projection",
+                "chain": [
+                    {"node": "V3Error06ClientProjected", "state": "projected", "code": "599"}
+                ]
+            }
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+    let no_status = json!({
+        "request_key": "4444:error-no-status",
+        "event_type": "request.failed",
+        "started_epoch_ms": 7,
+        "updated_epoch_ms": 8,
+        "finished_epoch_ms": 8,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "error-no-status",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses"
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 0,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": null
+    });
+    let typed200 = json!({
+        "request_key": "4444:error06-200",
+        "event_type": "request.failed",
+        "started_epoch_ms": 9,
+        "updated_epoch_ms": 10,
+        "finished_epoch_ms": 10,
+        "duration_ms": 1,
+        "meta": {
+            "request_id": "error06-200",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider_status": 200,
+            "observed_error": {
+                "source": "error06_projection",
+                "chain": [
+                    {"node": "V3Error06ClientProjected", "state": "projected", "code": "200"}
+                ]
+            }
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    });
+
+    write_observability_rows(
+        &home,
+        &[
+            retained.clone(),
+            success,
+            upstream502,
+            typed599,
+            conflict599,
+            no_status,
+            typed200,
+        ],
+    );
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    let before = std::fs::read(&store_path).expect("store before GET");
+
+    let harness = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../admin-webui/records-error-terminal-status-smoke.mjs");
+    let output = tokio::process::Command::new("node")
+        .arg(&harness)
+        .arg(&base)
+        .output()
+        .await
+        .expect("frontend terminal-status consumer");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let initial: Value = http_client()
+        .get(format!(
+            "{base}/api/observability/records?page=1&page_size=100&range=all"
+        ))
+        .send()
+        .await
+        .expect("initial records response")
+        .json()
+        .await
+        .expect("initial records json");
+    let retained_api = initial["records"]
+        .as_array()
+        .expect("records array")
+        .iter()
+        .find(|row| row["request_key"] == retained["request_key"])
+        .expect("retained row returned by records API");
+    assert_eq!(
+        retained_api["meta"], retained["meta"],
+        "records API changed the retained provider/error metadata: {initial}"
+    );
+    assert_eq!(retained_api["result"], "error");
+    assert_eq!(retained_api["error_origin"], "local");
+
+    let after = std::fs::read(&store_path).expect("store after GET");
+    assert_eq!(before, after, "GET /api/observability/records changed the store");
+
+    assert!(
+        output.status.success(),
+        "actual served usage.js must render the terminal-status scenarios correctly: {stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains("records-error-terminal-status smoke passed"),
+        "frontend consumer did not report its pass marker: {stdout}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Manual cooldown actions (add / probe).
 //
