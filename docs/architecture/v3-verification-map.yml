@@ -1510,6 +1510,13 @@ features:
     - final_provider_final_key_429_stays_health_neutral_and_ends_transport
     - remaining_same_provider_key_is_attempted_after_first_key_failure
     - last_of_two_failing_keys_keep_errors_internal_and_end_transport
+    - issue0afb440_non_last_failure_switches_immediately_direct
+    - issue0afb440_non_last_failure_switches_immediately_relay
+    - issue0afb440_healthy_sibling_completes_while_first_request_recovers
+    - issue0afb440_client_cancel_after_recovery_direct
+    - issue0afb440_client_cancel_after_recovery_relay
+    - issue0afb440_original_deadline_after_recovery_direct
+    - issue0afb440_original_deadline_after_recovery_relay
     - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_direct
     - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_relay
   jenny_sse_nonblocking_blackbox:
