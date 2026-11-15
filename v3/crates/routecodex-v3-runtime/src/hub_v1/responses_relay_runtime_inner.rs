@@ -845,7 +845,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     let provider_value: Value = match serde_json::from_slice(&bytes) {
                         Ok(value) => value,
                         Err(error) => {
-                            let failure = provider_runtime_failure(
+                            let mut failure = provider_runtime_failure(
                                 V3ProviderError::ResponseBody {
                                     request_id: input.request_id.clone(),
                                     provider_id: selected_target_provider_id.clone(),
@@ -856,6 +856,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 &selected_target_provider_id,
                                 Some(selected_observability.clone()),
                             );
+                            failure.provider_status = Some(provider_status);
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,

@@ -1201,6 +1201,14 @@ pub(crate) fn project_v3_responses_relay_error_chain(
     output: &V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
     let error_chain = output.error_chain.as_deref()?;
+    let diagnostic_source = output.diagnostic_source.as_ref().filter(|source| {
+        source.code == "provider_response_body_error"
+            && source
+                .external_error
+                .as_ref()
+                .and_then(|external| external.status)
+                .is_some_and(|status| (200..300).contains(&status))
+    });
     record_and_emit_v3_error_projection(
         state,
         trace_scope,
@@ -1222,6 +1230,7 @@ pub(crate) fn project_v3_responses_relay_error_chain(
             error06_exposed: false,
             error_class: None,
             health_action: None,
+            diagnostic_source,
             upstream_request_id: None,
         },
     )

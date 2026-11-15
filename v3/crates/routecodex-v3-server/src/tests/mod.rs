@@ -3746,6 +3746,42 @@ fn provider_attempt_category_uses_real_http_status_before_body_error_type() {
             Some(status)
         );
     }
+    let request_id = "req-provider-http-200-body-failure";
+    let context = test_v3_console_emission_context(
+        &state,
+        "responses",
+        "/v1/responses",
+        request_id,
+        &headers,
+        &json!({"model":"gpt-5.5"}),
+    );
+    let sink = build_v3_provider_failure_event_sink(&context);
+    let mut event = test_provider_failure_observation();
+    event.status = 502;
+    event.error_type = Some("provider_response_body_error".to_string());
+    event.external_error_code = Some("provider_response_body_error".to_string());
+    event.external_error_status = Some(200);
+    event.message = "controlled HTTP 200 body decode failure".to_string();
+    let mut observability = test_direct_observability(vec![event.clone()]);
+    observability.provider_status = event.external_error_status;
+    observability.response_status = Some("failed".to_string());
+    sink(&observability, &event);
+
+    let row = state
+        .webui_observability
+        .rows()
+        .unwrap()
+        .remove(&format!("7778:{request_id}"))
+        .expect("HTTP 200 body failure attempt row");
+    assert_eq!(row.meta.provider_status, Some(200));
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_response_body_error")
+    );
+    assert_eq!(
+        row.meta.error_detail.as_deref(),
+        Some("controlled HTTP 200 body decode failure")
+    );
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -5082,6 +5118,7 @@ fn error_projection_appends_human_console_failure_line() {
             error06_exposed: true,
             error_class: Some("runtime_failure"),
             health_action: None,
+            diagnostic_source: None,
             upstream_request_id: None,
         },
     );
@@ -5123,6 +5160,92 @@ fn error_projection_appends_human_console_failure_line() {
             && plain_log.contains("message=controlled error"),
         "human console log must include the visible failed line, not only JSON debug events: {log}"
     );
+    let _ = std::fs::remove_file(&log_file);
+}
+
+#[test]
+fn relay_terminal_projection_uses_typed_http200_body_failure_source() {
+    let log_file = test_v3_console_log_file("relay-http200-body-failure-terminal");
+    let _ = std::fs::remove_file(&log_file);
+    let state = test_v3_listener_state(&log_file, 5556);
+    let trace_scope = state
+        .debug
+        .start_trace(
+            "server",
+            "req-relay-http200-body-failure",
+            "exec-relay-http200-body-failure",
+        )
+        .unwrap();
+    let source = routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderResp14Raw",
+        "provider_response_body_error",
+        "provider response JSON decode failed",
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: Some(200),
+            code: Some("provider_response_body_error".to_string()),
+            provider_id: Some("provider-b".to_string()),
+            upstream_request_id: Some("upstream-b".to_string()),
+            message: Some("provider response JSON decode failed".to_string()),
+        },
+    );
+
+    let response = record_and_emit_v3_error_projection(
+        &state,
+        &trace_scope,
+        V3ErrorProjectionConsoleInput {
+            execution_mode: Some("relay"),
+            endpoint: "/v1/responses",
+            request_id: "req-relay-http200-body-failure",
+            entry_protocol: "responses",
+            session_id: None,
+            status: 502,
+            error_chain: &routecodex_v3_error::V3_ERROR_CHAIN_NODE_IDS,
+            body: Some(&json!({
+                "error": {
+                    "type": "network_error",
+                    "message": "internal response processing failed"
+                }
+            })),
+            project_path: None,
+            diagnostic_source: Some(&source),
+            error06_exposed: false,
+            error_class: None,
+            health_action: None,
+            upstream_request_id: None,
+        },
+    );
+
+    assert!(response.is_none());
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&format!(
+            "{}:req-relay-http200-body-failure",
+            state.server.port
+        ))
+        .expect("relay terminal projection must append a failed request row");
+    assert_eq!(row.result.as_deref(), Some("error"));
+    assert_eq!(row.meta.provider_status, Some(200));
+    assert_eq!(
+        row.meta.error_category.as_deref(),
+        Some("provider_response_body_error")
+    );
+    assert_eq!(
+        row.meta.error_detail.as_deref(),
+        Some("provider response JSON decode failed")
+    );
+    let observed = row.meta.observed_error.as_ref().unwrap();
+    assert_eq!(
+        observed.external_error_status,
+        Some(200),
+        "the terminal keeps the typed real upstream status"
+    );
+    assert_eq!(
+        observed.external_error_code.as_deref(),
+        Some("provider_response_body_error")
+    );
+    assert_eq!(observed.chain.len(), 6);
     let _ = std::fs::remove_file(&log_file);
 }
 

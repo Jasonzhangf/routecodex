@@ -88,30 +88,44 @@ pub(crate) fn record_v3_webui_error_projection(
         } else {
             Some(status)
         };
-    let (error_category, error_detail) = match body {
-        Some(body) => crate::v3_error_body_code_message(body),
-        None => match (typed.diagnostic_source, typed.terminal_disposition) {
-            // A real upstream error HTTP status (including a genuine 502) is the
-            // honest category, so the provider-error HTTP family keeps its
-            // current `http_<status>` semantics.
-            (
-                _,
-                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
-            ) if witness.status() >= 400 => (
-                format!("http_{}", witness.status()),
-                format!("HTTP status {}", witness.status()),
-            ),
-            // NoResponse (timeout, transport break, client cancel) or a 2xx
-            // provider head that failed later: the typed source names the cause.
-            (Some(source), _) => (source.code.clone(), source.message.clone()),
-            (
-                None,
-                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
-            ) => (
-                format!("http_{}", witness.status()),
-                format!("HTTP status {}", witness.status()),
-            ),
-            (None, _) => (format!("http_{status}"), format!("HTTP status {status}")),
+    let typed_http200_body_failure = typed.diagnostic_source.filter(|source| {
+        source.code == "provider_response_body_error"
+            && source
+                .external_error
+                .as_ref()
+                .and_then(|external| external.status)
+                .is_some_and(|status| (200..300).contains(&status))
+    });
+    let (error_category, error_detail) = match typed_http200_body_failure {
+        // The projected client body is an internal response-processing error in
+        // this branch. The typed source owns the real 2xx status and cause.
+        Some(source) => (source.code.clone(), source.message.clone()),
+        None => match body {
+            Some(body) => crate::v3_error_body_code_message(body),
+            None => match (typed.diagnostic_source, typed.terminal_disposition) {
+                // A real upstream error HTTP status (including a genuine 502) is
+                // the honest category, so the provider-error HTTP family keeps
+                // its current `http_<status>` semantics.
+                (
+                    _,
+                    Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+                ) if witness.status() >= 400 => (
+                    format!("http_{}", witness.status()),
+                    format!("HTTP status {}", witness.status()),
+                ),
+                // NoResponse (timeout, transport break, client cancel) or a 2xx
+                // provider head that failed later: the typed source names the
+                // cause.
+                (Some(source), _) => (source.code.clone(), source.message.clone()),
+                (
+                    None,
+                    Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+                ) => (
+                    format!("http_{}", witness.status()),
+                    format!("HTTP status {}", witness.status()),
+                ),
+                (None, _) => (format!("http_{status}"), format!("HTTP status {status}")),
+            },
         },
     };
     let client_disconnect = typed.diagnostic_source.is_some_and(|source| {
