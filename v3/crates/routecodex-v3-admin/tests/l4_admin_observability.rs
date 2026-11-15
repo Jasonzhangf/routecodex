@@ -1123,10 +1123,9 @@ async fn observability_error_row_terminal_status_never_uses_success_carrier() {
     let (base, _state, home) = bind_test_server().await;
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/e56edd5_terminal_http_200_row.json");
-    let retained: Value = serde_json::from_slice(
-        &std::fs::read(&fixture).expect("retained e56edd5 fixture"),
-    )
-    .expect("retained e56edd5 json");
+    let retained: Value =
+        serde_json::from_slice(&std::fs::read(&fixture).expect("retained e56edd5 fixture"))
+            .expect("retained e56edd5 json");
 
     let success = json!({
         "request_key": "4444:success-control",
@@ -1302,7 +1301,10 @@ async fn observability_error_row_terminal_status_never_uses_success_carrier() {
     assert_eq!(retained_api["error_origin"], "local");
 
     let after = std::fs::read(&store_path).expect("store after GET");
-    assert_eq!(before, after, "GET /api/observability/records changed the store");
+    assert_eq!(
+        before, after,
+        "GET /api/observability/records changed the store"
+    );
 
     assert!(
         output.status.success(),
