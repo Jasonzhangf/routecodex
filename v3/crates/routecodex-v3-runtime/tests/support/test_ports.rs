@@ -8,7 +8,9 @@
 //! the lifetime of the test binary removes the race.
 //!
 //! Included by several integration test binaries, so each one only uses part of
-//! this module.
+//! this module. Every loopback listener in an integration test must draw from
+//! this allocator; binding `127.0.0.1:0` directly can recapture a port already
+//! handed to a server that has not bound it yet.
 
 #![allow(dead_code)]
 

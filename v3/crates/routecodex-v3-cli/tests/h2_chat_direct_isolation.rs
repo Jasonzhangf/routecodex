@@ -82,6 +82,17 @@ struct ControlledUpstream {
     shutdown: Option<oneshot::Sender<()>>,
 }
 
+async fn bind_reserved_loopback() -> tokio::net::TcpListener {
+    loop {
+        let port = free_port();
+        match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+            Ok(listener) => return listener,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(error) => panic!("bind reserved loopback port {port}: {error}"),
+        }
+    }
+}
+
 impl Drop for ControlledUpstream {
     fn drop(&mut self) {
         if let Some(shutdown) = self.shutdown.take() {
@@ -399,7 +410,7 @@ async fn controlled_responses_upstream(
 }
 
 async fn start_controlled_responses_upstream(mode: ProviderMode) -> ControlledUpstream {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = bind_reserved_loopback().await;
     let address = listener.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -772,7 +783,7 @@ async fn controlled_chat_upstream(
 }
 
 async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = bind_reserved_loopback().await;
     let address = listener.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -800,7 +811,7 @@ async fn start_controlled_upstream(mode: ProviderMode) -> ControlledUpstream {
 /// Accepts the connection and drops it without any response bytes: the request
 /// never reaches a provider response stage, exercising the no-response lane.
 async fn start_no_response_upstream() -> ControlledUpstream {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = bind_reserved_loopback().await;
     let address = listener.local_addr().unwrap();
     let (captures_tx, captures_rx) = mpsc::unbounded_channel();
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
