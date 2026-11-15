@@ -370,55 +370,128 @@ fn completed_usage_projects_split_cache_fields() {
 }
 
 #[test]
-fn provider_attempt_failure_survives_completed_meta_rebuild() {
+fn provider_attempt_failure_counter_survives_completed_meta_rebuild() {
+    for (case, finish_reason) in [
+        ("missing", None),
+        ("tool-calls", Some("tool_calls")),
+        ("content-filter", Some("content_filter")),
+    ] {
+        let request_id = format!("r-failure-then-success-{case}");
+        let o = V3WebuiObservability::new();
+        let key = build_v3_obs_request_key(5555, &request_id);
+        record(
+            &o,
+            V3ObsEventType::Started,
+            &key,
+            scope(5555),
+            meta_with_full(&request_id),
+        )
+        .unwrap();
+
+        let mut failure_event = crate::V3RuntimeProviderFailureObservation::default();
+        failure_event.error_type = Some("provider_http_502".to_string());
+        failure_event.message = "provider returned HTTP 502".to_string();
+        let mut obs = crate::V3RuntimeObservability::default();
+        obs.provider_failure_events = vec![failure_event];
+
+        let mut failed_meta = meta_with_full(&request_id);
+        failed_meta.provider_status = Some(502);
+        failed_meta.response_status = Some("error".to_string());
+        failed_meta.finish_reason = Some("error".to_string());
+        failed_meta.error_category = Some("provider_http_502".to_string());
+        failed_meta.error_detail = Some("provider returned HTTP 502".to_string());
+        record_observed(
+            &o,
+            V3ObsEventType::ProviderAttemptFailed,
+            &key,
+            scope(5555),
+            failed_meta,
+            &obs,
+        )
+        .unwrap();
+
+        let mut completed_meta = meta_with_full(&request_id);
+        completed_meta.response_status = Some("completed".to_string());
+        completed_meta.finish_reason = finish_reason.map(str::to_string);
+        record_observed(
+            &o,
+            V3ObsEventType::Completed,
+            &key,
+            scope(5555),
+            completed_meta,
+            &obs,
+        )
+        .unwrap();
+        let rows = o.rows().unwrap();
+        let row = rows.get(&key).expect("row");
+        assert_eq!(row.result.as_deref(), Some("success"));
+        assert_eq!(row.failed_attempts, 1);
+        assert_eq!(row.meta.provider_status, Some(200));
+        assert_eq!(row.meta.response_status.as_deref(), Some("completed"));
+        assert_eq!(row.meta.finish_reason.as_deref(), finish_reason);
+        assert_eq!(row.meta.error_category, None);
+        assert_eq!(row.meta.error_detail, None);
+        assert_eq!(row.meta.observed_error, None);
+    }
+}
+
+#[test]
+fn completed_response_without_terminal_status_does_not_inherit_failed_attempt() {
     let o = V3WebuiObservability::new();
-    let key = build_v3_obs_request_key(5555, "r-failure-then-success");
+    let request_id = "r-failure-then-unreported-success";
+    let key = build_v3_obs_request_key(5555, request_id);
     record(
         &o,
         V3ObsEventType::Started,
         &key,
         scope(5555),
-        meta_with_full("r-failure-then-success"),
+        meta_with_full(request_id),
     )
     .unwrap();
 
-    let mut failure_event = crate::V3RuntimeProviderFailureObservation::default();
-    failure_event.error_type = Some("provider_http_502".to_string());
-    failure_event.message = "provider returned HTTP 502".to_string();
-    let mut obs = crate::V3RuntimeObservability::default();
-    obs.provider_failure_events = vec![failure_event];
-
-    let mut failed_meta = meta_with_full("r-failure-then-success");
-    failed_meta.error_category = Some("provider_http_502".to_string());
-    failed_meta.error_detail = Some("provider returned HTTP 502".to_string());
-    record_observed(
+    let mut failed_meta = meta_with_full(request_id);
+    failed_meta.provider_status = Some(503);
+    failed_meta.response_status = Some("error".to_string());
+    failed_meta.finish_reason = Some("error".to_string());
+    failed_meta.error_category = Some("provider_http_503".to_string());
+    failed_meta.error_detail = Some("provider returned HTTP 503".to_string());
+    failed_meta.observed_error = Some(V3ObsErrorTruth {
+        source: "provider_attempt_failure".to_string(),
+        external_error_status: Some(503),
+        ..Default::default()
+    });
+    record(
         &o,
         V3ObsEventType::ProviderAttemptFailed,
         &key,
         scope(5555),
         failed_meta,
-        &obs,
     )
     .unwrap();
 
-    // Completed rebuilds meta from the fresh payload; the category must survive.
-    record_observed(
+    let mut completed_meta = meta_with_full(request_id);
+    completed_meta.provider_status = None;
+    completed_meta.response_status = None;
+    completed_meta.finish_reason = None;
+    record(
         &o,
         V3ObsEventType::Completed,
         &key,
         scope(5555),
-        meta_with_full("r-failure-then-success"),
-        &obs,
+        completed_meta,
     )
     .unwrap();
+
     let rows = o.rows().unwrap();
     let row = rows.get(&key).expect("row");
-    assert_eq!(
-        row.meta.error_category.as_deref(),
-        Some("provider_http_502"),
-        "error_category must survive Completed meta rebuild"
-    );
-    assert!(row.failed_attempts >= 1);
+    assert_eq!(row.result.as_deref(), Some("success"));
+    assert_eq!(row.failed_attempts, 1);
+    assert_eq!(row.meta.provider_status, None);
+    assert_eq!(row.meta.response_status, None);
+    assert_eq!(row.meta.finish_reason, None);
+    assert_eq!(row.meta.error_category, None);
+    assert_eq!(row.meta.error_detail, None);
+    assert_eq!(row.meta.observed_error, None);
 }
 
 #[test]

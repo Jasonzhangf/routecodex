@@ -3888,6 +3888,7 @@ features:
   - Each listener writes its own isolated request-records file and never leaks another listener's port.
   - Error terminal rows and provider-attempt rows preserve the raw numeric provider status and error category.
   - A provider failure followed by a switch writes exactly one provider_attempt_failed row; the provider_switched row does not repeat the failed attempt's provider_status, error_category, error_detail, or observed_error.
+  - A recovered provider switch keeps the failed attempt row while the successful completion takes the final provider and response status, preserves the real finish_reason including tool_calls or content_filter, and clears inherited attempt error fields.
   - Terminal rows are immutable; a later Started/Completed/Failed cannot reopen or rewrite a terminal result.
   - Per-record JSONL writes are bounded by the internal observability max record bytes setting.
   - History writes compact oldest raw rows atomically before the byte limit, keep the new row, and remain bounded across repeated writes.

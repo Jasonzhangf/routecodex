@@ -271,6 +271,14 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         client_body.contains("SWITCHED_BUSINESS_OK"),
         "the switched provider's business body must reach the client: {client_body}"
     );
+    assert!(
+        !client_body.contains("controlled provider failure"),
+        "the failed provider's error message must not reach the client: {client_body}"
+    );
+    assert!(
+        !client_body.contains("controlled_unavailable"),
+        "the failed provider's error code must not reach the client: {client_body}"
+    );
     assert_eq!(
         a.calls.load(Ordering::SeqCst),
         1,
@@ -310,22 +318,46 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         1,
         "one failed attempt must write exactly one failure row: {rows:#?}"
     );
-    assert!(
-        failed_rows[0]["meta"]["provider_status"].is_number(),
-        "the failed row must carry the upstream status: {failed_rows:?}"
+    assert_eq!(
+        failed_rows[0]["meta"]["provider_status"], 503,
+        "the failed row must carry the real upstream status: {failed_rows:?}"
     );
-    assert!(
-        failed_rows[0]["meta"]["error_category"].is_string(),
-        "the failed row must carry the error category"
+    assert_eq!(
+        failed_rows[0]["meta"]["provider_id"], "a",
+        "the failed attempt must identify provider a: {failed_rows:?}"
     );
-    assert!(
-        failed_rows[0]["meta"]["error_detail"].is_string(),
-        "the failed row must carry the error detail"
+    assert_eq!(
+        failed_rows[0]["meta"]["provider"], "a:default:key:wire-a",
+        "the failed attempt must retain its exact provider identity: {failed_rows:?}"
     );
-    assert!(
-        failed_rows[0]["meta"]["observed_error"].is_object(),
-        "the failed row must carry the typed observed error"
+    assert_eq!(
+        failed_rows[0]["meta"]["error_category"], "provider_http_503",
+        "the failed row must retain its exact HTTP error category: {failed_rows:?}"
     );
+    assert_eq!(
+        failed_rows[0]["meta"]["error_detail"], "provider returned HTTP 503",
+        "the failed row must retain its exact provider failure detail: {failed_rows:?}"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["source"], "provider_attempt_failure",
+        "the failed row must retain its typed source: {failed_rows:?}"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["external_error_kind"], "provider",
+        "the failed row must retain its typed provider error kind: {failed_rows:?}"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["external_error_code"], "HTTP_503",
+        "the failed row must retain its typed upstream error code: {failed_rows:?}"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["external_error_status"], 503,
+        "the failed row must retain its typed upstream status: {failed_rows:?}"
+    );
+    let first_request_key = failed_rows[0]["request_key"]
+        .as_str()
+        .expect("the failed row carries a request_key")
+        .to_string();
 
     let switch_rows: Vec<&Value> = rows
         .iter()
@@ -362,6 +394,35 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         1,
         "the switched request must complete exactly once"
     );
+    assert_eq!(
+        completed_rows[0]["result"], "success",
+        "the switched request must complete successfully: {completed_rows:?}"
+    );
+    let completed_meta = &completed_rows[0]["meta"];
+    assert_eq!(
+        completed_meta["provider_status"], 200,
+        "the completed row must carry the final provider status: {completed_rows:?}"
+    );
+    assert_eq!(
+        completed_meta["response_status"], "completed",
+        "the completed row must carry the final response status: {completed_rows:?}"
+    );
+    assert!(
+        completed_meta["finish_reason"].is_null(),
+        "a Responses completion without a protocol finish reason must not inherit the prior attempt error: {completed_rows:?}"
+    );
+    assert!(
+        completed_meta["error_category"].is_null(),
+        "the completed row must not inherit the prior attempt error category: {completed_rows:?}"
+    );
+    assert!(
+        completed_meta["error_detail"].is_null(),
+        "the completed row must not inherit the prior attempt error detail: {completed_rows:?}"
+    );
+    assert!(
+        completed_meta["observed_error"].is_null(),
+        "the completed row must not inherit the prior attempt observation: {completed_rows:?}"
+    );
 
     // Admin HTTP surface: the same request is one failed attempt that ends
     // completed. This is the public consumer comparison the handoff requires.
@@ -372,7 +433,7 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
         if let Some(row) = body["records"].as_array().and_then(|rows| {
             rows.iter()
-                .find(|row| row["result"] == "success" || row["status"] == "completed")
+                .find(|row| row["request_key"] == first_request_key.as_str())
         }) {
             break row.clone();
         }
@@ -385,6 +446,30 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
     assert_eq!(
         row["failed_attempts"], 1,
         "admin consumption must count one failed attempt: {row}"
+    );
+    assert_eq!(
+        row["meta"]["provider_status"], 200,
+        "admin must expose the final provider status: {row}"
+    );
+    assert_eq!(
+        row["meta"]["response_status"], "completed",
+        "admin must expose the final response status: {row}"
+    );
+    assert!(
+        row["meta"]["finish_reason"].is_null(),
+        "admin must not inherit the failed attempt finish reason: {row}"
+    );
+    assert!(
+        row["meta"]["error_category"].is_null(),
+        "admin must not inherit the failed attempt category: {row}"
+    );
+    assert!(
+        row["meta"]["error_detail"].is_null(),
+        "admin must not inherit the failed attempt detail: {row}"
+    );
+    assert!(
+        row["meta"]["observed_error"].is_null(),
+        "admin must not inherit the failed attempt observation: {row}"
     );
 
     // Success control: the second request succeeds on provider a's first
@@ -418,10 +503,6 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         "the success control must not reach provider b"
     );
 
-    let first_request_key = failed_rows[0]["request_key"]
-        .as_str()
-        .expect("the failed row carries a request_key")
-        .to_string();
     let control_deadline = Instant::now() + Duration::from_secs(20);
     let rows_after_control = loop {
         let rows = read_raw_rows(&records_path);
