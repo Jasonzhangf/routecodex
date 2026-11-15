@@ -3970,7 +3970,11 @@ fn status_public_entry_keeps_reporting_running_after_config_content_changes() {
     // declaration it published. The instance identity derives from the config content, so
     // the derived identity now differs from the live one; status must not claim stopped.
     let original_config = fs::read_to_string(&config).unwrap();
-    fs::write(&config, format!("{original_config}\n# isolated config drift\n")).unwrap();
+    fs::write(
+        &config,
+        format!("{original_config}\n# isolated config drift\n"),
+    )
+    .unwrap();
 
     let drifted = run_status_json_top_level(binary, &state_root, &config);
     assert!(
