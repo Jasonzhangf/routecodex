@@ -89,6 +89,68 @@ function changedFileLines(relative, commit = null) {
   }
 }
 
+function shellSyntaxInterpreter(content) {
+  const [shebang = ''] = content.split('\n', 1);
+  if (!shebang.startsWith('#!')) return 'sh';
+  const tokens = shebang.slice(2).trim().split(/\s+/u).filter(Boolean);
+  const basename = (token) => (token ?? '').split('/').pop();
+  if (basename(tokens[0]) === 'bash') return 'bash';
+  if (basename(tokens[0]) !== 'env') return 'sh';
+  let operands = tokens.slice(1);
+  let index = 0;
+  let splitDone = false;
+  while (index < operands.length) {
+    const token = operands[index];
+    if (token === '--') {
+      index += 1;
+      break;
+    }
+    const longOption = token.startsWith('--') ? token.slice(2).split('=', 2) : null;
+    if (longOption) {
+      const [name, attached] = longOption;
+      if (name === 'split-string') {
+        if (splitDone) {
+          index += 1;
+          continue;
+        }
+        const payload = attached ?? operands[index + 1];
+        const consumed = attached === undefined ? 2 : 1;
+        operands = [...operands.slice(0, index), ...String(payload ?? '').split(/\s+/u).filter(Boolean), ...operands.slice(index + consumed)];
+        splitDone = true;
+        continue;
+      }
+      if (name === 'unset' || name === 'chdir' || name === 'argv0') {
+        index += attached === undefined ? 2 : 1;
+        continue;
+      }
+      index += 1;
+      continue;
+    }
+    if (token.startsWith('-') && token.length > 1) {
+      const flags = token.slice(1);
+      if (flags.startsWith('S')) {
+        if (splitDone) {
+          index += 1;
+          continue;
+        }
+        const attached = flags.slice(1);
+        const payload = attached || operands[index + 1];
+        const consumed = attached ? 1 : 2;
+        operands = [...operands.slice(0, index), ...String(payload ?? '').split(/\s+/u).filter(Boolean), ...operands.slice(index + consumed)];
+        splitDone = true;
+        continue;
+      }
+      index += flags.startsWith('u') || flags.startsWith('C') ? (flags.length > 1 ? 1 : 2) : 1;
+      continue;
+    }
+    break;
+  }
+  while (index < operands.length && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(operands[index])) {
+    index += 1;
+  }
+  return basename(operands[index]) === 'bash' ? 'bash' : 'sh';
+}
+
 function classifyWorkflowScope(entries) {
   let v3 = false;
   let v4 = false;
@@ -455,7 +517,7 @@ for (const { commit, path: relative } of entries) {
   }
 
   if (/\.sh$/u.test(relative) || relative === '.githooks/pre-commit' || relative === '.githooks/pre-push') {
-    const result = spawnSync('sh', ['-n'], { encoding: 'utf8', input: content });
+    const result = spawnSync(shellSyntaxInterpreter(content), ['-n'], { encoding: 'utf8', input: content });
     if (result.status !== 0) fail(`${relative} shell syntax check failed`);
   }
 }

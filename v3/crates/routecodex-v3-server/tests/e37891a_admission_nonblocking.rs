@@ -16,7 +16,14 @@ use axum::{
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, ops::Deref, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    ops::Deref,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 use tokio::{
     net::TcpListener,
     sync::{Mutex, Semaphore},
@@ -49,7 +56,11 @@ struct Capture {
 struct Peer {
     label: &'static str,
     captures: Mutex<Vec<Capture>>,
+    business_attempt_order: Arc<Mutex<Vec<String>>>,
     rejected_keys: Mutex<BTreeMap<String, u16>>,
+    reject_blocked: AtomicBool,
+    reject_entered: Semaphore,
+    reject_release: Semaphore,
     probe_entered: Semaphore,
     probe_release: Semaphore,
     holder_entered: Semaphore,
@@ -165,6 +176,18 @@ async fn peer_handler(
     });
 
     if let Some(status) = peer.rejected_keys.lock().await.get(&authorization).copied() {
+        peer.business_attempt_order
+            .lock()
+            .await
+            .push(format!("{}:entered", peer.label));
+        if peer.reject_blocked.load(Ordering::SeqCst) {
+            peer.reject_entered.add_permits(1);
+            peer.reject_release.acquire().await.unwrap().forget();
+        }
+        peer.business_attempt_order
+            .lock()
+            .await
+            .push(format!("{}:{status}", peer.label));
         return Response::builder()
             .status(status)
             .header("content-type", "application/json")
@@ -198,14 +221,32 @@ async fn peer_handler(
     } else if input == "target" {
         peer.target_entered.add_permits(1);
     }
+    if input == "target" {
+        peer.business_attempt_order.lock().await.push(format!(
+            "{}:{}",
+            peer.label,
+            StatusCode::OK.as_u16()
+        ));
+    }
     completed_response(peer.label, &model)
 }
 
 async fn spawn_peer(label: &'static str) -> PeerHandle {
+    spawn_peer_with_order(label, Arc::new(Mutex::new(Vec::new()))).await
+}
+
+async fn spawn_peer_with_order(
+    label: &'static str,
+    business_attempt_order: Arc<Mutex<Vec<String>>>,
+) -> PeerHandle {
     let peer = Arc::new(Peer {
         label,
         captures: Mutex::new(Vec::new()),
+        business_attempt_order,
         rejected_keys: Mutex::new(BTreeMap::new()),
+        reject_blocked: AtomicBool::new(false),
+        reject_entered: Semaphore::new(0),
+        reject_release: Semaphore::new(0),
         probe_entered: Semaphore::new(0),
         probe_release: Semaphore::new(0),
         holder_entered: Semaphore::new(0),
@@ -328,6 +369,20 @@ fn manifest_with_provider_blocks(
     provider_blocks: &str,
     route_pools: &str,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    manifest_with_declaration(
+        port,
+        &hub_v1_fixture::hub_v1_test_declaration(),
+        provider_blocks,
+        route_pools,
+    )
+}
+
+fn manifest_with_declaration(
+    port: u16,
+    declaration: &str,
+    provider_blocks: &str,
+    route_pools: &str,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let source = format!(
         r#"
 version = 3
@@ -341,7 +396,6 @@ endpoints = ["responses"]
 {provider_blocks}
 {route_pools}
 "#,
-        declaration = hub_v1_fixture::hub_v1_test_declaration(),
         execution = hub_v1_fixture::hub_v1_server_execution("owned"),
     );
     compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
@@ -1110,4 +1164,181 @@ targets = [
         evidence_body_text(&evidence).contains("owned-real-key-failure"),
         "the final provider error must remain available internally: {evidence}"
     );
+}
+
+async fn run_issue0afb440_ninth_visible_candidate(relay: bool) {
+    let (_home, _guard) = TEST_LOCK.lock().await;
+    std::env::set_var(AUTH_ENV, AUTH_SECRET);
+    let business_attempt_order = Arc::new(Mutex::new(Vec::new()));
+    let peers = [
+        spawn_peer_with_order("capacity-00", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-01", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-02", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-03", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-04", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-05", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-06", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-07", business_attempt_order.clone()).await,
+        spawn_peer_with_order("capacity-08", business_attempt_order.clone()).await,
+    ];
+    for peer in peers.iter().take(8) {
+        peer.rejected_keys
+            .lock()
+            .await
+            .insert(format!("Bearer {AUTH_SECRET}"), 503);
+    }
+
+    let provider_ids = [
+        "capacity00",
+        "capacity01",
+        "capacity02",
+        "capacity03",
+        "capacity04",
+        "capacity05",
+        "capacity06",
+        "capacity07",
+        "capacity08",
+    ];
+    let providers = provider_ids
+        .iter()
+        .zip(peers.iter())
+        .map(|(provider_id, peer)| (*provider_id, peer.base.as_str(), "wire-capacity"))
+        .collect::<Vec<_>>();
+    let route_pools = r#"
+[route_groups.owned.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "capacity00", model = "model", key = "key", priority = 9 },
+  { kind = "provider_model", provider = "capacity01", model = "model", key = "key", priority = 8 },
+  { kind = "provider_model", provider = "capacity02", model = "model", key = "key", priority = 7 },
+  { kind = "provider_model", provider = "capacity03", model = "model", key = "key", priority = 6 },
+  { kind = "provider_model", provider = "capacity04", model = "model", key = "key", priority = 5 },
+  { kind = "provider_model", provider = "capacity05", model = "model", key = "key", priority = 4 },
+  { kind = "provider_model", provider = "capacity06", model = "model", key = "key", priority = 3 },
+  { kind = "provider_model", provider = "capacity07", model = "model", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "capacity08", model = "model", key = "key", priority = 1 }
+]
+"#;
+    let provider_blocks = if relay {
+        providers
+            .iter()
+            .map(|(provider_id, base, wire_model)| provider_block(provider_id, base, wire_model))
+            .collect::<String>()
+    } else {
+        providers
+            .iter()
+            .map(|(provider_id, base, wire_model)| {
+                direct_provider_block(provider_id, base, wire_model)
+            })
+            .collect::<String>()
+    };
+    let declaration = if relay {
+        let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+        let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+        hub_v1_fixture::hub_v1_test_declaration().replace(direct_binding, relay_binding)
+    } else {
+        hub_v1_fixture::hub_v1_test_declaration()
+    };
+    let handle = spawn_v3_server_aggregate(manifest_with_declaration(
+        free_port(),
+        &declaration,
+        &provider_blocks,
+        route_pools,
+    ))
+    .await
+    .unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+
+    for peer in peers.iter().take(8) {
+        peer.reject_blocked.store(true, Ordering::SeqCst);
+    }
+    let client_task =
+        tokio::spawn(async move { send_request(&client(), &endpoint, "target").await });
+    for (index, peer) in peers.iter().take(8).enumerate() {
+        timeout(Duration::from_secs(5), peer.reject_entered.acquire())
+            .await
+            .unwrap_or_else(|_| panic!("candidate {index} must enter before timeout"))
+            .expect("candidate rejection gate must remain open")
+            .forget();
+        for (later_index, later_peer) in peers.iter().enumerate().skip(index + 1) {
+            let later_captures = later_peer.captures.lock().await;
+            assert!(
+                !later_captures
+                    .iter()
+                    .any(|capture| capture.input == "target" && !capture.probe),
+                "candidate {later_index} must not start before candidate {index} returns its 503: {later_captures:?}"
+            );
+        }
+        peer.reject_release.add_permits(1);
+    }
+    let outcome = timeout(CLIENT_TIMEOUT, client_task)
+        .await
+        .expect("client must complete after the rejection gates release")
+        .expect("client task must not panic");
+    let mut captures = Vec::new();
+    for peer in &peers {
+        captures.push(peer.captures.lock().await.clone());
+    }
+    let observed_order = business_attempt_order.lock().await.clone();
+    handle.shutdown().await;
+    for peer in peers {
+        stop_peer(peer).await;
+    }
+    std::env::remove_var(AUTH_ENV);
+
+    let ClientOutcome::Completed(value) = outcome else {
+        panic!("the ninth visible candidate must complete the client response: {outcome:?}");
+    };
+    assert!(
+        value["status"] == "completed" && value.to_string().contains("capacity-08-business-ok"),
+        "the ninth visible candidate success must reach the client: {value}"
+    );
+    for (index, peer_captures) in captures.iter().enumerate() {
+        assert_eq!(
+            peer_captures
+                .iter()
+                .filter(|capture| capture.input == "target" && !capture.probe)
+                .count(),
+            1,
+            "visible candidate {index} in {mode} must receive exactly one business attempt: {peer_captures:?}",
+            mode = if relay { "Relay" } else { "Direct" }
+        );
+    }
+    assert_eq!(
+        observed_order,
+        [
+            "capacity-00:entered",
+            "capacity-00:503",
+            "capacity-01:entered",
+            "capacity-01:503",
+            "capacity-02:entered",
+            "capacity-02:503",
+            "capacity-03:entered",
+            "capacity-03:503",
+            "capacity-04:entered",
+            "capacity-04:503",
+            "capacity-05:entered",
+            "capacity-05:503",
+            "capacity-06:entered",
+            "capacity-06:503",
+            "capacity-07:entered",
+            "capacity-07:503",
+            "capacity-08:200",
+        ],
+        "each candidate must enter only after the preceding 503 has returned"
+    );
+    assert!(
+        !value.to_string().contains("owned-real-key-failure"),
+        "the eight provider failures must stay out of the client response: {value}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_direct() {
+    run_issue0afb440_ninth_visible_candidate(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_relay() {
+    run_issue0afb440_ninth_visible_candidate(true).await;
 }
