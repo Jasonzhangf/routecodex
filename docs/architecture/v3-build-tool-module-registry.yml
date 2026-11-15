@@ -23,6 +23,9 @@ modules:
       - scripts/ensure-cli-command-shim.mjs
       - scripts/ensure-cli-executable.mjs
       - scripts/install-global.sh
+      - scripts/install-release.sh
+      - v3/tests/scripts/installer-config-consumer.spec.mjs
+      - docs/architecture/dags/v3.installer_config_verification.graph.json
       - tests/scripts/v3-cli-distribution.spec.mjs
       - tests/scripts/install-v3-cli-target-cleanup.spec.mjs
       - package.json
@@ -37,6 +40,7 @@ modules:
       - ~/.rcc/install
     required_gates:
       - npm --prefix v3 run test:distribution
+      - npm --prefix v3 run test:installer-config-consumer
       - npm --prefix v3 run test:install-cleanup
       - npm run verify:v3-resource-map
       - npm run verify:v3-module-boundaries
