@@ -5943,6 +5943,9 @@ features:
   - v3/admin-webui/routes-reload-smoke.mjs
   - v3/admin-webui/providers-onboarding-smoke.mjs
   - v3/admin-webui/deploy-page-smoke.mjs
+  - v3/admin-webui/records-error-terminal-status-smoke.mjs
+  - v3/crates/routecodex-v3-admin/tests/l4_admin_observability.rs
+  - docs/architecture/dags/v3.admin_error_row_status.graph.json
   resource_bindings:
   - v3.observability.webui_store
   - v3.admin.environment
@@ -5985,6 +5988,8 @@ features:
   - run_due
   - spawn_patrol_loop
   - records
+  - row_status_code
+  - statusText
   - v3_webui_observability_read_raw_rows
   - v3_webui_observability_read_raw_rows_from
   - build_timeseries
@@ -6031,6 +6036,8 @@ features:
   - npm run verify:v3-dagpipe-governance
   - npm run verify:v3-dagpipe-feature-graphs
   - npm run verify:v3-contract-map-owner
+  - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_observability observability_error_row_terminal_status_never_uses_success_carrier -- --exact --nocapture
+  - dagpipe graph validate docs/architecture/dags/v3.admin_error_row_status.graph.json
   - dagpipe graph validate docs/architecture/dags/v3.admin_provider_onboarding.graph.json
   - dagpipe graph validate docs/architecture/dags/v3.admin_provider_patrol.graph.json
   - dagpipe graph validate docs/architecture/dags/v3.admin_provider_patrol_plan.graph.json
