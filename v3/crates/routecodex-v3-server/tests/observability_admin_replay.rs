@@ -345,10 +345,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     };
     assert_eq!(list_row["result"], "error");
     assert_eq!(list_row["failed_attempts"], 2);
-    // The merged row carries the projected internal status (a provider network
-    // failure projects 502); the real external 503 stays on the attempt row and
-    // in `observed_error.external_error_status`, both asserted below.
-    assert_eq!(list_row["meta"]["provider_status"], 502);
+    // The merged row preserves the real provider status. The internal 502 stays
+    // on the projected Error06 node, while the provider 503 remains visible on
+    // both the attempt rows and the terminal evidence asserted below.
+    assert_eq!(list_row["meta"]["provider_status"], 503);
+    assert_eq!(list_row["meta"]["error_category"], "http_503");
 
     let (detail_status, detail) = get_json(
         &client,
