@@ -1,7 +1,7 @@
 use crate::client_transport_observation::{
     V3ClientResponseObservation, V3ClientTransportObservation,
 };
-use crate::restart_closeout::V3FrontTransportCloseoutState;
+use crate::restart_closeout::{V3ClientPeerDisconnectObservation, V3FrontTransportCloseoutState};
 use crate::session_admission::V3ServerRequestActivityPermit;
 use crate::V3MetadataCenterExecutionPlan;
 use axum::body::Body;
@@ -1057,6 +1057,10 @@ enum V3FrontWriteCommand {
 }
 
 impl V3StableFrontSocket {
+    pub(crate) fn peer_disconnect_observation(&self) -> V3ClientPeerDisconnectObservation {
+        V3ClientPeerDisconnectObservation::from_closeout_state(Arc::clone(&self.closeout_state))
+    }
+
     pub(crate) fn observe_request_trace(
         &self,
         trace: routecodex_v3_debug::V3DebugTraceScope,

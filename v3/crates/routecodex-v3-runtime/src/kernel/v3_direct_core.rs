@@ -1198,16 +1198,6 @@ where
                                 )
                             }
                         };
-                        if let Err(failure) =
-                            policy_result.exhaust_if_residence_expired(&attempt_budget)
-                        {
-                            return direct_runtime_helpers_stream::policy_failure_output_with_observability(
-                                failure,
-                                last_external_http,
-                                trace,
-                                None,
-                            );
-                        }
                         if let Some(event) = policy_result.event.clone() {
                             provider_failure_events.push(event.clone());
                             publish_v3_direct_provider_failure_event(

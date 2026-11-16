@@ -2,21 +2,22 @@
 //!
 //! Stable test IDs:
 //! `client_cancel_before_business_records_one_cancel_and_session_recovers`,
-//! `client_cancel_after_business_prefix_records_one_cancel`, and
+//! `client_cancel_after_upstream_prefix_records_one_cancel_responses_direct`,
+//! `client_cancel_after_upstream_prefix_records_one_cancel_responses_relay`,
+//! `client_cancel_after_upstream_prefix_records_one_cancel_openai_chat`, and
 //! `normal_completion_body_drop_does_not_add_cancel`.
 //!
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test client_cancel_terminal_public -- --nocapture`
 //!
 //! Each case enters a real SSE listener through one of three modes: Responses
-//! Direct, Responses Relay, or OpenAI Chat Direct. The controlled upstream
-//! holds each attempt at an explicit barrier so the client can close its socket
-//! before any business frame or, for the modes that commit a business prefix
-//! before the provider terminal, after that committed prefix. OpenAI Chat
-//! Direct buffers the whole attempt, so its applicable cases are cancellation
-//! before business output and a resolved normal outcome. The request ledger is
-//! read from the isolated test home and checked for one effective terminal, not
-//! just one final display row.
+//! Direct, Responses Relay, or OpenAI Chat Direct. The active runtime path fully
+//! buffers every provider attempt, so an upstream business prefix remains
+//! hidden while the controlled upstream holds the terminal. The client can
+//! close its socket before business output or after that upstream prefix exists,
+//! but in both cases before any provider payload reaches the client. The request
+//! ledger is read from the isolated test home and checked for one effective
+//! terminal, not just one final display row.
 
 use axum::{
     body::{Body, Bytes},
@@ -709,7 +710,7 @@ async fn run_before_business(mode: Mode) {
     entry.stop().await;
 }
 
-async fn run_after_business_prefix(mode: Mode) {
+async fn run_after_upstream_prefix(mode: Mode) {
     let (_home_guard, _lock) = TEST_LOCK.lock().await;
     let _env = EnvGuard::install();
     let home = PathBuf::from(std::env::var("HOME").unwrap());
@@ -724,59 +725,10 @@ async fn run_after_business_prefix(mode: Mode) {
         .expect("the controlled provider must receive the prefix request")
         .expect("provider capture channel");
     assert_eq!(capture["stream"], json!(true));
-    let wire = read_until(
-        &mut socket,
-        AFTER_PREFIX_TEXT.as_bytes(),
-        Duration::from_secs(5),
-    )
-    .await;
-    assert!(
-        String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
-        "the client must receive the committed business prefix before closing"
-    );
-
-    drop(socket);
-    let rows = wait_for_terminal_count(&path, 1, Duration::from_secs(10)).await;
-    let terminals = session_terminal_rows(&rows);
-    assert_eq!(
-        terminals.len(),
-        1,
-        "the post-prefix disconnect must produce one effective terminal: {terminals:#?}"
-    );
-    assert_cancelled_terminal(terminals[0]);
-    assert_no_failed_or_provider_failure(&rows);
-    entry.release_provider();
-
-    sleep(Duration::from_millis(200)).await;
-    let rows = read_rows(&path);
-    assert_eq!(
-        session_terminal_rows(&rows).len(),
-        1,
-        "the provider completion after the disconnect must not add a second terminal"
-    );
-    entry.stop().await;
-}
-
-async fn run_openai_chat_cancel_after_upstream_prefix() {
-    let (_home_guard, _lock) = TEST_LOCK.lock().await;
-    let _env = EnvGuard::install();
-    let home = PathBuf::from(std::env::var("HOME").unwrap());
-    let mut entry = start(Mode::OpenAiChat).await;
-    let server_addr = entry.handle.listeners[0].addr;
-    let path = request_records_path(&home, server_addr.port());
-
-    let mut socket = TcpStream::connect(server_addr).await.unwrap();
-    write_raw_request(&mut socket, Mode::OpenAiChat, AFTER_PREFIX_INPUT).await;
-    let capture = timeout(Duration::from_secs(5), entry.captures.recv())
-        .await
-        .expect("the controlled provider must receive the prefix request")
-        .expect("provider capture channel");
-    assert_eq!(capture["stream"], json!(true));
-
     let wire = read_until(&mut socket, KEEPALIVE_FRAME, Duration::from_secs(3)).await;
     assert!(
         !String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
-        "OpenAI Chat Direct must keep the uncommitted provider prefix buffered"
+        "{mode:?} must keep the uncommitted provider prefix buffered"
     );
     drop(socket);
 
@@ -864,8 +816,8 @@ async fn client_cancel_before_business_records_one_cancel_and_session_recovers()
 }
 
 #[tokio::test]
-async fn client_cancel_after_business_prefix_records_one_cancel() {
-    run_after_business_prefix(Mode::ResponsesDirect).await;
+async fn client_cancel_after_upstream_prefix_records_one_cancel_responses_direct() {
+    run_after_upstream_prefix(Mode::ResponsesDirect).await;
 }
 
 #[tokio::test]
@@ -879,13 +831,13 @@ async fn client_cancel_before_business_records_one_cancel_responses_relay() {
 }
 
 #[tokio::test]
-async fn client_cancel_after_business_prefix_records_one_cancel_responses_relay() {
-    run_after_business_prefix(Mode::ResponsesRelay).await;
+async fn client_cancel_after_upstream_prefix_records_one_cancel_responses_relay() {
+    run_after_upstream_prefix(Mode::ResponsesRelay).await;
 }
 
 #[tokio::test]
 async fn client_cancel_after_upstream_prefix_records_one_cancel_openai_chat() {
-    run_openai_chat_cancel_after_upstream_prefix().await;
+    run_after_upstream_prefix(Mode::OpenAiChat).await;
 }
 
 #[tokio::test]

@@ -31,6 +31,7 @@ async fn force_accepted_sse_transport(body: Body) -> Body {
         Duration::from_millis(2),
         None,
         None,
+        None,
     )
     .await
     .into_body()

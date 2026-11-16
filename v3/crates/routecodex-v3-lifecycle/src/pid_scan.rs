@@ -5,7 +5,8 @@ pub(crate) fn explicit_listener_pids_for_ports(
 ) -> Result<Vec<u32>, V3LifecycleError> {
     let mut pids = BTreeSet::new();
     for port in ports {
-        for pid in listening_pids_for_port(*port)? {
+        let port_pids = listening_pids_for_port(*port)?;
+        for pid in port_pids {
             if pid != std::process::id() {
                 pids.insert(pid);
             }

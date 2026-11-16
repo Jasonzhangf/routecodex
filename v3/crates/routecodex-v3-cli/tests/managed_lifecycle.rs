@@ -1571,7 +1571,12 @@ fn single_instance_dir(state_root: &Path) -> PathBuf {
 }
 
 fn wait_status_file_state(instance_dir: &Path, expected: &str) -> Value {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now()
+        + std::env::var("RCC_DEBUG_LIFECYCLE_DEADLINE_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| Duration::from_secs(5));
     loop {
         if let Ok(bytes) = fs::read(instance_dir.join("status.json")) {
             let status: Value = serde_json::from_slice(&bytes).unwrap();
@@ -2301,7 +2306,12 @@ fn internal_hooksd_crash_after_readiness_keeps_managed_runtime_healthy() {
         &hooksd_started,
         "ready hooksd did not start before crash",
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now()
+        + std::env::var("RCC_DEBUG_LIFECYCLE_DEADLINE_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .unwrap_or_else(|| Duration::from_secs(5));
     loop {
         let detail = wait_status_file_state(&instance_dir, "running")
             .get("detail")
@@ -3526,7 +3536,7 @@ fn start_force_kills_explicit_listener_pid_after_graceful_timeout() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + PORT_STATE_TIMEOUT;
     while Instant::now() < deadline && occupied.try_wait().unwrap().is_none() {
         sleep(Duration::from_millis(50));
     }

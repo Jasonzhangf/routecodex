@@ -1117,6 +1117,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     });
                 }
                 V3ProviderResponseBody::Sse(stream) => {
+                    let provider_attempt_deadline = std::time::Instant::now()
+                        + v3_relay_transport_response_timeout(
+                            manifest,
+                            &selected_target_provider_id,
+                        );
                     let sse_idle_timeout =
                         crate::hub_v1::relay_runtime_core::v3_provider_sse_idle_timeout(
                             manifest,
@@ -1128,7 +1133,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             &input.request_id,
                             &selected_target_provider_id,
                             stream,
-                            attempt_budget.residence_deadline(),
+                            provider_attempt_deadline,
                         );
                     let stream_observation = V3RuntimeStreamObservation::default();
                     // Keep every Relay provider attempt fully buffered until
@@ -1136,23 +1141,19 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     // The projector still builds the complete Responses frame
                     // sequence, but its deferred sink does not receive a byte
                     // until the accepted terminal is sealed.
-                    let projection_handle =
-                        initial_relay_seeds.client_stream_projection.clone();
-                    let mut relay_client_projection =
-                        if client_response_transport_intent == V3HubTransportIntent::Sse
-                            && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
-                            && !manifest.memory_raw_capture.enabled
-                            && !request_tool_thinking_enabled
-                            && !relay_request_declares_tools
-                        {
-                            projection_handle.as_ref().and_then(|handle| {
-                                let mut slot =
-                                    handle.lock().unwrap_or_else(|error| error.into_inner());
-                                if slot.is_none() {
-                                    if let Some(sink) =
-                                        initial_relay_seeds.client_frame_sink.clone()
-                                    {
-                                        *slot = Some(
+                    let projection_handle = initial_relay_seeds.client_stream_projection.clone();
+                    let mut relay_client_projection = if client_response_transport_intent
+                        == V3HubTransportIntent::Sse
+                        && provider_wire_protocol == V3HubProviderWireProtocol::OpenAiChat
+                        && !manifest.memory_raw_capture.enabled
+                        && !request_tool_thinking_enabled
+                        && !relay_request_declares_tools
+                    {
+                        projection_handle.as_ref().and_then(|handle| {
+                            let mut slot = handle.lock().unwrap_or_else(|error| error.into_inner());
+                            if slot.is_none() {
+                                if let Some(sink) = initial_relay_seeds.client_frame_sink.clone() {
+                                    *slot = Some(
                                             super::relay_client_frames::
                                                 V3RelayChatClientStreamProjector::
                                                 new_fully_buffered(
@@ -1160,13 +1161,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                                     attempt_budget.clone(),
                                                 ),
                                         );
-                                    }
                                 }
-                                slot.take()
-                            })
-                        } else {
-                            None
-                        };
+                            }
+                            slot.take()
+                        })
+                    } else {
+                        None
+                    };
                     let provider_value_result =
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
                         provider_wire_protocol,
@@ -1195,9 +1196,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     Some(selected_observability.clone()),
                                 )
                             );
-                            let residence_deadline_error = failure.policy_error_message.contains(
-                                "provider SSE attempt exceeded the request residence deadline",
-                            );
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
@@ -1217,8 +1215,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 )
                                 .await
                             );
-                            let deadline_expired =
-                                attempt_budget.residence_deadline() <= std::time::Instant::now();
                             if let Some(failure) = terminal_failure {
                                 return Ok(provider_failure_output_with_observation(
                                     failure,
@@ -1235,19 +1231,6 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 .as_ref()
                                 .is_some_and(|sink| sink.is_committed())
                             {
-                                return Ok(provider_failure_output_with_observation(
-                                    attach_v3_provider_failure_events_to_failure(
-                                        terminalize_v3_responses_relay_provider_failure(
-                                            failure,
-                                            last_external_http.clone(),
-                                        ),
-                                        &provider_failure_events,
-                                    ),
-                                    trace,
-                                    Some(stream_observation),
-                                ));
-                            }
-                            if residence_deadline_error || deadline_expired {
                                 return Ok(provider_failure_output_with_observation(
                                     attach_v3_provider_failure_events_to_failure(
                                         terminalize_v3_responses_relay_provider_failure(

@@ -1036,49 +1036,6 @@ impl V3SseConsoleFinalizer {
         }
     }
 
-    pub(crate) fn client_disconnected(mut self) {
-        if let Err(error) = merge_v3_runtime_stream_observation(
-            &mut self.observability,
-            Some(&self.stream_observation),
-        ) {
-            emit_v3_runtime_observability_contract_failure(
-                &self.context,
-                &self.observability,
-                error,
-            );
-        }
-        if let Err(error) =
-            emit_v3_toolreason_console_line(&self.context, Some(&self.stream_observation))
-        {
-            emit_v3_runtime_observability_contract_failure(
-                &self.context,
-                &self.observability,
-                error,
-            );
-        }
-        // Typed WebUI projection: client disconnect => Cancelled.
-        if let Err(error) = record_v3_webui_event_for_context(
-            &self.context,
-            V3ObsEventType::Cancelled,
-            &self.observability,
-        ) {
-            emit_v3_webui_projection_failure(&self.context, &error);
-        }
-        let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
-            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
-            "V3ServerRespOutbound06ClientFrame",
-            "client_disconnect",
-            "client disconnected before provider SSE stream completed",
-            Some(499),
-        );
-        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
-            &self.context,
-            &self.observability,
-            499,
-            result,
-        );
-    }
-
     pub(crate) fn emit_relay_sse_failure_console_line(
         self,
         status: u16,
@@ -1196,59 +1153,6 @@ impl V3DirectSseConsoleFinalizer {
                 );
             }
         }
-    }
-
-    pub(crate) fn client_disconnected(mut self) {
-        if let Err(error) = self.merge_stream_observation() {
-            emit_v3_runtime_observability_contract_failure(
-                &self.context,
-                &self.observability,
-                error,
-            );
-            return;
-        }
-        let semantic_terminal = match self.semantic_terminal() {
-            Ok(terminal) => terminal,
-            Err(error) => {
-                emit_v3_runtime_observability_contract_failure(
-                    &self.context,
-                    &self.observability,
-                    error,
-                );
-                return;
-            }
-        };
-        match semantic_terminal {
-            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Success) => {
-                self.emit_direct_sse_complete_console_lines();
-                return;
-            }
-            Some(routecodex_v3_runtime::hub_v1::V3RuntimeSemanticTerminal::Failure) => {
-                return;
-            }
-            None => {}
-        }
-        // Typed WebUI projection: client disconnect => Cancelled.
-        if let Err(error) = record_v3_webui_event_for_context(
-            &self.context,
-            V3ObsEventType::Cancelled,
-            &self.observability,
-        ) {
-            emit_v3_webui_projection_failure(&self.context, &error);
-        }
-        let result = routecodex_v3_runtime::foundation::project_v3_server_boundary_error_via_sdk(
-            routecodex_v3_error::V3ErrorSourceKind::ClientDisconnect,
-            "V3ServerRespOutbound06ClientFrame",
-            "client_disconnect",
-            "client disconnected before provider SSE stream completed",
-            Some(499),
-        );
-        emit_v3_post_commit_sse_error_sdk_result_console_line_for_context(
-            &self.context,
-            &self.observability,
-            499,
-            result,
-        );
     }
 
     pub(crate) fn merge_stream_observation(&mut self) -> Result<(), String> {
@@ -2181,7 +2085,7 @@ mod direct_sse_observability_none_tests {
     }
 
     #[tokio::test]
-    async fn direct_sse_client_drop_without_observability_records_cancelled_terminal() {
+    async fn direct_sse_local_drop_without_peer_disconnect_records_no_cancelled_terminal() {
         let state = test_listener_state(7777);
         let request_id = "req-direct-sse-no-observability-drop";
         let context = test_context(&state, request_id);
@@ -2200,18 +2104,12 @@ mod direct_sse_observability_none_tests {
             wrap_v3_direct_live_sse_console_stream(client_stream, finalizer);
         assert!(stream.next().await.unwrap().unwrap().starts_with(b"event:"));
         drop(stream);
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
         let rows = state.webui_observability.rows().unwrap();
-        assert_eq!(rows.len(), 1, "one request must fold to one terminal row");
-        let row = rows
-            .get(&build_v3_obs_request_key(7777, request_id))
-            .expect("client drop must record a terminal ledger row");
-        assert_eq!(row.event_type, "request.cancelled", "{}", row.event_type);
-        assert_eq!(row.result.as_deref(), Some("cancelled"));
-        assert_ne!(
-            row.meta.provider_status,
-            Some(502),
-            "a no-response client drop must not fabricate provider HTTP 502"
+        assert!(
+            rows.is_empty(),
+            "a local stream drop without peer-disconnect evidence must not fabricate a terminal row: {rows:?}"
         );
     }
 

@@ -134,7 +134,7 @@ pub(crate) fn wrap_v3_committed_relay_sse_console_stream(
             |_| {},
             move |terminal| match terminal {
                 V3CommittedSseTerminal::Completed => finalizer.complete_relay_sse(),
-                V3CommittedSseTerminal::Dropped => finalizer.client_disconnected(),
+                V3CommittedSseTerminal::Dropped => {}
             },
         ),
         None => stream,

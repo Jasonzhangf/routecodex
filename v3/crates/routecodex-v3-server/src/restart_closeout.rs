@@ -2,6 +2,39 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{oneshot, Notify};
 
+/// Read-only observation of the Front peer disconnect fact.
+///
+/// The HTTP read half owns the evidence. Consumers may wait for it, but they
+/// cannot turn a local future/body drop into a peer disconnect.
+#[derive(Clone, Debug)]
+pub(crate) struct V3ClientPeerDisconnectObservation {
+    state: Arc<V3FrontTransportCloseoutState>,
+}
+
+impl V3ClientPeerDisconnectObservation {
+    pub(crate) fn from_closeout_state(state: Arc<V3FrontTransportCloseoutState>) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn is_disconnected(&self) -> bool {
+        self.state.is_peer_disconnected()
+    }
+
+    pub(crate) async fn wait_disconnected(&self) {
+        self.state.wait_peer_disconnected().await;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_new() -> Self {
+        Self::from_closeout_state(V3FrontTransportCloseoutState::new())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mark_disconnected(&self) {
+        self.state.mark_peer_disconnected();
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct V3FrontTransportCloseoutState {
     request_cycle: Mutex<V3FrontTransportRequestCycle>,
@@ -147,8 +180,20 @@ impl V3FrontTransportCloseoutState {
     }
 
     pub(crate) async fn wait_peer_disconnected(&self) {
+        self.wait_peer_disconnected_with(|| {}).await;
+    }
+
+    async fn wait_peer_disconnected_with<F>(&self, after_empty_check: F)
+    where
+        F: FnOnce(),
+    {
         let notified = self.peer_disconnect_notify.notified();
+        tokio::pin!(notified);
+        // Register the waiter before re-reading the flag so the notification is
+        // pinned to this future even when the disconnect lands before the await.
+        notified.as_mut().enable();
         if !self.peer_disconnected.load(Ordering::Acquire) {
+            after_empty_check();
             notified.await;
         }
     }
@@ -184,5 +229,29 @@ impl V3FrontTransportCloseoutState {
             .expect("front socket close lock")
             .take()
             .map(|tx| tx.send(()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn peer_disconnect_between_check_and_await_is_not_lost() {
+        let state = V3FrontTransportCloseoutState::new();
+        let waiter_state = Arc::clone(&state);
+        let hook_state = Arc::clone(&state);
+        let waiter = tokio::spawn(async move {
+            waiter_state
+                .wait_peer_disconnected_with(move || hook_state.mark_peer_disconnected())
+                .await;
+        });
+
+        tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("a disconnect after the empty check must wake the peer watcher")
+            .expect("peer-disconnect waiter task");
+        assert!(state.is_peer_disconnected());
     }
 }

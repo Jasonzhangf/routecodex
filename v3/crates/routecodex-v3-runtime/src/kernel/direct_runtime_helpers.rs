@@ -92,56 +92,6 @@ pub(crate) struct V3DirectProviderFailurePolicyResult {
     retryable_transient: bool,
 }
 
-impl V3DirectProviderFailurePolicyResult {
-    fn exhaust_if_residence_expired(
-        &mut self,
-        budget: &V3AttemptBudget,
-    ) -> Result<(), DirectPolicyFailure> {
-        if std::time::Instant::now() < budget.residence_deadline()
-            || self.decision.action.is_terminal()
-        {
-            return Ok(());
-        }
-        let original_source = self
-            .decision
-            .exhaustion
-            .local_action
-            .classified
-            .source
-            .clone();
-        let action_projection = serde_json::to_value(&self.decision.exhaustion.local_action)
-            .map_err(|error| {
-                direct_policy_failure(&original_source, "V3Error04TargetExhaustionDecision", error)
-            })?;
-        let (exhaustion_projection, exhaustion) =
-            crate::operation_runner::run_v3_error_04_target_exhaustion_operator(
-                action_projection,
-                self.decision.exhaustion.local_action.clone(),
-                0,
-                false,
-                false,
-            )
-            .map_err(|error| {
-                direct_policy_failure(&original_source, "V3Error04TargetExhaustionDecision", error)
-            })?;
-        let (_, decision) =
-            crate::operation_runner::execute_v3_operation_runner_error_err05_execution_decision(
-                exhaustion_projection,
-                exhaustion,
-                None,
-            )
-            .map_err(|error| {
-                direct_policy_failure(&original_source, "V3Error05ExecutionDecision", error)
-            })?;
-        self.decision = decision;
-        if let Some(event) = self.event.as_mut() {
-            event.action = "terminal_no_response".to_owned();
-            event.next_provider_key = None;
-        }
-        Ok(())
-    }
-}
-
 pub(crate) struct V3DirectProviderFailurePolicyContext<
     'ctx,
     R: V3ProviderAvailabilityReader + ?Sized,
@@ -275,41 +225,6 @@ mod external_http_witness_tests {
     use super::*;
     use crate::hub_v1::external_http_witness_from_provider_error;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
-    use std::time::Duration;
-
-    fn attempt_budget_with_residence_timeout_ms(residence_timeout_ms: u64) -> V3AttemptBudget {
-        let source = format!(
-            r#"
-version = 3
-[pipelines.hub_v1]
-skeleton = "hub_v1"
-[servers.test]
-bind = "127.0.0.1"
-port = 4444
-routing_group = "default"
-[servers.test.execution]
-allowed_modes = ["direct", "relay"]
-allowed_invocation_sources = ["client", "refill", "dry_run"]
-allowed_transports = ["json", "sse"]
-attempt_store = {{ residence_timeout_ms = {residence_timeout_ms} }}
-[providers.test]
-type = "responses"
-base_url = "http://127.0.0.1:9/v1"
-default_model = "test-model"
-auth = {{ type = "api_key", entries = [{{ alias = "key", env = "TEST_KEY" }}] }}
-[providers.test.models.test-model]
-capabilities = ["text"]
-[route_groups.default.pools.default]
-targets = [{{ kind = "provider_model", provider = "test", model = "test-model", priority = 1 }}]
-"#
-        );
-        let manifest = compile_v3_config_05_manifest(
-            parse_v3_config_02_authoring(&source).expect("residence test authoring"),
-        )
-        .expect("residence test manifest");
-        V3AttemptBudget::from_manifest(&manifest, "test").expect("residence test budget")
-    }
-
     fn nonterminal_policy_result() -> V3DirectProviderFailurePolicyResult {
         let source = build_v3_error_01_source_raised(
             V3ErrorSourceKind::ProviderFailure,
@@ -480,55 +395,6 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test-model", 
         assert_eq!(no_response.error_chain, None);
     }
 
-    #[test]
-    fn residence_expiry_converts_nonterminal_decision_to_terminal_no_response() {
-        let mut policy_result = nonterminal_policy_result();
-        let original_source = policy_result
-            .decision
-            .exhaustion
-            .local_action
-            .classified
-            .source
-            .clone();
-        let budget = attempt_budget_with_residence_timeout_ms(1);
-        std::thread::sleep(Duration::from_millis(10));
-
-        policy_result
-            .exhaust_if_residence_expired(&budget)
-            .expect("residence expiry must execute SDK04 and SDK05");
-
-        assert_eq!(
-            policy_result.decision.action,
-            V3Error05ExecutionAction::ProjectTerminal
-        );
-        assert_eq!(
-            policy_result
-                .decision
-                .exhaustion
-                .local_action
-                .classified
-                .source,
-            original_source
-        );
-        let event = policy_result.event.expect("provider failure event");
-        assert_eq!(event.action, "terminal_no_response");
-        assert_eq!(event.next_provider_key, None);
-    }
-
-    #[test]
-    fn unexpired_residence_keeps_nonterminal_decision_and_event() {
-        let mut policy_result = nonterminal_policy_result();
-        let original_decision = policy_result.decision.clone();
-        let original_event = policy_result.event.clone();
-        let budget = attempt_budget_with_residence_timeout_ms(60_000);
-
-        policy_result
-            .exhaust_if_residence_expired(&budget)
-            .expect("unexpired residence must not enter the SDK");
-
-        assert_eq!(policy_result.decision, original_decision);
-        assert_eq!(policy_result.event, original_event);
-    }
 }
 
 #[cfg(test)]

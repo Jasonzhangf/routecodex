@@ -497,31 +497,20 @@ pub(crate) fn run_v3_plan_execution_preplan_operator(
 }
 
 pub(crate) async fn await_v3_plan_execution_with_deadline(
-    deadline: std::time::Instant,
+    _deadline: std::time::Instant,
     planning: impl std::future::Future<
         Output = Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop>,
     >,
 ) -> Result<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop> {
-    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), planning)
-        .await
-        .unwrap_or_else(|_| {
-            Err(V3PlanExecutionStop::Failed(
-                build_v3_error_01_source_raised(
-                    V3ErrorSourceKind::RuntimeFailure,
-                    "V3OperationRunnerPlanExecution",
-                    "request_residence_deadline_exceeded",
-                    "target planning exceeded the request residence deadline",
-                ),
-            ))
-        })
+    planning.await
 }
 
 /// Runtime planning entrypoint used by the Direct and Relay kernels.
 ///
-/// Selection is immediate and nonblocking. Declared candidates are not
-/// excluded by local capacity state; no recovery, probe or Deferred wait exists
-/// on the request path. The request budget is retained only for the original
-/// residence deadline.
+/// Selection is immediate. Declared candidates are not excluded by local
+/// capacity state. If all remaining candidates are only waiting for the
+/// existing provider-health recovery owner, the accepted request stays
+/// resident and retries selection after an availability change.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
@@ -535,7 +524,7 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
     request_local_busy_candidates: &'a BTreeSet<String>,
     now_ms: u64,
     deterministic_sample: u64,
-    _allow_exhaustion_rescue_probe: bool,
+    allow_exhaustion_rescue_probe: bool,
     mut preferred_selected: Option<V3Target10ConcreteProviderSelected>,
     mode_policy: V3PlanExecutionModePolicy,
 ) -> std::pin::Pin<
@@ -548,44 +537,84 @@ pub(crate) fn run_v3_plan_execution_operator_with_probes<'a>(
 > {
     Box::pin(async move {
         let _ = request_local_busy_candidates;
-        let outcome = run_v3_plan_execution_operator(
-            target_resolved_request,
-            manifest.clone(),
-            target_source,
-            failure_session_scope.clone(),
-            provider_health.clone(),
-            request_local_excluded_candidates.clone(),
-            now_ms,
-            deterministic_sample,
-            preferred_selected,
-            mode_policy,
-        )
-        .map_err(|error| {
-            V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3OperationRunnerPlanExecution",
-                "plan_execution_operator_failed",
-                error.message,
-            ))
-        })?;
-        match outcome {
-            V3PlanExecutionOutcome::Selected {
-                execution_planned_request,
-                plan,
-            } => Ok((execution_planned_request, plan)),
-            V3PlanExecutionOutcome::Exhausted {
-                expanded,
-                exhaustion,
-                source,
-                ..
-            } => Err(V3PlanExecutionStop::Exhausted {
-                expanded,
-                exhaustion,
-                source,
-            }),
-            V3PlanExecutionOutcome::Failed(source) => Err(V3PlanExecutionStop::Failed(source)),
-            V3PlanExecutionOutcome::OperatorFault(fault) => {
-                Err(V3PlanExecutionStop::OperatorFault(fault))
+        let mut current_now_ms = now_ms;
+        loop {
+            let observed_generation = provider_health.target_availability_generation();
+            let outcome = run_v3_plan_execution_operator(
+                target_resolved_request.clone(),
+                manifest.clone(),
+                target_source.clone(),
+                failure_session_scope.clone(),
+                provider_health.clone(),
+                request_local_excluded_candidates.clone(),
+                current_now_ms,
+                deterministic_sample,
+                preferred_selected.clone(),
+                mode_policy.clone(),
+            )
+            .map_err(|error| {
+                V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "V3OperationRunnerPlanExecution",
+                    "plan_execution_operator_failed",
+                    error.message,
+                ))
+            })?;
+            match outcome {
+                V3PlanExecutionOutcome::Selected {
+                    execution_planned_request,
+                    plan,
+                } => return Ok((execution_planned_request, plan)),
+                V3PlanExecutionOutcome::Exhausted {
+                    expanded,
+                    exhaustion,
+                    source,
+                    ..
+                } => {
+                    let cooldown_only =
+                        crate::provider_failure_runtime_policy::v3_exhaustion_is_cooldown_only(
+                            &expanded,
+                            request_local_excluded_candidates,
+                            failure_session_scope,
+                            provider_health,
+                            current_now_ms,
+                        );
+                    if !allow_exhaustion_rescue_probe || !cooldown_only {
+                        return Err(V3PlanExecutionStop::Exhausted {
+                            expanded,
+                            exhaustion,
+                            source,
+                        });
+                    }
+                    preferred_selected = None;
+                    provider_health
+                        .wait_for_target_availability_change(observed_generation)
+                        .await
+                        .map_err(|message| {
+                            V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::RuntimeFailure,
+                                "V3OperationRunnerPlanExecution",
+                                "plan_recovery_wait_failed",
+                                message,
+                            ))
+                        })?;
+                    current_now_ms = crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms()
+                        .map_err(|message| {
+                            V3PlanExecutionStop::Failed(build_v3_error_01_source_raised(
+                                V3ErrorSourceKind::RuntimeFailure,
+                                "V3OperationRunnerPlanExecution",
+                                "plan_recovery_clock_failed",
+                                message,
+                            ))
+                        })?
+                        .max(current_now_ms);
+                }
+                V3PlanExecutionOutcome::Failed(source) => {
+                    return Err(V3PlanExecutionStop::Failed(source))
+                }
+                V3PlanExecutionOutcome::OperatorFault(fault) => {
+                    return Err(V3PlanExecutionStop::OperatorFault(fault))
+                }
             }
         }
     })
@@ -596,7 +625,7 @@ mod tests {
     use super::*;
     use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
     use serde_json::json;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn candidate_key(candidate: &routecodex_v3_target::V3TargetCandidate) -> String {
         crate::provider_failure_runtime_policy::v3_relay_provider_candidate_key(candidate)
@@ -767,6 +796,96 @@ targets = [
             .expect("expanded candidates")
     }
 
+    #[tokio::test]
+    async fn expired_request_deadline_does_not_cancel_planning() {
+        let expected = build_v3_error_01_source_raised(
+            V3ErrorSourceKind::RuntimeFailure,
+            "V3OperationRunnerPlanExecution",
+            "planning_finished_after_old_deadline",
+            "planning completed after the former residence boundary",
+        );
+        let planning = async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Err::<(Value, V3PlanExecutionCompleted), V3PlanExecutionStop>(
+                V3PlanExecutionStop::Failed(expected.clone()),
+            )
+        };
+
+        let result = await_v3_plan_execution_with_deadline(
+            Instant::now() - Duration::from_secs(1),
+            planning,
+        )
+        .await;
+        let Err(V3PlanExecutionStop::Failed(source)) = result else {
+            panic!("the planning result must not be replaced by a residence timeout");
+        };
+        assert_eq!(source.code, "planning_finished_after_old_deadline");
+    }
+
+    #[tokio::test]
+    async fn cooldown_only_exhaustion_waits_for_recovery_and_reselects() {
+        let manifest = test_manifest("cooldown_recovery");
+        let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+        let scope = V3ProviderFailureSessionScope::new("test", "default", "cooldown-only-recovery")
+            .expect("session scope");
+        let request = json!({"model": "client-model", "input": "opaque"});
+        let expanded = expanded_from_hit(&manifest, opaque_hit(&manifest, &request));
+        let now_ms = 20_001;
+        health
+            .store()
+            .record_provider_cooldown_failure(
+                "cooldown_recovery",
+                Some("key1"),
+                Some("gpt-test"),
+                "temporary recovery window",
+                now_ms,
+                100_000,
+            )
+            .expect("temporary provider cooldown");
+
+        let excluded = BTreeSet::new();
+        let busy = BTreeSet::new();
+        let selection = run_v3_plan_execution_operator_with_probes(
+            crate::execution_control::V3AttemptBudget::process_default(),
+            request,
+            &manifest,
+            V3PlanExecutionTargetSource::Expanded(expanded),
+            &scope,
+            &health,
+            &excluded,
+            &busy,
+            now_ms,
+            0,
+            true,
+            None,
+            direct_policy(),
+        );
+        tokio::pin!(selection);
+        tokio::select! {
+            _ = &mut selection => {
+                panic!("cooldown-only exhaustion must remain resident");
+            }
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+        }
+
+        health
+            .store()
+            .complete_provider_cooldown_probe_success_at(
+                "cooldown_recovery",
+                Some("key1"),
+                Some("gpt-test"),
+                now_ms,
+            )
+            .expect("publish provider recovery");
+        let selected = tokio::time::timeout(Duration::from_secs(2), &mut selection)
+            .await
+            .expect("recovery notification must wake target planning");
+        let Ok((_request, plan)) = selected else {
+            panic!("recovered candidate must select");
+        };
+        assert_eq!(plan.selected.candidate.provider_id, "cooldown_recovery");
+    }
+
     #[test]
     fn plan_execution_operator_selects_and_decides_mode_without_admission() {
         let manifest = test_manifest("r05_sdk_success");
@@ -919,7 +1038,7 @@ targets = [
                         &BTreeSet::new(),
                         now_ms,
                         0,
-                        true,
+                        false,
                         None,
                         direct_policy(),
                     ),

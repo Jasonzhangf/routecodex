@@ -1232,6 +1232,9 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
     let client_disconnect_slot = client_sse_channel
         .is_some()
         .then(V3ClientDisconnectSlot::new);
+    let client_peer_disconnect = front_socket
+        .as_ref()
+        .map(restart_handoff::V3StableFrontSocket::peer_disconnect_observation);
     let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
         Box::pin(pending_endpoint_after_json_parse(
             Arc::clone(&state),
@@ -1269,6 +1272,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                 keepalive_interval,
                 client_wire_capture,
                 client_disconnect_slot,
+                client_peer_disconnect,
             )
             .await
         }

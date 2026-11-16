@@ -9467,6 +9467,91 @@ async fn issue4aeb668_nested_committed_sse_keeps_enclosing_evidence() {
     .await;
 }
 
+fn nested_sse_events(body: &str) -> Vec<Value> {
+    body.split("\n\n")
+        .filter_map(|event| {
+            let payload = event
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:").map(str::trim))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!payload.is_empty())
+                .then(|| serde_json::from_str(&payload).ok())
+                .flatten()
+        })
+        .collect()
+}
+
+fn nested_visible_text_values(events: &[Value]) -> Vec<String> {
+    let mut texts = Vec::new();
+    let collect_message_text = |item: &Value, texts: &mut Vec<String>| {
+        if item["type"] != "message" {
+            return;
+        }
+        if let Some(text) = item["text"].as_str() {
+            texts.push(text.to_owned());
+        }
+        for part in item["content"].as_array().into_iter().flatten() {
+            if part["type"] == "output_text" {
+                if let Some(text) = part["text"].as_str() {
+                    texts.push(text.to_owned());
+                }
+            }
+        }
+    };
+    for event in events {
+        match event["type"].as_str() {
+            Some("response.output_text.delta") => {
+                if let Some(delta) = event["delta"].as_str() {
+                    texts.push(delta.to_owned());
+                }
+            }
+            Some("response.output_text.done") => {
+                if let Some(text) = event["text"].as_str() {
+                    texts.push(text.to_owned());
+                }
+            }
+            Some("response.content_part.added" | "response.content_part.done") => {
+                if event.pointer("/part/type").and_then(Value::as_str) == Some("output_text") {
+                    if let Some(text) = event.pointer("/part/text").and_then(Value::as_str) {
+                        texts.push(text.to_owned());
+                    }
+                }
+            }
+            Some("response.output_item.added" | "response.output_item.done") => {
+                collect_message_text(&event["item"], &mut texts);
+            }
+            Some("response.created" | "response.in_progress" | "response.completed") => {
+                for item in event
+                    .pointer("/response/output")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_message_text(item, &mut texts);
+                }
+            }
+            _ => {}
+        }
+    }
+    texts
+}
+
+fn nested_reasoning_summary_texts(events: &[Value], event_type: &str) -> Vec<String> {
+    events
+        .iter()
+        .filter(|event| event["type"] == event_type)
+        .filter_map(|event| {
+            let field = if event_type == "response.reasoning_summary_text.delta" {
+                "delta"
+            } else {
+                "text"
+            };
+            event[field].as_str().map(str::to_owned)
+        })
+        .collect()
+}
+
 async fn start_nested_committed_failure_upstream() -> (
     String,
     mpsc::UnboundedReceiver<ProviderCapture>,
@@ -9744,7 +9829,10 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         committed_failure,
     } = case;
     let _test_guard = TEST_LOCK.lock().await;
-    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
+    // Multi-round ordering and accumulation have dedicated refill tests.
+    routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(
+        committed_failure.then_some(0),
+    );
     let home_guard = TestHomeGuard::new("issue4aeb668-nested-observations");
     let (failed_base_url, failed_shutdown) =
         start_controlled_failure_upstream_all_protocols().await;
@@ -9811,17 +9899,10 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         }
         None
     } else if committed_failure {
-        let mut response = response.unwrap();
+        let response = response.unwrap();
         let status = response.status();
-        let mut bytes = Vec::new();
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
-                Ok(None) => panic!("committed failure must not complete its SSE transport"),
-                Err(_) => break,
-            }
-        }
-        Some((status, String::from_utf8(bytes).unwrap()))
+        let body = response.text().await.unwrap();
+        Some((status, body))
     } else {
         let response = response.unwrap();
         Some((response.status(), response.text().await.unwrap()))
@@ -9852,19 +9933,73 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
     if let Some((status, response_body)) = business_response {
         assert_eq!(status, 200, "unexpected response body: {response_body}");
         if committed_failure {
-            assert!(
-                response_body.contains("committed-prefix"),
-                "{response_body}"
+            eprintln!("nested committed raw body: {response_body}");
+            let events = nested_sse_events(&response_body);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| event["type"] == "response.completed")
+                    .count(),
+                1,
+                "the complete buffered attempt must terminate normally: {response_body}"
             );
-            for forbidden in [
-                "<thinking>",
-                "secret",
-                "response.completed",
-                "response.failed",
-                "[DONE]",
-            ] {
-                assert!(!response_body.contains(forbidden), "{response_body}");
-            }
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| event["type"] == "response.failed"),
+                "a rewritten governed attempt must not fabricate failure: {response_body}"
+            );
+            let visible = nested_visible_text_values(&events);
+            assert!(
+                visible.iter().any(|text| text.contains("committed-prefix")),
+                "the certified visible prefix must survive governance: {visible:?}"
+            );
+            assert!(
+                visible.iter().all(|text| {
+                    !text.contains("<thinking>")
+                        && !text.contains("</thinking>")
+                        && !text.contains("secret")
+                }),
+                "governed thinking leaked into a visible carrier: {visible:?}"
+            );
+            let reasoning_deltas =
+                nested_reasoning_summary_texts(&events, "response.reasoning_summary_text.delta");
+            let reasoning_done_texts =
+                nested_reasoning_summary_texts(&events, "response.reasoning_summary_text.done");
+            assert_eq!(
+                reasoning_deltas,
+                vec!["secret"],
+                "the thinking body must be preserved in the reasoning delta: {events:?}"
+            );
+            assert_eq!(
+                reasoning_done_texts,
+                vec!["secret"],
+                "the thinking body must be preserved in the reasoning done event: {events:?}"
+            );
+            let completed = events
+                .iter()
+                .rev()
+                .find(|event| event["type"] == "response.completed")
+                .expect("normal terminal");
+            let summaries = completed["response"]["output"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| item["type"] == "reasoning")
+                .flat_map(|item| {
+                    item["summary"]
+                        .as_array()
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                })
+                .filter(|part| part["type"] == "summary_text")
+                .filter_map(|part| part["text"].as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                summaries,
+                vec!["secret"],
+                "the terminal snapshot must preserve the reasoning summary: {events:?}"
+            );
         } else if stream {
             assert_eq!(
                 response_body.matches("event: response.completed").count(),

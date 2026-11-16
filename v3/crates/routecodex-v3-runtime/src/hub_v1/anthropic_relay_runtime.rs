@@ -948,8 +948,10 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         let transport_attempt = attempt_budget.admit_transport_attempt().map_err(|error| {
             V3AnthropicRelayRuntimeError::ExecutionControlRequest(error.to_string())
         })?;
-        let transport_result = match tokio::time::timeout(
-            v3_relay_transport_response_timeout(manifest, &selected_target_provider_id),
+        let provider_attempt_deadline = std::time::Instant::now()
+            + v3_relay_transport_response_timeout(manifest, &selected_target_provider_id);
+        let transport_result = match tokio::time::timeout_at(
+            tokio::time::Instant::from_std(provider_attempt_deadline),
             transport.send(transport_request),
         )
         .await
@@ -1089,7 +1091,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         &input.request_id,
                         &selected_target_provider_id,
                         stream,
-                        attempt_budget.residence_deadline(),
+                        provider_attempt_deadline,
                     );
                 let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
                     crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
@@ -1121,13 +1123,6 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         if let Some(failure) = terminal_failure {
                             return Ok(provider_failure_output(
                                 failure,
-                                trace,
-                                std::mem::take(&mut provider_failure_events),
-                            ));
-                        }
-                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
-                            return Ok(provider_failure_output(
-                                terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
                                 std::mem::take(&mut provider_failure_events),
                             ));

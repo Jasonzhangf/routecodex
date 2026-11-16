@@ -223,7 +223,7 @@ pub(crate) fn guard_v3_provider_sse_attempt_deadline(
                         Err(V3ProviderError::Transport {
                             request_id,
                             provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
+                            reason: "provider SSE attempt exceeded its provider attempt deadline before a semantic terminal".to_string(),
                         }),
                         (stream, true),
                     ));
@@ -240,7 +240,7 @@ pub(crate) fn guard_v3_provider_sse_attempt_deadline(
                         Err(V3ProviderError::Transport {
                             request_id,
                             provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
+                            reason: "provider SSE attempt exceeded its provider attempt deadline before a semantic terminal".to_string(),
                         }),
                         (stream, true),
                     )),
@@ -1102,13 +1102,6 @@ where
                                 std::mem::take(failure_events),
                             ));
                         }
-                        if attempt_budget.residence_deadline() <= std::time::Instant::now() {
-                            return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(failure, last_external_http.clone()),
-                                trace,
-                                std::mem::take(failure_events),
-                            ));
-                        }
                         continue;
                     }
                 };
@@ -1245,7 +1238,7 @@ where
                     request_id,
                     &selected_target_provider_id,
                     stream,
-                    attempt_budget.residence_deadline(),
+                    attempt_deadline.into_std(),
                 );
                 let first_frame_result = match tokio::time::timeout_at(
                     attempt_deadline,
@@ -1283,11 +1276,6 @@ where
                         ));
                     }
                     Err(error) => {
-                        let residence_deadline_error = matches!(
-                            &error,
-                            V3ProviderError::Transport { reason, .. }
-                                if reason.contains("provider SSE attempt exceeded the request residence deadline")
-                        );
                         let mut failure =
                             provider_runtime_failure(error, &selected_target_provider_id);
                         failure.provider_status = Some(provider_status);
@@ -1309,15 +1297,6 @@ where
                         if let Some(failure) = terminal_failure {
                             return Ok(C::assemble_failure_output(
                                 failure,
-                                trace,
-                                std::mem::take(failure_events),
-                            ));
-                        }
-                        if residence_deadline_error
-                            || attempt_budget.residence_deadline() <= std::time::Instant::now()
-                        {
-                            return Ok(C::assemble_failure_output(
-                                terminalize_provider_failure(failure, last_external_http.clone()),
                                 trace,
                                 std::mem::take(failure_events),
                             ));
@@ -1825,15 +1804,6 @@ where
                     if let Some(failure) = terminal_failure {
                         return Ok(C::assemble_failure_output(
                             failure,
-                            trace,
-                            std::mem::take(failure_events),
-                        ));
-                    }
-                    let deadline_expired =
-                        attempt_budget.residence_deadline() <= std::time::Instant::now();
-                    if deadline_expired {
-                        return Ok(C::assemble_failure_output(
-                            terminalize_provider_failure(failure, last_external_http.clone()),
                             trace,
                             std::mem::take(failure_events),
                         ));

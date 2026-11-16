@@ -4489,7 +4489,7 @@ async fn direct_live_sse_drop_after_completed_before_ping_is_completed() {
 }
 
 #[tokio::test]
-async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
+async fn direct_live_sse_drop_before_terminal_does_not_infer_client_disconnect() {
     let log_file = test_v3_console_log_file("direct-live-sse-drop-before-terminal");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 7777);
@@ -4536,9 +4536,9 @@ async fn direct_live_sse_drop_before_terminal_remains_client_disconnect() {
     drop(stream);
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
-    assert!(log.contains("event=failed"), "{log}");
-    assert!(log.contains("status=499"), "{log}");
-    assert!(log.contains("subcode=client_disconnect"), "{log}");
+    assert!(!log.contains("event=failed"), "{log}");
+    assert!(!log.contains("status=499"), "{log}");
+    assert!(!log.contains("subcode=client_disconnect"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 
@@ -4601,7 +4601,7 @@ async fn direct_live_sse_drop_after_failure_terminal_does_not_become_client_disc
 }
 
 #[tokio::test]
-async fn direct_committed_sse_console_closeout_keeps_499_on_client_drop() {
+async fn direct_committed_sse_console_drop_does_not_infer_client_disconnect() {
     let log_file = test_v3_console_log_file("direct-console-sse-drop-before-terminal");
     let _ = std::fs::remove_file(&log_file);
     let state = test_v3_listener_state(&log_file, 4444);
@@ -4649,9 +4649,9 @@ async fn direct_committed_sse_console_closeout_keeps_499_on_client_drop() {
     drop(stream);
 
     let log = strip_test_ansi(&std::fs::read_to_string(&log_file).unwrap());
-    assert!(log.contains("event=failed"), "{log}");
-    assert!(log.contains("status=499"), "{log}");
-    assert!(log.contains("subcode=client_disconnect"), "{log}");
+    assert!(!log.contains("event=failed"), "{log}");
+    assert!(!log.contains("status=499"), "{log}");
+    assert!(!log.contains("subcode=client_disconnect"), "{log}");
     let _ = std::fs::remove_file(&log_file);
 }
 

@@ -21,6 +21,7 @@
 //! - An outcome with no successful client payload closes the client transport
 //!   without projecting a provider status, error payload, or fabricated success.
 //!   The real cause stays in the typed Error chain and in the console record.
+use crate::restart_closeout::V3ClientPeerDisconnectObservation;
 use crate::V3LiveSnapClientWireCaptureSlot;
 use axum::body::{Body, BodyDataStream};
 use axum::http::{header, StatusCode};
@@ -48,15 +49,15 @@ const V3_CLIENT_SSE_KEEPALIVE_COMMENT: &str = " keepalive";
 /// channel already delivered business bytes but before the runtime outcome
 /// exists.
 ///
-/// The transport owns the disconnect fact: only it sees the committed channel
-/// drop. The recorder that turns that fact into a typed terminal row is injected
-/// by the request owner, which holds the request identity and the console
-/// ingress. The transport never builds the ledger row itself.
+/// The Front HTTP read half owns the disconnect fact. The recorder that turns
+/// that fact into a typed terminal row is injected by the request owner, which
+/// holds the request identity and the console ingress. The transport never
+/// builds the ledger row itself.
 pub(crate) type V3ClientDisconnectRecorder = Box<dyn FnOnce() + Send>;
 
 /// Shared slot that lets the still-running request install its recorder after it
 /// allocates the request identity. The transport keeps its own clone, so the
-/// recorder survives the runtime task abort that the disconnect triggers.
+/// recorder survives the runtime task abort that a real peer disconnect triggers.
 #[derive(Clone, Default)]
 pub(crate) struct V3ClientDisconnectSlot {
     state: Arc<Mutex<V3ClientDisconnectState>>,
@@ -150,6 +151,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
     keepalive_interval: Duration,
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     client_disconnect_slot: Option<V3ClientDisconnectSlot>,
+    client_peer_disconnect: Option<V3ClientPeerDisconnectObservation>,
 ) -> Response<Body> {
     let mut runtime_outcome = runtime_outcome;
     let mut client_frame_receiver = client_frame_receiver;
@@ -212,6 +214,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 keepalive_interval,
                 client_wire_capture,
                 client_disconnect_slot,
+                client_peer_disconnect,
             )
         }
         V3ClientSseAcceptRace::CommittedFrame(frame) => {
@@ -238,6 +241,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 keepalive_interval,
                 client_wire_capture,
                 client_disconnect_slot,
+                client_peer_disconnect,
             )
         }
         V3ClientSseAcceptRace::KeepaliveDeadline => {
@@ -254,6 +258,7 @@ pub(crate) async fn accept_v3_client_sse_transport(
                 keepalive_interval,
                 client_wire_capture,
                 client_disconnect_slot,
+                client_peer_disconnect,
             )
         }
     }
@@ -262,9 +267,10 @@ pub(crate) async fn accept_v3_client_sse_transport(
 /// Commit the client SSE channel for a pending, deferred, or already-resolved
 /// runtime outcome.
 ///
-/// `outcome_task` owns the runtime work. The committed body aborts that task when
-/// the client transport goes away, so a client disconnect still cancels the
-/// in-flight runtime request.
+/// `outcome_task` owns the runtime work. The committed body aborts that task only
+/// after the Front read half observes the peer disconnect. Dropping the body
+/// locally does not prove that fact and therefore does not transfer or cancel the
+/// request.
 fn commit_v3_client_sse_channel(
     outcome: oneshot::Receiver<Response<Body>>,
     outcome_task: Option<JoinHandle<()>>,
@@ -273,6 +279,7 @@ fn commit_v3_client_sse_channel(
     keepalive_interval: Duration,
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     client_disconnect_slot: Option<V3ClientDisconnectSlot>,
+    client_peer_disconnect: Option<V3ClientPeerDisconnectObservation>,
 ) -> Response<Body> {
     let mut interval = tokio::time::interval_at(
         tokio::time::Instant::now() + keepalive_interval,
@@ -289,6 +296,7 @@ fn commit_v3_client_sse_channel(
         client_frame_emitted: false,
         client_wire_capture: client_wire_capture.clone(),
         client_disconnect_slot,
+        client_peer_disconnect,
         interval,
         keepalive_chunk: build_v3_sse_transport_out_04_keepalive_comment(
             V3_CLIENT_SSE_KEEPALIVE_COMMENT,
@@ -351,6 +359,9 @@ struct V3ClientSseChannelStream {
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     /// Owns the recorder that writes the committed-then-cancelled terminal row.
     client_disconnect_slot: Option<V3ClientDisconnectSlot>,
+    /// Read-only Front peer disconnect fact. This is the only fact that may
+    /// cancel a request from a dropped SSE body.
+    client_peer_disconnect: Option<V3ClientPeerDisconnectObservation>,
     interval: tokio::time::Interval,
     keepalive_chunk: Vec<u8>,
     /// Set when a chunk was just handed to the client transport. The next poll
@@ -601,26 +612,35 @@ impl Stream for V3ClientSseChannelStream {
 
 impl Drop for V3ClientSseChannelStream {
     fn drop(&mut self) {
-        // A client that goes away while the runtime outcome is still pending
-        // never reaches runtime closeout, even before its first business frame:
-        // the abort below drops the runtime task first. Record that disconnect
-        // terminal here. A resolved or already-closed outcome is left to the
-        // existing finalizer so the terminal row is written exactly once.
-        let outcome_still_pending = matches!(
-            self.outcome.try_recv(),
-            Err(oneshot::error::TryRecvError::Empty)
-        );
-        let record_disconnect = matches!(self.state, V3ClientSseChannelState::AwaitOutcome { .. })
-            && self.outcome_task.is_some()
-            && outcome_still_pending;
-        if record_disconnect {
-            if let Some(slot) = &self.client_disconnect_slot {
+        let Some(task) = self.outcome_task.take() else {
+            return;
+        };
+        if matches!(self.state, V3ClientSseChannelState::Finished) {
+            return;
+        }
+        let Some(peer_disconnect) = self.client_peer_disconnect.clone() else {
+            return;
+        };
+        let disconnect_slot = self.client_disconnect_slot.clone();
+        if peer_disconnect.is_disconnected() {
+            if let Some(slot) = &disconnect_slot {
                 slot.record_disconnect();
             }
-        }
-        if let Some(task) = self.outcome_task.take() {
             task.abort();
+            return;
         }
+        tokio::spawn(async move {
+            let mut task = task;
+            tokio::select! {
+                _ = peer_disconnect.wait_disconnected() => {
+                    if let Some(slot) = &disconnect_slot {
+                        slot.record_disconnect();
+                    }
+                    task.abort();
+                }
+                _ = &mut task => {}
+            }
+        });
     }
 }
 
@@ -676,6 +696,7 @@ mod tests {
             client_frame_emitted: false,
             client_wire_capture: None,
             client_disconnect_slot: None,
+            client_peer_disconnect: None,
             interval,
             keepalive_chunk: b": keepalive\n\n".to_vec(),
             flush_yield: false,
@@ -843,23 +864,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_sse_channel_drop_aborts_the_pending_runtime_task() {
-        let (sender, outcome) = oneshot::channel();
+    async fn client_sse_channel_local_drop_keeps_runtime_and_records_no_cancel() {
+        let (_sender, outcome) = oneshot::channel();
         let cancelled = Arc::new(AtomicBool::new(false));
         let guard = V3TestCancellationGuard(Arc::clone(&cancelled));
         let task = tokio::spawn(async move {
             let _guard = guard;
             tokio::time::sleep(Duration::from_secs(30)).await;
-            let _ = sender.send(sse_outcome(vec![b"data: late\n\n"], Duration::ZERO));
         });
-        drop(channel(outcome, task, Duration::from_millis(50)));
-        for _ in 0..50 {
-            if cancelled.load(Ordering::SeqCst) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        panic!("a client disconnect must abort the pending runtime task");
+        let mut stream = Box::pin(channel(outcome, task, Duration::from_millis(50)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        stream.client_disconnect_slot = Some(disconnect_slot(&calls));
+        stream.client_peer_disconnect = Some(V3ClientPeerDisconnectObservation::test_new());
+
+        drop(stream);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        assert!(
+            !cancelled.load(Ordering::SeqCst),
+            "a local body drop without peer-disconnect evidence must keep runtime custody"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            0,
+            "a local body drop must not fabricate a client cancellation"
+        );
     }
 
     #[tokio::test]
@@ -869,13 +898,16 @@ mod tests {
         let mut stream = Box::pin(channel(outcome, task, Duration::from_millis(50)));
         let calls = Arc::new(AtomicUsize::new(0));
         let slot = disconnect_slot(&calls);
+        let peer_disconnect = V3ClientPeerDisconnectObservation::test_new();
         stream.client_disconnect_slot = Some(slot.clone());
+        stream.client_peer_disconnect = Some(peer_disconnect.clone());
 
         assert_eq!(
             stream.next().await.expect("keepalive").expect("frame"),
             b": keepalive\n\n".to_vec(),
             "the pending channel must emit only the transport keepalive before the disconnect"
         );
+        peer_disconnect.mark_disconnected();
         drop(stream);
 
         assert_eq!(
@@ -896,12 +928,15 @@ mod tests {
         let mut stream = Box::pin(channel(outcome, task, Duration::from_millis(50)));
         let calls = Arc::new(AtomicUsize::new(0));
         let slot = V3ClientDisconnectSlot::new();
+        let peer_disconnect = V3ClientPeerDisconnectObservation::test_new();
         stream.client_disconnect_slot = Some(slot.clone());
+        stream.client_peer_disconnect = Some(peer_disconnect.clone());
 
         assert_eq!(
             stream.next().await.expect("keepalive").expect("frame"),
             b": keepalive\n\n".to_vec()
         );
+        peer_disconnect.mark_disconnected();
         drop(stream);
 
         let first_calls = Arc::clone(&calls);
@@ -936,13 +971,16 @@ mod tests {
             .push_back(b"data: first\n\n".to_vec());
         let calls = Arc::new(AtomicUsize::new(0));
         let slot = disconnect_slot(&calls);
+        let peer_disconnect = V3ClientPeerDisconnectObservation::test_new();
         stream.client_disconnect_slot = Some(slot.clone());
+        stream.client_peer_disconnect = Some(peer_disconnect.clone());
 
         assert_eq!(
             stream.next().await.expect("prefix").expect("frame"),
             b"data: first\n\n".to_vec(),
             "the committed prefix must reach the client before the disconnect"
         );
+        peer_disconnect.mark_disconnected();
         drop(stream);
 
         assert_eq!(
@@ -989,6 +1027,7 @@ mod tests {
             None,
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
+            None,
             None,
             None,
         )
@@ -1084,6 +1123,7 @@ mod tests {
             Duration::from_millis(50),
             None,
             None,
+            None,
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -1114,6 +1154,7 @@ mod tests {
             Some(frames),
             Box::new(|outcome| outcome),
             Duration::from_millis(500),
+            None,
             None,
             None,
         )

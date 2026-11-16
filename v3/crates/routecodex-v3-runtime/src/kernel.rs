@@ -1359,9 +1359,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 // acceptance and sealing. The Server keeps ownership of the
                 // SSE response head and transport-only keepalives; provider
                 // business frames must not cross that boundary early.
-                let client_commit_probe: Option<
-                    crate::nodes::V3CommittedClientFrameSink,
-                > = None;
+                let client_commit_probe: Option<crate::nodes::V3CommittedClientFrameSink> = None;
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
                         stream,
@@ -1518,16 +1516,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     )
                                 }
                             };
-                            if let Err(failure) =
-                                policy_result.exhaust_if_residence_expired(&attempt_budget)
-                            {
-                                return direct_runtime_helpers_stream::policy_failure_output_with_observability(
-                                    failure,
-                                    last_external_http,
-                                    trace,
-                                    None,
-                                );
-                            }
                             if let Some(event) = policy_result.event.clone() {
                                 provider_failure_events.push(event.clone());
                                 publish_v3_direct_provider_failure_event(

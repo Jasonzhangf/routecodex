@@ -656,7 +656,7 @@ pub(crate) fn wrap_v3_direct_committed_sse_console_stream(
             |_| {},
             move |terminal| match terminal {
                 V3CommittedSseTerminal::Completed => finalizer.complete(),
-                V3CommittedSseTerminal::Dropped => finalizer.client_disconnected(),
+                V3CommittedSseTerminal::Dropped => {}
             },
         ),
         None => stream,
@@ -718,14 +718,6 @@ impl futures_util::Stream for V3DirectLiveSseConsoleStream {
                 std::task::Poll::Ready(None)
             }
             std::task::Poll::Pending => std::task::Poll::Pending,
-        }
-    }
-}
-
-impl Drop for V3DirectLiveSseConsoleStream {
-    fn drop(&mut self) {
-        if let Some(finalizer) = self.finalizer.take() {
-            finalizer.client_disconnected();
         }
     }
 }

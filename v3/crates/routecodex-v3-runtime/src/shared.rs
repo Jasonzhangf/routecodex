@@ -108,9 +108,7 @@ fn v3_direct_sse_default_timeout() -> std::time::Duration {
 /// After the first semantic frame, the fixed inter-frame budget is independent
 /// of a local provider's longer first-frame allowance.
 fn v3_direct_sse_frame_interval_timeout() -> std::time::Duration {
-    std::time::Duration::from_millis(
-        routecodex_v3_config::V3_PROVIDER_SSE_INTER_FRAME_TIMEOUT_MS,
-    )
+    std::time::Duration::from_millis(routecodex_v3_config::V3_PROVIDER_SSE_INTER_FRAME_TIMEOUT_MS)
 }
 
 pub(crate) fn v3_route_plan_error_source(

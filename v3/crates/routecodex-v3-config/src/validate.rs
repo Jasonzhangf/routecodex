@@ -644,15 +644,9 @@ fn compile_providers(
         // exceed it; capping that value would cut healthy streams.
         if let Some(sse_first_frame_timeout_ms) = provider.sse_first_frame_timeout_ms {
             let (budget, kind) = if provider.local {
-                (
-                    V3_PROVIDER_LOCAL_FIRST_BYTE_TIMEOUT_MAX_MS,
-                    "local",
-                )
+                (V3_PROVIDER_LOCAL_FIRST_BYTE_TIMEOUT_MAX_MS, "local")
             } else {
-                (
-                    V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS,
-                    "remote",
-                )
+                (V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS, "remote")
             };
             if sse_first_frame_timeout_ms > budget {
                 return Err(validation(format!(

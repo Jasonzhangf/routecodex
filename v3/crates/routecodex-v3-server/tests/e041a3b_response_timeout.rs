@@ -1,5 +1,6 @@
-//! e041a3b public-entry reproduction: Direct Responses SSE must honor the
-//! execution attempt residence deadline before the provider request timeout.
+//! e041a3b public-entry reproduction: provider timeouts must remain
+//! identity-scoped attempt failures, recover through another candidate, and
+//! never leak an incomplete buffered provider prefix to the client.
 use axum::{
     body::{Body, Bytes},
     extract::State,
@@ -8,17 +9,12 @@ use axum::{
     routing::post,
     Json, Router,
 };
-use futures_util::{stream, StreamExt};
+use futures_util::stream;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{
-    convert::Infallible,
-    time::{Duration, Instant},
-};
+use std::{convert::Infallible, time::Duration};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::{mpsc, oneshot},
     time::timeout,
 };
@@ -58,7 +54,7 @@ async fn upstream(
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
     let input = body["input"].as_str().unwrap_or_default();
-    if input.contains("committed-deadline") {
+    if input.contains("committed-deadline") && body["model"] != "wire-recover" {
         let delta = json!({
             "type": "response.output_text.delta",
             "delta": "committed-business-delta",
@@ -68,8 +64,7 @@ async fn upstream(
             "sequence_number": 1
         });
         let frame = format!("event: response.output_text.delta\ndata: {delta}\n\n");
-        let stream = stream::once(async move { Ok::<_, Infallible>(Bytes::from(frame)) })
-            .chain(stream::pending());
+        let stream = stream::once(async move { Ok::<_, Infallible>(Bytes::from(frame)) });
         return Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
@@ -77,24 +72,8 @@ async fn upstream(
             .unwrap();
     }
 
-    if input.contains("deadline") && body["model"] != "wire-recover" {
-        // The initial SSE guard waits for the provider's first semantic event
-        // with the configured first-frame timeout, so a body that emits nothing
-        // never reaches the attempt collector's residence deadline. Emit one
-        // reasoning-only delta: it is a semantic event (clears the guard) but
-        // carries no visible business text, so the commit probe never commits
-        // the client channel and the attempt stays on the uncommitted path.
-        let reasoning = json!({
-            "type": "response.reasoning_summary_text.delta",
-            "delta": "deadline-reasoning",
-            "item_id": "rs_e041a3b_deadline",
-            "output_index": 0,
-            "summary_index": 0,
-            "sequence_number": 1
-        });
-        let frame = format!("event: response.reasoning_summary_text.delta\ndata: {reasoning}\n\n");
-        let stream = stream::once(async move { Ok::<_, Infallible>(Bytes::from(frame)) })
-            .chain(stream::pending());
+    if input.contains("first-frame-timeout") && body["model"] != "wire-recover" {
+        let stream = stream::pending::<Result<Bytes, Infallible>>();
         return Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
@@ -134,10 +113,6 @@ impl Entry {
             .unwrap();
         std::env::remove_var("E041A3B_DEADLINE_KEY");
     }
-}
-
-async fn start() -> Entry {
-    start_with(250, 5000, false, false).await
 }
 
 async fn start_with(residence_ms: u64, timeout_ms: u64, recovery: bool, health: bool) -> Entry {
@@ -230,157 +205,6 @@ async fn public_logs(entry: &Entry) -> Value {
         .unwrap()
 }
 
-async fn raw_deadline_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Result<usize>) {
-    let body = json!({
-        "model": "test.test",
-        "input": "deadline-never-terminal",
-        "stream": true
-    })
-    .to_string();
-    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
-        .await
-        .unwrap();
-    let request = format!(
-        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-deadline\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    let started = Instant::now();
-    socket.write_all(request.as_bytes()).await.unwrap();
-    let mut wire = Vec::new();
-    let ended = timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
-        .await
-        .expect("deadline request must terminate before the fixture watchdog");
-    (wire, started.elapsed(), ended)
-}
-
-async fn raw_committed_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Result<usize>) {
-    let body = json!({
-        "model": "test.test",
-        "input": "committed-deadline",
-        "stream": true
-    })
-    .to_string();
-    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
-        .await
-        .unwrap();
-    let request = format!(
-        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-committed\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    let started = Instant::now();
-    socket.write_all(request.as_bytes()).await.unwrap();
-    let mut wire = Vec::new();
-    let ended = timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
-        .await
-        .expect("committed deadline request must terminate before the fixture watchdog");
-    (wire, started.elapsed(), ended)
-}
-
-#[tokio::test]
-async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_and_survives() {
-    let _guard = TEST_LOCK.lock().await;
-    let entry = start().await;
-
-    let (wire, elapsed, ended) = raw_deadline_request(&entry).await;
-    let wire_text = String::from_utf8_lossy(&wire);
-    let logs = public_logs(&entry).await;
-    let projected_chains = logs["logs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|event| event["node_id"] == "V3Error06ClientProjected")
-        .map(|event| event["details"]["error_chain"].clone())
-        .collect::<Vec<_>>();
-    let projected_text = serde_json::to_string(&projected_chains).unwrap();
-    let logs_text = serde_json::to_string(&logs).unwrap();
-    let typed_deadline = logs_text.contains("residence deadline")
-        || logs_text.contains("direct_sse_attempt_store_rejected")
-        || logs_text.contains("provider_response_sse_stream");
-    let six_node_chain = projected_chains.iter().any(|chain| {
-        chain.as_array().is_some_and(|nodes| {
-            nodes.len() == 6
-                && nodes.first() == Some(&json!("V3Error01SourceRaised"))
-                && nodes.last() == Some(&json!("V3Error06ClientProjected"))
-        })
-    });
-
-    eprintln!(
-        "e041a3b-red elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
-        elapsed.as_millis(),
-        wire.len(),
-        wire_text
-    );
-    eprintln!("e041a3b-red typed_deadline={typed_deadline}");
-    eprintln!("e041a3b-red chains={projected_text}");
-
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
-    let response = client
-        .post(format!("{}/v1/responses", entry.base()))
-        .header("x-session-id", "e041a3b-deadline")
-        .json(&json!({
-            "model": "test.test",
-            "input": "healthy-sibling",
-            "stream": true
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let sibling = response.text().await.unwrap();
-    assert!(sibling.contains("sibling-success"));
-    assert!(sibling.contains("response.completed"));
-    eprintln!("e041a3b-red sibling={sibling}");
-
-    assert!(
-        elapsed <= Duration::from_millis(2000),
-        "deadline request took {elapsed:?}; expected the 250ms residence deadline, not the 5s provider timeout"
-    );
-    assert!(
-        elapsed >= Duration::from_millis(200),
-        "deadline request ended before the declared 250ms residence deadline: {elapsed:?}"
-    );
-    assert!(
-        six_node_chain,
-        "public diagnostics did not retain the V3Error01 -> V3Error06 typed chain: {projected_text}"
-    );
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "client transport ended abnormally without an acceptable reset: {ended:?}"
-    );
-    assert!(
-        wire.is_empty()
-            || (wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream")),
-        "unexpected client transport framing: {wire_text}"
-    );
-    assert!(
-        !wire_text.contains("deadline-business-delta")
-            && !wire_text.contains("response.completed")
-            && !wire_text.contains("\"status\":\"completed\""),
-        "client received fake business success: {wire_text}"
-    );
-    assert!(
-        !wire_text.contains("\"error\"")
-            && !wire_text.contains("network_error")
-            && !wire_text.contains("598")
-            && !wire_text.contains("599")
-            && !wire_text.contains("502"),
-        "client received a provider/proxy error payload: {wire_text}"
-    );
-    assert!(
-        !wire.ends_with(b"0\r\n\r\n"),
-        "client received a normal chunked completion: {wire_text}"
-    );
-
-    entry.stop().await;
-}
-
 async fn cooldown_pool(entry: &Entry) -> Value {
     reqwest::Client::new()
         .get(format!("{}/_routecodex/health/cooldown-pool", entry.base()))
@@ -393,19 +217,21 @@ async fn cooldown_pool(entry: &Entry) -> Value {
 }
 
 #[tokio::test]
-async fn provider_timeout_recovers_while_residence_remains() {
+async fn first_frame_timeout_after_residence_expiry_recovers_without_client_close() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start_with(15000, 150, true, true).await;
+    let mut entry = start_with(100, 250, true, true).await;
+    let started = std::time::Instant::now();
     let response = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(12))
+        .timeout(Duration::from_secs(5))
         .build()
         .unwrap()
         .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"input":"deadline-first-provider","stream":true}))
+        .json(&json!({"input":"first-frame-timeout","stream":true}))
         .send()
         .await
         .unwrap();
+    let elapsed = started.elapsed();
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.text().await.unwrap();
     assert!(
@@ -413,8 +239,15 @@ async fn provider_timeout_recovers_while_residence_remains() {
         "{body}"
     );
     assert!(
-        !body.contains("deadline-business-delta") && !body.contains("\"error\""),
+        !body.contains("committed-business-delta")
+            && !body.contains("\"error\"")
+            && !body.contains("network_error")
+            && !body.contains("502"),
         "{body}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(200) && elapsed <= Duration::from_secs(3),
+        "the first-frame timeout must end one provider attempt without ending the request: {elapsed:?}"
     );
     assert_eq!(
         entry.captures.recv().await.unwrap()["model"],
@@ -425,64 +258,64 @@ async fn provider_timeout_recovers_while_residence_remains() {
         "wire-recover"
     );
     assert!(entry.captures.try_recv().is_err());
-    eprintln!("e041a3b-recovery two-dispatches completed=true");
+    let logs_text = serde_json::to_string(&public_logs(&entry).await).unwrap();
+    assert!(
+        logs_text.contains("V3Error01SourceRaised")
+            && logs_text.contains("V3Error05ExecutionDecision")
+            && logs_text.contains("V3TargetLocalReselected"),
+        "the timed-out attempt must enter the typed Error chain and reselect: {logs_text}"
+    );
+    assert!(
+        !logs_text.contains("V3Error06ClientProjected"),
+        "the recoverable timeout must not project a client error: {logs_text}"
+    );
+    eprintln!(
+        "e041a3b-first-frame recovered=true elapsed_ms={}",
+        elapsed.as_millis()
+    );
     entry.stop().await;
 }
 
 #[tokio::test]
-async fn expired_request_never_dispatches_or_cools_backup_candidate() {
+async fn expired_residence_still_recovers_and_backup_stays_healthy() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start_with(250, 5000, true, true).await;
-    let body = json!({"input":"deadline-no-backup-budget","stream":true}).to_string();
-    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+    let mut entry = start_with(100, 250, true, true).await;
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"input":"first-frame-timeout","stream":true}))
+        .send()
         .await
         .unwrap();
-    socket.write_all(format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
-    let mut wire = Vec::new();
-    let _ = timeout(Duration::from_secs(2), socket.read_to_end(&mut wire))
-        .await
-        .expect("expired residence must not wait for recovery admission");
-    assert!(!String::from_utf8_lossy(&wire).contains("response.completed"));
-    assert!(!String::from_utf8_lossy(&wire).contains("\"error\""));
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.text().await.unwrap();
+    assert!(
+        body.contains("sibling-success") && body.contains("response.completed"),
+        "expired residence must not stop recovery: {body}"
+    );
+    assert!(
+        !body.contains("\"error\"") && !body.contains("network_error") && !body.contains("502"),
+        "expired residence must not produce a client error: {body}"
+    );
     assert_eq!(
         entry.captures.recv().await.unwrap()["model"],
         "wire-e041a3b"
     );
-    assert!(
-        entry.captures.try_recv().is_err(),
-        "expired request dispatched backup"
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover"
     );
+    assert!(entry.captures.try_recv().is_err());
     let pool = cooldown_pool(&entry).await;
     let entries = pool["entries"].as_array().unwrap();
     assert!(
-        entries.is_empty(),
-        "pre-cool observation must not commit cooldown: {pool}"
-    );
-    assert!(
         entries.iter().all(|item| item["model_id"] != "recover"),
-        "unattempted backup cooled: {pool}"
+        "the successful backup candidate must not be cooled: {pool}"
     );
-    let response = reqwest::Client::new()
-        .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"input":"deadline-no-backup-budget","stream":true}))
-        .send()
-        .await
-        .unwrap();
-    assert!(response.text().await.unwrap().contains("sibling-success"));
-    assert_eq!(
-        entry.captures.recv().await.unwrap()["model"],
-        "wire-recover",
-        "held identity must route the next request to the healthy backup"
-    );
-    assert!(entry.captures.try_recv().is_err());
-    let response = reqwest::Client::new()
-        .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
-        .send()
-        .await
-        .unwrap();
-    assert!(response.text().await.unwrap().contains("sibling-success"));
-    eprintln!("e041a3b-deadline backup-dispatched=false cooldown={pool}");
+    eprintln!("e041a3b-expired-residence backup-dispatched=true cooldown={pool}");
     entry.stop().await;
 }
 
@@ -525,83 +358,55 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn committed_first_frame_then_residence_deadline_breaks_transport_without_backup_dispatch() {
+async fn incomplete_buffered_visible_prefix_is_discarded_before_healthy_sibling_completion() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start_with(250, 5000, true, true).await;
-
-    let (wire, elapsed, ended) = raw_committed_request(&entry).await;
-    let wire_text = String::from_utf8_lossy(&wire);
-
-    eprintln!(
-        "e041a3b-committed elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
-        elapsed.as_millis(),
-        wire.len(),
-        wire_text
-    );
-
+    let mut entry = start_with(100, 5000, true, true).await;
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap()
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"input":"committed-deadline","stream":true}))
+        .send()
+        .await
+        .expect("the incomplete prefix must not close the client transport");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body_result = response.text().await;
+    let logs = public_logs(&entry).await;
+    let body = body_result.unwrap_or_else(|error| {
+        panic!(
+            "the incomplete prefix must not truncate the client body: {error}; logs={}",
+            serde_json::to_string(&logs).unwrap()
+        )
+    });
     assert!(
-        elapsed <= Duration::from_millis(2000),
-        "committed deadline request took {elapsed:?}; expected the 250ms residence deadline, not the 5s provider timeout"
-    );
-    assert!(
-        elapsed >= Duration::from_millis(200),
-        "committed deadline request ended before the declared 250ms residence deadline: {elapsed:?}"
-    );
-    assert!(
-        wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),
-        "unexpected client transport framing: {wire_text}"
+        body.contains("sibling-success") && body.contains("response.completed"),
+        "the healthy sibling must supply the complete terminal: {body}"
     );
     assert_eq!(
-        wire_text.matches("committed-business-delta").count(),
-        1,
-        "client must receive the certified committed business delta exactly once: {wire_text}"
+        body.matches("committed-business-delta").count(),
+        0,
+        "an incomplete provider attempt must not expose its business prefix: {body}"
     );
     assert!(
-        !wire_text.contains("response.completed")
-            && !wire_text.contains("\"status\":\"completed\"")
-            && !wire_text.contains("\"error\"")
-            && !wire_text.contains("network_error")
-            && !wire_text.contains("598")
-            && !wire_text.contains("599")
-            && !wire_text.contains("502"),
-        "client received fake success or a provider/proxy error payload: {wire_text}"
-    );
-    assert!(
-        !wire.ends_with(b"0\r\n\r\n"),
-        "committed transport must break, not fake a normal chunked completion: {wire_text}"
-    );
-    assert!(
-        ended.is_ok()
-            || ended
-                .as_ref()
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
-        "client transport ended abnormally without an acceptable reset: {ended:?}"
+        !body.contains("\"error\"") && !body.contains("network_error") && !body.contains("502"),
+        "client received a provider/proxy error payload: {body}"
     );
     assert_eq!(
         entry.captures.recv().await.unwrap()["model"],
         "wire-e041a3b"
     );
-    assert!(
-        entry.captures.try_recv().is_err(),
-        "committed first frame dispatched backup after the client channel committed"
+    assert_eq!(
+        entry.captures.recv().await.unwrap()["model"],
+        "wire-recover"
     );
-
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
-    let response = client
-        .post(format!("{}/v1/responses", entry.base()))
-        .json(&json!({"model":"test.recover","input":"healthy-sibling","stream":true}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let sibling = response.text().await.unwrap();
-    assert!(sibling.contains("sibling-success"));
-    assert!(sibling.contains("response.completed"));
-    eprintln!("e041a3b-committed sibling={sibling}");
-
+    assert!(entry.captures.try_recv().is_err());
+    let logs_text = serde_json::to_string(&logs).unwrap();
+    assert!(
+        !logs_text.contains("V3Error06ClientProjected"),
+        "the incomplete prefix must recover without a client error: {logs_text}"
+    );
+    eprintln!("e041a3b-buffered-prefix discarded=true sibling=completed");
     entry.stop().await;
 }

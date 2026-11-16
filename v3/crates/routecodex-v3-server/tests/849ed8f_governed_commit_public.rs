@@ -145,13 +145,83 @@ fn message_with_id(text: &str, item_id: &str) -> Value {
 
 fn scenario(input: &str, model: &str) -> Vec<String> {
     match input {
-        "post-commit-thinking-failure" => vec![
+        "full-buffered-thinking" => vec![
             delta(0, 0, "committed-prefix"),
             delta(0, 0, "<thinking>secret</thinking>"),
             completed(json!([message(
                 "committed-prefix <thinking>secret</thinking>"
             )])),
         ],
+        "failed-attempt-reasoning-only" if model != "wire-recover" => {
+            let reasoning = json!({
+                "id": "rs_849ed8f_failed",
+                "type": "reasoning",
+                "status": "completed",
+                "summary": [{"type": "summary_text", "text": "failed-attempt-reasoning"}]
+            });
+            vec![
+                sse(
+                    "response.output_item.added",
+                    json!({
+                        "type": "response.output_item.added",
+                        "output_index": 0,
+                        "item": {
+                            "id": "rs_849ed8f_failed",
+                            "type": "reasoning",
+                            "status": "in_progress",
+                            "summary": []
+                        }
+                    }),
+                ),
+                sse(
+                    "response.reasoning_summary_part.added",
+                    json!({
+                        "type": "response.reasoning_summary_part.added",
+                        "item_id": "rs_849ed8f_failed",
+                        "output_index": 0,
+                        "summary_index": 0,
+                        "part": {"type": "summary_text", "text": ""}
+                    }),
+                ),
+                sse(
+                    "response.reasoning_summary_text.delta",
+                    json!({
+                        "type": "response.reasoning_summary_text.delta",
+                        "item_id": "rs_849ed8f_failed",
+                        "output_index": 0,
+                        "summary_index": 0,
+                        "delta": "failed-attempt-reasoning"
+                    }),
+                ),
+                sse(
+                    "response.reasoning_summary_text.done",
+                    json!({
+                        "type": "response.reasoning_summary_text.done",
+                        "item_id": "rs_849ed8f_failed",
+                        "output_index": 0,
+                        "summary_index": 0,
+                        "text": "failed-attempt-reasoning"
+                    }),
+                ),
+                sse(
+                    "response.output_item.done",
+                    json!({
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": reasoning.clone()
+                    }),
+                ),
+                completed(json!([reasoning])),
+            ]
+        }
+        "ordinary-visible-secret" => {
+            let text = "ordinary secret remains visible";
+            vec![
+                delta(0, 0, text),
+                text_done(0, 0, text),
+                completed(json!([message(text)])),
+            ]
+        }
         "split-orphan-before-commit" if model != "wire-recover" => {
             let label = dsml_close();
             let (head, tail) = label.split_at(2);
@@ -628,6 +698,138 @@ fn completed_output_texts(wire: &[u8]) -> Vec<String> {
     texts
 }
 
+fn completed_reasoning_summary_texts(wire: &[u8]) -> Vec<String> {
+    let events = response_sse_events(&decoded_chunked_body(wire));
+    let completed = events
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "response.completed")
+        .and_then(|event| event.pointer("/response/output"))
+        .and_then(Value::as_array)
+        .expect("completed response output");
+    completed
+        .iter()
+        .filter(|item| item["type"] == "reasoning")
+        .filter_map(|item| item["summary"].as_array())
+        .flatten()
+        .filter(|part| part["type"] == "summary_text")
+        .filter_map(|part| part["text"].as_str())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn collect_message_output_text(item: &Value, texts: &mut Vec<String>) {
+    if item["type"] != "message" {
+        return;
+    }
+    if let Some(text) = item["text"].as_str() {
+        texts.push(text.to_owned());
+    }
+    for part in item["content"].as_array().into_iter().flatten() {
+        if part["type"] == "output_text" {
+            if let Some(text) = part["text"].as_str() {
+                texts.push(text.to_owned());
+            }
+        }
+    }
+}
+
+fn projected_visible_text_values(wire: &[u8]) -> Vec<String> {
+    let mut texts = Vec::new();
+    for event in response_sse_events(&decoded_chunked_body(wire)) {
+        match event["type"].as_str() {
+            Some("response.output_text.delta") => {
+                if let Some(delta) = event["delta"].as_str() {
+                    texts.push(delta.to_owned());
+                }
+            }
+            Some("response.output_text.done") => {
+                if let Some(text) = event["text"].as_str() {
+                    texts.push(text.to_owned());
+                }
+            }
+            Some("response.content_part.added" | "response.content_part.done") => {
+                if event.pointer("/part/type").and_then(Value::as_str) == Some("output_text") {
+                    if let Some(text) = event.pointer("/part/text").and_then(Value::as_str) {
+                        texts.push(text.to_owned());
+                    }
+                }
+            }
+            Some("response.output_item.added" | "response.output_item.done") => {
+                collect_message_output_text(&event["item"], &mut texts);
+            }
+            Some(
+                "response.created"
+                | "response.in_progress"
+                | "response.queued"
+                | "response.completed"
+                | "response.incomplete",
+            ) => {
+                for item in event
+                    .pointer("/response/output")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    collect_message_output_text(item, &mut texts);
+                }
+            }
+            _ => {}
+        }
+    }
+    texts
+}
+
+fn reasoning_summary_carrier_texts(wire: &[u8], event_type: &str) -> Vec<String> {
+    response_sse_events(&decoded_chunked_body(wire))
+        .into_iter()
+        .filter(|event| event["type"] == event_type)
+        .flat_map(|event| {
+            if event_type == "response.output_item.done" {
+                event["item"]["summary"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|part| part["type"] == "summary_text")
+                    .filter_map(|part| part["text"].as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            } else {
+                let field = if event_type == "response.reasoning_summary_text.delta" {
+                    "delta"
+                } else {
+                    "text"
+                };
+                event[field]
+                    .as_str()
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect()
+            }
+        })
+        .collect()
+}
+
+fn reasoning_item_ids(wire: &[u8], event_type: &str) -> Vec<String> {
+    response_sse_events(&decoded_chunked_body(wire))
+        .into_iter()
+        .filter(|event| event["type"] == event_type && event["item"]["type"] == "reasoning")
+        .filter_map(|event| event["item"]["id"].as_str().map(str::to_owned))
+        .collect()
+}
+
+fn reasoning_summary_part_texts(wire: &[u8], event_type: &str) -> Vec<String> {
+    response_sse_events(&decoded_chunked_body(wire))
+        .into_iter()
+        .filter(|event| event["type"] == event_type)
+        .filter_map(|event| {
+            event
+                .pointer("/part/text")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
 /// Concatenate the client-visible text carried by the projected delta events.
 ///
 /// The wire body is JSON, so the DSML label and a `>\n` residue only appear in
@@ -653,6 +855,69 @@ fn projected_delta_text(wire: &[u8]) -> String {
     text
 }
 
+/// The thinking wrapper is governed content, while its complete body is legal
+/// protocol reasoning. Prove both sides of that boundary: no raw marker or
+/// body may enter a visible message carrier, and the body must appear in the
+/// protocol-native reasoning carriers.
+fn assert_governed_thinking_moved_to_reasoning(wire: &[u8]) {
+    let visible = projected_visible_text_values(wire);
+    assert!(
+        !visible.is_empty(),
+        "the successful attempt must project a visible business carrier"
+    );
+    assert!(
+        visible.iter().all(|text| {
+            !text.contains("<thinking>")
+                && !text.contains("</thinking>")
+                && !text.contains("<thin")
+                && !text.contains("</thin")
+                && !text.contains("secret")
+        }),
+        "governed thinking leaked into a visible output_text carrier: {visible:?}"
+    );
+    let added_reasoning_items = reasoning_item_ids(wire, "response.output_item.added");
+    assert_eq!(
+        added_reasoning_items.len(),
+        1,
+        "the successful attempt must add one reasoning item"
+    );
+    assert_eq!(
+        reasoning_item_ids(wire, "response.output_item.done"),
+        added_reasoning_items,
+        "the completed reasoning item must match the added item"
+    );
+    assert_eq!(
+        reasoning_summary_part_texts(wire, "response.reasoning_summary_part.added"),
+        vec![""],
+        "a reasoning summary part must start empty"
+    );
+    assert_eq!(
+        reasoning_summary_carrier_texts(wire, "response.reasoning_summary_text.delta"),
+        vec!["secret"],
+        "the complete thinking body must be preserved exactly in the reasoning delta"
+    );
+    assert_eq!(
+        reasoning_summary_carrier_texts(wire, "response.reasoning_summary_text.done"),
+        vec!["secret"],
+        "the complete thinking body must be preserved exactly in the reasoning done event"
+    );
+    assert_eq!(
+        reasoning_summary_part_texts(wire, "response.reasoning_summary_part.done"),
+        vec!["secret"],
+        "the complete thinking body must be preserved exactly in the reasoning part"
+    );
+    assert_eq!(
+        reasoning_summary_carrier_texts(wire, "response.output_item.done"),
+        vec!["secret"],
+        "the complete thinking body must be preserved exactly in the completed reasoning item"
+    );
+    assert_eq!(
+        completed_reasoning_summary_texts(wire),
+        vec!["secret"],
+        "the complete thinking body must be preserved exactly in the reasoning summary"
+    );
+}
+
 fn assert_no_client_error(text: &str) {
     assert!(
         !text.contains("\"error\"")
@@ -665,28 +930,31 @@ fn assert_no_client_error(text: &str) {
 }
 
 #[tokio::test]
-async fn post_commit_thinking_governance_breaks_before_completion() {
+async fn full_buffered_thinking_governance_preserves_reasoning() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) = raw_request(
         &entry,
-        "849ed8f-post-commit-thinking",
-        "post-commit-thinking-failure",
+        "849ed8f-full-buffered-thinking",
+        "full-buffered-thinking",
     )
     .await;
     let text = wire_text(&wire);
-    eprintln!("849ed8f post-terminal wire={text}");
-
     assert!(text.contains("committed-prefix"), "{text}");
     assert!(
-        !text.contains("<thinking>") && !text.contains("secret"),
+        !text.contains("<thinking>") && !text.contains("</thinking>"),
         "{text}"
     );
-    assert!(!text.contains("response.completed"), "{text}");
+    // Full buffering lets the complete-attempt thinking owner move the marker
+    // body out of the message text before anything reaches the client. The body
+    // is legal protocol reasoning; the wrapper and its placement are governed.
+    assert_governed_thinking_moved_to_reasoning(&wire);
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the governed attempt must seal normally: {text}"
     );
+    assert_eq!(completed_output_texts(&wire), vec!["committed-prefix "]);
     assert_no_client_error(&text);
     assert!(
         ended.is_ok()
@@ -699,14 +967,106 @@ async fn post_commit_thinking_governance_breaks_before_completion() {
 }
 
 #[tokio::test]
-async fn split_orphan_after_clean_commit_does_not_leak_label_or_completion() {
+async fn failed_attempt_reasoning_is_not_projected_before_recovery() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start(true).await;
+    let (wire, _) = raw_request(
+        &entry,
+        "849ed8f-failed-attempt-reasoning",
+        "failed-attempt-reasoning-only",
+    )
+    .await;
+    let text = wire_text(&wire);
+    let first = entry.captures.recv().await.expect("first provider attempt");
+    let second = entry.captures.recv().await.expect("recovery attempt");
+    assert_eq!(first["model"], "wire-849ed8f");
+    assert_eq!(second["model"], "wire-recover");
+    assert!(
+        entry.captures.try_recv().is_err(),
+        "exactly two provider attempts are expected"
+    );
+
+    assert!(text.contains("recovered"), "{text}");
+    assert!(
+        !text.contains("failed-attempt-reasoning"),
+        "failed-attempt reasoning leaked to the client: {text}"
+    );
+    assert!(
+        !text.contains("response.reasoning_summary"),
+        "failed-attempt reasoning carriers leaked to the client: {text}"
+    );
+    assert!(
+        reasoning_summary_carrier_texts(&wire, "response.reasoning_summary_text.delta").is_empty()
+    );
+    assert!(
+        reasoning_summary_carrier_texts(&wire, "response.reasoning_summary_text.done").is_empty()
+    );
+    assert!(
+        reasoning_summary_part_texts(&wire, "response.reasoning_summary_part.added").is_empty()
+    );
+    assert!(reasoning_summary_part_texts(&wire, "response.reasoning_summary_part.done").is_empty());
+    assert!(reasoning_item_ids(&wire, "response.output_item.added").is_empty());
+    assert!(reasoning_summary_carrier_texts(&wire, "response.output_item.done").is_empty());
+    assert!(reasoning_item_ids(&wire, "response.output_item.done").is_empty());
+    assert!(
+        completed_reasoning_summary_texts(&wire).is_empty(),
+        "the recovered attempt must not inherit failed-attempt reasoning"
+    );
+    assert_no_client_error(&text);
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn ordinary_visible_secret_token_is_preserved() {
+    let _guard = TEST_LOCK.lock().await;
+    let entry = start(false).await;
+    let (wire, ended) =
+        raw_request(&entry, "849ed8f-ordinary-secret", "ordinary-visible-secret").await;
+
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["ordinary secret remains visible"]
+    );
+    let visible = projected_visible_text_values(&wire);
+    assert!(
+        !visible.is_empty()
+            && visible
+                .iter()
+                .all(|text| text == "ordinary secret remains visible"),
+        "ordinary visible text must remain byte-faithful in every carrier: {visible:?}"
+    );
+    assert!(
+        completed_reasoning_summary_texts(&wire).is_empty(),
+        "ordinary visible text must not be reclassified as reasoning"
+    );
+    assert!(
+        reasoning_summary_carrier_texts(&wire, "response.reasoning_summary_text.delta").is_empty()
+    );
+    assert!(
+        reasoning_summary_carrier_texts(&wire, "response.reasoning_summary_text.done").is_empty()
+    );
+    assert!(reasoning_summary_carrier_texts(&wire, "response.output_item.done").is_empty());
+    assert_no_client_error(&wire_text(&wire));
+    assert!(
+        ended.is_ok()
+            || ended
+                .as_ref()
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionReset),
+        "unexpected transport ending: {ended:?}"
+    );
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn ungovernable_split_orphan_drops_the_attempt_without_leaking() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, _) = raw_request(&entry, "849ed8f-orphan-after", "split-orphan-after-commit").await;
     let text = wire_text(&wire);
-    eprintln!("849ed8f orphan-after wire={text}");
-
-    assert!(text.contains("hello"), "{text}");
+    // Full buffering holds the whole attempt. When the split DSML label cannot
+    // be governed exactly, the attempt is dropped instead of projecting a
+    // prefix that a later rewrite would have to retract.
+    assert!(!text.contains("hello"), "{text}");
     assert!(!text.contains("tool_calls"), "{text}");
     assert!(!text.contains("response.completed"), "{text}");
     assert!(
@@ -768,7 +1128,7 @@ async fn bare_residue_newline_is_removed_before_projection() {
 }
 
 #[tokio::test]
-async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
+async fn snapshot_carrier_collision_completes_split_marker_after_full_buffer() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) =
@@ -779,14 +1139,15 @@ async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
     assert!(!text.contains("<thin"), "{text}");
     assert!(!text.contains("<thinking>"), "{text}");
     assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
+    assert_governed_thinking_moved_to_reasoning(&wire);
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.contains("response.completed"),
-        "the bounded truncation must not project completion: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the governed attempt must seal normally: {text}"
     );
-    assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["safe-prefix  tail", "ordinary"]
     );
     assert_no_client_error(&text);
     assert!(
@@ -865,7 +1226,10 @@ async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
     .await;
     let text = wire_text(&wire);
 
-    assert!(text.contains("clean-prefix"), "{text}");
+    // Full buffering keeps the prefix of an attempt whose terminal fails
+    // business acceptance inside the attempt; the client transport simply
+    // ends without ever receiving that prefix.
+    assert!(!text.contains("clean-prefix"), "{text}");
     assert!(!text.contains("response.completed"), "{text}");
     assert!(
         !text.ends_with("0\r\n\r\n"),
@@ -891,13 +1255,28 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
     eprintln!("849ed8f interleaved wire={text}");
 
     assert!(text.contains("safe-prefix"), "{text}");
-    assert!(!text.contains("<thinking>"), "{text}");
-    assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        !text.contains("<thinking>") && !text.contains("</thinking>"),
+        "{text}"
+    );
+    // Full buffering rewrites the complete attempt before any byte reaches the
+    // client. The thinking body is legal only as protocol-native reasoning; it
+    // must not appear in visible message content.
+    assert_governed_thinking_moved_to_reasoning(&wire);
+    assert!(text.contains("response.completed"), "{text}");
+    let events = response_sse_events(&decoded_chunked_body(&wire));
+    let terminal = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("terminal event");
+    let output = terminal["response"]["output"].as_array().unwrap();
+    assert_eq!(
+        output[0]["content"][0]["text"], "safe-prefix  tail",
+        "{terminal}"
+    );
+    assert!(
+        text.ends_with("0\r\n\r\n"),
+        "a fully buffered governed attempt must seal normally: {text}"
     );
     assert_no_client_error(&text);
     assert!(

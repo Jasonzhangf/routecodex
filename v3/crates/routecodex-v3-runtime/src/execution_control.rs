@@ -295,11 +295,9 @@ impl V3AttemptBudget {
     }
 
     fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
-        if Instant::now() >= self.inner.deadline {
-            return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
-                "provider SSE attempt exceeded the request residence deadline".to_string(),
-            ));
-        }
+        // Residence is not a request-lifetime boundary. An accepted request
+        // may continue into a successor after its former residence window.
+        // The deadline remains available only to bound optional refills.
         Ok(())
     }
 

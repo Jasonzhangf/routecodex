@@ -5,7 +5,7 @@
 //! `issue7517a07_body_timeout_not_provider_502`,
 //! `issue7517a07_genuine_provider_502_keeps_502`,
 //! `issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502`, and
-//! `issue7517a07_multi_candidate_residence_does_not_inherit_primary_502`.
+//! `issue7517a07_multi_candidate_provider_attempt_timeout_does_not_inherit_primary_502`.
 //!
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue7517a07_terminal_ledger_status -- --nocapture`
@@ -33,7 +33,7 @@ use futures_util::{stream, StreamExt};
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::{spawn_v3_server_aggregate, V3ServerAggregateHandle};
 use serde_json::{json, Value};
-use std::{convert::Infallible, path::PathBuf, time::Duration};
+use std::{convert::Infallible, ffi::OsString, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -51,9 +51,29 @@ mod test_ports;
 static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
 const AUTH_ENV: &str = "ISSUE_7517A07_LEDGER_KEY";
+const KEEPALIVE_ENV: &str = "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS";
 const CLIENT_MODEL: &str = "declared";
 const PROVIDER_A: &str = "primary7517";
 const PROVIDER_B: &str = "fallback7517";
+
+struct KeepaliveEnvGuard(Option<OsString>);
+
+impl KeepaliveEnvGuard {
+    fn install() -> Self {
+        let previous = std::env::var_os(KEEPALIVE_ENV);
+        std::env::set_var(KEEPALIVE_ENV, "50");
+        Self(previous)
+    }
+}
+
+impl Drop for KeepaliveEnvGuard {
+    fn drop(&mut self) {
+        match self.0.take() {
+            Some(value) => std::env::set_var(KEEPALIVE_ENV, value),
+            None => std::env::remove_var(KEEPALIVE_ENV),
+        }
+    }
+}
 
 fn completed() -> Value {
     json!({
@@ -76,7 +96,7 @@ fn completed() -> Value {
 }
 
 /// Controlled Responses upstream. The request `input` selects the behavior:
-/// - `deliver-then-hang`: emit one committed business delta, then never finish;
+/// - `deliver-then-hang`: emit one buffered business delta, then never finish;
 /// - `reasoning-then-hang`: emit one reasoning-only delta (clears the first-frame
 ///   guard but never commits) then never finish, so the attempt residence
 ///   deadline fires and the runtime reports a typed transport NoResponse;
@@ -332,8 +352,7 @@ struct Entry {
     handle: V3ServerAggregateHandle,
     shutdown: oneshot::Sender<()>,
     peer: tokio::task::JoinHandle<()>,
-    #[allow(dead_code)]
-    _captures: mpsc::UnboundedReceiver<Value>,
+    captures: mpsc::UnboundedReceiver<Value>,
 }
 
 impl Entry {
@@ -427,7 +446,7 @@ snapshots = true
         handle: spawn_v3_server_aggregate(manifest).await.unwrap(),
         shutdown,
         peer,
-        _captures: received,
+        captures: received,
     }
 }
 
@@ -698,13 +717,15 @@ fn assert_no_terminal_keeps_provider_502(label: &str, terminals: &[Value]) {
     }
 }
 
-/// Sub-form 1: a provider attempt delivered 2xx business content, then the client
-/// closed. The terminal row must not be a fabricated provider HTTP 502.
+/// Sub-form 1: a provider attempt produced a 2xx business prefix, but the active
+/// full-buffer path kept it private until the client closed. The terminal row must
+/// record the real client cancellation and must not fabricate provider HTTP 502.
 #[tokio::test]
 async fn issue7517a07_client_cancel_not_provider_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let _keepalive = KeepaliveEnvGuard::install();
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
-    let entry = start().await;
+    let mut entry = start_with(5000, 5000, 5000).await;
     let server_port = entry.handle.listeners[0].addr.port();
     let addr = entry.handle.listeners[0].addr;
 
@@ -720,10 +741,15 @@ async fn issue7517a07_client_cancel_not_provider_502() {
         body.len()
     );
     socket.write_all(request.as_bytes()).await.unwrap();
-    // Read the response head plus at least one committed business frame, then
-    // drop the client socket to cancel the stream after delivery.
+    let capture = timeout(Duration::from_secs(5), entry.captures.recv())
+        .await
+        .expect("the controlled provider must receive the prefix request")
+        .expect("provider capture channel");
+    assert_eq!(capture["stream"], json!(true));
+    // Read only the transport head and keepalive. The provider prefix remains
+    // buffered while the request is active.
     let mut delivered = Vec::new();
-    let read = timeout(Duration::from_secs(6), async {
+    let read = timeout(Duration::from_secs(3), async {
         let mut buf = [0u8; 4096];
         while let Ok(n) = socket.read(&mut buf).await {
             if n == 0 {
@@ -731,8 +757,8 @@ async fn issue7517a07_client_cancel_not_provider_502() {
             }
             delivered.extend_from_slice(&buf[..n]);
             if delivered
-                .windows(b"committed-business".len())
-                .any(|window| window == b"committed-business")
+                .windows(b": keepalive\n\n".len())
+                .any(|window| window == b": keepalive\n\n")
             {
                 break;
             }
@@ -749,27 +775,34 @@ async fn issue7517a07_client_cancel_not_provider_502() {
     let path = request_records_path(&home, server_port);
     let rows = wait_terminal(&path, Duration::from_secs(15)).await;
     let terminals = dump_rows("issue7517a07-cancel", &rows);
-    assert!(
-        !terminals.is_empty(),
-        "client cancel must leave a terminal ledger row: {}",
-        path.display()
+    assert_eq!(
+        terminals.len(),
+        1,
+        "client cancel must leave one terminal ledger row: {terminals:#?}"
     );
     assert!(
         read.is_ok(),
-        "the client must observe committed business content before closing"
+        "the client must observe the active transport keepalive before closing"
     );
     assert!(
         delivered
+            .windows(b": keepalive\n\n".len())
+            .any(|window| window == b": keepalive\n\n"),
+        "the client must receive the transport keepalive before closing: {}",
+        String::from_utf8_lossy(&delivered)
+    );
+    assert!(
+        !delivered
             .windows(b"committed-business".len())
             .any(|window| window == b"committed-business"),
-        "the client must receive committed business content before closing: {}",
+        "the full-buffer path must keep the provider prefix private: {}",
         String::from_utf8_lossy(&delivered)
     );
     let cancelled = terminals
         .iter()
         .find(|terminal| terminal["event_type"] == json!("request.cancelled"));
     let cancelled = cancelled
-        .expect("a delivered-then-cancelled Responses stream must record request.cancelled");
+        .expect("a buffered-then-cancelled Responses stream must record request.cancelled");
     assert!(
         cancelled["meta"]["provider_status"].is_null(),
         "client cancellation must not fabricate a provider status: {cancelled}"
@@ -788,12 +821,12 @@ async fn issue7517a07_client_cancel_not_provider_502() {
         assert_ne!(
             terminal["meta"]["provider_status"],
             json!(502),
-            "a client-cancelled delivery must not be labeled provider_status=502: {terminal}"
+            "a client-cancelled buffered attempt must not be labeled provider_status=502: {terminal}"
         );
         assert_ne!(
             terminal["meta"]["error_category"],
             json!("http_502"),
-            "a client-cancelled delivery must not be labeled http_502: {terminal}"
+            "a client-cancelled buffered attempt must not be labeled http_502: {terminal}"
         );
     }
 
@@ -1305,14 +1338,15 @@ async fn issue7517a07_direct_sse_missing_terminal_is_failed() {
 }
 
 /// Multi-candidate sub-form: candidate A returns a real HTTP 502, candidate B
-/// delivers committed business content, and the client cancels. The terminal
-/// belongs to candidate B and must not inherit A's provider status; A's own
-/// attempt row keeps the real 502.
+/// produces a buffered business prefix, and the client cancels before that
+/// attempt seals. The terminal belongs to candidate B and must not inherit A's
+/// provider status; A's own attempt row keeps the real 502.
 #[tokio::test]
 async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let _keepalive = KeepaliveEnvGuard::install();
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
-    let mut entry = start_multi(3000, 5000, 5000).await;
+    let mut entry = start_multi(5000, 5000, 5000).await;
     let server_port = entry.handle.listeners[0].addr.port();
     let addr = entry.handle.listeners[0].addr;
 
@@ -1328,8 +1362,13 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
         body.len()
     );
     socket.write_all(request.as_bytes()).await.unwrap();
+    let b_capture = timeout(Duration::from_secs(5), entry.b_requests.recv())
+        .await
+        .expect("candidate B must receive the request after candidate A's 502")
+        .expect("candidate B capture channel");
+    assert_eq!(b_capture["stream"], json!(true));
     let mut delivered = Vec::new();
-    let read = timeout(Duration::from_secs(10), async {
+    let read = timeout(Duration::from_secs(3), async {
         let mut buf = [0u8; 4096];
         while let Ok(n) = socket.read(&mut buf).await {
             if n == 0 {
@@ -1337,8 +1376,8 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
             }
             delivered.extend_from_slice(&buf[..n]);
             if delivered
-                .windows(b"committed-business".len())
-                .any(|window| window == b"committed-business")
+                .windows(b": keepalive\n\n".len())
+                .any(|window| window == b": keepalive\n\n")
             {
                 break;
             }
@@ -1354,26 +1393,33 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
     assert!(
         read.is_ok()
             && delivered
-                .windows(b"committed-business".len())
-                .any(|window| window == b"committed-business"),
-        "the client must receive candidate B's committed business content before closing: {}",
+                .windows(b": keepalive\n\n".len())
+                .any(|window| window == b": keepalive\n\n"),
+        "the client must observe the transport keepalive before closing: {}",
+        String::from_utf8_lossy(&delivered)
+    );
+    assert!(
+        !delivered
+            .windows(b"committed-business".len())
+            .any(|window| window == b"committed-business"),
+        "candidate B's buffered provider prefix must remain private: {}",
         String::from_utf8_lossy(&delivered)
     );
 
     let path = request_records_path(&home, server_port);
     let rows = wait_terminal(&path, Duration::from_secs(15)).await;
     let terminals = dump_rows("issue7517a07-multi-cancel", &rows);
-    assert!(
-        !terminals.is_empty(),
-        "the multi-candidate cancel must leave a terminal ledger row: {}",
-        path.display()
+    assert_eq!(
+        terminals.len(),
+        1,
+        "the multi-candidate cancel must leave one terminal ledger row: {terminals:#?}"
     );
     let cancelled = terminals
         .iter()
         .find(|terminal| terminal["event_type"] == json!("request.cancelled"))
         .unwrap_or_else(|| {
             panic!(
-                "a committed-then-cancelled Responses stream must record request.cancelled: {terminals:#?}"
+                "a buffered-then-cancelled Responses stream must record request.cancelled: {terminals:#?}"
             )
         });
     assert_eq!(
@@ -1410,10 +1456,9 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
         1,
         "candidate A must really be attempted once: {a_requests:#?}"
     );
-    assert_eq!(
-        b_requests.len(),
-        1,
-        "candidate B must really be attempted after A's 502: {b_requests:#?}"
+    assert!(
+        b_requests.is_empty(),
+        "candidate B must be attempted exactly once after A's 502: {b_requests:#?}"
     );
 
     entry.stop().await;
@@ -1421,11 +1466,11 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
 }
 
 /// Multi-candidate sub-form: candidate A returns a real HTTP 502, candidate B
-/// sends only a reasoning delta and hangs until the typed residence terminal.
+/// sends only a reasoning delta and hangs until its own provider-body timeout.
 /// The terminal belongs to candidate B and must not inherit A's 502; A's own
 /// attempt row keeps the real 502.
 #[tokio::test]
-async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
+async fn issue7517a07_multi_candidate_provider_attempt_timeout_does_not_inherit_primary_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
     let mut entry = start_multi(3000, 5000, 5000).await;
@@ -1453,31 +1498,31 @@ async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
             format!("status={status} body_bytes={body}")
         }
     };
-    eprintln!("[issue7517a07-multi-residence] client_outcome={client_outcome}");
+    eprintln!("[issue7517a07-multi-attempt-timeout] client_outcome={client_outcome}");
 
     let path = request_records_path(&home, server_port);
     let rows = wait_terminal(&path, Duration::from_secs(15)).await;
-    let terminals = dump_rows("issue7517a07-multi-residence", &rows);
+    let terminals = dump_rows("issue7517a07-multi-attempt-timeout", &rows);
     assert!(
         !terminals.is_empty(),
-        "the multi-candidate residence terminal must leave a ledger row: {}",
+        "the multi-candidate attempt-timeout terminal must leave a ledger row: {}",
         path.display()
     );
     let terminal = terminals
         .iter()
         .find(|terminal| terminal["meta"]["provider_id"] == json!(PROVIDER_B))
         .unwrap_or_else(|| {
-            panic!("the residence terminal must belong to candidate B: {terminals:#?}")
+            panic!("the attempt-timeout terminal must belong to candidate B: {terminals:#?}")
         });
     assert_eq!(
         terminal["event_type"],
         json!("request.failed"),
-        "a typed residence terminal is a failed terminal: {terminal}"
+        "a typed provider attempt timeout is a failed terminal: {terminal}"
     );
     assert_eq!(
         terminal["meta"]["error_category"],
-        json!("provider_response_residence_timeout"),
-        "the typed residence source owns the terminal category: {terminal}"
+        json!("provider_response_body_error"),
+        "candidate B's typed provider-body timeout owns the terminal category: {terminal}"
     );
     assert_eq!(
         terminal["meta"]["provider_status"],
@@ -1487,19 +1532,25 @@ async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
     assert_ne!(
         terminal["meta"]["provider_status"],
         json!(502),
-        "the residence terminal must not inherit candidate A's 502: {terminal}"
+        "the attempt-timeout terminal must not inherit candidate A's 502: {terminal}"
     );
     assert_ne!(
         terminal["meta"]["error_category"],
         json!("http_502"),
-        "the residence terminal must not inherit candidate A's http_502: {terminal}"
+        "the attempt-timeout terminal must not inherit candidate A's http_502: {terminal}"
+    );
+    assert!(
+        terminal["meta"]["error_detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("operation timed out")),
+        "the terminal keeps candidate B's provider-body timeout cause: {terminal}"
     );
     assert_eq!(
         terminal["meta"]["observed_error"]["source"],
         json!("error06_projection"),
-        "the Direct residence lane holds the typed Error06 chain: {terminal}"
+        "the Direct attempt-timeout lane holds the typed Error06 chain: {terminal}"
     );
-    assert_no_terminal_keeps_provider_502("multi-candidate residence", &terminals);
+    assert_no_terminal_keeps_provider_502("multi-candidate attempt timeout", &terminals);
     assert_primary_attempt_kept_502(&rows);
 
     let a_requests = entry.drain_a_requests();

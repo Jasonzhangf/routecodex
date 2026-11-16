@@ -9,6 +9,9 @@
 //! `issue23fe689_gemini_relay_provider_terminal_ledger_terminal`.
 //! `issue23fe689_recovered_candidate_is_not_closed_early` is the positive
 //! control: a failed candidate with a healthy successor must still complete.
+//! `issue888e383_two_real_429s_wait_for_live_successor` extends that harness
+//! with the public Responses SSE recovery shape: two real 429 candidates remain
+//! internal while a third candidate is deliberately held.
 //!
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue23fe689_provider_terminal_ledger_row -- --nocapture --test-threads=1`
@@ -45,7 +48,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Semaphore},
     time::{sleep, Instant},
 };
 
@@ -546,6 +549,517 @@ async fn assert_failed_candidate_recovers() {
     let _ = failed_shutdown.send(());
     let _ = recovery_shutdown.send(());
     std::env::remove_var(AUTH_ENV);
+    drop(home_guard);
+}
+
+const ISSUE888_KEY_ENV: &str = "ISSUE_888E383_FIXTURE_KEY";
+const ISSUE888_CLIENT_MODEL: &str = "issue888e383-client";
+const ISSUE888_WIRE_MODEL: &str = "issue888e383-wire";
+const ISSUE888_PROVIDER_A: &str = "issue888e383_a";
+const ISSUE888_PROVIDER_B: &str = "issue888e383_b";
+const ISSUE888_PROVIDER_C: &str = "issue888e383_c";
+const ISSUE888_SENTINEL_A: &str = "issue888e383-private-rate-limit-a";
+const ISSUE888_SENTINEL_B: &str = "issue888e383-private-rate-limit-b";
+const ISSUE888_SUCCESS: &str = "issue888e383-recovered-business-response";
+
+struct Issue888EnvGuard(Option<std::ffi::OsString>);
+
+impl Issue888EnvGuard {
+    fn install() -> Self {
+        let previous = std::env::var_os("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS");
+        std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", "50");
+        std::env::set_var(ISSUE888_KEY_ENV, "issue888e383-controlled-key");
+        Self(previous)
+    }
+}
+
+impl Drop for Issue888EnvGuard {
+    fn drop(&mut self) {
+        match self.0.take() {
+            Some(value) => std::env::set_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS", value),
+            None => std::env::remove_var("ROUTECODEX_HTTP_SSE_KEEPALIVE_MS"),
+        }
+        std::env::remove_var(ISSUE888_KEY_ENV);
+    }
+}
+
+#[derive(Debug)]
+struct Issue888ProviderCapture {
+    provider: &'static str,
+    body: Value,
+}
+
+#[derive(Clone)]
+struct Issue888HeldProviderState {
+    captures: mpsc::UnboundedSender<Issue888ProviderCapture>,
+    release: Arc<Semaphore>,
+}
+
+#[derive(Clone)]
+struct Issue888RateLimitProviderState {
+    provider: &'static str,
+    captures: mpsc::UnboundedSender<Issue888ProviderCapture>,
+}
+
+async fn issue888_provider_429(
+    State(state): State<Issue888RateLimitProviderState>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    let sentinel = match state.provider {
+        ISSUE888_PROVIDER_A => ISSUE888_SENTINEL_A,
+        ISSUE888_PROVIDER_B => ISSUE888_SENTINEL_B,
+        _ => panic!("unexpected 429 provider identity"),
+    };
+    eprintln!(
+        "[issue888e383] provider={} attempt model={}",
+        state.provider, body["model"]
+    );
+    state
+        .captures
+        .send(Issue888ProviderCapture {
+            provider: state.provider,
+            body,
+        })
+        .expect("429 provider capture channel must remain open");
+    Response::builder()
+        .status(StatusCode::TOO_MANY_REQUESTS)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "error": {
+                    "type": "rate_limit_error",
+                    "message": sentinel
+                }
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+async fn issue888_provider_success(
+    State(state): State<Issue888HeldProviderState>,
+    Json(body): Json<Value>,
+) -> Response<Body> {
+    state
+        .captures
+        .send(Issue888ProviderCapture {
+            provider: ISSUE888_PROVIDER_C,
+            body,
+        })
+        .expect("held provider capture channel must remain open");
+    let permit = state
+        .release
+        .acquire()
+        .await
+        .expect("held provider release semaphore must remain open");
+    permit.forget();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(
+            json!({
+                "id": "chatcmpl_issue888e383_recovered",
+                "object": "chat.completion",
+                "created": 1,
+                "model": ISSUE888_WIRE_MODEL,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": ISSUE888_SUCCESS
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 3,
+                    "total_tokens": 8
+                }
+            })
+            .to_string(),
+        ))
+        .unwrap()
+}
+
+async fn start_issue888_429_provider(
+    provider: &'static str,
+    captures: mpsc::UnboundedSender<Issue888ProviderCapture>,
+) -> (u16, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let state = Issue888RateLimitProviderState { provider, captures };
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/chat/completions", post(issue888_provider_429))
+                .with_state(state),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    (port, shutdown, task)
+}
+
+async fn start_issue888_success_provider(
+    captures: mpsc::UnboundedSender<Issue888ProviderCapture>,
+    release: Arc<Semaphore>,
+) -> (u16, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (shutdown, shutdown_rx) = oneshot::channel();
+    let state = Issue888HeldProviderState { captures, release };
+    let task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new()
+                .route("/v1/chat/completions", post(issue888_provider_success))
+                .with_state(state),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx.await;
+        })
+        .await
+        .unwrap();
+    });
+    (port, shutdown, task)
+}
+
+fn issue888_manifest(
+    server_port: u16,
+    provider_a_port: u16,
+    provider_b_port: u16,
+    provider_c_port: u16,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
+    let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
+    let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
+    let declaration =
+        hub_v1_fixture::hub_v1_test_declaration().replace(direct_binding, relay_binding);
+    let execution = hub_v1_fixture::hub_v1_server_execution("issue888e383");
+    let source = format!(
+        r#"
+version = 3
+{declaration}
+[servers.issue888e383]
+bind = "127.0.0.1"
+port = {server_port}
+routing_group = "issue888e383"
+endpoints = ["responses"]
+{execution}
+[providers.{provider_a}]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{provider_a_port}/v1"
+default_model = "{wire_model}"
+auth = {{ type = "api_key", entries = [{{ alias = "a", env = "{auth_env}" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.{provider_a}.models.{wire_model}]
+wire_name = "{wire_model}"
+aliases = ["{client_model}"]
+supports_streaming = true
+capabilities = ["text"]
+[providers.{provider_b}]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{provider_b_port}/v1"
+default_model = "{wire_model}"
+auth = {{ type = "api_key", entries = [{{ alias = "b", env = "{auth_env}" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.{provider_b}.models.{wire_model}]
+wire_name = "{wire_model}"
+aliases = ["{client_model}"]
+supports_streaming = true
+capabilities = ["text"]
+[providers.{provider_c}]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{provider_c_port}/v1"
+default_model = "{wire_model}"
+auth = {{ type = "api_key", entries = [{{ alias = "c", env = "{auth_env}" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.{provider_c}.models.{wire_model}]
+wire_name = "{wire_model}"
+aliases = ["{client_model}"]
+supports_streaming = true
+capabilities = ["text"]
+[route_groups.issue888e383.pools.default]
+selection = {{ strategy = "priority" }}
+targets = [
+  {{ kind = "provider_model", provider = "{provider_a}", model = "{wire_model}", key = "a", priority = 3 }},
+  {{ kind = "provider_model", provider = "{provider_b}", model = "{wire_model}", key = "b", priority = 2 }},
+  {{ kind = "provider_model", provider = "{provider_c}", model = "{wire_model}", key = "c", priority = 1 }}
+]
+[debug]
+log_console = false
+snapshots = true
+"#,
+        declaration = declaration,
+        execution = execution,
+        provider_a = ISSUE888_PROVIDER_A,
+        provider_b = ISSUE888_PROVIDER_B,
+        provider_c = ISSUE888_PROVIDER_C,
+        wire_model = ISSUE888_WIRE_MODEL,
+        client_model = ISSUE888_CLIENT_MODEL,
+        auth_env = ISSUE888_KEY_ENV,
+    );
+    compile_v3_config_05_manifest(parse_v3_config_02_authoring(&source).unwrap()).unwrap()
+}
+
+async fn run_issue888e383_two_real_429s_wait_for_live_successor() {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let _env = Issue888EnvGuard::install();
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let (captures_tx, mut captures_rx) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let (provider_a_port, shutdown_a, task_a) =
+        start_issue888_429_provider(ISSUE888_PROVIDER_A, captures_tx.clone()).await;
+    let (provider_b_port, shutdown_b, task_b) =
+        start_issue888_429_provider(ISSUE888_PROVIDER_B, captures_tx.clone()).await;
+    let (provider_c_port, shutdown_c, task_c) =
+        start_issue888_success_provider(captures_tx, Arc::clone(&release)).await;
+    let _cleanup = C8bc12fCleanupGuard::new(vec![
+        task_a.abort_handle(),
+        task_b.abort_handle(),
+        task_c.abort_handle(),
+    ]);
+    let server_port = test_ports::free_port();
+    let handle = spawn_v3_server_aggregate(issue888_manifest(
+        server_port,
+        provider_a_port,
+        provider_b_port,
+        provider_c_port,
+    ))
+    .await
+    .unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .unwrap();
+    let request = json!({
+        "model": ISSUE888_CLIENT_MODEL,
+        "input": "issue888e383 two real 429s then held successor",
+        "stream": true
+    });
+    let mut response = client
+        .post(format!("{base}/v1/responses"))
+        .json(&request)
+        .send()
+        .await
+        .expect("the public Responses SSE request must remain live while recovery is pending");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "text/event-stream"
+    );
+
+    let first = tokio::time::timeout(Duration::from_secs(5), captures_rx.recv())
+        .await
+        .expect("the first 429 candidate must be attempted")
+        .expect("provider capture channel must remain open");
+    let second = tokio::time::timeout(Duration::from_secs(5), captures_rx.recv())
+        .await
+        .expect("the second 429 candidate must be attempted")
+        .expect("provider capture channel must remain open");
+    let held = tokio::time::timeout(Duration::from_secs(5), captures_rx.recv())
+        .await
+        .expect("the held successor must be attempted")
+        .expect("provider capture channel must remain open");
+    assert_eq!(
+        [first.provider, second.provider, held.provider],
+        [
+            ISSUE888_PROVIDER_A,
+            ISSUE888_PROVIDER_B,
+            ISSUE888_PROVIDER_C
+        ],
+        "the same public request must try A, B, then C exactly in priority order"
+    );
+    for capture in [&first, &second, &held] {
+        assert_eq!(
+            capture.body["model"], ISSUE888_WIRE_MODEL,
+            "the public request must preserve the selected wire model: {capture:?}"
+        );
+    }
+
+    let mut live_wire = Vec::new();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !live_wire
+            .windows(b": keepalive\n\n".len())
+            .any(|w| w == b": keepalive\n\n")
+        {
+            let chunk = response
+                .chunk()
+                .await
+                .expect("the live client channel must not fail while C is held")
+                .expect("the live client channel must emit a transport keepalive");
+            live_wire.extend_from_slice(&chunk);
+        }
+    })
+    .await
+    .expect("the active client channel must remain observable while C is held");
+    let quiet_deadline = Instant::now() + Duration::from_millis(250);
+    while Instant::now() < quiet_deadline {
+        match tokio::time::timeout_at(quiet_deadline, response.chunk()).await {
+            Ok(Ok(Some(chunk))) => live_wire.extend_from_slice(&chunk),
+            Ok(Ok(None)) => panic!(
+                "the client stream closed before the held successor was released: {}",
+                String::from_utf8_lossy(&live_wire)
+            ),
+            Ok(Err(error)) => panic!(
+                "the client stream failed before the held successor was released: {error}: {}",
+                String::from_utf8_lossy(&live_wire)
+            ),
+            Err(_) => break,
+        }
+    }
+    let live_text = String::from_utf8_lossy(&live_wire);
+    assert!(
+        !live_text.contains(ISSUE888_SENTINEL_A)
+            && !live_text.contains(ISSUE888_SENTINEL_B)
+            && !live_text.contains("rate_limit_error")
+            && !live_text.contains("network_error")
+            && !live_text.contains("event: error")
+            && !live_text.contains("response.completed"),
+        "provider failures or a synthetic terminal reached the client during recovery: {live_text}"
+    );
+
+    release.add_permits(1);
+    let mut final_wire = live_wire;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match response
+                .chunk()
+                .await
+                .expect("the recovered public response must remain readable")
+            {
+                Some(chunk) => final_wire.extend_from_slice(&chunk),
+                None => break,
+            }
+        }
+    })
+    .await
+    .expect("the released successor must complete the original client request");
+    let final_text = String::from_utf8_lossy(&final_wire);
+    assert!(
+        final_text.contains(ISSUE888_SUCCESS),
+        "the held successor business response must reach the client: {final_text}"
+    );
+    assert!(
+        final_text.contains("response.completed"),
+        "the held successor must emit a legal Responses terminal: {final_text}"
+    );
+    assert!(
+        !final_text.contains(ISSUE888_SENTINEL_A)
+            && !final_text.contains(ISSUE888_SENTINEL_B)
+            && !final_text.contains("rate_limit_error")
+            && !final_text.contains("network_error")
+            && !final_text.contains("event: error"),
+        "the completed client stream must contain no provider or proxy error payload: {final_text}"
+    );
+
+    let records_path = request_records_path(&home, server_port);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let rows = loop {
+        let rows = read_rows_strict(&records_path);
+        if rows.iter().any(is_terminal) || Instant::now() >= deadline {
+            break rows;
+        }
+        sleep(Duration::from_millis(50)).await;
+    };
+    let terminal_rows = rows
+        .iter()
+        .filter(|row| is_terminal(row))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        terminal_rows.len(),
+        1,
+        "the recovered public request must write exactly one terminal row: {rows:#?}"
+    );
+    assert_eq!(
+        terminal_rows[0]["event_type"], "request.completed",
+        "the recovered request must complete once: {rows:#?}"
+    );
+    for (provider, sentinel) in [
+        (ISSUE888_PROVIDER_A, ISSUE888_SENTINEL_A),
+        (ISSUE888_PROVIDER_B, ISSUE888_SENTINEL_B),
+    ] {
+        let attempts = rows
+            .iter()
+            .filter(|row| {
+                row["event_type"] == "request.provider_attempt_failed"
+                    && row["meta"]["provider_id"] == provider
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            attempts.len(),
+            1,
+            "provider {provider} must retain exactly one typed failed attempt: {rows:#?}"
+        );
+        let attempt = attempts[0];
+        assert_eq!(
+            attempt["meta"]["provider_status"], 429,
+            "provider {provider}'s real HTTP 429 must remain independent: {attempt:#?}"
+        );
+        assert_eq!(
+            attempt["meta"]["error_category"], "provider_http_429",
+            "provider {provider}'s 429 classification must not collapse to network_error/502: {attempt:#?}"
+        );
+        assert_eq!(
+            attempt["meta"]["error_detail"], sentinel,
+            "provider {provider}'s distinct 429 cause must remain independently preserved: {attempt:#?}"
+        );
+        assert_eq!(
+            attempt["meta"]["observed_error"]["external_error_status"], 429,
+            "provider {provider}'s typed source must preserve its own real status: {attempt:#?}"
+        );
+        assert_eq!(
+            attempt["meta"]["observed_error"]["action"], "switch_provider",
+            "provider {provider}'s typed action must continue recovery: {attempt:#?}"
+        );
+    }
+    assert_eq!(
+        rows.iter()
+            .find(|row| {
+                row["event_type"] == "request.provider_attempt_failed"
+                    && row["meta"]["provider_id"] == ISSUE888_PROVIDER_A
+            })
+            .unwrap()["meta"]["observed_error"]["next_provider_key"],
+        "issue888e383_b:default:b:issue888e383-wire",
+        "candidate A's typed error chain must name the distinct successor B"
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|row| {
+                row["event_type"] == "request.provider_attempt_failed"
+                    && row["meta"]["provider_id"] == ISSUE888_PROVIDER_B
+            })
+            .unwrap()["meta"]["observed_error"]["next_provider_key"],
+        "issue888e383_c:default:c:issue888e383-wire",
+        "candidate B's typed error chain must name the distinct held successor C"
+    );
+    assert!(
+        !rows.iter().any(|row| row["event_type"] == "request.failed"),
+        "a held successor must not produce an early failed terminal: {rows:#?}"
+    );
+
+    assert!(handle.shutdown().await.is_empty());
+    let _ = shutdown_a.send(());
+    let _ = shutdown_b.send(());
+    let _ = shutdown_c.send(());
+    tokio::time::timeout(Duration::from_secs(10), task_a)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), task_b)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), task_c)
+        .await
+        .unwrap()
+        .unwrap();
     drop(home_guard);
 }
 
@@ -1096,4 +1610,9 @@ async fn issuec8bc12f_responses_relay_http200_completed_business_terminal() {
 #[tokio::test]
 async fn issuec8bc12f_responses_relay_http200_malformed_processing_failure_terminal() {
     assert_c8bc12f_responses_relay_variant(C8bc12fResponseVariant::MalformedJson).await;
+}
+
+#[tokio::test]
+async fn issue888e383_two_real_429s_wait_for_live_successor() {
+    run_issue888e383_two_real_429s_wait_for_live_successor().await;
 }
