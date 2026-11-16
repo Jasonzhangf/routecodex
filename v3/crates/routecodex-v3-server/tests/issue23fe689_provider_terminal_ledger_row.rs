@@ -9,6 +9,9 @@
 //! `issue23fe689_gemini_relay_provider_terminal_ledger_terminal`.
 //! `issue23fe689_recovered_candidate_is_not_closed_early` is the positive
 //! control: a failed candidate with a healthy successor must still complete.
+//! `issuedd1de7e_responses_relay_provider_http_400_terminal_provenance` and
+//! `issuedd1de7e_responses_relay_provider_http_400_recovers_eligible_sibling`
+//! pin the Responses Relay HTTP 400 provenance and sibling-recovery controls.
 //!
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue23fe689_provider_terminal_ledger_row -- --nocapture --test-threads=1`
@@ -619,6 +622,7 @@ impl C8bc12fClientCapture {
 #[derive(Clone)]
 struct C8bc12fProviderState {
     provider: &'static str,
+    failure_status: Option<StatusCode>,
     variant: Option<C8bc12fResponseVariant>,
     captures: mpsc::UnboundedSender<C8bc12fProviderCapture>,
 }
@@ -635,17 +639,23 @@ async fn c8bc12f_provider(
         })
         .expect("controlled provider capture channel must remain open");
 
-    if state.variant.is_none() {
+    if let Some(status) = state.failure_status {
         return Response::builder()
-            .status(StatusCode::TOO_MANY_REQUESTS)
+            .status(status)
             .header("content-type", "application/json")
             .body(Body::from(
-                r#"{"error":{"type":"c8bc12f_private_rate_limit","message":"private A sentinel must not reach the client"}}"#,
+                format!(
+                    r#"{{"error":{{"type":"private_http_{}","message":"private A sentinel must not reach the client"}}}}"#,
+                    status.as_u16()
+                ),
             ))
             .unwrap();
     }
 
-    let body = match state.variant.unwrap() {
+    let body = match state
+        .variant
+        .expect("a non-failure controlled provider must declare a response variant")
+    {
         C8bc12fResponseVariant::Completed => serde_json::to_string(&json!({
             "id": "chatcmpl_c8bc12f_completed",
             "object": "chat.completion",
@@ -680,11 +690,22 @@ async fn start_c8bc12f_provider(
     variant: Option<C8bc12fResponseVariant>,
     captures: mpsc::UnboundedSender<C8bc12fProviderCapture>,
 ) -> (u16, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
+    let failure_status = variant.is_none().then_some(StatusCode::TOO_MANY_REQUESTS);
+    start_controlled_c8bc12f_provider(provider, failure_status, variant, captures).await
+}
+
+async fn start_controlled_c8bc12f_provider(
+    provider: &'static str,
+    failure_status: Option<StatusCode>,
+    variant: Option<C8bc12fResponseVariant>,
+    captures: mpsc::UnboundedSender<C8bc12fProviderCapture>,
+) -> (u16, oneshot::Sender<()>, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let (shutdown, shutdown_rx) = oneshot::channel();
     let state = C8bc12fProviderState {
         provider,
+        failure_status,
         variant,
         captures,
     };
@@ -709,6 +730,15 @@ fn c8bc12f_manifest(
     provider_a_port: u16,
     provider_b_port: u16,
 ) -> routecodex_v3_config::V3Config05ManifestPublished {
+    c8bc12f_manifest_with_provider_count(server_port, provider_a_port, provider_b_port, true)
+}
+
+fn c8bc12f_manifest_with_provider_count(
+    server_port: u16,
+    provider_a_port: u16,
+    provider_b_port: u16,
+    include_provider_b: bool,
+) -> routecodex_v3_config::V3Config05ManifestPublished {
     let direct_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "direct", protocol_profile_owner = "v3.entry_protocol_registry_contract", implemented = true, forbidden_reentry_behavior = "Responses endpoint must not fall through to relay or pending runtime.", runtime_owner_symbol = "execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/kernel.rs" }"#;
     let relay_binding = r#"{ entry_protocol = "responses", endpoint_patterns = ["/v1/responses", "/v1/responses/compact"], execution_mode = "relay", protocol_profile_owner = "v3.hub_relay_runtime_closeout", implemented = true, forbidden_reentry_behavior = "Responses endpoint must enter Hub Relay runtime and must not fall through to Direct/P6 or pending runtime.", runtime_owner_symbol = "execute_v3_responses_relay_runtime_with_default_transport", runtime_owner_path = "v3/crates/routecodex-v3-runtime/src/hub_v1/responses_relay_runtime.rs" }"#;
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
@@ -718,6 +748,34 @@ fn c8bc12f_manifest(
     );
     let declaration = declaration.replace(direct_binding, relay_binding);
     let execution = hub_v1_fixture::hub_v1_server_execution("c8bc12f");
+    let provider_b = include_provider_b.then(|| {
+        format!(
+            r#"[providers.{provider_b}]
+type = "openai_chat"
+base_url = "http://127.0.0.1:{provider_b_port}/v1"
+default_model = "{wire_model}"
+auth = {{ type = "api_key", entries = [{{ alias = "b", env = "{auth_env}" }}] }}
+health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
+[providers.{provider_b}.models.{wire_model}]
+wire_name = "{wire_model}"
+aliases = ["{client_model}"]
+supports_streaming = true
+capabilities = ["text"]
+"#,
+            provider_b = C8BC12F_PROVIDER_B,
+            provider_b_port = provider_b_port,
+            wire_model = C8BC12F_WIRE_MODEL,
+            auth_env = C8BC12F_AUTH_ENV,
+            client_model = C8BC12F_CLIENT_MODEL,
+        )
+    });
+    let provider_b_target = include_provider_b.then(|| {
+        format!(
+            r#", {{ kind = "provider_model", provider = "{provider_b}", model = "{wire_model}", key = "b", priority = 1 }}"#,
+            provider_b = C8BC12F_PROVIDER_B,
+            wire_model = C8BC12F_WIRE_MODEL,
+        )
+    });
     let source = format!(
         r#"
 version = 3
@@ -739,22 +797,11 @@ wire_name = "{wire_model}"
 aliases = ["{client_model}"]
 supports_streaming = true
 capabilities = ["text"]
-[providers.{provider_b}]
-type = "openai_chat"
-base_url = "http://127.0.0.1:{provider_b_port}/v1"
-default_model = "{wire_model}"
-auth = {{ type = "api_key", entries = [{{ alias = "b", env = "{auth_env}" }}] }}
-health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-[providers.{provider_b}.models.{wire_model}]
-wire_name = "{wire_model}"
-aliases = ["{client_model}"]
-supports_streaming = true
-capabilities = ["text"]
+{provider_b}
 [route_groups.c8bc12f.pools.default]
 selection = {{ strategy = "priority" }}
 targets = [
-  {{ kind = "provider_model", provider = "{provider_a}", model = "{wire_model}", key = "a", priority = 2 }},
-  {{ kind = "provider_model", provider = "{provider_b}", model = "{wire_model}", key = "b", priority = 1 }}
+  {{ kind = "provider_model", provider = "{provider_a}", model = "{wire_model}", key = "a", priority = 2 }}{provider_b_target}
 ]
 [debug]
 log_console = false
@@ -763,7 +810,8 @@ snapshots = true
         declaration = declaration,
         execution = execution,
         provider_a = C8BC12F_PROVIDER_A,
-        provider_b = C8BC12F_PROVIDER_B,
+        provider_b = provider_b.unwrap_or_default(),
+        provider_b_target = provider_b_target.unwrap_or_default(),
         wire_model = C8BC12F_WIRE_MODEL,
         client_model = C8BC12F_CLIENT_MODEL,
         auth_env = C8BC12F_AUTH_ENV,
@@ -1053,6 +1101,282 @@ async fn assert_c8bc12f_responses_relay_variant(variant: C8bc12fResponseVariant)
     drop(home_guard);
 }
 
+async fn assert_dd1de7e_responses_relay_provider_http_400(recovers: bool) {
+    let (home_guard, _lock) = TEST_LOCK.lock().await;
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap();
+    let (captures_tx, mut captures_rx) = mpsc::unbounded_channel();
+    let (provider_a_port, shutdown_a, task_a) = start_controlled_c8bc12f_provider(
+        C8BC12F_PROVIDER_A,
+        Some(StatusCode::BAD_REQUEST),
+        None,
+        captures_tx.clone(),
+    )
+    .await;
+    let (provider_b_port, shutdown_b, task_b) = if recovers {
+        let (port, shutdown, task) = start_controlled_c8bc12f_provider(
+            C8BC12F_PROVIDER_B,
+            None,
+            Some(C8bc12fResponseVariant::Completed),
+            captures_tx,
+        )
+        .await;
+        (Some(port), Some(shutdown), Some(task))
+    } else {
+        (None, None, None)
+    };
+    let mut provider_tasks = vec![task_a.abort_handle()];
+    if let Some(task) = task_b.as_ref() {
+        provider_tasks.push(task.abort_handle());
+    }
+    let _cleanup = C8bc12fCleanupGuard::new(provider_tasks);
+    let server_port = test_ports::free_port();
+    let handle = spawn_v3_server_aggregate(c8bc12f_manifest_with_provider_count(
+        server_port,
+        provider_a_port,
+        provider_b_port.unwrap_or(provider_a_port),
+        recovers,
+    ))
+    .await
+    .unwrap();
+    let base = format!("http://{}", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .unwrap();
+    let request = json!({
+        "model": C8BC12F_CLIENT_MODEL,
+        "input": "dd1de7e controlled Responses Relay provider HTTP 400 request",
+        "stream": true
+    });
+    let client_capture = match client
+        .post(format!("{base}/v1/responses"))
+        .json(&request)
+        .send()
+        .await
+    {
+        Err(error) => C8bc12fClientCapture {
+            status: None,
+            bytes: Vec::new(),
+            send_error: Some(error.to_string()),
+            read_error: None,
+        },
+        Ok(mut response) => {
+            let status = Some(response.status());
+            let mut bytes = Vec::new();
+            let mut read_error = None;
+            loop {
+                match response.chunk().await {
+                    Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+                    Ok(None) => break,
+                    Err(error) => {
+                        read_error = Some(error.to_string());
+                        break;
+                    }
+                }
+            }
+            C8bc12fClientCapture {
+                status,
+                bytes,
+                send_error: None,
+                read_error,
+            }
+        }
+    };
+    let client_wire = client_capture.diagnostic();
+
+    let expected_attempts = if recovers { 2 } else { 1 };
+    let mut captures = Vec::new();
+    for _ in 0..expected_attempts {
+        captures.push(
+            tokio::time::timeout(Duration::from_secs(5), captures_rx.recv())
+                .await
+                .expect("every expected provider attempt must reach its controlled upstream")
+                .expect("controlled provider capture channel must remain open"),
+        );
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), captures_rx.recv())
+            .await
+            .is_err(),
+        "the failed identity must not be retried and no unexpected provider may be attempted"
+    );
+
+    let mut expected_providers = vec![C8BC12F_PROVIDER_A];
+    if recovers {
+        expected_providers.push(C8BC12F_PROVIDER_B);
+    }
+    assert_eq!(
+        captures
+            .iter()
+            .map(|capture| capture.provider)
+            .collect::<Vec<_>>(),
+        expected_providers,
+        "the public Responses Relay request must try each declared provider once in order"
+    );
+    for capture in &captures {
+        assert_eq!(
+            capture.body["model"], C8BC12F_WIRE_MODEL,
+            "provider requests must use the configured wire model: {capture:?}"
+        );
+    }
+
+    let records_path = request_records_path(&home, server_port);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let rows = loop {
+        let rows = read_rows_strict(&records_path);
+        if rows.iter().any(is_terminal) || Instant::now() >= deadline {
+            break rows;
+        }
+        sleep(Duration::from_millis(50)).await;
+    };
+    let terminal_rows = rows
+        .iter()
+        .filter(|row| is_terminal(row))
+        .collect::<Vec<_>>();
+    let provider_a_attempts = rows
+        .iter()
+        .filter(|row| {
+            row["event_type"] == "request.provider_attempt_failed"
+                && row["meta"]["provider_id"] == C8BC12F_PROVIDER_A
+        })
+        .collect::<Vec<_>>();
+    eprintln!(
+        "[issuedd1de7e] recovers={recovers} client={client_wire} provider_a_attempts={provider_a_attempts:#?} rows={rows:#?}"
+    );
+    assert_eq!(
+        terminal_rows.len(),
+        1,
+        "the Responses Relay request must write exactly one terminal row: {rows:#?}"
+    );
+    assert!(
+        rows.iter().any(|row| {
+            row["event_type"] == "request.route_selected"
+                && row["meta"]["execution_mode"] == "relay"
+        }),
+        "the public /v1/responses request must actually enter Relay mode: {rows:#?}"
+    );
+    assert_eq!(
+        provider_a_attempts.len(),
+        1,
+        "the HTTP 400 identity must have exactly one failed attempt row: {rows:#?}"
+    );
+    assert_eq!(
+        provider_a_attempts[0]["meta"]["provider_status"], 400,
+        "the first provider's real HTTP 400 must remain an attempt fact: {rows:#?}"
+    );
+    assert!(
+        !client_wire.contains("private A sentinel") && !client_wire.contains("private_http_400"),
+        "the private provider 400 body must not reach the client: {client_wire}"
+    );
+
+    if recovers {
+        assert_eq!(
+            client_capture.status,
+            Some(StatusCode::OK),
+            "the healthy eligible sibling must complete the public request: {client_wire}"
+        );
+        assert!(!client_capture.transport_failed());
+        assert!(
+            client_wire.contains("C8BC12F_B_COMPLETED"),
+            "the healthy sibling's business response must reach the client: {client_wire}"
+        );
+        assert!(
+            client_wire.contains("response.completed"),
+            "the healthy sibling must deliver its real protocol terminal: {client_wire}"
+        );
+        assert_eq!(
+            terminal_rows[0]["event_type"], "request.completed",
+            "a recovered request must not be closed as failed: {rows:#?}"
+        );
+        assert_eq!(terminal_rows[0]["result"], "success");
+    } else {
+        assert!(
+            client_capture.status.is_none() || client_capture.status == Some(StatusCode::OK),
+            "provider exhaustion must not expose a provider HTTP error status: {client_wire}"
+        );
+        assert!(
+            client_capture.transport_failed(),
+            "provider exhaustion must terminate the client transport detectably: {client_wire}"
+        );
+        assert!(
+            !client_wire.contains("response.completed") && !client_wire.contains("network_error"),
+            "provider exhaustion must not fabricate success or expose a proxy error body: {client_wire}"
+        );
+        assert_eq!(
+            terminal_rows[0]["event_type"], "request.failed",
+            "provider exhaustion must write one failed terminal: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["provider_status"], 400,
+            "the terminal row must preserve the real provider HTTP 400: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["error_category"], "http_400",
+            "the terminal row must not relabel the provider 400 as network_error: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["observed_error"]["external_error_status"], 400,
+            "the typed Error01 source must preserve the provider 400: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["provider"], "c8bc12f_a:default:a:c8bc12f-wire",
+            "the terminal row must preserve the exact failed provider identity: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["provider_id"], C8BC12F_PROVIDER_A,
+            "the terminal row must preserve the failed provider id: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["auth_alias"], "a",
+            "the terminal row must preserve the failed auth alias: {rows:#?}"
+        );
+        assert_eq!(
+            terminal_rows[0]["meta"]["wire_model"], C8BC12F_WIRE_MODEL,
+            "the terminal row must preserve the failed wire model: {rows:#?}"
+        );
+        assert!(
+            terminal_rows[0]["meta"]["observed_error"]["next_provider_key"].is_null(),
+            "the final failed row must not retain the failed identity as the next provider: {rows:#?}"
+        );
+        let error_chain = terminal_rows[0]["meta"]["observed_error"]["chain"]
+            .as_array()
+            .expect("the failed terminal must carry an Error chain")
+            .iter()
+            .map(|entry| entry["node"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            error_chain,
+            [
+                "V3Error01SourceRaised",
+                "V3Error02Classified",
+                "V3Error03TargetLocalAction",
+                "V3Error04TargetExhaustionDecision",
+                "V3Error05ExecutionDecision",
+                "V3Error06ClientProjected",
+            ],
+            "the failed terminal must preserve the complete typed Error01-06 chain: {rows:#?}"
+        );
+    }
+
+    handle.shutdown().await;
+    let _ = shutdown_a.send(());
+    if let Some(shutdown) = shutdown_b {
+        let _ = shutdown.send(());
+    }
+    tokio::time::timeout(Duration::from_secs(10), task_a)
+        .await
+        .unwrap()
+        .unwrap();
+    if let Some(task) = task_b {
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    drop(home_guard);
+}
+
 #[tokio::test]
 async fn issue23fe689_openai_chat_direct_provider_terminal_ledger_terminal() {
     assert_entry_writes_one_failed_terminal(Entry::Chat, Mode::Direct).await;
@@ -1096,4 +1420,14 @@ async fn issuec8bc12f_responses_relay_http200_completed_business_terminal() {
 #[tokio::test]
 async fn issuec8bc12f_responses_relay_http200_malformed_processing_failure_terminal() {
     assert_c8bc12f_responses_relay_variant(C8bc12fResponseVariant::MalformedJson).await;
+}
+
+#[tokio::test]
+async fn issuedd1de7e_responses_relay_provider_http_400_terminal_provenance() {
+    assert_dd1de7e_responses_relay_provider_http_400(false).await;
+}
+
+#[tokio::test]
+async fn issuedd1de7e_responses_relay_provider_http_400_recovers_eligible_sibling() {
+    assert_dd1de7e_responses_relay_provider_http_400(true).await;
 }

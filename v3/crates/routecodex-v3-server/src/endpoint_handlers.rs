@@ -587,7 +587,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                 output.diagnostic_cause.as_ref(),
             );
         }
-        if let Some(disposition) = output.terminal_disposition.take() {
+        if let Some(disposition) = output.terminal_disposition.clone() {
             // A provider terminal disposition ends the client transport without
             // a client payload, so this path never reaches the relay closeout
             // below. The chain and status are still real typed facts: persist
@@ -740,7 +740,7 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     };
                 }
                 V3ResponsesDirectServerOutcome::RelayOutput(mut relay_output) => {
-                    if let Some(disposition) = relay_output.terminal_disposition.take() {
+                    if let Some(disposition) = relay_output.terminal_disposition.clone() {
                         // Same entry, same defect as the branch below: a
                         // provider terminal disposition bypasses the relay
                         // closeout, so the real typed chain and the on-disk

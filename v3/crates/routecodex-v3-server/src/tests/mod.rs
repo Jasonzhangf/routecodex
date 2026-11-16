@@ -5119,6 +5119,7 @@ fn error_projection_appends_human_console_failure_line() {
             error_class: Some("runtime_failure"),
             health_action: None,
             diagnostic_source: None,
+            terminal_disposition: None,
             upstream_request_id: None,
         },
     );
@@ -5213,6 +5214,7 @@ fn relay_terminal_projection_uses_typed_http200_body_failure_source() {
             error06_exposed: false,
             error_class: None,
             health_action: None,
+            terminal_disposition: None,
             upstream_request_id: None,
         },
     );
