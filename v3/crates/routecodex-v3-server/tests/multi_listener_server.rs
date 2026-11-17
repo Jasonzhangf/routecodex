@@ -634,6 +634,63 @@ async fn wait_for_v3_provider_terminal_evidence(samples_root: &std::path::Path) 
     panic!("provider terminal evidence must appear under {samples_root:?}");
 }
 
+async fn wait_for_v3_request_id_by_sample_marker(
+    samples_root: &std::path::Path,
+    request_marker: &str,
+) -> String {
+    for _ in 0..200 {
+        if let Ok(entries) = fs::read_dir(samples_root) {
+            for entry in entries.flatten() {
+                let request_path = entry.path().join("request.json");
+                if fs::read_to_string(&request_path)
+                    .is_ok_and(|request| request.contains(request_marker))
+                {
+                    return entry.file_name().to_string_lossy().into_owned();
+                }
+            }
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "request sample for marker {request_marker:?} must appear under {samples_root:?}"
+    );
+}
+
+async fn wait_for_v3_failed_request_row(
+    home: &std::path::Path,
+    port: u16,
+    request_id: &str,
+) -> Value {
+    let path = home
+        .join(".rcc")
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"));
+    for _ in 0..200 {
+        let mut matching = Vec::new();
+        if let Ok(content) = fs::read_to_string(&path) {
+            for line in content.lines().filter(|line| !line.trim().is_empty()) {
+                let Ok(envelope) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
+                let row = &envelope["row"];
+                if row["event_type"] == "request.failed"
+                    && row["meta"]["request_id"] == request_id
+                {
+                    matching.push(row.clone());
+                }
+            }
+        }
+        if let [row] = matching.as_slice() {
+            return row.clone();
+        }
+        sleep(Duration::from_millis(25)).await;
+    }
+    panic!(
+        "exactly one failed terminal row for {request_id} must appear at {}",
+        path.display(),
+    );
+}
+
 fn read_responses_sample_response_by_request_marker(
     samples_root: &std::path::Path,
     request_marker: &str,
@@ -3248,6 +3305,7 @@ async fn provider_content_type_mismatch_records_the_received_head_as_evidence() 
 async fn provider_truncated_body_records_the_received_head_as_evidence() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("provider-truncated-body-evidence");
+    let request_marker = "provider-truncated-body-request-marker";
     // A real `200 OK` head, then far fewer bytes than `content-length` promises.
     let (provider_base_url, shutdown) =
         start_truncated_body_upstream(500, b"{\"incomplete\"".to_vec()).await;
@@ -3263,7 +3321,7 @@ async fn provider_truncated_body_records_the_received_head_as_evidence() {
 
     let response = reqwest::Client::new()
         .post(format!("http://{}/v1/responses", handle.listeners[0].addr))
-        .json(&json!({"model":"client-test","input":"hello"}))
+        .json(&json!({"model":"client-test","input":request_marker}))
         .send()
         .await;
     // Client contract: a header-less close, never a fabricated 502.
@@ -3292,6 +3350,24 @@ async fn provider_truncated_body_records_the_received_head_as_evidence() {
         .find(|entry| entry[0] == json!("content-type"))
         .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
     assert_eq!(recorded[1], json!("application/json".as_bytes()));
+    let sample_root = home_guard.codex_samples_root(port);
+    let request_id =
+        wait_for_v3_request_id_by_sample_marker(&sample_root, request_marker).await;
+    let terminal_row =
+        wait_for_v3_failed_request_row(&home_guard.path, port, &request_id).await;
+    assert_eq!(
+        terminal_row["meta"]["request_id"], request_id,
+        "the terminal row must belong to the request under test: {terminal_row}"
+    );
+    assert_eq!(
+        terminal_row["meta"]["provider_status"], 200,
+        "the public terminal row must preserve the received provider HTTP 200 head: {terminal_row}"
+    );
+    assert_eq!(
+        terminal_row["meta"]["error_category"],
+        "network_error",
+        "the public terminal row must preserve the internal response-processing category: {terminal_row}"
+    );
 
     std::env::remove_var("V3_P6_TEST_KEY");
     handle.shutdown().await;
