@@ -651,9 +651,7 @@ async fn wait_for_v3_request_id_by_sample_marker(
         }
         sleep(Duration::from_millis(25)).await;
     }
-    panic!(
-        "request sample for marker {request_marker:?} must appear under {samples_root:?}"
-    );
+    panic!("request sample for marker {request_marker:?} must appear under {samples_root:?}");
 }
 
 async fn wait_for_v3_failed_request_row(
@@ -673,8 +671,7 @@ async fn wait_for_v3_failed_request_row(
                     continue;
                 };
                 let row = &envelope["row"];
-                if row["event_type"] == "request.failed"
-                    && row["meta"]["request_id"] == request_id
+                if row["event_type"] == "request.failed" && row["meta"]["request_id"] == request_id
                 {
                     matching.push(row.clone());
                 }
@@ -3351,10 +3348,8 @@ async fn provider_truncated_body_records_the_received_head_as_evidence() {
         .unwrap_or_else(|| panic!("the received head must be recorded: {evidence}"));
     assert_eq!(recorded[1], json!("application/json".as_bytes()));
     let sample_root = home_guard.codex_samples_root(port);
-    let request_id =
-        wait_for_v3_request_id_by_sample_marker(&sample_root, request_marker).await;
-    let terminal_row =
-        wait_for_v3_failed_request_row(&home_guard.path, port, &request_id).await;
+    let request_id = wait_for_v3_request_id_by_sample_marker(&sample_root, request_marker).await;
+    let terminal_row = wait_for_v3_failed_request_row(&home_guard.path, port, &request_id).await;
     assert_eq!(
         terminal_row["meta"]["request_id"], request_id,
         "the terminal row must belong to the request under test: {terminal_row}"

@@ -1197,13 +1197,22 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
     let terminal_row = terminal_rows[0];
     assert_eq!(terminal_row.meta.request_id, "protocol-plan-operator-fault");
     assert_eq!(terminal_row.meta.provider_status, None);
-    assert_eq!(terminal_row.meta.error_category.as_deref(), Some("relay_error_operator_sdk_failure"));
+    assert_eq!(
+        terminal_row.meta.error_category.as_deref(),
+        Some("relay_error_operator_sdk_failure")
+    );
     assert_eq!(
         terminal_row.meta.observed_error.as_ref().unwrap().source,
         "error06_projection_not_exposed"
     );
     assert!(
-        terminal_row.meta.observed_error.as_ref().unwrap().chain.is_empty(),
+        terminal_row
+            .meta
+            .observed_error
+            .as_ref()
+            .unwrap()
+            .chain
+            .is_empty(),
         "the no-chain operator fault must not invent an Error06 chain"
     );
 
@@ -1243,9 +1252,9 @@ fn responses_relay_operator_fault_terminal_without_error06_records_provider_term
     );
     let output = V3ResponsesRelayRuntimeOutput {
         status: 599,
-        terminal_disposition: Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(
-            witness,
-        )),
+        terminal_disposition: Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        ),
         client_body: V3ResponsesRelayClientBody::Json(Value::Null),
         node_trace: vec!["V3ProviderRespInbound01Raw"],
         error_chain: None,
@@ -1283,10 +1292,7 @@ fn responses_relay_operator_fault_terminal_without_error06_records_provider_term
         row.meta.observed_error.as_ref().unwrap().source,
         "error06_projection_not_exposed"
     );
-    assert_eq!(
-        row.meta.observed_error.as_ref().unwrap().chain,
-        Vec::new()
-    );
+    assert_eq!(row.meta.observed_error.as_ref().unwrap().chain, Vec::new());
 
     fs::remove_dir_all(root).unwrap();
 }
