@@ -100,19 +100,18 @@ pub(crate) fn record_v3_webui_error_projection(
         // The projected client body is an internal response-processing error in
         // this branch. The typed source owns the real 2xx status and cause.
         Some(source) => (source.code.clone(), source.message.clone()),
-        None => match body {
-            Some(body) => crate::v3_error_body_code_message(body),
-            None => match (typed.diagnostic_source, typed.terminal_disposition) {
-                // A real upstream error HTTP status (including a genuine 502) is
-                // the honest category, so the provider-error HTTP family keeps
-                // its current `http_<status>` semantics.
-                (
-                    _,
-                    Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
-                ) if witness.status() >= 400 => (
-                    format!("http_{}", witness.status()),
-                    format!("HTTP status {}", witness.status()),
-                ),
+        None => match (body, typed.terminal_disposition) {
+            // A real upstream error HTTP status owns the terminal category even
+            // when the internal Error06 projection also carries a proxy status.
+            (
+                _,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
+            ) if witness.status() >= 400 => (
+                format!("http_{}", witness.status()),
+                format!("HTTP status {}", witness.status()),
+            ),
+            (Some(body), _) => crate::v3_error_body_code_message(body),
+            (None, typed_terminal) => match (typed.diagnostic_source, typed_terminal) {
                 // NoResponse (timeout, transport break, client cancel) or a 2xx
                 // provider head that failed later: the typed source names the
                 // cause.

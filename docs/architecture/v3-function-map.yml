@@ -5735,9 +5735,11 @@ features:
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/console/impl_webui_projection.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
   - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-server/tests/issue23fe689_provider_terminal_ledger_row.rs
   resource_bindings:
   - v3.server.internal_observability_projection
   - v3.observability.webui_store
@@ -5758,9 +5760,11 @@ features:
   - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
   - v3/crates/routecodex-v3-server/src/console/impl_webui_projection.rs
   - v3/crates/routecodex-v3-server/src/live_snapshot.rs
+  - v3/crates/routecodex-v3-server/src/endpoint_handlers.rs
   - v3/crates/routecodex-v3-server/src/lib.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
   - v3/crates/routecodex-v3-config/src/store.rs
+  - v3/crates/routecodex-v3-server/tests/issue23fe689_provider_terminal_ledger_row.rs
   forbidden_paths:
   - request.normal_payload
   - response.client_payload
@@ -5771,6 +5775,7 @@ features:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib provider_attempt_category_uses_real_http_status_before_body_error_type -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_relay_openai_chat_provider_http_400_429_503_status_classification_public_gate -- --nocapture --test-threads=1
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue23fe689_provider_terminal_ledger_row issuedd1de7e_ -- --nocapture --test-threads=1
   - npm run verify:v3-resource-map
   - git diff --check
   runtime_status: source_controlled_runtime_pending_live_replay

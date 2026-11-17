@@ -1190,6 +1190,7 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                     error_class: Some(error06_error_class),
                     health_action: error06_health_action.as_ref(),
                     diagnostic_source: None,
+                    terminal_disposition: None,
                     // V3Error06ClientProjected does not carry the Error01
                     // external link, so this lane records "not exposed".
                     upstream_request_id: None,
@@ -1327,6 +1328,10 @@ struct V3ErrorProjectionConsoleInput<'input> {
     project_path: Option<&'input str>,
     /// Typed Error01 source already held by the current terminal output.
     diagnostic_source: Option<&'input routecodex_v3_error::V3Error01SourceRaised>,
+    /// Typed provider terminal already held by the current output. When present,
+    /// the ledger derives provider status and category from this fact instead of
+    /// the internally projected client body.
+    terminal_disposition: Option<&'input routecodex_v3_error::V3ProviderTerminalDisposition>,
     /// `true` when this lane holds the typed `V3Error06ClientProjected`. Lanes
     /// that only carry the chain record an explicit "not exposed" marker.
     error06_exposed: bool,
@@ -1371,6 +1376,7 @@ fn emit_relay_error_chain_if_any(
             error_class: None,
             health_action: None,
             diagnostic_source: None,
+            terminal_disposition: None,
             upstream_request_id: None,
         },
     )
@@ -1422,6 +1428,7 @@ fn record_and_emit_v3_error_projection(
             error_chain: input.error_chain,
             health_action: input.health_action,
             diagnostic_source: input.diagnostic_source,
+            terminal_disposition: input.terminal_disposition,
             upstream_request_id: input.upstream_request_id,
             ..Default::default()
         },
