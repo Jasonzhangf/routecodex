@@ -235,6 +235,11 @@ verification:
   change_risk: low
   unit:
   - v3/crates/routecodex-v3-server/src/lib.rs
+  - v3/crates/routecodex-v3-server/src/request_id.rs
+  - v3/crates/routecodex-v3-server/src/request_identity.rs
+  - v3/crates/routecodex-v3-server/src/console/impl_bulk.rs
+  - v3/crates/routecodex-v3-server/src/tests/mod.rs
+  - v3/crates/routecodex-v3-server/tests/request_count_success_only_public.rs
   contract:
   - docs/goals/v3-console-request-count-visibility-test-design.md
   - docs/architecture/function-map.yml
@@ -242,6 +247,8 @@ verification:
   integration:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity
     --lib -- --nocapture
+  - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test
+    request_count_success_only_public -- --nocapture
   smoke:
   - npm run verify:v3-architecture-docs
   - npm run verify:function-map-compile-gate
@@ -249,10 +256,18 @@ verification:
   - npm run build:min
   notes:
   - Server owns one aggregate-shared request counter, the typed V3AllocatedRequestIdentity
-    allocation extension, and request-count projection; listeners must not create
-    independent locks for the shared persisted file, and console must not parse request
-    ids, create a second counter, emit a duplicate pre-route placeholder block, or
-    mutate request/response payloads.
+    allocation extension, and request-count projection; allocation reserves only the
+    monotonic sequence, the idempotent success commit is the only totalCount/windowCount
+    writer, error terminals never count, and listeners must not create independent locks
+    for the shared persisted file. Console must not parse request ids, create a second
+    counter, emit a duplicate pre-route placeholder block, or mutate request/response
+    payloads.
+  required_positive:
+  - totalCount and windowCount increment only when the allocated identity commits one success terminal.
+  - Relay and Direct SSE lanes commit the success count only when the committed stream reaches its completion terminal, so a dropped or disconnected stream never counts.
+  required_negative:
+  - Error terminals must never increment totalCount or windowCount.
+  - Provider retries, provider switches, and continuation frames must not commit the same request twice.
   mainline_bindings:
   - v3-console-count-01
   - v3-console-count-02
