@@ -1200,8 +1200,24 @@ pub(crate) fn project_v3_responses_relay_error_chain(
     request_console_project_path: Option<&str>,
     output: &V3ResponsesRelayRuntimeOutput,
 ) -> Option<Response<Body>> {
-    let error_chain = output.error_chain.as_deref()?;
     let terminal_disposition = output.terminal_disposition.as_ref();
+    let Some(error_chain) = output.error_chain.as_deref() else {
+        if let Some(disposition) = terminal_disposition {
+            record_v3_provider_terminal_request_row(
+                state,
+                entry_protocol,
+                endpoint,
+                request_id,
+                output.status,
+                &[],
+                output.diagnostic_source.as_ref(),
+                disposition,
+                None,
+                false,
+            );
+        }
+        return None;
+    };
     let diagnostic_source = output.diagnostic_source.as_ref().filter(|source| {
         terminal_disposition.is_some()
             || (source.code == "provider_response_body_error"

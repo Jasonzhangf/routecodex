@@ -1184,7 +1184,116 @@ async fn protocol_plan_operator_fault_consumer_preserves_sources_without_error06
         "operator fault must close the body after the transport break"
     );
 
+    let rows = state.webui_observability.rows().unwrap();
+    let terminal_rows = rows
+        .values()
+        .filter(|row| row.event_type == "request.failed")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        terminal_rows.len(),
+        1,
+        "the exact no-chain operator fault must write one failed terminal row: {terminal_rows:#?}"
+    );
+    let terminal_row = terminal_rows[0];
+    assert_eq!(terminal_row.meta.request_id, "protocol-plan-operator-fault");
+    assert_eq!(terminal_row.meta.provider_status, None);
+    assert_eq!(
+        terminal_row.meta.error_category.as_deref(),
+        Some("relay_error_operator_sdk_failure")
+    );
+    assert_eq!(
+        terminal_row.meta.observed_error.as_ref().unwrap().source,
+        "error06_projection_not_exposed"
+    );
+    assert!(
+        terminal_row
+            .meta
+            .observed_error
+            .as_ref()
+            .unwrap()
+            .chain
+            .is_empty(),
+        "the no-chain operator fault must not invent an Error06 chain"
+    );
+
     sample_worker.shutdown().await;
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn responses_relay_operator_fault_terminal_without_error06_records_provider_terminal_row() {
+    let _home_lock = TEST_HOME_LOCK.lock().unwrap();
+    let root = std::env::temp_dir().join(format!(
+        "routecodex-v3-responses-relay-terminal-no-chain-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    let _home = TestHomeGuard::set(&root);
+    let state =
+        test_v3_listener_state_with_debug(&root.join("server.log"), 5555, true, false, None, true);
+    let request_id = "responses-relay-terminal-no-chain";
+    let trace_scope = routecodex_v3_debug::V3DebugTraceScope {
+        server_id: state.server.id.clone(),
+        request_id: request_id.to_string(),
+        execution_id: "execution-terminal-no-chain".to_string(),
+    };
+    let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+        503,
+        vec![("content-type".to_string(), b"application/json".to_vec())],
+        br#"{"error":{"type":"provider_unavailable"}}"#.to_vec(),
+    )
+    .with_body_read_failure("provider closed the response body early");
+    let diagnostic_source = routecodex_v3_error::build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3Error06ClientProjected",
+        "relay_error_projection_nonterminal",
+        "Error06 SDK completed without a terminal client projection",
+    );
+    let output = V3ResponsesRelayRuntimeOutput {
+        status: 599,
+        terminal_disposition: Some(
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        ),
+        client_body: V3ResponsesRelayClientBody::Json(Value::Null),
+        node_trace: vec!["V3ProviderRespInbound01Raw"],
+        error_chain: None,
+        observability: None,
+        diagnostic_source: Some(diagnostic_source),
+        diagnostic_cause: None,
+        stream_observation: None,
+        finalized_response: None,
+        provider_snapshots: None,
+        protocol_direct_handoff: None,
+    };
+
+    assert!(
+        crate::live_snapshot::project_v3_responses_relay_error_chain(
+            &state,
+            &trace_scope,
+            "responses",
+            "/v1/responses",
+            request_id,
+            None,
+            None,
+            &output,
+        )
+        .is_none(),
+        "terminal projection must not produce a debug-failure response"
+    );
+
+    let rows = state.webui_observability.rows().unwrap();
+    let row = rows
+        .get(&build_v3_obs_request_key(5555, request_id))
+        .expect("a terminal without an Error06 chain must still record a request row");
+    assert_eq!(row.meta.provider_status, Some(503));
+    assert_eq!(row.meta.error_category.as_deref(), Some("http_503"));
+    assert_eq!(
+        row.meta.observed_error.as_ref().unwrap().source,
+        "error06_projection_not_exposed"
+    );
+    assert_eq!(row.meta.observed_error.as_ref().unwrap().chain, Vec::new());
+
     fs::remove_dir_all(root).unwrap();
 }
 
