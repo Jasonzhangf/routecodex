@@ -36632,3 +36632,39 @@ candidate run and `INCOMPLETE`/`UNVERIFIED` as applicable.
 - GitHub CI is currently in progress for `scope` and `repo-sanity`. Merge,
   remote main receipt, install, one formal `rccv3 restart`, listener health,
   same-entry live replay, sample audit, and cleanup remain open.
+
+### 2026-11-19 PR test-fixture correction and focused review
+
+- PR `#587` failed its full `test` check because the two pre-existing
+  `provider_failure_runtime_policy` fixtures constructed the strict-legacy
+  compatibility failure without the typed attempt source. That source-less
+  wrapper produced the ordinary provider-failure labels observed in CI
+  (`pre_cool_observation` and `terminal_route_and_default_exhausted`).
+- Correction scope is test-only:
+  `provider_compat.rs` now passes the typed `RuntimeFailure` source for
+  `ProviderReqCompat06ProviderCompat/provider_request_compat_error`,
+  confirming request-local exclusion, same-provider sibling reselection, and
+  provider-health neutrality. `terminal_projection.rs` uses the same typed
+  source and asserts the non-`ProviderFailure` terminal as `NoResponse`. The
+  retained real upstream 429 witness remains internal evidence and does not
+  change the request-local compatibility terminal.
+- Implementation files, provider health semantics, retry policy, map bindings,
+  and the already reviewed strict-legacy image-history behavior are unchanged.
+- Current-base local author receipts after the correction: focused
+  `provider_compat` and `terminal_projection` fixtures passed; the complete
+  `provider_failure_runtime_policy` test group passed `86 passed; 0 failed`;
+  `npm run test:v3-provider-compat-profile-loading` exited `0`;
+  `npm run verify:v3-architecture-ci` exited `0` with `33/33` sub-gates
+  green; `cargo fmt --manifest-path v3/Cargo.toml --all -- --check` and
+  `git diff --check` passed.
+- A new focused independent `codex-auto-review` review exited `0`, echoed
+  `scope.mode=focused`, `scope.commit=null`, base
+  `636fb5284bd00d6e381e693e6898acbed7f82f1b`, and returned no findings.
+  Raw receipt: `evidence/review-20261119-r4/review.json`; event stream:
+  `evidence/review-20261119-r4/events.jsonl`; exit receipt:
+  `evidence/review-20261119-r4/review.exit`; contract:
+  `evidence/review-20261119-r4/task.md`.
+- The fixture-correction commit, PR push, CI rerun, merge, remote receipt,
+  install, one formal `rccv3 restart`, listener health, same-entry live
+  replay, post-restart sample audit, cleanup, and issue disposition remain
+  open. Issue `612639e` therefore remains `open`.

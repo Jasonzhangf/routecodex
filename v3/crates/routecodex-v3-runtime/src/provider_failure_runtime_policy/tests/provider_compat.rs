@@ -138,8 +138,14 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
         retry_policy: V3RelayProviderFailureRetryPolicy::default(),
         deterministic_sample: 0,
     };
+    let attempt_source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "ProviderReqCompat06ProviderCompat",
+        "provider_request_compat_error",
+        "prompt is too long",
+    );
 
-    let result = run_v3_relay_provider_failure_policy(
+    let result = run_v3_relay_provider_failure_policy_with_response_source(
         &context,
         selected,
         "ProviderReqCompat06ProviderCompat",
@@ -153,6 +159,10 @@ async fn relay_provider_compat_failure_keeps_same_provider_sibling_health_neutra
             trace: &mut trace,
             last_external_http: &mut None,
         },
+        None,
+        Some(attempt_source),
+        None,
+        None,
     )
     .await
     .expect("relay compat failure must reselect a same-provider sibling");
