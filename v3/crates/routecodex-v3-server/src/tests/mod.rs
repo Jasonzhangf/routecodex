@@ -249,6 +249,7 @@ fn test_v3_listener_state_with_debug(
             state_file: log_file.with_extension("request-id-counter.json"),
             state: V3RequestCounterState::default(),
             loaded: false,
+            persistence_degraded: false,
         })),
         codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
             manifest.debug.codex_samples,
@@ -2725,6 +2726,7 @@ fn request_identity_allocation_keeps_persisted_and_typed_counts_atomic() {
         state_file: state_file.clone(),
         state: V3RequestCounterState::default(),
         loaded: false,
+        persistence_degraded: false,
     };
 
     let first = counter
@@ -2753,11 +2755,41 @@ fn request_identity_allocation_keeps_persisted_and_typed_counts_atomic() {
         state_file: state_file.clone(),
         state: V3RequestCounterState::default(),
         loaded: false,
+        persistence_degraded: false,
     };
     let third = reloaded
         .next_request_identity("openai-responses", "router", "gpt-5.5")
         .unwrap();
     assert_eq!((third.total_count, third.daily_count), (3, 3));
+
+    let saved_state = std::fs::read(&state_file).unwrap();
+    std::fs::remove_file(&state_file).unwrap();
+    std::fs::create_dir(&state_file).unwrap();
+    let mut recovering = V3RequestIdCounter {
+        state_file: state_file.clone(),
+        state: V3RequestCounterState::default(),
+        loaded: false,
+        persistence_degraded: false,
+    };
+    let during_failure = recovering
+        .next_request_identity("openai-responses", "router", "gpt-5.5")
+        .unwrap();
+    assert_eq!(
+        (during_failure.total_count, during_failure.daily_count),
+        (1, 1)
+    );
+    assert!(state_file.is_dir());
+
+    std::fs::remove_dir(&state_file).unwrap();
+    std::fs::write(&state_file, saved_state).unwrap();
+    let after_recovery = recovering
+        .next_request_identity("openai-responses", "router", "gpt-5.5")
+        .unwrap();
+    assert_eq!(
+        (after_recovery.total_count, after_recovery.daily_count),
+        (5, 5)
+    );
+    assert_ne!(during_failure.request_id, after_recovery.request_id);
 
     std::fs::remove_file(state_file).unwrap();
 }
