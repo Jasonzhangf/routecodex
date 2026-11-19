@@ -18,6 +18,10 @@ struct DirectTransportFailureWithoutResponse {
     sends: AtomicUsize,
 }
 
+struct DirectStrictLegacyImageSiblingTransport {
+    sends: AtomicUsize,
+}
+
 #[async_trait]
 impl ResponsesTransport for DirectOnlyFailureTransport {
     async fn send(
@@ -101,6 +105,35 @@ impl ResponsesTransport for DirectTransportFailureWithoutResponse {
             provider_id: request.provider_id().to_string(),
             reason: "connection closed before response headers".to_string(),
         })
+    }
+}
+
+#[async_trait]
+impl ResponsesTransport for DirectStrictLegacyImageSiblingTransport {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        assert_eq!(request.provider_id(), "second");
+        self.sends.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(
+            request.body()["input"][1]["output"][1],
+            json!({
+                "type": "input_image",
+                "detail": "auto",
+                "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+            })
+        );
+        Ok(V3ProviderResp14Raw::from_json(
+            request.request_id(),
+            request.provider_id(),
+            200,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".to_string(),
+                value: b"application/json".to_vec(),
+            }],
+            br#"{"id":"resp_image_sibling","status":"completed","output_text":"ok"}"#.to_vec(),
+        ))
     }
 }
 
@@ -207,7 +240,11 @@ async fn direct_generic_provider_http_400_exhaustion_records_exact_identity_with
     // The last HTTP400 records exact identity health, ends this request
     // transport immediately, and stays out of the client.
     let output = execution.await;
-    assert_eq!(transport.sends.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        1,
+        "unexpected output: {output:?}"
+    );
     // Capacity admission is removed, so there is no process-shared lease snapshot here.
     assert_eq!(
         transport.sends.load(Ordering::SeqCst),
@@ -306,6 +343,85 @@ async fn direct_transport_failure_without_response_records_exact_identity_observ
     );
     assert_eq!(failure.failure_count, 0);
     assert_eq!(failure.cooldown_until_ms, None);
+}
+
+#[tokio::test]
+async fn direct_strict_legacy_image_compat_reselects_before_provider_send() {
+    let routing_group = "direct_strict_legacy_image_sibling";
+    let manifest = scoped_test_manifest(strict_legacy_image_sibling_manifest(), routing_group);
+    let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
+    let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
+        port: Some(7777),
+        pipeline_id: Some("test-pipeline:test-session:direct-strict-legacy-image".to_string()),
+        server_id: "test".to_string(),
+        failure_session_scope: test_failure_session_scope(routing_group),
+        request_id: "req-direct-strict-legacy-image".to_string(),
+        execution_id: "exec-direct-strict-legacy-image".to_string(),
+        method: "POST".to_string(),
+        path: "/v1/responses".to_string(),
+        body: json!({
+            "model": "client-model",
+            "input": [
+                {"type": "function_call", "call_id": "call_image", "name": "view_image", "arguments": "{}"},
+                {"type": "function_call_output", "call_id": "call_image", "output": [{
+                    "type": "input_text", "text": "image result"
+                }, {
+                    "type": "input_image",
+                    "detail": "auto",
+                    "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                }]},
+                {"type": "message", "role": "user", "content": [{
+                    "type": "input_text", "text": "continue"
+                }]}
+            ]
+        }),
+    };
+    let transport = DirectStrictLegacyImageSiblingTransport {
+        sends: AtomicUsize::new(0),
+    };
+    let plan = plan_v3_responses_protocol_execution_with_provider_health(
+        &manifest,
+        raw.clone(),
+        health.clone(),
+        0,
+    )
+    .expect("protocol plan");
+    assert_eq!(plan.decision.target.candidate.provider_id, "first");
+
+    let output = execute_v3_responses_direct_runtime_kernel_core(
+        V3ResponsesDirectRuntimeCoreState::new()
+            .with_provider_health(health.clone())
+            .with_initial_plan(&plan),
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &transport,
+    )
+    .await;
+
+    assert_eq!(
+        transport.sends.load(Ordering::SeqCst),
+        1,
+        "unexpected output: {output:?}"
+    );
+    assert_eq!(output.client_payload.status, 200, "{output:?}");
+    assert!(output.error_chain.is_none(), "{output:?}");
+    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    let failure = output
+        .observability
+        .as_ref()
+        .and_then(|observability| observability.provider_failure_events.first())
+        .expect("compatibility failure observation");
+    assert_eq!(failure.error_type.as_deref(), Some("provider_request_compat_error"));
+    assert_eq!(failure.health_state, "request_local_provider_compat");
+    assert_eq!(failure.failure_count, 0);
+    assert_eq!(failure.cooldown_until_ms, None);
+    assert!(
+        health
+            .availability("first", Some("key"), Some("test"), u64::MAX)
+            .available
+    );
 }
 
 #[tokio::test]

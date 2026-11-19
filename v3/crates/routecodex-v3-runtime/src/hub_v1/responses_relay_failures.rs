@@ -282,6 +282,14 @@ pub(crate) fn provider_request_relay_failure(
                         &error,
                     ))
                 }
+                V3ProviderCompatErrorClassification::StrictLegacyUnrepresentableRequest => {
+                    Some(crate::shared::direct_plain_error(
+                        routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+                        "ProviderReqCompat06ProviderCompat",
+                        "provider_request_compat_error",
+                        error.to_string(),
+                    ))
+                }
                 V3ProviderCompatErrorClassification::Other => None,
             };
             let (source, error_operator_fault) = match source_result {
@@ -293,7 +301,7 @@ pub(crate) fn provider_request_relay_failure(
                 "ProviderReqCompat06ProviderCompat",
                 source
                     .as_ref()
-                    .map_or("provider_request_compat_error", |source| {
+                    .map_or("provider_request_compat_internal_error", |source| {
                         source.code.as_str()
                     })
                     .to_string(),
@@ -1264,6 +1272,58 @@ mod tests {
             "provider_request_payload_invalid"
         );
         assert!(failure.terminal_projection.is_none());
+    }
+
+    #[test]
+    fn strict_legacy_unrepresentable_request_enters_request_local_policy() {
+        let error = V3ProviderCompatError::new_strict_legacy_unrepresentable_request(
+            "request",
+            provider_compat_core::STRICT_LEGACY_INPUT_PROFILE.to_string(),
+            format!(
+                "{} path=function_call_output.output[].input_image",
+                provider_compat_core::STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR
+            ),
+        );
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(error),
+            "provider-1",
+            None,
+        )
+        .expect("strict-legacy request compat failure must enter recovery");
+        assert_eq!(failure.status, 598);
+        let source = failure
+            .attempt_source
+            .as_ref()
+            .expect("strict-legacy failure must carry its typed source");
+        assert_eq!(source.code, "provider_request_compat_error");
+        assert!(
+            routecodex_v3_error::is_v3_recoverable_request_compat_source(source),
+            "the strict-legacy source must be health-neutral and request-local"
+        );
+        assert!(failure.error_operator_fault.is_none());
+        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+    }
+
+    #[test]
+    fn unrelated_compat_failure_uses_internal_error_code() {
+        let error = V3ProviderCompatError::other(
+            "request",
+            provider_compat_core::STRICT_LEGACY_INPUT_PROFILE.to_string(),
+            "unrelated provider compatibility fault".to_string(),
+        );
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(error),
+            "provider-1",
+            None,
+        )
+        .expect("unrelated request compat failure must use ordinary provider policy");
+        assert_eq!(failure.status, 502);
+        assert_eq!(
+            failure.policy_error_type,
+            "provider_request_compat_internal_error"
+        );
+        assert!(failure.attempt_source.is_none());
+        assert!(failure.error_operator_fault.is_none());
     }
 
     #[test]

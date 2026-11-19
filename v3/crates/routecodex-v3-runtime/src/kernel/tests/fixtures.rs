@@ -172,6 +172,54 @@ targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
     compile_v3_config_05_manifest(authoring).unwrap()
 }
 
+pub(super) fn strict_legacy_image_sibling_manifest() -> V3Config05ManifestPublished {
+    let authoring = parse_v3_config_02_authoring(
+        r#"
+version = 3
+
+[servers.test]
+bind = "127.0.0.1"
+port = 4444
+routing_group = "default"
+[servers.test.execution]
+allowed_modes = ["direct"]
+allowed_invocation_sources = ["client"]
+allowed_transports = ["json"]
+
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "test"
+compatibility_profile = "responses:strict-legacy-input"
+auth = { type = "api_key", entries = [{ alias = "key", env = "FIRST_KEY" }] }
+[providers.first.models.test]
+wire_name = "wire-first"
+
+[providers.second]
+type = "responses"
+base_url = "http://second.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SECOND_KEY" }] }
+[providers.second.models.test]
+wire_name = "wire-second"
+
+[forwarders.responses]
+model = "client-model"
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "second", model = "test", key = "key", priority = 1 }
+]
+
+[route_groups.default.pools.default]
+selection = { strategy = "priority" }
+targets = [{ kind = "forwarder", id = "responses", priority = 1 }]
+"#,
+    )
+    .unwrap();
+    compile_v3_config_05_manifest(authoring).unwrap()
+}
+
 pub(super) fn mixed_protocol_reselection_manifest() -> V3Config05ManifestPublished {
     let authoring = parse_v3_config_02_authoring(
         r#"

@@ -36476,3 +36476,143 @@ replay was performed during remediation.
 Remaining work is source delivery and CI. Production installation, restart,
 live same-entry replay, and exact active source loading remain out of this
 candidate run and `INCOMPLETE`/`UNVERIFIED` as applicable.
+
+## 2026-11-18 qingyanx input_image 400 fix handoff
+
+- Goal: fix issue `612639e` for request
+  `openai-responses-router-gpt-5.5-20261118T163946420-2803276-4887`; keep the
+  qingyanx strict-legacy candidate request-local, health-neutral, and lossless.
+- Evidence: A minimal request passes; exact provider-bound B0 returns HTTP 400
+  code `1210`; removing images passes only by losing business data; serializing
+  images as text returns HTTP 400 code `1261` prompt-too-long.
+- DAG and owner are recorded in `plan.md`. The first implementation gap is the
+  strict-legacy provider compat boundary plus the Direct projection error path.
+- Next node: add red tests for strict-profile representability and Direct
+  sibling reselection before any provider send. Production config, install,
+  restart, merge, push, and live replay are out of scope until candidate
+  gates and independent review pass.
+
+### 2026-11-19 continuation: author verification and review entry
+
+- Identity and continuity: `collab context` restored Henry as peer, wire role
+  `worker`, work role `architect`, with master Jenny. `collab recv` returned
+  `count=0`; the prior durable notification was consumed before this run. The
+  existing cancelled longhorizon was reused; no new goal was created or
+  renewed. `888e383-live-disconnect-20261113` remains owned elsewhere and its
+  worktree was not taken over or cleaned.
+- Root cause and fix: the request contains
+  `function_call_output.output[].input_image`; qingyanx's strict-legacy
+  Responses profile cannot represent it. The implementation keeps the original
+  request and image history unchanged, returns a typed request-local compat
+  failure, excludes only the exact incompatible candidate before provider
+  send, and lets a sibling process the complete history. No image is deleted,
+  serialized, truncated, or rewritten, and the candidate remains health-neutral.
+- Two planned GCM worker launches failed before result collection because of
+  transport/stream disconnect blockers. The work remained in this peer session
+  and no worker ownership claim was fabricated.
+- Author verification:
+  - `cargo fmt --manifest-path v3/Cargo.toml --all -- --check` PASS.
+  - `git diff --check` PASS.
+  - `npm run test:v3-provider-compat-profile-loading` exit `0`, including the
+    strict-legacy Direct and Relay image-history black-box cases.
+  - `npm run verify:v3-architecture-ci` exit `0`, `33/33` sub-gates green.
+  - A first architecture-CI attempt was environment-blocked by a missing
+    candidate `node_modules/yaml` and by two concurrently invoked tests
+    sharing one Cargo target lock. `npm ci` restored the declared dependency;
+    the author gates were then rerun serially. This is verification
+    environment recovery, not a candidate behavior finding.
+- Candidate map binding: the two image-history test IDs were added to the
+  existing `strict_legacy_input_black_box_regression` block. No second
+  verification block was created.
+- Open boundaries: independent overall review, PR CI, merge, push, remote
+  receipt, install, one formal `rccv3 restart`, listener health, same-entry
+  live replay, sample audit, and task-resource cleanup remain outstanding.
+  Issue `612639e` and duplicate issue `958d2ad` therefore remain `open`; a
+  candidate pass, sibling success, or reviewer acceptance is not production
+  fix closure.
+
+### 2026-11-19 review remediation and pre-review author receipt
+
+- The first independent overall review returned four findings. Two P1 findings
+  are accepted and closed here. The governance-scope P1 is not applicable to
+  this candidate: the user explicitly authorized fixing the current qingyanx
+  HTTP 400, and the directly applicable RouteCodex requirements are the
+  transparent-proxy, protocol-compat, and provider-error-decoupling entries.
+  The `routecodex-governance-unification` goal is a separate historical scope
+  and is not changed or promoted here. The raw review JSON is preserved at
+  `evidence/review-20261119/review.json`; the review event stream is preserved
+  at `evidence/review-20261119/events.jsonl`.
+- P1 function-map binding: `v3.provider_compat_profile_loading` now declares
+  `cross_feature_extensions` for `v3_direct_core.rs` (owned by
+  `v3.direct_runtime_kernel_core`), `provider_failure_runtime_policy.rs`
+  (owned by `v3.provider_response_error_policy_closeout`), and
+  `routecodex-v3-error/src/lib.rs` (owned by `v3.debug_error_foundation`).
+  These existing owners consume the typed request-local compatibility source;
+  Compat does not own retry, provider switching, or health semantics.
+- P1 no-sibling exhaustion: the strict-legacy image-history black box now
+  adds `strict_legacy_image_history_exhausts_direct_without_provider_send`
+  and `strict_legacy_image_history_exhausts_relay_without_provider_send`.
+  Both assert the strict upstream receives zero requests and rejections, the
+  public client request ends as a transport break rather than HTTP 400 or a
+  normal empty response, and the listener `/_routecodex/health/cooldown-pool`
+  remains empty. Both IDs are registered in the existing
+  `strict_legacy_input_black_box_regression` block.
+- Author receipt: the full strict-legacy black box is `6 passed; 0 failed`
+  (log: `evidence/strict-legacy-blackbox-full-20261118T212755.log`).
+  `npm run test:v3-provider-compat-profile-loading` exits `0`
+  (log: `evidence/strict-legacy-profile-loading-20261118T212836.log`).
+  `npm run verify:v3-architecture-ci` exits `0` with `33/33` sub-gates green
+  (log: `evidence/architecture-ci-20261118T212940.log`).
+  `cargo fmt --manifest-path v3/Cargo.toml --all -- --check` and
+  `git diff --check` both PASS.
+- Remaining: the next independent overall review of this remediated candidate
+  is the gate before candidate commit, PR CI, merge, push, install, one formal
+  `rccv3 restart`, listener health, live replay, sample audit, and cleanup.
+  Issue `612639e` remains `open`.
+
+### 2026-11-19 current-base verification after r2 finding
+
+- Review r2 identified one P1: the previous author receipts were bound to the
+  older `origin/main=82bbe91c...`, while the reviewer resolved the affected
+  candidate against `origin/main=636fb5284bd00d6e381e693e6898acbed7f82f1b`.
+  The candidate worktree was retained unchanged; no reset, stash, or unrelated
+  worktree cleanup was performed.
+- Current-base profile and public-entry verification was rerun with
+  `origin/main=636fb5284bd00d6e381e693e6898acbed7f82f1b`:
+  `npm run test:v3-provider-compat-profile-loading` exited `0`.
+  The receipt is `evidence/strict-legacy-profile-loading-current-20261119.log`
+  and records the provider-compat unit suite plus the strict-legacy Direct and
+  Relay sibling and exhaustion cases as green.
+- Current-base architecture verification was rerun:
+  `npm run verify:v3-architecture-ci` exited `0` with `33/33` sub-gates green.
+  The raw receipt is `evidence/architecture-ci-current-20261119.log`.
+- These current-base receipts address the r2 stale-base finding. They are now
+  the author evidence for a focused independent re-review of the affected
+  strict-legacy runtime and architecture-map boundary. Review, candidate
+  commit, PR CI, merge, push, install, one formal `rccv3 restart`, listener
+  health, same-entry replay, sample audit, and cleanup remain open.
+- Before focused re-review dispatch, `git fetch origin` was rerun and
+  `origin/main` remained exactly
+  `636fb5284bd00d6e381e693e6898acbed7f82f1b`; `git diff --check` passed.
+
+### 2026-11-19 focused independent review PASS
+
+- A new independent Codex OAuth `codex-auto-review` session completed the
+  focused r3 review with thinking medium and read-only permissions.
+- Review exit code was `0`; final JSON was valid and echoed
+  `mode=focused`, `commit=null`, and base
+  `636fb5284bd00d6e381e693e6898acbed7f82f1b`. Findings were empty.
+- The reviewer confirmed that the current-base receipts cover both Direct and
+  Relay sibling reselection, both no-sibling transport-only exhaustion cases,
+  the provider-compat unit suite, and the 33/33 architecture gates. It also
+  confirmed that the current base is an ancestor of the candidate and that the
+  stale-base P1 is resolved.
+- Raw review receipt:
+  `evidence/review-20261119-r3/review.json`; event stream:
+  `evidence/review-20261119-r3/events.jsonl`; exit receipt:
+  `evidence/review-20261119-r3/review.exit`; reviewer contract:
+  `evidence/review-20261119-r3/task.md`.
+- This closes the review finding for the current candidate. Candidate commit,
+  applicable PR CI, merge, push, remote receipt, install, one formal
+  `rccv3 restart`, listener health, same-entry live replay, sample audit, and
+  owned-resource cleanup remain outstanding.

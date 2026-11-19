@@ -80,6 +80,22 @@ features = {{ directory_owned = true }}
     path
 }
 
+fn write_profileless_provider(
+    root: &Path,
+    provider_id: &str,
+    provider_type: &str,
+    model: &str,
+    token_file: &Path,
+    extra: &str,
+) -> PathBuf {
+    let path = write_provider(root, provider_id, provider_type, model, token_file, extra);
+    let raw = fs::read_to_string(&path)
+        .unwrap()
+        .replace("compatibilityProfile = \"chat:test\"\n", "");
+    fs::write(&path, raw).unwrap();
+    path
+}
+
 fn directory_root_config(primary_provider: &str, model: &str) -> String {
     format!(
         r#"version = 3
@@ -618,6 +634,61 @@ supportsThinking = true
     assert_eq!(
         provider.compatibility_profile.as_deref(),
         Some("responses:deepseek-official")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn qingyanx_directory_provider_defaults_to_strict_legacy_responses_compat_profile() {
+    let root = temp_root("qingyanx-default-profile");
+    let token = write_token(&root, "qingyanx");
+    write_profileless_provider(&root, "qingyanx", "responses", "glm-5.3", &token, "");
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("qingyanx", "glm-5.3")).unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("qingyanx directory provider must compile");
+    assert_eq!(
+        snapshot.providers["qingyanx"]
+            .compatibility_profile
+            .as_deref(),
+        Some("responses:strict-legacy-input")
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn unregistered_provider_does_not_receive_strict_legacy_responses_compat_profile() {
+    let root = temp_root("unregistered-default-profile");
+    let token = write_token(&root, "ordinary");
+    write_profileless_provider(&root, "ordinary", "responses", "glm-5.3", &token, "");
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("ordinary", "glm-5.3")).unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("ordinary directory provider must compile");
+    assert_eq!(snapshot.providers["ordinary"].compatibility_profile, None);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_qingyanx_compatibility_profile_overrides_directory_default() {
+    let root = temp_root("qingyanx-explicit-profile");
+    let token = write_token(&root, "qingyanx");
+    write_provider(&root, "qingyanx", "responses", "glm-5.3", &token, "");
+    let config_path = root.join("config.v3.toml");
+    fs::write(&config_path, directory_root_config("qingyanx", "glm-5.3")).unwrap();
+
+    let snapshot = V3ConfigStore::new(&config_path)
+        .load_snapshot()
+        .expect("explicit qingyanx profile must compile");
+    assert_eq!(
+        snapshot.providers["qingyanx"]
+            .compatibility_profile
+            .as_deref(),
+        Some("chat:test")
     );
     fs::remove_dir_all(root).unwrap();
 }

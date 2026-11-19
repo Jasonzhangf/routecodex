@@ -47,6 +47,12 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
     let mut failed_candidates = BTreeSet::new();
     let mut same_candidate_retries = BTreeMap::new();
     let mut trace = Vec::new();
+    let attempt_source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "ProviderReqCompat06ProviderCompat",
+        "provider_request_compat_error",
+        "arguments must be valid JSON",
+    );
     let context = V3RelayProviderFailurePolicyContext {
         manifest: &manifest,
         captured_target_09: None,
@@ -67,7 +73,7 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         last_external_http: &mut None,
     };
 
-    let result = run_v3_relay_provider_failure_policy(
+    let result = run_v3_relay_provider_failure_policy_with_response_source(
         &context,
         selected,
         "ProviderReqCompat06ProviderCompat",
@@ -76,6 +82,10 @@ async fn request_local_provider_compat_default_floor_exhausts_without_wait_or_he
         "arguments must be valid JSON".to_string(),
         None,
         &mut state,
+        None,
+        Some(attempt_source),
+        None,
+        None,
     )
     .await
     .expect("request-local compat exhaustion must project without recovery wait");

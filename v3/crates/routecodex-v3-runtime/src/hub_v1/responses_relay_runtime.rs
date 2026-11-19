@@ -1329,6 +1329,42 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         .expect("operator-fault manifest")
     }
 
+    fn strict_legacy_image_sibling_manifest() -> V3Config05ManifestPublished {
+        let source = r#"
+version = 3
+[servers.strict_legacy_image]
+bind = "127.0.0.1"
+port = 5556
+routing_group = "strict_legacy_image"
+endpoints = ["responses"]
+[providers.first]
+type = "responses"
+base_url = "http://first.invalid/v1"
+default_model = "test"
+compatibility_profile = "responses:strict-legacy-input"
+auth = { type = "api_key", entries = [{ alias = "key", env = "FIRST_KEY" }] }
+[providers.first.models.test]
+wire_name = "wire-first"
+[providers.second]
+type = "responses"
+base_url = "http://second.invalid/v1"
+default_model = "test"
+auth = { type = "api_key", entries = [{ alias = "key", env = "SECOND_KEY" }] }
+[providers.second.models.test]
+wire_name = "wire-second"
+[route_groups.strict_legacy_image.pools.default]
+selection = { strategy = "priority" }
+targets = [
+  { kind = "provider_model", provider = "first", model = "test", key = "key", priority = 2 },
+  { kind = "provider_model", provider = "second", model = "test", key = "key", priority = 1 }
+]
+"#;
+        compile_v3_config_05_manifest(
+            parse_v3_config_02_authoring(source).expect("strict-legacy image authoring"),
+        )
+        .expect("strict-legacy image manifest")
+    }
+
     #[tokio::test]
     async fn responses_compat_other_none_uses_canonical_fallback_source() {
         let manifest = operator_fault_manifest();
@@ -1369,7 +1405,10 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         .expect("Responses compat Other must defer to the provider failure policy");
         assert_eq!(failure.status, 502);
         assert_eq!(failure.source_stage, "ProviderReqCompat06ProviderCompat");
-        assert_eq!(failure.policy_error_type, "provider_request_compat_error");
+        assert_eq!(
+            failure.policy_error_type,
+            "provider_request_compat_internal_error"
+        );
         assert_eq!(failure.policy_error_message, expected_message);
         assert!(failure.terminal_projection.is_none());
         assert!(failure.error_operator_fault.is_none());
@@ -1416,7 +1455,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
             routecodex_v3_error::V3ErrorSourceKind::ProviderFailure
         );
         assert_eq!(source.source_stage, "ProviderReqCompat06ProviderCompat");
-        assert_eq!(source.code, "provider_request_compat_error");
+        assert_eq!(source.code, "provider_request_compat_internal_error");
         assert_eq!(source.message, expected_message);
         assert!(source.internal_error.is_none());
         let external = source
@@ -1430,7 +1469,7 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
         assert_eq!(external.status, None);
         assert_eq!(
             external.code.as_deref(),
-            Some("provider_request_compat_error")
+            Some("provider_request_compat_internal_error")
         );
         assert_eq!(external.provider_id.as_deref(), Some("primary"));
         assert_eq!(external.upstream_request_id, None);
@@ -1452,6 +1491,117 @@ targets = [{ kind = "provider_model", provider = "primary", model = "gpt-test", 
                     "primary",
                     Some("key"),
                     Some("gpt-test"),
+                    u64::MAX,
+                )
+                .available
+        );
+    }
+
+    #[tokio::test]
+    async fn strict_legacy_image_failure_reselects_sibling_without_health_mutation() {
+        let manifest = strict_legacy_image_sibling_manifest();
+        let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
+        let failure_session_scope = V3ProviderFailureSessionScope::new(
+            "strict_legacy_image",
+            "strict_legacy_image",
+            "session",
+        )
+        .expect("strict-legacy image session scope");
+        let selected = match resolve_v3_relay_target_outcome(V3RelayProviderTargetResolutionInput {
+            manifest: &manifest,
+            server_id: "strict_legacy_image",
+            failure_session_scope: &failure_session_scope,
+            entry_kind: "responses",
+            endpoint_path: "/v1/responses",
+            body: &json!({"model": "test", "input": "hello"}),
+            request_local_excluded_candidates: &BTreeSet::new(),
+            provider_health: &health,
+            now_ms: 0,
+            deterministic_sample: 0,
+        }) {
+            V3RelayProviderTargetResolution::Selected(selected) => selected,
+            _ => panic!("fixture must select the strict-legacy provider"),
+        };
+        assert_eq!(selected.candidate.provider_id, "first");
+        let error = V3ProviderCompatError::new_strict_legacy_unrepresentable_request(
+            "request",
+            provider_compat_core::STRICT_LEGACY_INPUT_PROFILE.to_string(),
+            format!(
+                "{} path=function_call_output.output[].input_image",
+                provider_compat_core::STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR
+            ),
+        );
+        let failure = provider_request_relay_failure(
+            V3ResponsesRelayRuntimeError::ProviderCompat(error),
+            "first",
+            None,
+        )
+        .expect("strict-legacy image failure must enter the provider policy");
+        assert_eq!(failure.status, 598);
+        let source = failure
+            .attempt_source
+            .as_ref()
+            .expect("strict-legacy image failure must carry its recoverable source");
+        assert_eq!(source.code, "provider_request_compat_error");
+
+        let context = V3RelayProviderFailurePolicyContext {
+            manifest: &manifest,
+            captured_target_09: None,
+            failure_session_scope: failure_session_scope.clone(),
+            provider_health: &health,
+            retry_policy: V3RelayProviderFailureRetryPolicy::default(),
+            deterministic_sample: 0,
+        };
+        let mut last_external_http = None;
+        let mut failed_candidates = BTreeSet::new();
+        let mut same_candidate_retries = BTreeMap::new();
+        let mut retry_selected = None;
+        let mut provider_failure_events = Vec::new();
+        let selected_observability = V3RuntimeObservability::default();
+        let mut trace = Vec::new();
+        let mut state = V3ResponsesRelayProviderRetryState {
+            failed_candidates: &mut failed_candidates,
+            same_candidate_retries: &mut same_candidate_retries,
+            retry_selected: &mut retry_selected,
+            provider_failure_events: &mut provider_failure_events,
+            provider_failure_event_sink: None,
+            selected_observability: &selected_observability,
+            trace: &mut trace,
+            last_external_http: &mut last_external_http,
+        };
+
+        let terminal =
+            handle_v3_responses_relay_provider_failure(&context, selected, failure, &mut state)
+                .await
+                .expect("strict-legacy image failure must stay in the provider policy");
+        assert!(terminal.is_none(), "a sibling must be selected");
+        assert_eq!(failed_candidates.len(), 1);
+        assert_eq!(
+            retry_selected
+                .as_ref()
+                .expect("strict-legacy image failure must select the sibling")
+                .candidate
+                .provider_id,
+            "second"
+        );
+        let event = provider_failure_events
+            .first()
+            .expect("strict-legacy image failure event");
+        assert_eq!(
+            event.error_type.as_deref(),
+            Some("provider_request_compat_error")
+        );
+        assert_eq!(event.health_state, "request_local_provider_compat");
+        assert_eq!(event.failure_count, 0);
+        assert_eq!(event.cooldown_until_ms, None);
+        assert!(
+            health
+                .store()
+                .availability_for_session(
+                    &failure_session_scope,
+                    "first",
+                    Some("key"),
+                    Some("test"),
                     u64::MAX,
                 )
                 .available

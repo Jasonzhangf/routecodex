@@ -6,6 +6,7 @@
     { "providerId": "minimax", "compatibilityProfile": "chat:minimax" },
     { "providerId": "minimonth", "compatibilityProfile": "chat:minimax" },
     { "providerId": "opencode-go", "compatibilityProfile": "responses:deepseek-console-go" },
-    { "providerId": "deepseek_official", "compatibilityProfile": "responses:deepseek-official" }
+    { "providerId": "deepseek_official", "compatibilityProfile": "responses:deepseek-official" },
+    { "providerId": "qingyanx", "compatibilityProfile": "responses:strict-legacy-input" }
   ]
 }

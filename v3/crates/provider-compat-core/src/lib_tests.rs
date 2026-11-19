@@ -654,3 +654,215 @@ fn custom_tool_function_profile_dispatches_request_and_response_mapping() {
     assert_eq!(response.payload["output"][0]["name"], "apply_patch");
     assert_eq!(response.payload["output"][0]["input"], "patch");
 }
+
+#[test]
+fn strict_legacy_input_profile_projects_rejected_responses_fields() {
+    let payload = json!({
+        "model": "deepseek-v3.1",
+        "input": [
+            {"type": "message", "role": "user", "content": "hello"},
+            {"type": "reasoning", "summary": "prior reasoning"},
+            {"type": "function_call", "call_id": "call_1", "name": "tool_search", "arguments": "{}"}
+        ],
+        "tools": [
+            {"type": "tool_search", "name": "tool_search", "description": "Search tools", "parameters": {"type": "object"}, "x_provider_extension": {"mode": "strict"}}
+        ],
+        "tool_choice": {"type": "tool_search", "name": "tool_search"}
+    });
+    let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload,
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:strict-legacy-input".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        result.applied_profile.as_deref(),
+        Some("responses:strict-legacy-input")
+    );
+    assert_eq!(
+        result.payload["input"],
+        json!([
+            {"type": "message", "role": "user", "content": "hello"},
+            {"type": "function_call", "call_id": "call_1", "name": "tool_search", "arguments": "{}"}
+        ])
+    );
+    assert_eq!(
+        result.payload["tools"][0],
+        json!({
+            "type": "function",
+            "name": "tool_search",
+            "description": "Search tools",
+            "parameters": {"type": "object"},
+            "x_provider_extension": {"mode": "strict"}
+        })
+    );
+    assert_eq!(
+        result.payload["tool_choice"],
+        json!({"type": "function", "name": "tool_search"})
+    );
+}
+
+#[test]
+fn strict_legacy_input_profile_composes_custom_tool_function_history() {
+    let payload = json!({
+        "model": "deepseek-v3.1",
+        "tools": [
+            {"type": "custom", "name": "apply_patch", "description": "Apply patch"},
+            {"type": "tool_search", "name": "tool_search", "parameters": {"type": "object"}}
+        ],
+        "tool_choice": "auto",
+        "input": [
+            {"type": "message", "role": "user", "content": "patch it"},
+            {"type": "reasoning", "summary": []},
+            {"type": "custom_tool_call", "call_id": "call_1", "name": "apply_patch", "input": "patch"},
+            {"type": "custom_tool_call_output", "call_id": "call_1", "output": "done"}
+        ]
+    });
+    let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload,
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:strict-legacy-input".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+
+    assert_eq!(
+        result.applied_profile.as_deref(),
+        Some("responses:strict-legacy-input")
+    );
+    assert_eq!(result.payload["tools"][0]["type"], "function");
+    assert_eq!(
+        result.payload["tools"][0]["name"],
+        "routecodex_custom__6170706c795f7061746368"
+    );
+    assert_eq!(result.payload["tools"][1]["type"], "function");
+    assert_eq!(result.payload["tools"][1]["name"], "tool_search");
+    assert_eq!(
+        result.payload["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["message", "function_call", "function_call_output"]
+    );
+    assert_eq!(
+        result.payload["input"][1]["name"],
+        "routecodex_custom__6170706c795f7061746368"
+    );
+    assert_eq!(
+        result.payload["input"][1]["arguments"],
+        "{\"input\":\"patch\"}"
+    );
+
+    let binding = crate::compile_custom_tool_function_binding(&json!({
+        "tools": [
+            {"type": "custom", "name": "apply_patch"},
+            {"type": "tool_search", "name": "tool_search", "parameters": {"type": "object"}}
+        ]
+    }));
+    let response = run_resp_inbound_stage3_compat(ReqOutboundCompatInput {
+        payload: json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "routecodex_custom__6170706c795f7061746368",
+                "arguments": "{\"input\":\"patch\"}"
+            }]
+        }),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:strict-legacy-input".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            custom_tool_function_binding: Some(binding),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .unwrap();
+    assert_eq!(response.payload["output"][0]["type"], "custom_tool_call");
+    assert_eq!(response.payload["output"][0]["name"], "apply_patch");
+    assert_eq!(response.payload["output"][0]["input"], "patch");
+}
+
+#[test]
+fn strict_legacy_input_profile_rejects_unrepresentable_function_output_image() {
+    let image = json!({
+        "type": "input_image",
+        "detail": "auto",
+        "image_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    });
+    let payload = json!({
+        "model": "zai-org/glm-5.3",
+        "input": [
+            {"type": "function_call", "call_id": "call_image", "name": "view_image", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_image", "output": [
+                {"type": "input_text", "text": "image result"},
+                image
+            ]}
+        ]
+    });
+    let result = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload: payload.clone(),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:strict-legacy-input".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    });
+    let error = result.expect_err("strict-legacy backend cannot represent output images");
+    assert!(error.starts_with(crate::STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR));
+    assert!(error.contains("function_call_output.output[].input_image"));
+    assert_eq!(payload["input"][1]["output"][1], image);
+}
+
+#[test]
+fn strict_legacy_input_profile_keeps_representable_function_history_and_other_profiles() {
+    let payload = json!({
+        "model": "zai-org/glm-5.3",
+        "input": [
+            {"type": "function_call", "call_id": "call_text", "name": "read", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_text", "output": [
+                {"type": "input_text", "text": "text result"}
+            ]}
+        ]
+    });
+    let strict = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload: payload.clone(),
+        adapter_context: AdapterContext {
+            compatibility_profile: Some("responses:strict-legacy-input".to_string()),
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .expect("text function output remains representable");
+    assert_eq!(strict.payload["input"], payload["input"]);
+
+    let image_payload = json!({
+        "input": [{
+            "type": "function_call_output",
+            "call_id": "call_image",
+            "output": [{"type": "input_image", "image_url": "data:image/png;base64,AAAA"}]
+        }]
+    });
+    let ordinary = run_req_outbound_stage3_compat(ReqOutboundCompatInput {
+        payload: image_payload.clone(),
+        adapter_context: AdapterContext {
+            compatibility_profile: None,
+            provider_protocol: Some("openai-responses".to_string()),
+            ..Default::default()
+        },
+        explicit_profile: None,
+    })
+    .expect("other Responses providers keep newer image shapes");
+    assert_eq!(ordinary.payload["input"], image_payload["input"]);
+}
