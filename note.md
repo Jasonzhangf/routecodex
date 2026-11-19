@@ -36616,3 +36616,19 @@ candidate run and `INCOMPLETE`/`UNVERIFIED` as applicable.
   applicable PR CI, merge, push, remote receipt, install, one formal
   `rccv3 restart`, listener health, same-entry live replay, sample audit, and
   owned-resource cleanup remain outstanding.
+
+### 2026-11-19 candidate delivery and PR CI
+
+- Candidate commit `1be14ea489` was created after the independent review PASS.
+  The first commit attempt was rejected because this worktree lacked the
+  declared root `typescript` dependency; `npm ci` restored the dependency and
+  the normal pre-commit hook then passed `verify:fast` plus the affected V3
+  Rust compile check. No hook bypass was used.
+- The candidate branch was pushed to `origin` and PR `#587` was opened:
+  `fix(v3): preserve image history across strict legacy routing`.
+- The owner-local Collab delivery receipt records the candidate commit, PR,
+  current-base logs, focused review, hook result, worktree, and the remaining
+  install/restart/live-replay/sample-audit/cleanup gaps.
+- GitHub CI is currently in progress for `scope` and `repo-sanity`. Merge,
+  remote main receipt, install, one formal `rccv3 restart`, listener health,
+  same-entry live replay, sample audit, and cleanup remain open.
