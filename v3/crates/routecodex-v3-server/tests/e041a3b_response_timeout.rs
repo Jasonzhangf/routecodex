@@ -430,6 +430,51 @@ async fn provider_timeout_recovers_while_residence_remains() {
 }
 
 #[tokio::test]
+async fn request_counter_write_failure_preserves_responses_and_counts() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start().await;
+    let counter_dir = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+        .join(".rcc")
+        .join("state");
+    let counter_file = counter_dir.join("request-id-counter.json");
+    let counter_temp = counter_file.with_extension(format!("json.tmp.{}", std::process::id()));
+    std::fs::create_dir_all(&counter_temp).unwrap();
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    for input in [
+        "counter-write-fault-first",
+        "counter-write-fault-second",
+        "counter-writable",
+    ] {
+        if input == "counter-writable" {
+            assert!(!counter_file.exists());
+            std::fs::remove_dir(&counter_temp).unwrap();
+        }
+        let response = client
+            .post(format!("{}/v1/responses", entry.base()))
+            .json(&json!({"input":input,"stream":true}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains("sibling-success") && body.contains("response.completed"),
+            "{body}"
+        );
+        assert_eq!(entry.captures.try_recv().unwrap()["input"], input);
+    }
+    let state: Value = serde_json::from_slice(&std::fs::read(counter_file).unwrap()).unwrap();
+    assert_eq!(state["totalCount"], 3);
+    assert_eq!(state["windowCount"], 3);
+    entry.stop().await;
+}
+
+#[tokio::test]
 async fn expired_request_never_dispatches_or_cools_backup_candidate() {
     let _guard = TEST_LOCK.lock().await;
     let mut entry = start_with(250, 5000, true, true).await;

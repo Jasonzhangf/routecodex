@@ -4,7 +4,7 @@
 
 `feature_id: v3.console_request_count_visibility` is the single registered
 owner of the existing V3 request counter extension used by this feature: it
-returns the persisted request id together with typed total and local-day counts,
+returns the request id together with typed total and local-day counts,
 then projects that same allocation through
 `feature_id: v3.console_human_readable_layering`.
 
@@ -24,8 +24,10 @@ request id.
 
 1. The aggregate creates one `Arc<Mutex<V3RequestIdCounter>>` before building
    listeners; every listener clones that same handle.
-2. `V3RequestIdCounter` loads the persisted state once under the aggregate lock.
-3. One allocation atomically increments total and local-day counts.
+2. `V3RequestIdCounter` loads persisted counts under the aggregate lock.
+3. One allocation atomically increments total and local-day counts in memory.
+   Disk I/O errors go to operational diagnostics. The owner continues allocating
+   from memory and publishes the cumulative counts when the state file is available.
 4. The owner returns one typed allocation containing `request_id`,
    `total_count`, and `daily_count`.
 5. Server request context retains that exact allocation for the whole request.
@@ -40,6 +42,9 @@ request id.
 - A local-date transition keeps total monotonic and resets daily to `1`.
 - Restart reloads total and current local-day counts from the same persisted
   file.
+- A counter write failure leaves a real Responses SSE request able to reach the
+  provider and complete. When writes resume, the saved counts include requests
+  allocated during the failure.
 - One request start and its terminal response show the same
   `[#total/daily]`.
 - Exactly one routed request block is emitted; no pre-route block may publish
@@ -75,6 +80,6 @@ request id.
 - Existing managed lifecycle persistence/restart tests.
 - Focused console fixed-column/color/plain tests.
 - Resource/function/mainline/manifest/verification map gates.
-- Managed V3 restart and two real 5555 requests proving monotonic
-  `[#total/daily]` in both request and response blocks.
+- Managed V3 restart and two real Responses requests on an active managed
+  listener proving monotonic `[#total/daily]` in both request and response blocks.
 - Mandatory Codex review with unambiguous `VERDICT: PASS`.

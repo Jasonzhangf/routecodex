@@ -1928,6 +1928,7 @@ mod direct_sse_observability_none_tests {
                 )),
                 state: V3RequestCounterState::default(),
                 loaded: false,
+                persistence_degraded: false,
             })),
             codex_sample_store: Arc::new(routecodex_v3_debug::V3CodexSampleStore::new(
                 false,

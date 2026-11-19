@@ -6280,7 +6280,7 @@ chains:
     callee_file: v3/crates/routecodex-v3-server/src/request_id.rs
     owner_feature_id: v3.console_request_count_visibility
     semantic_input: the aggregate-shared request counter handle
-    semantic_output: one persisted, unique, typed request identity allocation
+    semantic_output: one unique typed request identity allocated in memory, with counter persistence reported through diagnostics
     resource_flow:
       consumes:
       - v3.server.request_identity

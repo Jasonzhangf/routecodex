@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
-use std::io::Read as _;
+use std::io::{self, ErrorKind, Write as _};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,6 +26,7 @@ pub(crate) struct V3RequestIdCounter {
     pub(crate) state_file: PathBuf,
     pub(crate) state: V3RequestCounterState,
     pub(crate) loaded: bool,
+    pub(crate) persistence_degraded: bool,
 }
 
 impl V3RequestIdCounter {
@@ -34,6 +35,7 @@ impl V3RequestIdCounter {
             state_file: resolve_v3_request_id_counter_file(),
             state: V3RequestCounterState::default(),
             loaded: false,
+            persistence_degraded: false,
         }
     }
 
@@ -44,7 +46,7 @@ impl V3RequestIdCounter {
         model: &str,
     ) -> Result<V3AllocatedRequestIdentity, String> {
         let clock = v3_request_id_clock_now()?;
-        self.ensure_loaded(&clock)?;
+        let load_result = self.ensure_loaded(&clock.local_date_key);
         if self.state.window_key != clock.local_date_key {
             self.state.window_key = clock.local_date_key.clone();
             self.state.window_count = 0;
@@ -60,7 +62,24 @@ impl V3RequestIdCounter {
             .checked_add(1)
             .ok_or_else(|| "V3 request id daily counter overflowed".to_string())?;
         self.state.updated_at = clock.utc_iso.clone();
-        self.persist()?;
+        let persist_result = load_result.and_then(|()| self.persist());
+        match (self.persistence_degraded, persist_result) {
+            (false, Err(error)) => {
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "[RouteCodexV3] request counter persistence unavailable: {error}"
+                );
+                self.persistence_degraded = true;
+            }
+            (true, Ok(())) => {
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "[RouteCodexV3] request counter persistence recovered"
+                );
+                self.persistence_degraded = false;
+            }
+            _ => {}
+        }
         Ok(V3AllocatedRequestIdentity {
             request_id: format!(
                 "{entry}-{provider}-{model}-{}-{}-{}",
@@ -75,33 +94,23 @@ impl V3RequestIdCounter {
         })
     }
 
-    fn ensure_loaded(&mut self, clock: &V3RequestIdClock) -> Result<(), String> {
+    fn ensure_loaded(&mut self, local_date_key: &str) -> Result<(), String> {
         if self.loaded {
             return Ok(());
         }
-        if !self.state_file.exists() {
-            self.state = V3RequestCounterState {
-                total_count: 0,
-                window_count: 0,
-                window_key: clock.local_date_key.clone(),
-                updated_at: clock.utc_iso.clone(),
-            };
-            self.loaded = true;
-            return Ok(());
-        }
-        let mut file = fs::File::open(&self.state_file).map_err(|error| {
-            format!(
-                "failed to read V3 request id counter {}: {error}",
-                self.state_file.display()
-            )
-        })?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(|error| {
-            format!(
-                "failed to read V3 request id counter {}: {error}",
-                self.state_file.display()
-            )
-        })?;
+        let bytes = match fs::read(&self.state_file) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                self.loaded = true;
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(format!(
+                    "failed to read V3 request id counter {}: {error}",
+                    self.state_file.display()
+                ))
+            }
+        };
         let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
             format!(
                 "failed to parse V3 request id counter {}: {error}",
@@ -144,17 +153,15 @@ impl V3RequestIdCounter {
                 )
             })?
             .to_string();
-        let updated_at = value
-            .get("updatedAt")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        self.state = V3RequestCounterState {
-            total_count,
-            window_count,
-            window_key,
-            updated_at,
-        };
+        // Count requests admitted while the persisted state was unreadable.
+        self.state.total_count = self.state.total_count.saturating_add(total_count);
+        if window_key == local_date_key {
+            if self.state.window_key != window_key {
+                self.state.window_key = window_key;
+                self.state.window_count = 0;
+            }
+            self.state.window_count = self.state.window_count.saturating_add(window_count);
+        }
         self.loaded = true;
         Ok(())
     }

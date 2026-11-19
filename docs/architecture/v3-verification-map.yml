@@ -2854,12 +2854,14 @@ features:
   - One aggregate-shared request counter handle is cloned into every V3 listener.
   - One atomic V3AllocatedRequestIdentity carries request_id, total_count, and daily_count.
   - Request and response console headlines render the same typed total/daily request count.
+  - When the request counter temp file cannot be written, Responses SSE reaches the provider and completes. The next successful write includes the intervening counts.
   required_negative:
   - Listeners must not create per-port request counter handles for the shared persisted file.
   - Console must not parse total or daily counts from the long request id string.
   - Console must not emit a duplicate pre-route placeholder request block.
   integration:
   - cargo +stable test --manifest-path v3/Cargo.toml -p routecodex-v3-server request_identity --lib -- --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e041a3b_response_timeout request_counter_write_failure_preserves_responses_and_counts -- --exact --nocapture
   smoke:
   - npm run verify:v3-console-request-count-visibility
   - npm run test:v3-console-request-count-visibility-red-fixtures
