@@ -198,12 +198,12 @@
     "body_must": {
       "text": "held response released",
       "status": "completed",
-      "output_items.0.type": "message",
-      "output_items.0.role": "assistant",
-      "output_items.0.content.0.type": "output_text",
-      "output_items.0.content.0.text": "held response released",
-      "output_items.1.type": "reasoning",
-      "output_items.1.summary.0.text": "relay failure holder completed"
+      "output_items.0.type": "reasoning",
+      "output_items.0.summary.0.text": "relay failure holder completed",
+      "output_items.1.type": "message",
+      "output_items.1.role": "assistant",
+      "output_items.1.content.0.type": "output_text",
+      "output_items.1.content.0.text": "held response released"
     },
     "body_must_not": [
       "provider_error",
@@ -236,12 +236,12 @@
       "body_must": {
         "text": "recovered response",
         "status": "completed",
-        "output_items.0.type": "message",
-        "output_items.0.role": "assistant",
-        "output_items.0.content.0.type": "output_text",
-        "output_items.0.content.0.text": "recovered response",
-        "output_items.1.type": "reasoning",
-        "output_items.1.summary.0.text": "relay failure recovered"
+        "output_items.0.type": "reasoning",
+        "output_items.0.summary.0.text": "relay failure recovered",
+        "output_items.1.type": "message",
+        "output_items.1.role": "assistant",
+        "output_items.1.content.0.type": "output_text",
+        "output_items.1.content.0.text": "recovered response"
       },
       "body_must_not": [
         "provider_error",
@@ -270,12 +270,12 @@
       "body_must": {
         "text": "recovered response",
         "status": "completed",
-        "output_items.0.type": "message",
-        "output_items.0.role": "assistant",
-        "output_items.0.content.0.type": "output_text",
-        "output_items.0.content.0.text": "recovered response",
-        "output_items.1.type": "reasoning",
-        "output_items.1.summary.0.text": "relay failure recovered"
+        "output_items.0.type": "reasoning",
+        "output_items.0.summary.0.text": "relay failure recovered",
+        "output_items.1.type": "message",
+        "output_items.1.role": "assistant",
+        "output_items.1.content.0.type": "output_text",
+        "output_items.1.content.0.text": "recovered response"
       },
       "body_must_not": [
         "provider_error",
