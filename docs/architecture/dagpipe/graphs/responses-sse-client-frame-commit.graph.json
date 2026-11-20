@@ -1,110 +1,212 @@
 {
   "id": "v3.responses_sse_client_frame_commit",
-  "version": "1",
+  "version": "2",
   "inputs": [
     {
-      "id": "provider-attempt-frame",
-      "schema": "Array",
-      "schema_ref": "v3.responses_sse_client_frame_commit.arc.provider_attempt_frame"
+      "id": "provider-attempt-input",
+      "schema": "Object",
+      "schema_ref": "v3.responses_sse_client_frame_commit.arc.provider_attempt_input"
     }
   ],
   "nodes": [
     {
       "id": "collect_provider_attempt_frames",
-      "operator": "routecodex.v3.runtime.collect_direct_sse_attempt_frames",
+      "operator": "routecodex.v3.runtime.collect_direct_sse_attempt_after_terminal_with_hooks",
       "operator_version": "1",
-      "inputs": ["provider-attempt-frame"],
+      "inputs": ["provider-attempt-input"],
       "output": {
-        "id": "buffered-attempt-frames",
-        "schema": "Array",
-        "schema_ref": "v3.responses_sse_client_frame_commit.arc.buffered_attempt_frames"
+        "id": "attempt-outcome",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.attempt_outcome"
       },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
-      "iterator": "Items",
+      "iterator": "Whole",
       "resources": {
-        "reads": [],
+        "reads": ["v3.response.provider_raw", "v3.execution.attempt_control_state"],
         "writes": ["v3.sse.direct.full_attempt_buffer"]
       }
     },
     {
-      "id": "detect_first_committable_frame",
-      "operator": "routecodex.v3.runtime.detect_first_committable_frame",
+      "id": "seal_accepted_output",
+      "operator": "routecodex.v3.runtime.V3CommittedClientSseBuilder::seal_after_validated_terminal",
       "operator_version": "1",
-      "inputs": ["buffered-attempt-frames"],
+      "inputs": ["attempt-outcome"],
       "output": {
-        "id": "commit-decision",
+        "id": "sealed-output",
         "schema": "Object",
-        "schema_ref": "v3.responses_sse_client_frame_commit.arc.commit_decision"
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.sealed_output"
       },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
-      "iterator": "Items",
+      "iterator": "Whole",
       "resources": {
-        "reads": ["v3.runtime.provider_attempt_business_control"],
-        "writes": []
+        "reads": ["v3.sse.direct.full_attempt_buffer", "v3.execution.attempt_control_state"],
+        "writes": ["v3.execution.attempt_payload_store"]
       }
     },
     {
-      "id": "commit_client_channel",
-      "operator": "routecodex.v3.runtime.commit_client_channel",
+      "id": "error_err01_source_raised",
+      "operator": "routecodex.v3.error.err01_source_raised",
       "operator_version": "1",
-      "inputs": ["commit-decision"],
+      "inputs": ["attempt-outcome"],
       "output": {
-        "id": "client-frame-ledger",
+        "id": "error-source",
         "schema": "Object",
-        "schema_ref": "v3.responses_sse_client_frame_commit.arc.client_frame_ledger"
+        "schema_ref": "v3.operation_runner.arc.error_source"
       },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.sse.direct.full_attempt_buffer"],
-        "writes": ["v3.sse.client_frame_ledger"]
+        "writes": ["v3.error.chain"]
       }
     },
     {
-      "id": "continue_append_only",
-      "operator": "routecodex.v3.runtime.continue_append_only_client_frames",
+      "id": "error_err02_classified",
+      "operator": "routecodex.v3.error.err02_classified",
       "operator_version": "1",
-      "inputs": ["client-frame-ledger"],
+      "inputs": ["error-source"],
       "output": {
-        "id": "append-only-frames",
-        "schema": "Array",
-        "schema_ref": "v3.responses_sse_client_frame_commit.arc.append_only_frames"
-      },
-      "input_selector": { "include": [], "exclude": [], "predicate": null },
-      "output_selector": { "include": [], "exclude": [], "predicate": null },
-      "iterator": "Items",
-      "resources": {
-        "reads": ["v3.sse.client_frame_ledger"],
-        "writes": ["v3.sse.client_frame_ledger"]
-      }
-    },
-    {
-      "id": "terminal_closeout",
-      "operator": "routecodex.v3.runtime.terminal_closeout_client_frames",
-      "operator_version": "1",
-      "inputs": ["append-only-frames"],
-      "output": {
-        "id": "client-frame-candidate",
+        "id": "error-classified",
         "schema": "Object",
-        "schema_ref": "v3.responses_sse_client_frame_commit.arc.client_frame"
+        "schema_ref": "v3.operation_runner.arc.error_classified"
       },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
-      "iterator": "Items",
+      "iterator": "Whole",
       "resources": {
-        "reads": ["v3.sse.client_frame_ledger"],
-        "writes": ["v3.sse.client_frame_ledger"]
+        "reads": ["v3.error.chain"],
+        "writes": ["v3.error.chain"]
+      }
+    },
+    {
+      "id": "error_err03_target_local_action",
+      "operator": "routecodex.v3.error.err03_target_local_action",
+      "operator_version": "1",
+      "inputs": ["error-classified"],
+      "output": {
+        "id": "error-target-local-action",
+        "schema": "Object",
+        "schema_ref": "v3.operation_runner.arc.error_target_local_action"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.target.candidate_set", "v3.provider.availability_projection"],
+        "writes": ["v3.error.chain", "v3.error.action_plan"]
+      }
+    },
+    {
+      "id": "error_err04_target_exhaustion",
+      "operator": "routecodex.v3.error.err04_target_exhaustion",
+      "operator_version": "1",
+      "inputs": ["error-target-local-action"],
+      "output": {
+        "id": "error-target-exhaustion",
+        "schema": "Object",
+        "schema_ref": "v3.operation_runner.arc.error_target_exhaustion"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.action_plan", "v3.error.provider_action_gate"],
+        "writes": ["v3.error.chain", "v3.error.exhaustion_decision"]
+      }
+    },
+    {
+      "id": "error_err05_execution_decision",
+      "operator": "routecodex.v3.error.err05_execution_decision",
+      "operator_version": "1",
+      "inputs": ["error-target-exhaustion"],
+      "output": {
+        "id": "error-execution-decision",
+        "schema": "Object",
+        "schema_ref": "v3.operation_runner.arc.error_execution_decision"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.error.chain", "v3.error.exhaustion_decision"],
+        "writes": ["v3.error.chain", "v3.error.execution_decision"]
+      }
+    },
+    {
+      "id": "record_client_disconnect",
+      "operator": "routecodex.v3.server.V3ClientDisconnectSlot::record_disconnect",
+      "operator_version": "1",
+      "inputs": ["attempt-outcome"],
+      "output": {
+        "id": "client-disconnect-observed",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.client_disconnect_observed"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.execution.attempt_control_state"],
+        "writes": ["v3.server.internal_observability_projection"]
+      }
+    },
+    {
+      "id": "abort_owned_runtime_task",
+      "operator": "routecodex.v3.server.V3ClientSseChannelStream::drop",
+      "operator_version": "1",
+      "inputs": ["client-disconnect-observed"],
+      "output": {
+        "id": "cancelled-attempt",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.cancelled_attempt"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": ["v3.execution.request_lifecycle_control", "v3.execution.attempt_control_state"],
+        "writes": []
+      }
+    },
+    {
+      "id": "settle_attempt_disposition",
+      "operator": "routecodex.v3.runtime.V3AttemptReservation::drop",
+      "operator_version": "1",
+      "inputs": ["sealed-output", "error-execution-decision", "cancelled-attempt"],
+      "output": {
+        "id": "attempt-disposition",
+        "schema": "Object",
+        "schema_ref": "v3.responses_sse_client_frame_commit.arc.attempt_disposition"
+      },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole",
+      "resources": {
+        "reads": [
+          "v3.sse.direct.full_attempt_buffer",
+          "v3.execution.attempt_budget",
+          "v3.execution.attempt_payload_store",
+          "v3.error.execution_decision"
+        ],
+        "writes": ["v3.execution.attempt_budget", "v3.execution.attempt_payload_store"]
       }
     }
   ],
   "edges": [
-    { "from": "collect_provider_attempt_frames", "to": "detect_first_committable_frame", "arc_id": "buffered-attempt-frames" },
-    { "from": "detect_first_committable_frame", "to": "commit_client_channel", "arc_id": "commit-decision" },
-    { "from": "commit_client_channel", "to": "continue_append_only", "arc_id": "client-frame-ledger" },
-    { "from": "continue_append_only", "to": "terminal_closeout", "arc_id": "append-only-frames" }
+    { "from": "collect_provider_attempt_frames", "to": "seal_accepted_output", "arc_id": "attempt-outcome" },
+    { "from": "collect_provider_attempt_frames", "to": "error_err01_source_raised", "arc_id": "attempt-outcome" },
+    { "from": "error_err01_source_raised", "to": "error_err02_classified", "arc_id": "error-source" },
+    { "from": "error_err02_classified", "to": "error_err03_target_local_action", "arc_id": "error-classified" },
+    { "from": "error_err03_target_local_action", "to": "error_err04_target_exhaustion", "arc_id": "error-target-local-action" },
+    { "from": "error_err04_target_exhaustion", "to": "error_err05_execution_decision", "arc_id": "error-target-exhaustion" },
+    { "from": "error_err05_execution_decision", "to": "settle_attempt_disposition", "arc_id": "error-execution-decision" },
+    { "from": "collect_provider_attempt_frames", "to": "record_client_disconnect", "arc_id": "attempt-outcome" },
+    { "from": "record_client_disconnect", "to": "abort_owned_runtime_task", "arc_id": "client-disconnect-observed" },
+    { "from": "abort_owned_runtime_task", "to": "settle_attempt_disposition", "arc_id": "cancelled-attempt" },
+    { "from": "seal_accepted_output", "to": "settle_attempt_disposition", "arc_id": "sealed-output" }
   ],
-  "outputs": ["client-frame-candidate"]
+  "outputs": ["attempt-disposition"]
 }

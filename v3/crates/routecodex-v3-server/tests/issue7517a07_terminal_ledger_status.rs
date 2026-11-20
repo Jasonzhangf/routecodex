@@ -15,8 +15,8 @@
 //! (client-cancelled streams and provider response-body/transport timeouts).
 //! These cases enter the real `/v1/responses` listener of a spawned aggregate
 //! server and read the persisted request-record ledger:
-//! - a delivered, then client-cancelled stream records a terminal row that is
-//!   not a provider HTTP 502;
+//! - a client-cancelled stream with an unaccepted provider prefix records a
+//!   terminal row that is not a provider HTTP 502;
 //! - a provider response-body/transport timeout records its typed transport
 //!   terminal, not a fabricated provider 502;
 //! - a genuine provider HTTP 502 keeps `provider_status=502`/`http_502`.
@@ -76,7 +76,7 @@ fn completed() -> Value {
 }
 
 /// Controlled Responses upstream. The request `input` selects the behavior:
-/// - `deliver-then-hang`: emit one committed business delta, then never finish;
+/// - `deliver-then-hang`: emit one buffered business delta, then never finish;
 /// - `reasoning-then-hang`: emit one reasoning-only delta, then go idle without
 ///   committing. The rolling idle timeout produces a typed transport NoResponse;
 /// - `provider-502`: answer a real HTTP 502 with a JSON body.
@@ -719,8 +719,8 @@ async fn issue7517a07_client_cancel_not_provider_502() {
         body.len()
     );
     socket.write_all(request.as_bytes()).await.unwrap();
-    // Read the response head plus at least one committed business frame, then
-    // drop the client socket to cancel the stream after delivery.
+    // Read the response head plus a transport keepalive, then drop the client
+    // socket while the provider holds the unaccepted business prefix.
     let mut delivered = Vec::new();
     let read = timeout(Duration::from_secs(6), async {
         let mut buf = [0u8; 4096];
@@ -729,10 +729,7 @@ async fn issue7517a07_client_cancel_not_provider_502() {
                 break;
             }
             delivered.extend_from_slice(&buf[..n]);
-            if delivered
-                .windows(b"committed-business".len())
-                .any(|window| window == b"committed-business")
-            {
+            if String::from_utf8_lossy(&delivered).contains("keepalive") {
                 break;
             }
         }
@@ -755,20 +752,21 @@ async fn issue7517a07_client_cancel_not_provider_502() {
     );
     assert!(
         read.is_ok(),
-        "the client must observe committed business content before closing"
+        "the client must observe the held SSE transport"
+    );
+    let delivered_text = String::from_utf8_lossy(&delivered).to_string();
+    assert!(
+        delivered_text.contains("keepalive"),
+        "the client must observe transport keepalive before closing: {delivered_text}"
     );
     assert!(
-        delivered
-            .windows(b"committed-business".len())
-            .any(|window| window == b"committed-business"),
-        "the client must receive committed business content before closing: {}",
-        String::from_utf8_lossy(&delivered)
+        !delivered_text.contains("committed-business"),
+        "the unaccepted provider prefix must stay private: {delivered_text}"
     );
     let cancelled = terminals
         .iter()
         .find(|terminal| terminal["event_type"] == json!("request.cancelled"));
-    let cancelled = cancelled
-        .expect("a delivered-then-cancelled Responses stream must record request.cancelled");
+    let cancelled = cancelled.expect("a buffered-prefix cancel must record request.cancelled");
     assert!(
         cancelled["meta"]["provider_status"].is_null(),
         "client cancellation must not fabricate a provider status: {cancelled}"
@@ -1235,7 +1233,7 @@ async fn issue7517a07_direct_sse_cancelled_terminal_is_not_missing_terminal() {
     drop(home_guard);
 }
 
-/// EOF after a committed business frame and no semantic terminal remains a
+/// EOF after a buffered business frame and no semantic terminal remains a
 /// failed request. It must not fabricate a successful completion or a 502.
 #[tokio::test]
 async fn issue7517a07_direct_sse_missing_terminal_is_failed() {
@@ -1302,7 +1300,7 @@ async fn issue7517a07_direct_sse_missing_terminal_is_failed() {
 }
 
 /// Multi-candidate sub-form: candidate A returns a real HTTP 502, candidate B
-/// delivers committed business content, and the client cancels. The terminal
+/// holds an unaccepted business prefix, and the client cancels. The terminal
 /// belongs to candidate B and must not inherit A's provider status; A's own
 /// attempt row keeps the real 502.
 #[tokio::test]
@@ -1333,10 +1331,7 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
                 break;
             }
             delivered.extend_from_slice(&buf[..n]);
-            if delivered
-                .windows(b"committed-business".len())
-                .any(|window| window == b"committed-business")
-            {
+            if String::from_utf8_lossy(&delivered).contains("keepalive") {
                 break;
             }
         }
@@ -1348,13 +1343,14 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
         delivered.len(),
         read.is_ok()
     );
+    let delivered_text = String::from_utf8_lossy(&delivered).to_string();
     assert!(
-        read.is_ok()
-            && delivered
-                .windows(b"committed-business".len())
-                .any(|window| window == b"committed-business"),
-        "the client must receive candidate B's committed business content before closing: {}",
-        String::from_utf8_lossy(&delivered)
+        read.is_ok() && delivered_text.contains("keepalive"),
+        "the client must observe candidate B's held SSE transport before closing: {delivered_text}"
+    );
+    assert!(
+        !delivered_text.contains("committed-business"),
+        "candidate B's unaccepted business prefix must stay private: {delivered_text}"
     );
 
     let path = request_records_path(&home, server_port);
@@ -1369,9 +1365,7 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
         .iter()
         .find(|terminal| terminal["event_type"] == json!("request.cancelled"))
         .unwrap_or_else(|| {
-            panic!(
-                "a committed-then-cancelled Responses stream must record request.cancelled: {terminals:#?}"
-            )
+            panic!("a buffered-prefix cancel must record request.cancelled: {terminals:#?}")
         });
     assert_eq!(
         cancelled["meta"]["provider_id"],

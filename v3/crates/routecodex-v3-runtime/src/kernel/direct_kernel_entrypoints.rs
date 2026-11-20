@@ -107,20 +107,12 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             plan
         });
 
-        // Every business item of a prior round already owns its final
-        // `output_index`. Apply that request-wide offset before frames reach
-        // the live sink, because flushed bytes cannot be corrected later.
-        let round_frame_sink = shared_state
-            .client_frame_sink
-            .clone()
-            .map(|sink| sink.with_output_index_offset(accumulated_items.len()));
         let mut state = V3ResponsesDirectRuntimeCoreState::new()
             .with_client_identity_headers(shared_state.client_identity_headers.clone())
             .with_now_epoch_ms(now_epoch_ms)
             .with_provider_health(shared_state.provider_health.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())
             .with_route_selection_event_sink(shared_state.route_selection_event_sink.clone())
-            .with_client_frame_sink(round_frame_sink)
             .with_request_execution_control(Some(control.clone()));
         if rounds == 0 {
             state = state.with_observability_accumulator(observability_accumulator.clone());
@@ -267,12 +259,8 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                 // irrevocable. Count the business items they
                                 // carried so the assembly never synthesizes a
                                 // second `output_item.done` for them.
-                                let flushed_frames = stream.flushed_prefix_frames();
                                 let sealed_frames = stream.sealed_frames();
-                                let delivered_item_count =
-                                    direct_runtime_helpers_stream::count_direct_sse_output_items(
-                                        &sealed_frames[..flushed_frames.min(sealed_frames.len())],
-                                    );
+                                let delivered_item_count = 0;
                                 let chunks = collect_direct_committed_sse(stream).await;
                                 let segments =
                                     direct_runtime_helpers_stream::split_direct_sse_committed_chunks(
@@ -284,12 +272,6 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
                                     &mut delivered_sse_frames,
                                     &mut synthesized_output_index,
                                     delivered_item_count,
-                                    // The next round commits its own first
-                                    // business frame as soon as it exists, so
-                                    // this round's governed remainder must
-                                    // reach the client now or the client sees
-                                    // round N+1 before round N.
-                                    shared_state.client_frame_sink.as_ref(),
                                 );
                             }
                         }
@@ -489,7 +471,6 @@ fn append_direct_sse_intermediate_content(
     delivered: &mut Vec<Vec<u8>>,
     next_output_index: &mut usize,
     delivered_item_count: usize,
-    live_sink: Option<&crate::nodes::V3CommittedClientFrameSink>,
 ) {
     // `next_output_index` is the number of business items already accumulated
     // from earlier rounds. Offset this round's frames so two rounds cannot both
@@ -542,19 +523,7 @@ fn append_direct_sse_intermediate_content(
         }
     }
 
-    // The next round shares the live sink and commits its first business frame
-    // the moment the provider produces one. A remainder left for the final body
-    // would therefore reach the client after that later round. Deliver this
-    // round's governed remainder now, in request order. The frames are already
-    // request-wide indexed, so the sink must not apply a round offset again.
-    match live_sink {
-        Some(sink) => {
-            for frame in prepared {
-                sink.send_prepared(frame);
-            }
-        }
-        None => delivered.extend(prepared),
-    }
+    delivered.extend(prepared);
     *next_output_index = offset + item_count;
 }
 

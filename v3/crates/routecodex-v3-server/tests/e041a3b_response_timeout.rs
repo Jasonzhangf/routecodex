@@ -706,7 +706,7 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn committed_first_frame_then_idle_timeout_breaks_transport_without_backup_dispatch() {
+async fn idle_timeout_after_unaccepted_business_frame_breaks_transport_without_backup_dispatch() {
     let _guard = TEST_LOCK.lock().await;
     let mut entry = start_with_budgets(250, 5_000, 600, true, true, "direct").await;
 
@@ -732,10 +732,9 @@ async fn committed_first_frame_then_idle_timeout_breaks_transport_without_backup
         wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),
         "unexpected client transport framing: {wire_text}"
     );
-    assert_eq!(
-        wire_text.matches("committed-business-delta").count(),
-        1,
-        "client must receive the certified committed business delta exactly once: {wire_text}"
+    assert!(
+        !wire_text.contains("committed-business-delta"),
+        "client received an unaccepted attempt prefix: {wire_text}"
     );
     assert!(
         !wire_text.contains("response.completed")

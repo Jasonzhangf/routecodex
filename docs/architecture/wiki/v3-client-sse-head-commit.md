@@ -88,32 +88,13 @@ payload.
 
 - The Server owns the committed client SSE transport channel and its
   transport-only keepalives; the Runtime buffers the provider attempt until the
-  first committable business frame, then delivers frame-by-frame under an
-  append-only ledger that never rewrites, replaces, suppresses, or re-emits a
-  delivered frame.
+  completed result passes protocol and response-governance checks.
 - Establishing the channel is not a semantic client commit.
-- Without first-frame commit enabled, no provider payload byte or provider status
-  reaches the client before the runtime outcome exists; with it enabled, the
-  first committable business frame crosses at its provider arrival time and the
-  terminal remainder replays only the undelivered tail. The Direct content probe
-  certifies that frame: it requires client-visible business content (visible
-  output_text or a named tool-call item start) and no governed text marker, so a
-  reasoning-only, whitespace-only, or nameless-item prefix never commits. A
-  tool-call argument payload stays held until its item completes, so the client
-  receives the complete payload once and never a partial one. That gate and the
-  tool-call certification are decided only by the incremental item carriers
-  (`output_item.added`/`output_item.done`) and the terminal snapshot: a
-  non-terminal `created`/`in_progress`/`queued` state mirror may list the item
-  together with a partial payload, so it neither certifies a start nor releases
-  the gate.
-- After the commit the probe is only a hold signal: while the newest text may
-  still be governed, the collector suspends projection, keeps those frames in the
-  attempt, and the registered complete-attempt owner decides the whole attempt at
-  the terminal. Protected business text (fenced or inline code, quoted text) is
-  delivered unchanged and governed text is never projected.
-- A post-commit provider failure records provider health for the attempted
-  identity and ends the transport as a 200 SSE body break: no error frame, no
-  keepalive, and no normal chunked terminator.
+- No provider-derived frame reaches the client before the runtime accepts the
+  complete result. Tool arguments and protected business text are governed as
+  part of the whole attempt and then projected once in protocol order.
+- A failed attempt stays private. Error recovery may try another eligible
+  identity without exposing any of the failed attempt's frames.
 - An outcome that arrives inside one keepalive interval returns the exact runtime
   status, headers, and body. The race adds no framing of its own.
 - A client never receives a provider error payload on the committed channel. The

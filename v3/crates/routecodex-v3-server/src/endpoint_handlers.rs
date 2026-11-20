@@ -154,7 +154,6 @@ pub(crate) fn pending_endpoint_after_json_parse(
     execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
-    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
     client_disconnect_slot: Option<crate::V3ClientDisconnectSlot>,
 ) -> std::pin::Pin<Box<impl std::future::Future<Output = Response<Body>> + Send>> {
@@ -170,7 +169,6 @@ pub(crate) fn pending_endpoint_after_json_parse(
         execution_mode,
         pending_owner_symbol,
         request_purpose,
-        client_frame_sink,
         payload,
         client_disconnect_slot,
     ))
@@ -187,7 +185,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
     mut execution_mode: V3EntryProtocolExecutionMode,
     pending_owner_symbol: Option<String>,
     request_purpose: V3RequestPurpose,
-    client_frame_sink: Option<routecodex_v3_runtime::V3CommittedClientFrameSink>,
     payload: Value,
     client_disconnect_slot: Option<crate::V3ClientDisconnectSlot>,
 ) -> Response<Body> {
@@ -558,7 +555,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                     plan.relay_runtime_seeds()
                 });
                 seeds.request_execution_control = responses_request_execution_control.clone();
-                seeds.client_frame_sink = client_frame_sink.clone();
                 seeds.client_identity_headers = responses_client_identity_headers(&request_headers);
                 seeds
             },
@@ -654,7 +650,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                 Some(handoff.request_execution_control),
                 Some(provider_failure_event_sink.clone()),
                 Some(route_selection_event_sink.clone()),
-                client_frame_sink.clone(),
                 request_purpose,
             )
             .await;
@@ -839,7 +834,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             responses_request_execution_control,
             Some(provider_failure_event_sink.clone()),
             Some(route_selection_event_sink.clone()),
-            client_frame_sink,
             request_purpose,
         )
         .await;

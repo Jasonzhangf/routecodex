@@ -46,19 +46,12 @@ The following are skeleton invariants and may not be changed by later hooks or
 compatibility features:
 
 - establishing the HTTP/SSE transport channel is not semantic client commit;
-- the runtime owns a pre-commit attempt buffer. Without first-frame commit
-  enabled, no provider business frame may cross the client-frame edge before a
-  protocol-valid terminal event; with it enabled, the first committable business
-  frame crosses at its provider arrival time and delivery is append-only:
-  delivered frames are never rewritten, replaced, suppressed, or re-emitted. The
-  request-level predicate only filters which attempts carry the Direct content
-  probe; the probe certifies the commit by requiring visible output_text and no
-  governed text marker, so the whole-attempt rewrites stay governed for the whole
-  attempt rather than being assumed away by the predicate;
+- the runtime owns the complete attempt buffer. Provider business frames cross
+  the client-frame edge only after the protocol terminal, response governance
+  and complete-result validation;
 - provider failure, malformed event, missing terminal, or transport EOF before
-  terminal stays in the Error chain and triggers the existing reselect policy; a
-  failure after delivery ends the committed channel silently without switching
-  candidates or re-issuing the attempt;
+  terminal stays in the Error chain. The runtime can reselect another eligible
+  identity before any business frame reaches the client;
 - a failed attempt buffer is discarded. A replacement provider must produce a
   complete terminal attempt before any business frame is released;
 - the client may receive transport-only keepalive comments while the attempt is
@@ -97,8 +90,6 @@ attempt's frames must not be concatenated with the replacement attempt.
 
 ## Gate
 
-The source-marker gates are retired. Use the existing client SSE transport,
-pre-commit buffering plus first-frame commit, candidate recovery and public
-HTTP regressions bound in the verification map. Keep the declared ownership and
-topology in the canonical maps. A source-text match does not prove buffering,
-first-frame timing, or client behavior.
+Use the client SSE transport, complete-attempt buffering, and candidate recovery
+regressions bound in the verification map. The public HTTP regression holds the
+Provider terminal and checks the bytes visible to the client before release.

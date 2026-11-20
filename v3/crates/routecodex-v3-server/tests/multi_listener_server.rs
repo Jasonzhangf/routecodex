@@ -9882,17 +9882,9 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         }
         None
     } else if committed_failure {
-        let mut response = response.unwrap();
+        let response = response.unwrap();
         let status = response.status();
-        let mut bytes = Vec::new();
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
-                Ok(None) => panic!("committed failure must not complete its SSE transport"),
-                Err(_) => break,
-            }
-        }
-        Some((status, String::from_utf8(bytes).unwrap()))
+        Some((status, response.text().await.unwrap()))
     } else {
         let response = response.unwrap();
         Some((response.status(), response.text().await.unwrap()))
@@ -9927,15 +9919,17 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
                 response_body.contains("committed-prefix"),
                 "{response_body}"
             );
-            for forbidden in [
-                "<thinking>",
-                "secret",
-                "response.completed",
-                "response.failed",
-                "[DONE]",
-            ] {
+            for forbidden in ["<thinking>", "response.failed", "[DONE]"] {
                 assert!(!response_body.contains(forbidden), "{response_body}");
             }
+            assert!(
+                response_body.contains("\"text\":\"secret\""),
+                "the governed reasoning text must remain available: {response_body}"
+            );
+            assert!(
+                response_body.contains("response.completed"),
+                "the complete buffered attempt must close normally: {response_body}"
+            );
         } else if stream {
             assert_eq!(
                 response_body.matches("event: response.completed").count(),
@@ -10031,7 +10025,7 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         } else {
             "V3Transport13ResponsesHttpRequest"
         });
-        if !final_relay && !exhausted && !committed_failure {
+        if !final_relay && !exhausted {
             expected_sends.push("V3Transport13ResponsesHttpRequest");
         }
         assert_eq!(

@@ -148,7 +148,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
-        client_frame_sink,
         observability_accumulator: _,
         request_execution_control,
     } = state;
@@ -1356,27 +1355,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .clone()
                     .unwrap_or_default();
                 response_projection.stream_observation = Some(stream_observation.clone());
-                // A committed client prefix can never be retracted. This
-                // request-level predicate only removes the whole-attempt
-                // rewrites that are decided before the stream starts (memory
-                // capture) or are scoped to a declared profile (thinking-tags).
-                // The complete-attempt Direct response hook stays content
-                // driven, so the collector's frame-level commit probe decides
-                // the actual commit and the hook still runs after the terminal.
-                // Tool declarations do not gate early commit: the probe already
-                // holds any governed text (DSML labels and thinking markers)
-                // before the terminal, and the complete-attempt owners only
-                // rewrite content that carries those exact markers. The DSH
-                // harness injects tools into every request and omits
-                // `tool_choice`, so a declaration-based gate here would block
-                // first-frame commit for all live traffic.
-                let attempt_client_frame_sink = client_frame_sink.clone().filter(|_| {
-                    !manifest.memory_raw_capture.enabled
-                        && !response_projection.compat_plan.has_block(
-                            crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
-                        )
-                });
-                let client_commit_probe = attempt_client_frame_sink.clone();
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
                         stream,
@@ -1392,7 +1370,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &hook_registry,
                         &direct_failure_session_scope,
                         attempt_budget.clone(),
-                        attempt_client_frame_sink,
                     )
                     .await
                     {
@@ -1401,17 +1378,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                             if let Err(error) = runtime_timing.finish_external_if_active() {
                                 return direct_runtime_helpers_stream::source_failure_output(
                                     runtime_source("V3RuntimeTimingExternal", error),
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
-                            if client_commit_probe
-                                .as_ref()
-                                .is_some_and(|sink| sink.is_committed())
-                            {
-                                return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
-                                    Err(fault),
                                     last_external_http.clone(),
                                     trace,
                                     &hook_registry,
@@ -1436,17 +1402,6 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                     &hook_registry,
                                 );
                             }
-                            if client_commit_probe
-                                .as_ref()
-                                .is_some_and(|sink| sink.is_committed())
-                            {
-                                return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
-                                    Ok(source),
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
                             return direct_runtime_helpers_stream::source_failure_output(
                                 Ok(source),
                                 last_external_http.clone(),
@@ -1460,38 +1415,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                                 .err()
                                 .map(|error| runtime_source("V3RuntimeTimingExternal", error));
                             if let Some(timing_failure) = timing_failure {
-                                if client_commit_probe
-                                    .as_ref()
-                                    .is_some_and(|sink| sink.is_committed())
-                                {
-                                    return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
-                                        timing_failure,
-                                        last_external_http.clone(),
-                                        trace,
-                                        &hook_registry,
-                                    );
-                                }
                                 return direct_runtime_helpers_stream::source_failure_output(
                                     timing_failure,
-                                    last_external_http.clone(),
-                                    trace,
-                                    &hook_registry,
-                                );
-                            }
-                            if client_commit_probe
-                                .as_ref()
-                                .is_some_and(|sink| sink.is_committed())
-                            {
-                                if let Err(node) = record_post_commit_direct_provider_failure(
-                                    &provider_health,
-                                    &direct_failure_session_scope,
-                                    &policy.target,
-                                    &source,
-                                ) {
-                                    trace.push(node);
-                                }
-                                return direct_runtime_helpers_stream::post_commit_client_transport_break_output(
-                                    Ok(source),
                                     last_external_http.clone(),
                                     trace,
                                     &hook_registry,
