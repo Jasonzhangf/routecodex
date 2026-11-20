@@ -608,7 +608,7 @@ async fn streaming_intent_keeps_nonstreaming_body_budget_and_received_status() {
             format!("http://{addr}/v1/responses"),
             V3ProviderAuthHandle {
                 alias: "key1".into(),
-                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse-fallback".into()),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse-json-body".into()),
             },
             V3ResponsesStreamIntent::Sse,
             json!({"model":"wire-model","input":"hello","stream":true}),
