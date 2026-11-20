@@ -592,6 +592,9 @@ impl V3Error05ExecutionDecision {
         let recoverable_response_processing = is_v3_recoverable_response_processing_source(
             &self.exhaustion.local_action.classified.source,
         );
+        let recoverable_request_compat = is_v3_recoverable_request_compat_source(
+            &self.exhaustion.local_action.classified.source,
+        );
         let valid_terminal = match source_kind {
             V3ErrorSourceKind::ProviderFailure => {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
@@ -600,7 +603,9 @@ impl V3Error05ExecutionDecision {
                     && !self.exhaustion.same_provider_retry_available
                     && self.exhaustion.target_exhausted
             }
-            V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+            V3ErrorSourceKind::RuntimeFailure
+                if recoverable_response_processing || recoverable_request_compat =>
+            {
                 self.action == V3Error05ExecutionAction::ProjectTerminal
                     && self.exhaustion.route_pool_remaining_after_exclusion == 0
                     && !self.exhaustion.default_pool_available
@@ -889,6 +894,7 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
         validate_external_error_source_kind(&source.source_kind);
     }
     let recoverable_response_processing = is_v3_recoverable_response_processing_source(&source);
+    let recoverable_request_compat = is_v3_recoverable_request_compat_source(&source);
     let (class, terminal_state) = match source.source_kind {
         V3ErrorSourceKind::InvalidRequest
         | V3ErrorSourceKind::RequestConflict
@@ -905,7 +911,9 @@ pub fn build_v3_error_02_classified_from_v3_error_01(
             "already_terminal",
         ),
         V3ErrorSourceKind::TargetPoolExhausted => ("target_pool_exhausted", "already_terminal"),
-        V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+        V3ErrorSourceKind::RuntimeFailure
+            if recoverable_response_processing || recoverable_request_compat =>
+        {
             ("runtime_failure", "non_terminal_if_candidates_remain")
         }
         V3ErrorSourceKind::RuntimeFailure => ("runtime_failure", "already_terminal"),
@@ -972,6 +980,16 @@ pub fn is_v3_recoverable_response_processing_source(source: &V3Error01SourceRais
         })
 }
 
+/// Returns whether a provider request compatibility failure is safe to handle
+/// as a request-local candidate incompatibility. This is intentionally keyed
+/// by the typed source stage and code; a free-form runtime message is not
+/// sufficient to enter provider recovery.
+pub fn is_v3_recoverable_request_compat_source(source: &V3Error01SourceRaised) -> bool {
+    source.source_kind == V3ErrorSourceKind::RuntimeFailure
+        && source.source_stage == "ProviderReqCompat06ProviderCompat"
+        && source.code == "provider_request_compat_error"
+}
+
 /// Returns whether a provider failure is health-neutral and eligible for the
 /// transient same-provider retry budget at the given pipeline stage.
 pub fn is_v3_retryable_transient_stage_code(source_stage: &str, code: &str) -> bool {
@@ -1016,12 +1034,14 @@ pub fn build_v3_error_03_target_local_action_from_v3_error_02(
     );
     let recoverable_response_processing =
         is_v3_recoverable_response_processing_source(&classified.source);
+    let recoverable_request_compat = is_v3_recoverable_request_compat_source(&classified.source);
     let client_disconnect = matches!(
         classified.source.source_kind,
         V3ErrorSourceKind::ClientDisconnect
     );
     let retry_eligible =
-        (provider_failure || recoverable_response_processing) && candidates_remaining > 0;
+        (provider_failure || recoverable_response_processing || recoverable_request_compat)
+            && candidates_remaining > 0;
     // Provider failures, including SSE/transport failures, affect provider health.
     let health_affecting = provider_failure && !matches!(scope, V3ErrorActionScope::None);
     let exhaustion_effect = if retry_eligible {
@@ -1077,6 +1097,8 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
     );
     let recoverable_response_processing =
         is_v3_recoverable_response_processing_source(&local_action.classified.source);
+    let recoverable_request_compat =
+        is_v3_recoverable_request_compat_source(&local_action.classified.source);
     let target_exhausted = if provider_failure || recoverable_response_processing {
         route_pool_remaining_after_exclusion == 0
             && !target_recovery_pending
@@ -1089,6 +1111,11 @@ pub fn build_v3_error_04_target_exhaustion_decision_with_target_recovery(
                     .as_ref()
                     .and_then(|error| error.status)
                     == Some(429))
+    } else if recoverable_request_compat {
+        route_pool_remaining_after_exclusion == 0
+            && !target_recovery_pending
+            && !default_pool_available
+            && !same_provider_retry_available
     } else {
         matches!(
             local_action.classified.source.source_kind,
@@ -1121,6 +1148,8 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
 ) -> V3Error05ExecutionDecision {
     let recoverable_response_processing =
         is_v3_recoverable_response_processing_source(&exhaustion.local_action.classified.source);
+    let recoverable_request_compat =
+        is_v3_recoverable_request_compat_source(&exhaustion.local_action.classified.source);
     let alternatives_available =
         exhaustion.route_pool_remaining_after_exclusion > 0 || exhaustion.default_pool_available;
     let action = match exhaustion.local_action.classified.source.source_kind {
@@ -1129,7 +1158,8 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
             V3Error05ExecutionAction::ReevaluateTarget
         }
         V3ErrorSourceKind::RuntimeFailure
-            if recoverable_response_processing && exhaustion.target_recovery_pending =>
+            if (recoverable_response_processing || recoverable_request_compat)
+                && exhaustion.target_recovery_pending =>
         {
             V3Error05ExecutionAction::ReevaluateTarget
         }
@@ -1153,11 +1183,14 @@ pub fn build_v3_error_05_execution_decision_from_v3_error_04(
         }
         V3ErrorSourceKind::ProviderFailure => V3Error05ExecutionAction::ProjectTerminal,
         V3ErrorSourceKind::RuntimeFailure
-            if recoverable_response_processing && alternatives_available =>
+            if (recoverable_response_processing || recoverable_request_compat)
+                && alternatives_available =>
         {
             V3Error05ExecutionAction::Reselect
         }
-        V3ErrorSourceKind::RuntimeFailure if recoverable_response_processing => {
+        V3ErrorSourceKind::RuntimeFailure
+            if recoverable_response_processing || recoverable_request_compat =>
+        {
             V3Error05ExecutionAction::ProjectTerminal
         }
         _ => V3Error05ExecutionAction::RejectNonProviderError,

@@ -327,6 +327,14 @@ pub fn project_v3_openai_chat_relay_runtime_failure(
             V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
                 super::provider_request_payload_source("ProviderReqCompat06ProviderCompat", &error)
             }
+            V3ProviderCompatErrorClassification::StrictLegacyUnrepresentableRequest => {
+                crate::shared::direct_plain_error(
+                    V3ErrorSourceKind::RuntimeFailure,
+                    "ProviderReqCompat06ProviderCompat",
+                    "provider_request_compat_error",
+                    error.to_string(),
+                )
+            }
             V3ProviderCompatErrorClassification::Other => crate::shared::direct_plain_error(
                 V3ErrorSourceKind::RuntimeFailure,
                 "V3HubRuntime",

@@ -755,16 +755,7 @@ pub(crate) fn responses_direct_request_projection_hook_with_key_catalog_and_drop
             provider_protocol,
             &profile,
         )
-        .map_err(|error| {
-            raise_v3_source_via_err01(
-                V3ErrorSourceKind::RuntimeFailure,
-                "V3ResponsesDirect11Policy",
-                "responses_direct_provider_compat_failed",
-                format!("{}", error),
-                V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
-            )
-            .map(|(_, source)| source)
-        })?;
+        .map_err(|error| crate::hub_v1::provider_request_direct_source(&error))?;
     request_body = compat_body;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
         candidate.oauth_declaration.as_ref(),
@@ -1061,16 +1052,7 @@ pub(crate) fn chat_direct_request_projection_hook_with_key_catalog_and_drop_cont
         crate::hub_v1::V3HubProviderWireProtocol::OpenAiChat,
         &profile,
     )
-    .map_err(|error| {
-        raise_v3_source_via_err01(
-            V3ErrorSourceKind::RuntimeFailure,
-            "V3ChatDirect11Policy",
-            "chat_direct_provider_compat_failed",
-            error.to_string(),
-            V3Err01SourceInput::Internal(V3InternalErrorCode::V3Provider12ResponsesWirePayload),
-        )
-        .map(|(_, source)| source)
-    })?;
+    .map_err(|error| crate::hub_v1::provider_request_direct_source(&error))?;
     wire_body = compat_body;
     let secret = v3_provider_auth_secret_handle_from_declaration_fields(
         candidate.oauth_declaration.as_ref(),

@@ -180,6 +180,78 @@ fn transient_stream_failures_reselect_even_when_same_provider_budget_is_reported
     }
 }
 
+fn request_compat_error_05(source: V3Error01SourceRaised) -> V3Error05ExecutionDecision {
+    let classified = build_v3_error_02_classified_from_v3_error_01(source);
+    let action = build_v3_error_03_target_local_action_from_v3_error_02(
+        classified,
+        V3ErrorActionScope::None,
+        1,
+    );
+    let exhaustion = build_v3_error_04_target_exhaustion_decision_with_provider_availability(
+        action, 1, false, false,
+    );
+    build_v3_error_05_execution_decision_from_v3_error_04(exhaustion, None)
+}
+
+#[test]
+fn typed_request_compat_source_reselects_only_with_matching_stage_and_code() {
+    let typed = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "ProviderReqCompat06ProviderCompat",
+        "provider_request_compat_error",
+        "StrictLegacyUnrepresentableRequest profile=responses:strict-legacy-input",
+    );
+    assert!(is_v3_recoverable_request_compat_source(&typed));
+    assert_eq!(
+        build_v3_error_02_classified_from_v3_error_01(typed.clone()).terminal_state,
+        "non_terminal_if_candidates_remain"
+    );
+    assert!(matches!(
+        request_compat_error_05(typed).action,
+        V3Error05ExecutionAction::Reselect
+    ));
+
+    let missing_stage = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "V3ProviderRespInbound01Raw",
+        "provider_request_compat_error",
+        "StrictLegacyUnrepresentableRequest profile=responses:strict-legacy-input",
+    );
+    assert!(!is_v3_recoverable_request_compat_source(&missing_stage));
+    assert_eq!(
+        build_v3_error_02_classified_from_v3_error_01(missing_stage.clone()).terminal_state,
+        "already_terminal"
+    );
+    assert!(matches!(
+        request_compat_error_05(missing_stage).action,
+        V3Error05ExecutionAction::RejectNonProviderError
+    ));
+
+    let unregistered_code = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "ProviderReqCompat06ProviderCompat",
+        "strict_legacy_unrepresentable_request",
+        "StrictLegacyUnrepresentableRequest profile=responses:strict-legacy-input",
+    );
+    assert!(!is_v3_recoverable_request_compat_source(&unregistered_code));
+    assert_eq!(
+        build_v3_error_02_classified_from_v3_error_01(unregistered_code.clone()).terminal_state,
+        "already_terminal"
+    );
+    assert!(matches!(
+        request_compat_error_05(unregistered_code).action,
+        V3Error05ExecutionAction::RejectNonProviderError
+    ));
+
+    let wrong_source_kind = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::ProviderFailure,
+        "ProviderReqCompat06ProviderCompat",
+        "provider_request_compat_error",
+        "provider failure must not enter request-local compat recovery",
+    );
+    assert!(!is_v3_recoverable_request_compat_source(&wrong_source_kind));
+}
+
 fn exhausted_provider_error_05(code: &str) -> V3Error05TerminalDecision {
     let source = build_v3_error_01_source_raised(
         V3ErrorSourceKind::ProviderFailure,

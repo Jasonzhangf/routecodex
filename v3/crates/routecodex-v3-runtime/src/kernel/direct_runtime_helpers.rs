@@ -857,7 +857,7 @@ pub(crate) async fn run_v3_direct_provider_failure_policy<R: V3ProviderAvailabil
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&source);
     let is_health_neutral_failure = is_response_processing_failure
         || crate::provider_failure_runtime_policy::is_health_neutral_request_compat_failure(
-            source.source_stage,
+            &source,
             source
                 .external_error
                 .as_ref()

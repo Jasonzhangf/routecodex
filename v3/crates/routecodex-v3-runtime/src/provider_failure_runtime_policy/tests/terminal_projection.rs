@@ -237,8 +237,14 @@ targets = [
         vec![("retry-after".to_string(), b"17".to_vec())],
         br#"{"error":{"type":"rate_limit_error"}}"#.to_vec(),
     );
+    let attempt_source = build_v3_error_01_source_raised(
+        V3ErrorSourceKind::RuntimeFailure,
+        "ProviderReqCompat06ProviderCompat",
+        "provider_request_compat_error",
+        "arguments must be valid JSON",
+    );
     let mut last_external_http = Some(upstream.clone());
-    let result = run_v3_relay_provider_failure_policy(
+    let result = run_v3_relay_provider_failure_policy_with_response_source(
         &context,
         selected,
         "ProviderReqCompat06ProviderCompat",
@@ -252,6 +258,10 @@ targets = [
             trace: &mut trace,
             last_external_http: &mut last_external_http,
         },
+        None,
+        Some(attempt_source),
+        None,
+        None,
     )
     .await
     .expect("request-local compat failure must project terminally");
@@ -266,11 +276,11 @@ targets = [
         "request-local compat must not consume a same-candidate retry budget"
     );
     assert!(!trace.contains(&"V3TargetPolicyRetriedSame"));
-    // The request-local compat failure is the terminal, but the real upstream 429
-    // head that arrived on an earlier attempt is still the provider terminal's
-    // evidence: it is recorded, never projected to the client.
+    // The request-local compat failure is the terminal. A real upstream 429
+    // witness from an earlier attempt remains internal evidence, but it cannot
+    // change this non-ProviderFailure terminal into a Provider terminal.
     assert_eq!(
         result.terminal_disposition,
-        Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(upstream))
+        Some(routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse)
     );
 }

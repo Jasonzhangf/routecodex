@@ -1415,6 +1415,21 @@ features:
   owner_kind: rust_ssot
   owner_scope: Provider compatibility profile loading, payload-boundary validation, provider-declared output-cap projection, provider-configurable reasoning-effort override, and the explicitly registered reversible Zen TCM executor/native-tool representation at adjacent request and response Compat nodes only.
   owner_module: v3.provider_compat_core
+  cross_feature_extensions:
+  - path: v3/crates/routecodex-v3-runtime/src/kernel/v3_direct_core.rs
+    owner_feature_id: v3.direct_runtime_kernel_core
+    reason: The Direct kernel consumes the typed request-local ProviderReqCompat06
+      source and routes it through its existing provider-failure policy before
+      Provider send.
+  - path: v3/crates/routecodex-v3-runtime/src/provider_failure_runtime_policy.rs
+    owner_feature_id: v3.provider_response_error_policy_closeout
+    reason: The existing Direct/Relay provider-failure policy consumes the typed
+      request-local compatibility source and keeps provider health neutral.
+  - path: v3/crates/routecodex-v3-error/src/lib.rs
+    owner_feature_id: v3.debug_error_foundation
+    reason: The canonical typed Error01-05 policy classifies the exact
+      request-local compatibility source without defining provider-specific
+      profile projection.
   resource_bindings:
   - v3.provider_compat.payload_boundary_contract
   - v3.request.provider_semantic
@@ -1456,6 +1471,7 @@ features:
   - v3/crates/routecodex-v3-runtime/tests
   - v3/crates/routecodex-v3-cli/tests/goaichat_hosted_tool_history_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/responses_custom_tool_function_compat_blackbox.rs
+  - v3/crates/routecodex-v3-cli/tests/responses_strict_legacy_input_compat_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/provider_reasoning_effort_policy_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/opencode_zen_tcm_bridge_blackbox.rs
   - v3/crates/routecodex-v3-cli/tests/xcreate_glm_prompt_cache_public.rs

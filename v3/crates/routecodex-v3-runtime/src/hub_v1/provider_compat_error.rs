@@ -1,9 +1,11 @@
 use super::common::V3ProviderCompatProfileId;
+use provider_compat_core::STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V3ProviderCompatErrorClassification {
     PayloadBoundaryViolation,
     RequestPayloadInvalid,
+    StrictLegacyUnrepresentableRequest,
     Other,
 }
 
@@ -30,6 +32,19 @@ impl V3ProviderCompatError {
         }
     }
 
+    pub(crate) fn new_strict_legacy_unrepresentable_request(
+        stage: &'static str,
+        profile: String,
+        reason: String,
+    ) -> Self {
+        Self {
+            stage,
+            profile,
+            reason,
+            classification: V3ProviderCompatErrorClassification::StrictLegacyUnrepresentableRequest,
+        }
+    }
+
     pub(crate) fn other(stage: &'static str, profile: String, reason: String) -> Self {
         Self {
             stage,
@@ -49,7 +64,15 @@ pub(crate) fn classify_v3_provider_compat_error(
     profile: &V3ProviderCompatProfileId,
     reason: String,
 ) -> V3ProviderCompatError {
-    if reason.starts_with("ProviderCompatPayloadBoundaryViolation") {
+    if profile.as_str() == provider_compat_core::STRICT_LEGACY_INPUT_PROFILE
+        && reason.starts_with(STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR)
+    {
+        V3ProviderCompatError::new_strict_legacy_unrepresentable_request(
+            stage,
+            profile.as_str().to_string(),
+            reason,
+        )
+    } else if reason.starts_with("ProviderCompatPayloadBoundaryViolation") {
         V3ProviderCompatError::new_payload_boundary(stage, profile.as_str().to_string(), reason)
     } else if matches!(stage, "request" | "request_protocol")
         && (reason.contains("MalformedOutboundField")
@@ -78,6 +101,33 @@ pub(crate) fn provider_request_payload_source(
         error.to_string(),
         routecodex_v3_error::V3InternalErrorCode::V3Provider12ResponsesWirePayload,
     )
+}
+
+pub(crate) fn provider_request_direct_source(
+    error: &V3ProviderCompatError,
+) -> crate::shared::V3DirectSourceError {
+    match error.classification() {
+        V3ProviderCompatErrorClassification::PayloadBoundaryViolation => {
+            provider_compat_boundary_source("ProviderReqCompat06ProviderCompat", error)
+        }
+        V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
+            provider_request_payload_source("ProviderReqCompat06ProviderCompat", error)
+        }
+        V3ProviderCompatErrorClassification::StrictLegacyUnrepresentableRequest => {
+            crate::shared::direct_plain_error(
+                routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+                "ProviderReqCompat06ProviderCompat",
+                "provider_request_compat_error",
+                error.to_string(),
+            )
+        }
+        V3ProviderCompatErrorClassification::Other => crate::shared::direct_plain_error(
+            routecodex_v3_error::V3ErrorSourceKind::RuntimeFailure,
+            "ProviderReqCompat06ProviderCompat",
+            "provider_request_compat_internal_error",
+            error.to_string(),
+        ),
+    }
 }
 
 pub fn provider_compat_boundary_source(
@@ -148,6 +198,42 @@ mod tests {
             error.classification(),
             V3ProviderCompatErrorClassification::Other
         );
+        let strict_legacy_error = classify_v3_provider_compat_error(
+            "response",
+            &V3ProviderCompatProfileId::from_config(Some(
+                provider_compat_core::STRICT_LEGACY_INPUT_PROFILE,
+            )),
+            format!("{STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR} profile=strict-legacy"),
+        );
+        assert_eq!(
+            strict_legacy_error.classification(),
+            V3ProviderCompatErrorClassification::StrictLegacyUnrepresentableRequest
+        );
+    }
+
+    #[test]
+    fn strict_legacy_request_source_is_narrowly_recoverable() {
+        let strict_legacy = V3ProviderCompatError::new_strict_legacy_unrepresentable_request(
+            "request",
+            provider_compat_core::STRICT_LEGACY_INPUT_PROFILE.to_string(),
+            format!(
+                "{STRICT_LEGACY_INCOMPATIBLE_REQUEST_ERROR} path=function_call_output.output[].input_image"
+            ),
+        );
+        let source = provider_request_direct_source(&strict_legacy)
+            .expect("strict-legacy source must execute Error01 successfully");
+        assert_eq!(source.code, "provider_request_compat_error");
+        assert!(routecodex_v3_error::is_v3_recoverable_request_compat_source(&source));
+
+        let other = V3ProviderCompatError::other(
+            "request",
+            provider_compat_core::STRICT_LEGACY_INPUT_PROFILE.to_string(),
+            "unrelated provider compatibility fault".to_string(),
+        );
+        let source = provider_request_direct_source(&other)
+            .expect("other source must execute Error01 successfully");
+        assert_eq!(source.code, "provider_request_compat_internal_error");
+        assert!(!routecodex_v3_error::is_v3_recoverable_request_compat_source(&source));
     }
 
     #[test]

@@ -161,11 +161,10 @@ pub(crate) fn provider_runtime_failure_stage(error: &V3ProviderError) -> &'stati
 /// exact-identity for every failure class; this classifier only decides whether
 /// the exact failed identity is recorded in provider health.
 pub(crate) fn is_health_neutral_request_compat_failure(
-    source_stage: &str,
+    source: &V3Error01SourceRaised,
     error_type: Option<&str>,
 ) -> bool {
-    source_stage == "ProviderReqCompat06ProviderCompat"
-        || error_type == Some("provider_request_compat_error")
+    routecodex_v3_error::is_v3_recoverable_request_compat_source(source)
         // Provider semantic invalid-request responses describe this request,
         // not provider health. Relay may surface them as a runtime 502 after
         // decoding an HTTP-200 SSE error event, so status alone is insufficient.
@@ -1013,7 +1012,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     let is_response_processing_failure =
         routecodex_v3_error::is_v3_recoverable_response_processing_source(&attempt_source);
     let is_request_local_compat_failure = is_response_processing_failure
-        || is_health_neutral_request_compat_failure(source_stage, error_type.as_deref());
+        || is_health_neutral_request_compat_failure(&attempt_source, error_type.as_deref());
     let mut excluded_with_failed = state.failed_candidates.clone();
     excluded_with_failed.insert(candidate_key.clone());
     let resolution = reselect_from_captured_target_plan(

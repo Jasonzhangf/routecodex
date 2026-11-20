@@ -12,6 +12,7 @@ pub use common::{
 pub use common::{V3HubExecutionMode, V3HubProviderWireProtocol};
 mod provider_compat_error;
 pub(crate) use provider_compat_error::classify_v3_provider_compat_error;
+pub(crate) use provider_compat_error::provider_request_direct_source;
 pub(crate) use provider_compat_error::provider_request_payload_source;
 pub use provider_compat_error::{
     extract_v3_provider_compat_boundary_field, provider_compat_boundary_source,

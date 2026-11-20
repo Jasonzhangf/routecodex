@@ -1618,6 +1618,14 @@ pub(crate) fn compat_source(
         V3ProviderCompatErrorClassification::RequestPayloadInvalid => {
             crate::hub_v1::provider_request_payload_source(stage, error)
         }
+        V3ProviderCompatErrorClassification::StrictLegacyUnrepresentableRequest => {
+            crate::shared::direct_plain_error(
+                V3ErrorSourceKind::RuntimeFailure,
+                stage,
+                "provider_request_compat_error",
+                error.to_string(),
+            )
+        }
         V3ProviderCompatErrorClassification::Other => {
             crate::shared::raise_v3_runtime_failure_source(
                 stage,
