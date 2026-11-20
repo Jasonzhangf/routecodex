@@ -526,6 +526,24 @@ test('fault script requires attempts and each attempt needs its kind script', ()
   });
 });
 
+test('a complete non-2xx expectation requires the scripted final Provider response', () => {
+  const bad = baseCase({
+    expected_client: {
+      transport: 'complete', status: 599, body_must: { 'error.message': 'internal failure' },
+      semantic_terminal_required: false,
+    },
+  });
+  withFixture({ 'valid-case': bad }, validManifest(['valid-case']), (root) => {
+    assert.match(findingsOf(root), /complete non-2xx status must match the scripted final Provider response/);
+  });
+
+  const valid = loadFixtures(realFixtureRoot)
+    .find(({ value }) => value.case_id === 'provider-error-exhaustion').value;
+  withFixture({ [valid.case_id]: valid }, validManifest([valid.case_id]), (root) => {
+    assert.deepEqual(inspectCorpus(root).findings, []);
+  });
+});
+
 test('real fault fixture declares two candidates and both literal auth orders', () => {
   const loaded = loadFixtures(realFixtureRoot);
   const fault = loaded.find((entry) => entry.value.case_id === 'provider-fault-stream-cut')?.value;

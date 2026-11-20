@@ -174,7 +174,7 @@ for (const test of [
   'issue0e129d0_anthropic_nonstop_reason_public',
   'issue0e129d0_actual_error_uses_error_chain_and_switches_provider',
   'responses_wire_representation_survives_chat_and_anthropic_entries',
-  'genuine_http_and_native_sse_errors_break_transport_without_client_error',
+  'final_http_errors_project_and_native_sse_errors_break_transport',
   'responses_openai_chat_field_parity_paired_malformed_arguments_preserve_exact_string_without_reselect',
   'responses_openai_chat_field_parity_unpaired_malformed_arguments_preserve_exact_string_without_reselect',
   'responses_malformed_function_call_arguments_keep_pair_with_reversible_anthropic_input',

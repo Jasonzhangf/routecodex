@@ -20,6 +20,7 @@ use tokio::sync::{mpsc, Mutex};
 mod hub_v1_fixture;
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+const POOL_FAILURE_BODY: &str = r#"{"error":{"type":"server_error","message":"Upstream request failed: Endpoint is unavailable."}}"#;
 
 #[derive(Clone)]
 struct RecoveryPeer {
@@ -541,7 +542,8 @@ async fn peer_provider(
     if should_fail {
         return (
             StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"error":{"type":"server_error","message":"Upstream request failed: Endpoint is unavailable."}})),
+            [("content-type", "application/json")],
+            POOL_FAILURE_BODY,
         )
             .into_response();
     }
@@ -786,20 +788,22 @@ async fn run_all_fail(mode: Mode) {
         .unwrap();
     let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
 
-    let result = client.post(&endpoint).json(&request(false)).send().await;
-    let raw = match result {
-        Err(_) => String::new(),
-        Ok(reply) => {
-            assert!(
-                !reply.status().is_success(),
-                "all-key exhaustion cannot fabricate success"
-            );
-            reply.text().await.unwrap()
-        }
-    };
-    assert!(
-        !raw.contains("Endpoint is unavailable") && !raw.contains("server_error"),
-        "provider HTTP error body reached client: {raw}"
+    let reply = client
+        .post(&endpoint)
+        .json(&request(false))
+        .send()
+        .await
+        .expect("the final real Provider HTTP error must reach the client");
+    let status = reply.status();
+    let raw = reply.text().await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "pool exhaustion must project the final Provider status: {raw}"
+    );
+    assert_eq!(
+        raw, POOL_FAILURE_BODY,
+        "pool exhaustion must project the final Provider body without rewriting"
     );
 
     let received: Vec<_> = std::iter::from_fn(|| receipts_rx.try_recv().ok()).collect();
@@ -844,20 +848,22 @@ async fn run_legacy_declared_budget_ignored(mode: Mode) {
         .unwrap();
     let endpoint = format!("http://{}/v1/responses", server.listeners[0].addr);
 
-    let result = client.post(&endpoint).json(&request(false)).send().await;
-    let raw = match result {
-        Err(_) => String::new(),
-        Ok(reply) => {
-            assert!(
-                !reply.status().is_success(),
-                "local budget stop cannot fabricate success"
-            );
-            reply.text().await.unwrap()
-        }
-    };
-    assert!(
-        !raw.contains("Endpoint is unavailable") && !raw.contains("server_error"),
-        "provider HTTP error body reached client: {raw}"
+    let reply = client
+        .post(&endpoint)
+        .json(&request(false))
+        .send()
+        .await
+        .expect("the final real Provider HTTP error must reach the client");
+    let status = reply.status();
+    let raw = reply.text().await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the retired attempt budget must still project the final Provider status: {raw}"
+    );
+    assert_eq!(
+        raw, POOL_FAILURE_BODY,
+        "the final Provider body must remain lossless"
     );
 
     let received: Vec<_> = std::iter::from_fn(|| receipts_rx.try_recv().ok()).collect();

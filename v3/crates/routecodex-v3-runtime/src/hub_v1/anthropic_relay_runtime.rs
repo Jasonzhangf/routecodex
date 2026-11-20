@@ -739,6 +739,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
     // 统一 relay timing（与 relay_runtime_core 同语义）：只写入 typed
     // observability，不进入 payload。
     loop {
+        last_external_http = None;
         let preferred_selected = retry_selected.take();
         let selected = if let Some(selected) = initial_selected.take() {
             selected

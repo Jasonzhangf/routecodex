@@ -605,7 +605,7 @@ async fn req03_opaque_route_selects_ordered_provider_and_preserves_tool_payload_
 }
 
 #[tokio::test]
-async fn req03_route_selection_failure_observes_typed_error_without_client_error_blackbox() {
+async fn req03_provider_exhaustion_projects_only_final_typed_error_blackbox() {
     let _test_guard = TEST_LOCK.lock().await;
     let home_guard = TestHomeGuard::new("selection-failure");
     std::env::set_var(REQ03_KEY_ENV, "req03-opaque-route-secret");
@@ -691,9 +691,8 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
         "control sample persistence failures: {control_failures:?}"
     );
 
-    // Both declared candidates return a real provider HTTP error. The runtime
-    // must exclude each exact failed candidate and then terminate this request
-    // through the typed Error chain instead of returning either provider body.
+    // Both declared candidates return a real provider HTTP error. Only the
+    // final actual error reaches the client after the typed Error chain exhausts the route.
     let provider_error = json!({
         "error": {
             "message": "controlled req03 provider exhaustion",
@@ -708,12 +707,14 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
             provider_error.clone(),
         )
         .await;
+    let mut final_provider_error = provider_error.clone();
+    final_provider_error["error"]["message"] = json!("controlled req03 final beta error");
     let (failure_beta_base_url, failure_beta_shutdown, failure_beta_task) =
         start_capture_upstream_with_response(
             "beta",
             captures_tx.clone(),
             StatusCode::SERVICE_UNAVAILABLE,
-            provider_error,
+            final_provider_error.clone(),
         )
         .await;
     let manifest = req03_opaque_route_manifest(
@@ -734,14 +735,11 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
     .await
     .expect("the failing request must reach a terminal transport outcome");
 
-    // Client contract: a selection-time failure must never become an error
-    // response, an error status, or a fabricated success.
-    let client_error = client_observation.expect_err(
-        "an exhausted route selection must close the non-streaming client without a payload",
-    );
-    assert!(
-        !client_error.is_status(),
-        "the client must never receive a projected HTTP error status: {client_error}"
+    let response = client_observation.expect("the real last-key HTTP error must reach the client");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response.text().await.unwrap(),
+        final_provider_error.to_string()
     );
 
     let first_failure_capture = timeout(Duration::from_secs(5), captures_rx.recv())
@@ -759,8 +757,7 @@ async fn req03_route_selection_failure_observes_typed_error_without_client_error
         "provider exhaustion must contact each declared candidate exactly once"
     );
 
-    // Typed Error public observation: the projection stays provider-private
-    // evidence on disk. We assert the typed artifact, not a client projection.
+    // The same request must keep its typed artifact and original attempt evidence.
     let samples_root = home_guard.endpoint_samples_root(RESPONSES_SAMPLE_DIR, addr.port());
     let sample_dir = wait_for_sample_with_request_marker(&samples_root, request_marker)
         .await

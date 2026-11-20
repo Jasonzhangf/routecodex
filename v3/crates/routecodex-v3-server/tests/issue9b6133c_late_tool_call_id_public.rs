@@ -466,32 +466,21 @@ async fn responses_relay_preserves_late_tool_call_ids_through_execution_and_foll
         .send()
         .await
         .expect("mismatched follow-up must reach the public entry");
-    assert_eq!(rejected_response.status(), reqwest::StatusCode::OK);
-    assert!(
-        rejected_response
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .starts_with("text/event-stream"),
-        "mismatched follow-up must use the client SSE boundary"
-    );
+    assert_eq!(rejected_response.status(), reqwest::StatusCode::BAD_REQUEST);
     let rejected_body = tokio::time::timeout(Duration::from_secs(10), rejected_response.text())
         .await
-        .expect("mismatched follow-up must settle");
-    let rejected_body = rejected_body.unwrap_or_else(|error| error.to_string());
-    assert!(
-        !rejected_body.contains("response.completed")
-            && !rejected_body.contains("controlled upstream history mismatch"),
-        "mismatched follow-up must not complete or expose the provider rejection: {rejected_body}"
-    );
+        .expect("mismatched follow-up must settle")
+        .expect("the final provider error body must be complete");
     let rejected_upstream = received_capture(&mut captures, "mismatched follow-up").await;
-    assert!(
-        rejected_upstream
-            .rejection
-            .as_deref()
-            .is_some_and(|reason| reason.contains("controlled upstream history mismatch")),
-        "controlled provider must reject mismatched paired tool history"
+    let reason = rejected_upstream
+        .rejection
+        .as_deref()
+        .expect("controlled provider must reject mismatched paired tool history");
+    assert!(reason.contains("controlled upstream history mismatch"));
+    assert_eq!(
+        rejected_body,
+        json!({"error":{"message":reason}}).to_string(),
+        "the final error must preserve the actual upstream response"
     );
     let mut expected_mismatched_history = expected_tool_history();
     expected_mismatched_history[2]["content"] = json!("wrong late id");

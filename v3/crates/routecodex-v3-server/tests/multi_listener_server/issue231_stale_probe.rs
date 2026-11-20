@@ -257,9 +257,8 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
         "the stale cooled probe must not create or mutate a healthy sibling entry"
     );
 
-    // 6. A singleton bypasses automatic cooldown and its real failure closes
-    // only its own transport; a concurrent healthy
-    //    request still completes.
+    // 6. A singleton bypasses automatic cooldown and projects its final real
+    //    HTTP error; a concurrent healthy request still completes.
     let exhausted = tokio::spawn(send_for_outcome(
         client.clone(),
         endpoint.clone(),
@@ -290,11 +289,17 @@ async fn issue231_stale_probe_witness(outcome: StaleProbeOutcome) {
     match timeout(Duration::from_secs(5), exhausted).await {
         Err(_) => panic!("singleton terminal failure must not wait for future recovery"),
         Ok(Err(join_error)) => panic!("exhausted request task must not fail: {join_error}"),
-        Ok(Ok(ClientOutcome::TransportBreak)) => {}
+        Ok(Ok(ClientOutcome::TransportBreak)) => {
+            panic!("the final real Provider error must reach the client");
+        }
         Ok(Ok(ClientOutcome::Response(response))) => {
             let status = response.status();
             let text = response.text().await.expect("unexpected response body");
-            panic!("exhaustion must close transport, got {status}: {text}");
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                text,
+                r#"{"error":{"message":"issue231 owned cooled failure"}}"#
+            );
         }
     }
 

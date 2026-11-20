@@ -840,50 +840,37 @@ async fn zen_tcm_provider_403_never_projects_an_error_payload_to_the_client() {
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    let outcome = client
-        .post(format!(
-            "http://127.0.0.1:{}/v1/chat/completions",
-            harness.port
-        ))
-        .json(&json!({"model":"zenpeer.model","stream":false,"messages":[{"role":"user","content":"hi"}]}))
-        .send()
-        .await;
-    // A provider 403 leaves no provider for this request, so the client
-    // transport must terminate before any response status or body is
-    // committed. A completed reply of any status (empty 200, {}, a 502
-    // substitute error, or a projected error payload) is a contract
-    // violation, and a client timeout or connect failure is not the declared
-    // termination.
-    let error = match outcome {
-        Ok(reply) => {
-            let status = reply.status();
-            let content_type = reply
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or_default()
-                .to_string();
-            let raw = reply.text().await.unwrap_or_default();
-            panic!(
-                "provider 403 must not commit any client response: status={status} content-type={content_type} body={raw}"
-            );
-        }
-        Err(error) => error,
-    };
-    assert!(
-        !error.is_timeout(),
-        "provider 403 left the client waiting: {error}"
+    let (status, content_type, raw) = send_raw(
+        &client,
+        harness.port,
+        "/v1/chat/completions",
+        &json!({
+            "model":"zenpeer.model",
+            "stream":false,
+            "messages":[{"role":"user","content":"hi"}]
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "the final real Provider HTTP status must reach the client: {raw}"
     );
     assert!(
-        !error.is_connect(),
-        "test client failed to reach the server: {error}"
+        content_type.contains("application/json"),
+        "the final Provider error must retain its JSON content type: {content_type}"
+    );
+    assert_eq!(
+        raw, r#"{"error":{"message":"FreeTierError","type":"FreeTierError"}}"#,
+        "the final Provider error body must remain lossless"
     );
     let captures = harness.peer.captures.lock().await;
     assert_eq!(
         captures.len(),
         1,
-        "one provider attempt must reach the peer before exhaustion: {captures:?}"
+        "one provider attempt must reach the peer before final projection: {captures:?}"
     );
     drop(captures);
+    assert!(harness.peer.errors.lock().await.is_empty());
     harness.stop().await;
 }

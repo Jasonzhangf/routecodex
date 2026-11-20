@@ -26,10 +26,10 @@ use tokio::{
 mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
-/// The OpenAI Chat Direct entry must give clients the same provider/client
-/// isolation as the Responses Direct entry: provider errors never become a
-/// client payload, and a no-response pool breaks the client transport instead
-/// of answering with a fabricated status.
+/// The OpenAI Chat Direct entry keeps non-final and non-HTTP failures private,
+/// while a final complete Provider HTTP error reaches the client unchanged.
+/// A no-response pool still breaks the client transport instead of answering
+/// with a fabricated status.
 #[derive(Debug, Clone, Copy)]
 struct ChatPorts {
     success: u16,
@@ -55,6 +55,7 @@ impl ChatPorts {
 struct ProviderCapture {
     authorization: Option<String>,
     body: Value,
+    observed_at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -165,32 +166,38 @@ async fn chat_direct_success_baseline_json_and_sse() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// The chat entry is decoupled from the provider. A real upstream HTTP 429 is a
-/// provider error: it is classified in the typed Error chain and never projected
-/// to the client. With the pool exhausted the client observes a transport break,
-/// not the upstream status and not the upstream error body.
+/// Both real upstream HTTP attempts return 429. The first error stays in the
+/// typed Error chain; the final complete HTTP response is projected with its
+/// actual status and body. JSON and pre-commit SSE clients see the same final
+/// provider response because no business frame has committed either transport.
 #[tokio::test]
 async fn chat_direct_real_upstream_http_429_never_reaches_client() {
-    let success = start_controlled_upstream(ProviderMode::Success).await;
-    let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
-    let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
-    let ports = ChatPorts::allocate();
-    let config = write_chat_config(&ports, &success, Some(&rate_a), Some(&rate_b));
-    let client = reqwest::Client::new();
-    let mut cli = start_cli_server(&config, ports.all());
-    wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
+    for stream in [false, true] {
+        let success = start_controlled_upstream(ProviderMode::Success).await;
+        let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
+        let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
+        let ports = ChatPorts::allocate();
+        let config = write_chat_config(&ports, &success, Some(&rate_a), Some(&rate_b));
+        let client = reqwest::Client::new();
+        let mut cli = start_cli_server(&config, ports.all());
+        wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    assert_chat_no_front_http_headers(ports.exhausted).await;
-    assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut rate_a.captures, "429 first upstream").await;
-    next_capture(&mut rate_b.captures, "429 second upstream").await;
-    drop(cli);
-    wait_ports_closed(&client, &ports.all()).await;
+        assert_chat_final_provider_http_error(
+            &client,
+            ports.exhausted,
+            429,
+            r#"{"error":{"type":"rate_limit_error","code":"rate_limit_error","message":"controlled rate limit"}}"#,
+            stream,
+        )
+        .await;
+        assert_two_captures_each(&mut rate_a.captures, &mut rate_b.captures, "direct 429").await;
+        drop(cli);
+        wait_ports_closed(&client, &ports.all()).await;
+    }
 }
 
-/// The same boundary for a real external 503: a provider terminal is provider-private,
-/// so an exhausted pool breaks the client transport instead of projecting the
-/// upstream status and body.
+/// The same final-error boundary for a real external 503. The final complete
+/// response is projected; the first response remains provider-private evidence.
 #[tokio::test]
 async fn chat_direct_real_upstream_http_503_never_reaches_client() {
     let success = start_controlled_upstream(ProviderMode::Success).await;
@@ -204,10 +211,20 @@ async fn chat_direct_real_upstream_http_503_never_reaches_client() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    assert_chat_no_front_http_headers(ports.exhausted).await;
-    assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut unavailable_a.captures, "503 first upstream").await;
-    next_capture(&mut unavailable_b.captures, "503 second upstream").await;
+    assert_chat_final_provider_http_error(
+        &client,
+        ports.exhausted,
+        503,
+        r#"{"error":{"type":"upstream_unavailable","message":"controlled upstream 503"}}"#,
+        false,
+    )
+    .await;
+    assert_two_captures_each(
+        &mut unavailable_a.captures,
+        &mut unavailable_b.captures,
+        "direct 503",
+    )
+    .await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -242,10 +259,20 @@ async fn chat_direct_upstream_http_502_is_not_forwarded_to_client() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    assert_chat_no_front_http_headers(ports.exhausted).await;
-    assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut bad_gateway_a.captures, "first upstream 502").await;
-    next_capture(&mut bad_gateway_b.captures, "second upstream 502").await;
+    assert_chat_final_provider_http_error(
+        &client,
+        ports.exhausted,
+        502,
+        r#"{"error":{"type":"upstream_gateway_error","message":"controlled upstream 502"}}"#,
+        false,
+    )
+    .await;
+    assert_two_captures_each(
+        &mut bad_gateway_a.captures,
+        &mut bad_gateway_b.captures,
+        "direct 502",
+    )
+    .await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -281,34 +308,36 @@ async fn chat_direct_real_upstream_error_survives_as_transport_isolation_then_re
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// A provider first answers with a real 429 and a later candidate drops the
-/// connection. Both are provider terminals: the client observes one transport
-/// break, never the 429 status, the provider error body, or an internal
-/// `network_error` frame. A following request on the same session scope must
-/// resume from the healthy candidate.
+/// A provider first answers with a real 429 and the final candidate drops its
+/// connection. The final failure has no complete Provider HTTP response, so the
+/// earlier 429 witness cannot be projected and the client transport must break.
+/// A following request on the same session scope must resume from the healthy
+/// candidate.
 #[tokio::test]
 async fn chat_direct_last_provider_failure_breaks_transport_and_reselect_succeeds() {
     let mut success = start_controlled_upstream(ProviderMode::Success).await;
     let mut rate = start_controlled_upstream(ProviderMode::RateLimited).await;
     let mut no_response = start_no_response_upstream().await;
     let ports = ChatPorts::allocate();
-    let config = write_chat_config(&ports, &success, Some(&rate), Some(&no_response));
+    let config =
+        write_chat_config_with_failure_a_first(&ports, &success, Some(&rate), Some(&no_response));
     let client = reqwest::Client::new();
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
     wait_for_health(&client, &mut cli, ports.reselect, "chat_reselect").await;
 
-    let failure_result = client
-        .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.exhausted))
-        .json(&json!({"model":"client-test","messages":[{"role":"user","content":"429 then no response"}]}))
-        .send()
-        .await;
+    let failure_result = read_chat_front_response(ports.exhausted, false).await;
     assert!(
-        failure_result.is_err(),
-        "a provider terminal must break the client transport instead of projecting a provider error"
+        failure_result.is_empty(),
+        "a final no-response failure must break transport without projecting the earlier 429 witness: {}",
+        String::from_utf8_lossy(&failure_result)
     );
-    next_capture(&mut rate.captures, "429 before transport failure").await;
-    next_capture(&mut no_response.captures, "transport after 429").await;
+    let rate_capture = next_capture(&mut rate.captures, "429 before transport failure").await;
+    let no_response_capture = next_capture(&mut no_response.captures, "transport after 429").await;
+    assert!(
+        rate_capture.observed_at < no_response_capture.observed_at,
+        "the explicit fixture order must attempt 429 before the no-response candidate"
+    );
 
     let success_response = client
         .post(format!("http://127.0.0.1:{}/v1/chat/completions", ports.reselect))
@@ -344,6 +373,7 @@ async fn controlled_responses_upstream(
                 .and_then(|value| value.to_str().ok())
                 .map(ToOwned::to_owned),
             body: parsed.clone(),
+            observed_at: Instant::now(),
         })
         .unwrap();
     match &state.mode {
@@ -452,8 +482,9 @@ async fn chat_relay_cross_protocol_pool_exhaustion_no_response_breaks_client_tra
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// A real upstream 5xx on the cross-protocol lane is a provider failure that
-/// must not become a client payload; the client transport breaks instead.
+/// A real final upstream 5xx on the cross-protocol lane is projected after
+/// both declared candidates fail. The response status and body remain actual
+/// Provider output rather than a proxy-generated error.
 #[tokio::test]
 async fn chat_relay_cross_protocol_upstream_http_502_is_not_forwarded_to_client() {
     let success = start_controlled_responses_upstream(ProviderMode::Success).await;
@@ -473,10 +504,20 @@ async fn chat_relay_cross_protocol_upstream_http_502_is_not_forwarded_to_client(
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    assert_chat_no_front_http_headers(ports.exhausted).await;
-    assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut bad_gateway_a.captures, "relay first upstream 502").await;
-    next_capture(&mut bad_gateway_b.captures, "relay second upstream 502").await;
+    assert_chat_final_provider_http_error(
+        &client,
+        ports.exhausted,
+        502,
+        r#"{"error":{"type":"upstream_gateway_error","message":"controlled upstream 502"}}"#,
+        false,
+    )
+    .await;
+    assert_two_captures_each(
+        &mut bad_gateway_a.captures,
+        &mut bad_gateway_b.captures,
+        "relay 502",
+    )
+    .await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -520,9 +561,9 @@ async fn chat_relay_cross_protocol_error_then_reselect_succeeds() {
     wait_ports_closed(&client, &ports.all()).await;
 }
 
-/// The same provider-private boundary on the cross-protocol lane: an exhausted
-/// pool of `responses`-type providers must break the chat client transport
-/// instead of projecting the last real external status and error.
+/// The same final-error boundary on the cross-protocol lane: after both
+/// declared `responses`-type providers return complete 503 responses, the
+/// final response is projected to the chat client without proxy rewriting.
 #[tokio::test]
 async fn chat_relay_cross_protocol_real_upstream_http_503_never_reaches_client() {
     let success = start_controlled_responses_upstream(ProviderMode::Success).await;
@@ -542,10 +583,20 @@ async fn chat_relay_cross_protocol_real_upstream_http_503_never_reaches_client()
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "chat_exhausted").await;
 
-    assert_chat_no_front_http_headers(ports.exhausted).await;
-    assert_chat_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut unavailable_a.captures, "relay 503 first upstream").await;
-    next_capture(&mut unavailable_b.captures, "relay 503 second upstream").await;
+    assert_chat_final_provider_http_error(
+        &client,
+        ports.exhausted,
+        503,
+        r#"{"error":{"type":"upstream_unavailable","message":"controlled upstream 503"}}"#,
+        false,
+    )
+    .await;
+    assert_two_captures_each(
+        &mut unavailable_a.captures,
+        &mut unavailable_b.captures,
+        "relay 503",
+    )
+    .await;
     drop(cli);
     wait_ports_closed(&client, &ports.all()).await;
 }
@@ -629,6 +680,79 @@ async fn assert_chat_no_front_http_headers(port: u16) {
     );
 }
 
+async fn assert_chat_final_provider_http_error(
+    client: &reqwest::Client,
+    port: u16,
+    expected_status: u16,
+    expected_body: &str,
+    stream: bool,
+) {
+    let response = client
+        .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+        .json(&json!({
+            "model": "client-test",
+            "messages": [{"role": "user", "content": "final provider error"}],
+            "stream": stream,
+        }))
+        .send()
+        .await
+        .expect("the final provider HTTP error must reach the HTTP client");
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let body = response
+        .text()
+        .await
+        .expect("the final provider HTTP error body must be readable");
+    if !stream || status != ReqwestStatusCode::OK {
+        assert_eq!(
+            status,
+            ReqwestStatusCode::from_u16(expected_status).unwrap(),
+            "the client must receive the final Provider status, body={body}"
+        );
+        assert_eq!(
+            body, expected_body,
+            "the client must receive the final Provider body without rewriting"
+        );
+        return;
+    }
+    assert!(
+        content_type.starts_with("text/event-stream"),
+        "a committed SSE head must keep its protocol content type: {content_type}"
+    );
+    let events: Vec<_> = body
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .collect();
+    assert_eq!(events, [expected_body], "Chat must emit one Provider error");
+    assert!(
+        !body.contains("\"object\":\"chat.completion\"") && !body.contains("data: [DONE]"),
+        "a committed Provider error must not become a normal Chat completion: {body}"
+    );
+}
+
+async fn assert_two_captures_each(
+    first: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+    second: &mut mpsc::UnboundedReceiver<ProviderCapture>,
+    label: &str,
+) {
+    next_capture(first, &format!("{label} first candidate")).await;
+    next_capture(second, &format!("{label} final candidate")).await;
+    assert_no_extra_capture(first, &format!("{label} first candidate"));
+    assert_no_extra_capture(second, &format!("{label} final candidate"));
+}
+
+fn assert_no_extra_capture(captures: &mut mpsc::UnboundedReceiver<ProviderCapture>, lane: &str) {
+    assert!(
+        matches!(captures.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+        "{lane} must have one upstream send per request"
+    );
+}
+
 /// A streaming client must observe an aborted transfer instead of a normal end
 /// of stream or an error payload: the response head and one SSE comment frame
 /// reach the transport and the chunked body never terminates.
@@ -708,6 +832,7 @@ async fn controlled_chat_upstream(
                 .and_then(|value| value.to_str().ok())
                 .map(ToOwned::to_owned),
             body: parsed.clone(),
+            observed_at: Instant::now(),
         })
         .unwrap();
     match &state.mode {
@@ -814,6 +939,7 @@ async fn start_no_response_upstream() -> ControlledUpstream {
                         .send(ProviderCapture {
                             authorization: None,
                             body: json!({"transport_connected": true}),
+                            observed_at: Instant::now(),
                         })
                         .unwrap();
                     drop(socket);
@@ -834,7 +960,30 @@ fn write_chat_config(
     failure_a: Option<&ControlledUpstream>,
     failure_b: Option<&ControlledUpstream>,
 ) -> ChatConfig {
-    write_chat_config_for_provider_type(ports, "openai_chat", success, failure_a, failure_b)
+    write_chat_config_for_provider_type_order(
+        ports,
+        "openai_chat",
+        success,
+        failure_a,
+        failure_b,
+        false,
+    )
+}
+
+fn write_chat_config_with_failure_a_first(
+    ports: &ChatPorts,
+    success: &ControlledUpstream,
+    failure_a: Option<&ControlledUpstream>,
+    failure_b: Option<&ControlledUpstream>,
+) -> ChatConfig {
+    write_chat_config_for_provider_type_order(
+        ports,
+        "openai_chat",
+        success,
+        failure_a,
+        failure_b,
+        true,
+    )
 }
 
 /// Writes the chat-entry server config for the given provider wire type. A
@@ -847,6 +996,24 @@ fn write_chat_config_for_provider_type(
     success: &ControlledUpstream,
     failure_a: Option<&ControlledUpstream>,
     failure_b: Option<&ControlledUpstream>,
+) -> ChatConfig {
+    write_chat_config_for_provider_type_order(
+        ports,
+        provider_type,
+        success,
+        failure_a,
+        failure_b,
+        false,
+    )
+}
+
+fn write_chat_config_for_provider_type_order(
+    ports: &ChatPorts,
+    provider_type: &str,
+    success: &ControlledUpstream,
+    failure_a: Option<&ControlledUpstream>,
+    failure_b: Option<&ControlledUpstream>,
+    failure_a_first: bool,
 ) -> ChatConfig {
     // Console logging stays off by default so a green run is quiet; set
     // ROUTECODEX_CHAT_TEST_LOG_CONSOLE=1 to capture the runtime error chain.
@@ -893,7 +1060,10 @@ supports_streaming = true
         None => String::new(),
     };
     let success_target = r#"{ kind = "provider_model", provider = "success", model = "test", key = "success", priority = 1 }"#;
-    let failure_a_target = r#"{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = 1 }"#;
+    let failure_a_priority = if failure_a_first { 2 } else { 1 };
+    let failure_a_target = format!(
+        r#"{{ kind = "provider_model", provider = "failure_a", model = "test", key = "failure-a", priority = {failure_a_priority} }}"#
+    );
     let failure_b_target = r#"{ kind = "provider_model", provider = "failure_b", model = "test", key = "failure-b", priority = 1 }"#;
     // Reselect walks the cooled provider first and must recover on the healthy one.
     let reselect_forwarder_targets = match failure_a {
@@ -904,6 +1074,9 @@ supports_streaming = true
     // the terminal pool state. The baseline-only case keeps one target because a
     // forwarder without targets is rejected at config load.
     let exhausted_forwarder_targets = match (failure_a, failure_b) {
+        (Some(_), Some(_)) if failure_a_first => {
+            format!("{failure_a_target},\n  {failure_b_target}")
+        }
         (Some(_), Some(_)) => format!("{failure_b_target},\n  {failure_a_target}"),
         (Some(_), None) => failure_a_target.to_string(),
         (None, Some(_)) => failure_b_target.to_string(),

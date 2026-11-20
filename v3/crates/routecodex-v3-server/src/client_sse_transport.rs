@@ -233,6 +233,7 @@ enum V3ClientSseChannelState {
 enum V3ClientSseChannelDisposition {
     Drain,
     FrameCommittedPayload,
+    ProtocolError(Vec<u8>),
     Close(io::Error),
 }
 
@@ -260,10 +261,16 @@ impl V3ClientSseChannelStream {
 
     /// A committed SSE channel carries a successful client payload. An SSE payload
     /// streams through; a successful non-SSE payload is carried by SSE transport
-    /// framing of the committed bytes. Every other outcome keeps its explicit
-    /// transport failure instead of a silent clean end, and the connection record
-    /// keeps the runtime status for diagnosis.
+    /// framing of the committed bytes. A qualified provider error is carried only
+    /// by the typed Server sidecar. Every other non-success outcome keeps its
+    /// explicit transport failure.
     fn committed_channel_disposition(response: &Response<Body>) -> V3ClientSseChannelDisposition {
+        if let Some(sidecar) = response
+            .extensions()
+            .get::<crate::V3ClientSseProtocolErrorSidecar>()
+        {
+            return V3ClientSseChannelDisposition::ProtocolError(sidecar.bytes.clone());
+        }
         let content_type = response
             .headers()
             .get(header::CONTENT_TYPE)
@@ -354,6 +361,11 @@ impl Stream for V3ClientSseChannelStream {
                             let disposition =
                                 V3ClientSseChannelStream::committed_channel_disposition(&response);
                             match disposition {
+                                V3ClientSseChannelDisposition::ProtocolError(bytes) => {
+                                    this.state = V3ClientSseChannelState::Finished;
+                                    this.flush_yield = true;
+                                    return Poll::Ready(Some(Ok(bytes)));
+                                }
                                 V3ClientSseChannelDisposition::Close(error) => {
                                     this.state = V3ClientSseChannelState::Finished;
                                     return Poll::Ready(Some(Err(error)));
@@ -657,6 +669,76 @@ mod tests {
             chunks.len(),
             2,
             "keepalive then the explicit close: {chunks:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_sse_channel_emits_a_typed_provider_error_sidecar_once() {
+        let (sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut response = json_outcome(
+                429,
+                "application/json",
+                r#"{"error":{"type":"rate_limit_error","message":"slow down"}}"#,
+            );
+            response.extensions_mut().insert(
+                crate::V3ClientSseProtocolErrorSidecar {
+                    bytes: b"event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"slow down\"}}\n\n"
+                        .to_vec(),
+                },
+            );
+            let _ = sender.send(response);
+        });
+        let chunks = collect(channel(outcome, task, Duration::from_millis(50))).await;
+        assert_eq!(
+            chunks
+                .iter()
+                .filter_map(|chunk| chunk.as_ref().ok())
+                .filter(|chunk| chunk.starts_with(b"event: error\n"))
+                .count(),
+            1,
+            "the typed provider error sidecar must be emitted once: {chunks:?}"
+        );
+        assert!(
+            chunks.iter().all(Result::is_ok),
+            "a qualified sidecar must close cleanly: {chunks:?}"
+        );
+        assert_eq!(
+            chunks.last().and_then(|chunk| chunk.as_ref().ok()),
+            Some(
+                &b"event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"slow down\"}}\n\n"
+                    .to_vec()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn client_sse_channel_keeps_unqualified_provider_error_as_transport_failure() {
+        let (sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = sender.send(json_outcome(
+                429,
+                "application/json",
+                r#"{"error":{"message":"slow down"}}"#,
+            ));
+        });
+        let chunks = collect(channel(outcome, task, Duration::from_millis(50))).await;
+        assert!(
+            chunks.iter().any(|chunk| chunk.is_err()),
+            "an unqualified provider HTTP error must remain a transport failure: {chunks:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_sse_channel_rejects_an_unrepresentable_provider_error_sidecar() {
+        let (sender, outcome) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = sender.send(json_outcome(429, "application/json", "\u{fffd}"));
+        });
+        let chunks = collect(channel(outcome, task, Duration::from_millis(50))).await;
+        assert!(
+            chunks.iter().any(|chunk| chunk.is_err()),
+            "without a typed sidecar, the channel must keep the transport failure: {chunks:?}"
         );
     }
 

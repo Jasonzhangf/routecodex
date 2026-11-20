@@ -120,7 +120,7 @@ export function validateCase(relative, value) {
   }
   validateClientRequest(relative, value.client_request, findings);
   validateExpectedProvider(relative, value.expected_provider, findings);
-  validateExpectedClient(relative, value.expected_client, findings);
+  validateExpectedClient(relative, value.expected_client, value.upstream_response, findings);
   validateUpstream(relative, value.upstream_response, findings, 'upstream_response');
   validateAssertions(relative, value, findings);
   validateRuntimeSetup(relative, value.runtime_setup, findings);
@@ -193,7 +193,7 @@ function validateAuthOrders(relative, expected, findings) {
   }
 }
 
-function validateExpectedClient(relative, expected, findings) {
+function validateExpectedClient(relative, expected, upstream, findings) {
   const fail = (message) => findings.push(`${relative}: ${message}`);
   if (!isObject(expected)) {
     fail('expected_client object missing');
@@ -201,8 +201,15 @@ function validateExpectedClient(relative, expected, findings) {
   }
   if (!CLIENT_TRANSPORT_SET.has(expected.transport)) fail(`expected_client.transport invalid: ${expected.transport}`);
   if (expected.transport === 'complete') {
-    if (!Number.isInteger(expected.status) || expected.status < 200 || expected.status >= 300) {
-      fail(`expected_client.status must be 2xx for complete transport: ${expected.status}`);
+    if (!Number.isInteger(expected.status) || expected.status < 200 || expected.status >= 600) {
+      fail(`expected_client.status must be a final HTTP status for complete transport: ${expected.status}`);
+    } else if (expected.status >= 300) {
+      const finalAttempt = Array.isArray(upstream?.attempts) ? upstream.attempts.at(-1) : undefined;
+      const mode = finalAttempt?.kind ?? upstream?.mode;
+      const status = finalAttempt?.status ?? upstream?.status;
+      if (mode !== 'json' || status !== expected.status) {
+        fail('expected_client complete non-2xx status must match the scripted final Provider response');
+      }
     }
     if (!isObject(expected.body_must)) fail('expected_client.body_must must be an object for complete transport');
   }

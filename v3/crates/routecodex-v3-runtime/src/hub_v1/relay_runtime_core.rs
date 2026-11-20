@@ -723,6 +723,7 @@ where
         deterministic_sample,
     };
     loop {
+        last_external_http = None;
         let preferred_selected = retry_selected.take();
         let selected = if let Some(selected) = initial_admitted.take() {
             selected

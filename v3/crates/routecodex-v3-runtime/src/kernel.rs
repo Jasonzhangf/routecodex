@@ -322,6 +322,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut provider_request_snapshot = None;
     let allowed_modes = direct_runtime_allowed_execution_modes(manifest, &standardized.server_id);
     loop {
+        last_external_http = None;
         let (selected, planned_decision): (
             routecodex_v3_target::V3Target10ConcreteProviderSelected,
             Option<V3Execution11ProtocolDecision>,

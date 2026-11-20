@@ -152,6 +152,20 @@ fn evidence_body_text(evidence: &Value) -> String {
         .unwrap_or_default()
 }
 
+fn assert_final_http_error(outcome: &ClientOutcome, evidence: &Value, expected_status: u16) {
+    let ClientOutcome::Http { status, body } = outcome else {
+        panic!("the final provider HTTP error must reach the client: {outcome:?}");
+    };
+    assert_eq!(*status, expected_status);
+    assert_eq!(evidence["kind"], "external_http");
+    assert_eq!(evidence["status"], expected_status);
+    assert_eq!(*body, evidence_body_text(evidence));
+    assert_eq!(
+        serde_json::from_str::<Value>(body).unwrap(),
+        json!({"error":{"message":"owned-real-key-failure","http_status":expected_status}})
+    );
+}
+
 fn completed_response(label: &str, model: &str) -> Response<Body> {
     let text = format!("{label}-business-ok");
     Response::builder()
@@ -239,7 +253,8 @@ async fn peer_handler(
             .status(status)
             .header("content-type", "application/json")
             .body(Body::from(
-                json!({"error":{"message":"owned-real-key-failure"}}).to_string(),
+                json!({"error":{"message":"owned-real-key-failure","http_status":status}})
+                    .to_string(),
             ))
             .unwrap();
     }
@@ -1672,7 +1687,7 @@ targets = [{ kind = "provider_model", provider = "only", model = "model", key = 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn final_provider_final_key_error_stays_internal_and_ends_transport() {
+async fn final_provider_final_key_projects_real_http_error() {
     let (home, _guard) = TEST_LOCK.lock().await;
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let peer = spawn_peer("final").await;
@@ -1709,23 +1724,11 @@ targets = [{ kind = "provider_model", provider = "final", model = "model", key =
         1,
         "the only declared key must be attempted exactly once: {captures:?}"
     );
-    let ClientOutcome::TransportError(error) = &outcome else {
-        panic!("the final provider failure must end only this client transport: {outcome:?}");
-    };
-    assert!(
-        !error.contains("owned-real-key-failure"),
-        "provider error body must not reach the client: {error}"
-    );
-    assert_eq!(evidence["kind"], "external_http", "{evidence}");
-    assert_eq!(evidence["status"], 418, "{evidence}");
-    assert!(
-        evidence_body_text(&evidence).contains("owned-real-key-failure"),
-        "the real provider error must remain available internally: {evidence}"
-    );
+    assert_final_http_error(&outcome, &evidence, 418);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn final_provider_final_key_429_stays_health_neutral_and_ends_transport() {
+async fn final_provider_final_key_projects_429_and_stays_health_neutral() {
     let (home, _guard) = TEST_LOCK.lock().await;
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let peer = spawn_peer("final429").await;
@@ -1774,19 +1777,7 @@ targets = [{ kind = "provider_model", provider = "final429", model = "model", ke
         1,
         "the only declared key must be attempted exactly once: {captures:?}"
     );
-    let ClientOutcome::TransportError(error) = &outcome else {
-        panic!("the final provider failure must end only this client transport: {outcome:?}");
-    };
-    assert!(
-        !error.contains("owned-real-key-failure"),
-        "provider error body must not reach the client: {error}"
-    );
-    assert_eq!(terminal["kind"], "external_http", "{terminal}");
-    assert_eq!(terminal["status"], 429, "{terminal}");
-    assert!(
-        evidence_body_text(&terminal).contains("owned-real-key-failure"),
-        "the real provider error must remain available internally: {terminal}"
-    );
+    assert_final_http_error(&outcome, &terminal, 429);
     let attempts = failed_attempts["attempts"]
         .as_array()
         .expect("failed attempts must be an array");
@@ -1862,7 +1853,7 @@ targets = [
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn last_of_two_failing_keys_keep_errors_internal_and_end_transport() {
+async fn last_of_two_failing_keys_projects_only_its_own_error() {
     let (home, _guard) = TEST_LOCK.lock().await;
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     std::env::set_var(SECOND_AUTH_ENV, SECOND_AUTH_SECRET);
@@ -1903,32 +1894,20 @@ targets = [
     std::env::remove_var(AUTH_ENV);
     std::env::remove_var(SECOND_AUTH_ENV);
 
-    assert!(
-        captures.iter().any(|capture| {
-            capture.input == "target" && capture.authorization == format!("Bearer {AUTH_SECRET}")
-        }),
-        "the first failing key must be attempted: {captures:?}"
+    let keys = captures
+        .iter()
+        .filter(|capture| capture.input == "target")
+        .map(|capture| &capture.authorization)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys,
+        [
+            &format!("Bearer {AUTH_SECRET}"),
+            &format!("Bearer {SECOND_AUTH_SECRET}")
+        ],
+        "the first failed key and final key must each be attempted once in order"
     );
-    assert!(
-        captures.iter().any(|capture| {
-            capture.input == "target"
-                && capture.authorization == format!("Bearer {SECOND_AUTH_SECRET}")
-        }),
-        "the final untried key must be attempted after the first failure: {captures:?}"
-    );
-    let ClientOutcome::TransportError(error) = &outcome else {
-        panic!("the exhausted provider target must end only this client transport: {outcome:?}");
-    };
-    assert!(
-        !error.contains("owned-real-key-failure"),
-        "provider error body must not reach the client: {error}"
-    );
-    assert_eq!(evidence["kind"], "external_http", "{evidence}");
-    assert_eq!(evidence["status"], 418, "{evidence}");
-    assert!(
-        evidence_body_text(&evidence).contains("owned-real-key-failure"),
-        "the final provider error must remain available internally: {evidence}"
-    );
+    assert_final_http_error(&outcome, &evidence, 418);
 }
 
 async fn run_issue0afb440_ninth_visible_candidate(relay: bool) {

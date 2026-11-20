@@ -628,7 +628,7 @@ async fn gemini_default_direct_preserves_native_json_and_sse_business_terminals_
 }
 
 #[tokio::test]
-async fn native_direct_all_provider_exhaustion_closes_only_the_request_transport() {
+async fn native_direct_exhaustion_projects_only_the_final_provider_error() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(PROVIDER_KEY_ENV, "native-direct-secret");
 
@@ -668,18 +668,11 @@ async fn native_direct_all_provider_exhaustion_closes_only_the_request_transport
 
     assert_native_direct_default(&client, handle.listeners[0].addr).await;
 
-    let error = initial.expect_err(
-        "all-provider exhaustion must not return a provider status or fabricated business response",
-    );
-    assert!(
-        error.is_request(),
-        "all-provider exhaustion must detectably close only the request transport: {error:?}"
-    );
-    assert!(
-        !error
-            .to_string()
-            .contains("ANTHROPIC_EXHAUSTION_PRIVATE_MARKER"),
-        "provider exhaustion body reached the client: {error}"
+    let response = initial.expect("the final real provider error must be delivered");
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"type":"error","error":{"type":"rate_limit_error","message":"ANTHROPIC_EXHAUSTION_PRIVATE_MARKER"}}"#
     );
     let capture = recv_capture(&mut captures_rx).await;
     assert_eq!(capture.provider, "anthropic-exhausted");

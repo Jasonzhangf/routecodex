@@ -399,6 +399,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             deterministic_sample,
         };
         loop {
+            last_external_http = None;
             let (selected, protocol_decision) = if let Some((selected, protocol_decision)) =
                 initial_selected.take()
             {

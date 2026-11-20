@@ -351,9 +351,11 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure_with_source(
     }
     if failure.terminal_disposition.is_none() {
         failure.terminal_disposition = Some(match last_external_http {
-            Some(witness) => {
-                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
-            }
+            Some(witness) => V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+                &source,
+                true,
+                Some(witness),
+            ),
             None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
         });
     }
@@ -384,7 +386,14 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
         return failure;
     }
     let terminal_disposition = match last_external_http {
-        Some(witness) => routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness),
+        Some(witness) => V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+            &failure
+                .attempt_source
+                .clone()
+                .unwrap_or_else(|| terminal_failure_source(&failure)),
+            failure.provider_status.is_some(),
+            Some(witness),
+        ),
         None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
     };
     failure
@@ -442,6 +451,29 @@ pub(crate) fn terminalize_v3_responses_relay_provider_failure(
         Err(fault) => failure.error_operator_fault = Some(fault),
     }
     failure
+}
+
+fn terminal_failure_source(
+    failure: &V3ResponsesRelayProviderFailure,
+) -> routecodex_v3_error::V3Error01SourceRaised {
+    let external_code = failure
+        .provider_status
+        .map(|status| format!("provider_http_{status}"))
+        .unwrap_or_else(|| failure.policy_error_type.clone());
+    routecodex_v3_error::build_v3_error_01_source_raised_external(
+        routecodex_v3_error::V3ErrorSourceKind::ProviderFailure,
+        failure.source_stage,
+        &external_code,
+        &failure.policy_error_message,
+        routecodex_v3_error::V3ExternalErrorLink {
+            kind: routecodex_v3_error::V3ExternalErrorKind::Provider,
+            status: failure.provider_status,
+            code: Some(external_code.clone()),
+            provider_id: None,
+            upstream_request_id: None,
+            message: Some(failure.policy_error_message.clone()),
+        },
+    )
 }
 
 pub(crate) fn provider_response_stream_failure(
@@ -1092,8 +1124,8 @@ mod tests {
             terminalize_v3_responses_relay_provider_failure(failure, Some(witness.clone()));
         assert_eq!(
             terminalized.terminal_disposition,
-            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
-            "upstream body must stay in the typed terminal witness, not the client wire",
+            Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(witness)),
+            "a complete final upstream body is qualified for the client projection",
         );
         let projection = terminalized
             .terminal_projection

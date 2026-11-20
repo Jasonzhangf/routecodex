@@ -49,8 +49,14 @@ impl Drop for TestHomeGuard {
     }
 }
 
+#[derive(Clone, Debug)]
+struct UpstreamCall {
+    provider: &'static str,
+    body: Value,
+}
+
 struct Peer {
-    captures: Mutex<Vec<Value>>,
+    captures: Mutex<Vec<UpstreamCall>>,
     probe_entered: Semaphore,
     probe_release: Semaphore,
     business_entered: Semaphore,
@@ -60,7 +66,10 @@ async fn healthy(
     State(peer): State<Arc<Peer>>,
     Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    peer.captures.lock().await.push(body.clone());
+    peer.captures.lock().await.push(UpstreamCall {
+        provider: "healthy",
+        body: body.clone(),
+    });
     if body["messages"][0]["content"] == "upstream failure marker" {
         return (
             StatusCode::FORBIDDEN,
@@ -82,13 +91,25 @@ async fn cooled(
 ) -> (StatusCode, Json<Value>) {
     assert_eq!(headers["authorization"], "Bearer owned-test-key");
     assert_eq!(body["model"], "step-5-preview");
-    peer.captures.lock().await.push(body.clone());
+    peer.captures.lock().await.push(UpstreamCall {
+        provider: "cooled",
+        body: body.clone(),
+    });
     if body["messages"][0]["content"] == "earlier business generation marker" {
         peer.business_entered.add_permits(1);
         peer.business_release.acquire().await.unwrap().forget();
         return (
             StatusCode::FORBIDDEN,
             Json(json!({"error":{"message":"owned earlier business forbidden"}})),
+        );
+    }
+    if matches!(
+        body["messages"][0]["content"].as_str(),
+        Some("all cooled marker" | "all cooled raw" | "all cooled stream")
+    ) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error":{"message":"owned exhausted business request"}})),
         );
     }
     peer.probe_entered.add_permits(1);
@@ -425,7 +446,7 @@ async fn public_recovery_witness_with_generation(
         .lock()
         .await
         .iter()
-        .any(|v| v["messages"][0]["content"] == "step5 marker");
+        .any(|call| call.body["messages"][0]["content"] == "step5 marker");
     eprintln!("public causal witness: probe pending, healthy business attempted={attempted_before_release}, request_finished={}", before_release.is_ok());
     let completed_before_release = before_release.is_ok();
     if require_pending_healthy_progress {
@@ -463,16 +484,18 @@ async fn public_recovery_witness_with_generation(
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["choices"][0]["message"]["content"], "step5 complete");
     if let Some(earlier_business) = earlier_business {
-        // Actual pinned business 403 passes through typed Error/Provider health
-        // before this request-local close. Probe A remains authenticated and held.
+        // The final real business 403 is projected after required client-protocol
+        // conversion. Probe A remains authenticated and held.
         peer.business_release.add_permits(1);
         let bytes = timeout(Duration::from_secs(2), earlier_business)
             .await
             .unwrap()
             .unwrap();
+        let projected_403 = String::from_utf8_lossy(&bytes);
         assert!(
-            bytes.is_empty(),
-            "provider 403 must not become client error data"
+            projected_403.starts_with("HTTP/1.1 403 ")
+                && projected_403.contains("owned earlier business forbidden"),
+            "final real provider 403 must preserve status and body: {projected_403}"
         );
         assert_eq!(peer.probe_release.available_permits(), 0);
         eprintln!("same-identity earlier business403 processed after held probe capture; healthy content already complete");
@@ -538,9 +561,8 @@ async fn public_recovery_witness_with_generation(
     })
     .await
     .expect("released 503 probe must complete and retain exact cooldown");
-    // A pinned all-cooled target has no business response to deliver. Its failed
-    // probe must leave health cooled while closing this request, not await a
-    // future scheduled recovery. The watchdog is only a test cleanup boundary.
+    // The pinned request reaches a separate business attempt. Its error and
+    // the earlier failed health probe carry different upstream bodies.
     let failure_client = client.clone();
     let failure_base = base.clone();
     let mut exhausted = tokio::spawn(async move {
@@ -549,12 +571,38 @@ async fn public_recovery_witness_with_generation(
             .send().await
     });
     let exhausted_result = timeout(Duration::from_millis(500), &mut exhausted).await;
-    let closed = matches!(&exhausted_result, Ok(Ok(Err(_))));
-    eprintln!("public all-cooled witness: failed probe already captured, promptly closed={closed}");
-    if exhausted_result.is_err() {
-        exhausted.abort();
-        let _ = exhausted.await;
-    }
+    let projected_business_error = match exhausted_result {
+        Ok(Ok(Err(error))) => {
+            eprintln!(
+                "public all-cooled witness: failed probe already captured, transport error={error}"
+            );
+            false
+        }
+        Ok(Ok(Ok(response))) => {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|error| format!("<body read failed: {error}>"));
+            eprintln!("public all-cooled witness: client response status={status} body={body:?}");
+            status == StatusCode::SERVICE_UNAVAILABLE
+                && body == r#"{"error":{"message":"owned exhausted business request"}}"#
+        }
+        Ok(Err(error)) => {
+            eprintln!(
+                "public all-cooled witness: failed probe already captured, request task failed={error}"
+            );
+            false
+        }
+        Err(_) => {
+            exhausted.abort();
+            let _ = exhausted.await;
+            eprintln!(
+                "public all-cooled witness: failed probe already captured, request remained pending past 500ms"
+            );
+            false
+        }
+    };
     let sibling = client.post(format!("{base}/v1/chat/completions"))
         .json(&json!({"model":"healthy.step-5-preview","messages":[{"role":"user","content":"sibling marker"}],"stream":false}))
         .send().await.unwrap();
@@ -564,24 +612,36 @@ async fn public_recovery_witness_with_generation(
         sibling_body["choices"][0]["message"]["content"],
         "step5 complete"
     );
-    if closed {
+    if projected_business_error {
         let all_cooled_raw = raw_chat(port, "cooled.step-5-preview", "all cooled raw", false).await;
         eprintln!("all-cooled nonstream client bytes={}", all_cooled_raw.len());
-        assert!(
-            all_cooled_raw.is_empty(),
-            "nonstream failure must close without HTTP status/body: {:?}",
-            String::from_utf8_lossy(&all_cooled_raw)
-        );
+        let raw = String::from_utf8(all_cooled_raw).unwrap();
+        assert!(raw.starts_with("HTTP/1.1 503 "), "{raw}");
+        assert!(raw.contains("owned exhausted business request"), "{raw}");
+        assert!(!raw.contains("owned failed probe"), "{raw}");
         let stream_raw = raw_chat(port, "cooled.step-5-preview", "all cooled stream", true).await;
         let stream_text = String::from_utf8_lossy(&stream_raw);
         eprintln!("all-cooled stream wire={stream_text:?}");
         assert!(
-            !stream_text.contains("data:")
-                && !stream_text.contains("[DONE]")
-                && !stream_text.contains("event: error")
-                && !stream_text.contains("503"),
-            "failure SSE must carry no business/error terminal: {stream_text}"
+            stream_text.contains("owned exhausted business request")
+                && !stream_text.contains("owned failed probe")
+                && !stream_text.contains("[DONE]"),
+            "the client must receive the business error only: {stream_text}"
         );
+        let captures = peer.captures.lock().await;
+        for marker in ["all cooled marker", "all cooled raw", "all cooled stream"] {
+            assert_eq!(
+                captures
+                    .iter()
+                    .filter(|call| {
+                        call.provider == "cooled" && call.body["messages"][0]["content"] == marker
+                    })
+                    .count(),
+                1,
+                "must capture one business attempt for {marker}"
+            );
+        }
+        drop(captures);
         let forbidden_raw = raw_chat(
             port,
             "healthy.step-5-preview",
@@ -590,17 +650,17 @@ async fn public_recovery_witness_with_generation(
         )
         .await;
         eprintln!("actual upstream403 client bytes={}", forbidden_raw.len());
+        let projected_403 = String::from_utf8_lossy(&forbidden_raw);
         assert!(
-            forbidden_raw.is_empty(),
-            "real provider403 must remain internal, with no client wrapper: {:?}",
-            String::from_utf8_lossy(&forbidden_raw)
+            projected_403.starts_with("HTTP/1.1 403 ")
+                && projected_403.contains("owned upstream forbidden"),
+            "final real provider 403 must preserve status and body: {projected_403}"
         );
         assert!(
-            peer.captures
-                .lock()
-                .await
-                .iter()
-                .any(|v| v["messages"][0]["content"] == "upstream failure marker"),
+            peer.captures.lock().await.iter().any(|call| {
+                call.provider == "healthy"
+                    && call.body["messages"][0]["content"] == "upstream failure marker"
+            }),
             "real403 must be triggered through actual provider transport"
         );
         let recovered_sibling = client.post(format!("{base}/v1/chat/completions"))
@@ -633,7 +693,10 @@ async fn public_recovery_witness_with_generation(
     handle.shutdown().await;
     upstream.abort();
     let _ = upstream.await;
-    assert!(closed, "all-cooled failed probe waited for future recovery instead of closing the exhausted request");
+    assert!(
+        projected_business_error,
+        "the request must settle promptly with its own real error after the failed probe"
+    );
     if require_pending_healthy_progress {
         assert!(attempted_before_release, "healthy Step5 was blocked by the owned pending rescue probe; releasing that probe restored the same request");
     }

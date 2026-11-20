@@ -1454,7 +1454,7 @@ features:
   - Error generates action plans only; Provider alone mutates health state
   - Target-facing availability is read-only; Router has no Provider health dependency
   - Dry Run uses Runtime foundation kernel and terminal no-network effect
-  - Management APIs project diagnostic Debug/Error/Dry Run results only; model entries never project error status/body/events and do not duplicate Runtime/Error policy
+  - Management APIs project diagnostic Debug/Error/Dry Run results only. Model entries consume typed qualification for complete final Provider errors and leave recovery decisions in Runtime/Error.
   - Debug sink and malformed/disabled Dry Run failures enter the six-node Error chain without panic or silent success
   - Provider health mutation methods are crate-private and external Target-style compile fixtures cannot call them
   - External provider/upstream/transport errors keep external_error identity and never receive internal_code
@@ -1465,9 +1465,9 @@ features:
   required_negative:
   - The optional snapshot failure test proves no V3DebugArtifact source replaces the original upstream source and no snapshot failure terminates the public SSE consumer.
   required_integration:
-  - All model entry errors stay internal even on pool exhaustion; multi_listener_server model_entries_never_deliver_provider_or_sse_decode_errors_blackbox captures real HTTP bytes for Chat, Responses including compact, Messages, and Gemini JSON/SSE with upstream503 and malformed SSE; responses_inbound_websocket_sse_decode_failure_never_sends_client_error and the provider429/binary/502, malformed input, pool exhaustion, session isolation, and successful tool tests are mandatory in test:v3-server-debug-error-blackbox and the V3 cargo workspace CI run
+  - Model entry blackbox covers real HTTP 503 projection and malformed SSE transport breaks for Chat, Responses including compact, Messages and Gemini. final_truncated_provider_error_breaks_transport_and_preserves_received_head proves an incomplete body with a real 503 head remains private. direct_incomplete_http_error_remains_private_evidence covers the same boundary at the pluggable Direct transport interface. The V3 workspace gate also covers WebSocket decode failures, provider 429/binary/502, malformed input, pool exhaustion, session isolation and successful tools.
   - multi_listener_server malformed_http_framing_never_sends_client_error_blackbox proves fresh, reused and pipelined HTTP parse failures terminate with zero new bytes; front_http_framing_preserves_authorized_responses_blackbox preserves control errors, opaque/multi-flush bodies and Expect/100-continue; hyper_default_error_policy_preserves_upstream_behavior_blackbox proves the dependency default and explicit true preserve native 400/431; existing success gates preserve SSE and WebSocket
-  - Server model pending endpoint emits internal Debug/Error evidence and returns only complete success or a typed incomplete transport outcome
+  - Server model endpoints emit internal Debug/Error evidence and return complete success, a qualified final Provider error or a typed incomplete transport outcome.
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
@@ -1507,10 +1507,10 @@ features:
     - empty_leading_tier_reaches_healthy_lower_tier
     - matched_pool_unavailable_reaches_declared_default
     - concurrent_business_requests_have_no_admission_limit
-    - final_provider_final_key_error_stays_internal_and_ends_transport
-    - final_provider_final_key_429_stays_health_neutral_and_ends_transport
+    - final_provider_final_key_projects_real_http_error
+    - final_provider_final_key_projects_429_and_stays_health_neutral
     - remaining_same_provider_key_is_attempted_after_first_key_failure
-    - last_of_two_failing_keys_keep_errors_internal_and_end_transport
+    - last_of_two_failing_keys_projects_only_its_own_error
     - issue0afb440_non_last_failure_switches_immediately_direct
     - issue0afb440_non_last_failure_switches_immediately_relay
     - issue0afb440_healthy_sibling_completes_while_first_request_recovers
@@ -1865,7 +1865,7 @@ features:
   - the public Server socket-drop path separately aborts the runtime outcome task, releases the request-local attempt, and starts no additional provider attempt; it does not claim to exercise the typed codec-to-collector handoff
   - rejected metadata_center request produces zero upstream captures
   - chat entry pool exhaustion and provider terminals break the client transport for both the same-protocol Direct lane and the cross-protocol Relay lane instead of projecting an error payload
-  - a real external upstream status (429/503) never reaches the client on either lane; the client observes a transport break and a healthy later candidate is reselected to serve the request, while the failed request's provider-terminal evidence keeps the real upstream status, headers, and body
+  - a real external upstream error on a non-final candidate stays in typed evidence while a healthy later candidate serves the request. Only the actual exhausted final identity's complete real HTTP error may be projected, using the client protocol
   - Standard Chat Direct JSON and SSE recover from an owned pre-head A failure through the already-selected Responses B; A1/B1, held-client pending, genuine B model/content/stop/usage/DONE, privacy and owned cleanup are required.
   - Direct-to-Relay continuation consumes the captured target plan and request-local exclusions without Router re-entry or a new request execution control.
   - fa22072_direct_relay_captured_plan_and_exclusions_public_consumer requires captured A/B/C execution and D0 after the receiving manifest routes to D; captured-plan and exclusion reverses must each fail.
@@ -2271,7 +2271,7 @@ features:
   - issuee63d2f2_chat_sse_literal_marker_context_stays_business
   - issuee63d2f2_chat_sse_role_usage_native_tools_preserve_terminal
   - responses_wire_representation_survives_chat_and_anthropic_entries
-  - genuine_http_and_native_sse_errors_break_transport_without_client_error
+  - final_http_errors_project_and_native_sse_errors_break_transport
   - chat_malformed_tool_call_arguments_keep_pair_with_reversible_anthropic_input
   - anthropic_malformed_function_wrapper_restores_exact_raw_arguments
   - anthropic_valid_function_arguments_do_not_use_raw_argument_wrapper
@@ -3057,24 +3057,25 @@ features:
   - A real client disconnect while the outcome remains pending records one cancelled terminal before aborting only that request, including when only headers or keepalives have been delivered (7a07d21).
   - The Server commits the client SSE transport channel and its transport-only keepalives; the Runtime still buffers the full provider attempt before any provider payload byte is projected.
   - An outcome that arrives inside one keepalive interval keeps the exact runtime status, headers, and body; the committed channel carries only transport framing.
-  - The committed channel carries the projected client payload with SSE transport framing only; the transport module reads the HTTP status and content type and never parses, reclassifies, or rewrites the payload.
+  - The committed channel carries the projected client payload or typed final Provider error sidecar with SSE transport framing. The Server protocol owner prepares the sidecar before the transport consumes it.
   - The keepalive has exactly one owner at a time: the committed channel while the runtime outcome is pending, and the drained SSE body afterwards.
-  - A successful runtime outcome is never turned into a client transport failure; only an outcome with no successful client payload closes the transport, without projecting a provider status, error payload, or fabricated success.
+  - A successful runtime outcome delivers its payload. A qualified final Provider HTTP error may deliver one protocol error sidecar. Other unsuccessful outcomes end the affected transport without a fabricated client error or success.
   - A non-SSE client keeps waiting for the runtime outcome and never receives a committed channel.
   - An exec replacement atomically pauses new business dispatch and waits through active Body EOF, Hyper HTTP tail submission and actual ordered Front write/flush completion before sample preflight and idle transport cleanup; cancellation restores admission without cancelling healthy socket writes or shortening ordinary request deadlines.
   required_reverse:
   - A provider payload byte or provider status never reaches the client before the runtime outcome exists.
-  - Provider error detail, internal status, and pool-exhaustion text never appear in a committed client body.
+  - Non-final Provider errors, internal status, and pool-exhaustion text stay out of a committed client body.
   - The transport module never imports Runtime, provider transport, or payload-parsing code.
   - The restart operation budget must never become a body cutoff; control peer cancellation releases maintenance even when a healthy provider attempt remains pending.
-  - A committed channel never closes the connection cleanly in place of the typed transport break.
+  - An unqualified terminal keeps its typed transport break after the transport head has been sent.
   required_blackbox:
   - The real /v1/chat/completions entry returns a 200 text/event-stream head plus a keepalive comment while the controlled provider attempt is still gated.
   - client_cancel_terminal_public covers Responses Direct, Responses Relay, and OpenAI Chat Direct. Responses Direct and Relay prove one cancelled terminal before first business output, one after a committed business prefix, and no cancelled terminal after a resolved normal outcome. OpenAI Chat Direct proves the shared recorder for a buffered whole-attempt mode through cancellation before first business output and a resolved normal outcome; it must not fabricate a business prefix before the provider terminal.
   - The buffered provider payload and the runtime terminal still stream through the committed channel once the provider is released.
   - A non-SSE client on the same entry receives no committed channel and still receives the runtime JSON outcome.
   - An SSE client whose released provider returns a complete JSON document receives that successful payload by SSE transport framing with no transport failure and no error frame.
-  - A controlled provider 429 released after the commit produces a client transport failure with no provider detail and no projected error frame.
+  - A controlled final Provider HTTP error released after transport-only commit delivers one protocol error with the source error content and no fabricated completion. Chat preserves the complete JSON error or valid UTF-8 text in the error message.
+  - final_provider_error_projects_native_responses_sse_error_event proves a held terminal error carries top-level Responses error fields and retains opaque Provider fields.
   - exec_preparation_drains_an_in_flight_client_response_before_closing_transports proves preparation waits for a gated provider response and delivers its payload and terminal.
   - exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal proves the ordinary provider timeout ends an unsuccessful attempt without projected errors or fabricated completion.
   - borrowed_exec_preparation_cancellation_resumes_queued_dispatch_and_pending_sse proves borrowed-preflight cancellation restores queued provider dispatch after keepalive reuse and preserves complete pending SSE.
@@ -3083,6 +3084,7 @@ features:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test client_cancel_terminal_public -- --nocapture --test-threads=1
   - npm run test:v3-client-sse-head-commit
   - npm run test:v3-client-transport-boundary
+  - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test fa22072_error_decoupling final_provider_error_projects_native_responses_sse_error_event -- --exact --nocapture
   - npm run verify:v3-client-sse-head-commit
   - npm run verify:v3-architecture-docs
   - npm run verify:architecture-wiki-html-sync
@@ -3511,7 +3513,7 @@ features:
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-runtime --lib provider_probe_fairness_tests -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server pool_empty_recovery -- --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server issue44cc3af -- --nocapture --test-threads=1
-  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_provider_http_error_never_reaches_the_client -- --exact --nocapture
+  - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server responses_direct_projects_final_real_provider_http_error -- --exact --nocapture
   - node scripts/run-v3-cargo-test.mjs -p routecodex-v3-config --test config_v3_contract -- --nocapture
   - npm run test:v3-provider-health-contract
   - npm run test:v3-provider-session-cooldown-red-fixtures
@@ -4302,7 +4304,7 @@ features:
     manifest: v3/fixtures/protocol-live-mock-matrix/manifest.json
   - case: provider_failure_and_stream_cut
     fixtures: [provider-error-exhaustion, provider-fault-stream-cut]
-    expects: provider failure stays in the typed Error chain and is not returned as business success
+    expects: the complete final HTTP 429 preserves its status and error details, and an incomplete stream remains a detectable transport failure
     matrix: v3/scripts/tests/v3-protocol-live-mock-matrix.mjs
     manifest: v3/fixtures/protocol-live-mock-matrix/manifest.json
   candidate_test_bindings:

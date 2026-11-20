@@ -10316,7 +10316,7 @@ async fn assert_incomplete_transport(result: Result<reqwest::Response, reqwest::
 /// HTTP500 and native HTTP200 SSE errors are distinct failure controls. Neither
 /// may become a client error or a fabricated completion; independent traffic lives.
 #[tokio::test]
-async fn genuine_http_and_native_sse_errors_break_transport_without_client_error() {
+async fn final_http_errors_project_and_native_sse_errors_break_transport() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     for (kind, process) in [
@@ -10362,9 +10362,26 @@ async fn genuine_http_and_native_sse_errors_break_transport_without_client_error
         }
         for (status, content_type, upstream) in failures {
             let (endpoint, handle, mut captures, shutdown) =
-                start_entry(kind, process, status, content_type, upstream).await;
+                start_entry(kind, process, status, content_type, upstream.clone()).await;
             let client = client();
-            assert_incomplete_transport(post_request(&client, &endpoint, "test.test").await).await;
+            let outcome = post_request(&client, &endpoint, "test.test").await;
+            if status.is_success() {
+                assert_incomplete_transport(outcome).await;
+            } else {
+                let response = outcome.expect("final real HTTP error must reach the client");
+                let projected_status = response.status();
+                let projected_body = response.text().await.unwrap();
+                if projected_status == StatusCode::OK {
+                    let payloads = events(&projected_body);
+                    assert_eq!(payloads.len(), 1, "{projected_body}");
+                    assert_eq!(payloads[0]["type"], "error");
+                    let expected: Value = serde_json::from_str(&upstream).unwrap();
+                    assert_eq!(payloads[0]["error"], expected["error"]);
+                } else {
+                    assert_eq!(projected_status, status);
+                    assert_eq!(projected_body, upstream);
+                }
+            }
             assert_one_attempt(&mut captures, "wire-test").await;
             let body =
                 successful_body(post_request(&client, &endpoint, "independent.test").await).await;

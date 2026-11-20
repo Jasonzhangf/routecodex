@@ -223,16 +223,11 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         }))
         .send()
         .await;
-    match error_result {
-        Ok(response) => panic!(
-            "a provider-terminal 429 must not reach the chat client, got {}",
-            response.status()
-        ),
-        Err(error) => assert!(
-            error.is_request(),
-            "expected an aborted chat client transport: {error}"
-        ),
-    }
+    let expected_error =
+        r#"{"error":{"type":"rate_limit_error","message":"controlled rate limit"}}"#;
+    let error_response = error_result.expect("the final provider 429 must reach the client");
+    assert_eq!(error_response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(error_response.text().await.unwrap(), expected_error);
     let error_capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())
         .await
         .expect("provider failure must produce a capture")
@@ -252,26 +247,24 @@ async fn server_executes_controlled_json_sse_error_and_isolation_without_second_
         }))
         .send()
         .await;
-    match sse_error_result {
-        Ok(response) => {
-            assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(
-                response.headers().get("content-type").unwrap(),
-                "text/event-stream"
-            );
-            let break_error = tokio::time::timeout(Duration::from_secs(2), response.text())
-                .await
-                .expect("streaming provider terminal must settle within the transport break")
-                .expect_err("a streaming provider terminal must break the client transport");
-            assert!(
-                !break_error.to_string().contains("rate_limit_error"),
-                "the provider body must not reach the client: {break_error}"
-            );
-        }
-        Err(error) => assert!(
-            error.is_request(),
-            "expected an aborted chat client transport: {error}"
-        ),
+    let response = sse_error_result.expect("the final provider error must reach the client");
+    let status = response.status();
+    if status == StatusCode::OK {
+        assert_eq!(response.headers()["content-type"], "text/event-stream");
+    }
+    let body = tokio::time::timeout(Duration::from_secs(2), response.text())
+        .await
+        .expect("streaming provider terminal must settle promptly")
+        .expect("final provider terminal must be readable");
+    if status == StatusCode::OK {
+        let data = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .collect::<Vec<_>>();
+        assert_eq!(data, [expected_error]);
+    } else {
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body, expected_error);
     }
     let sse_failure_capture = loop {
         let capture = tokio::time::timeout(Duration::from_secs(2), captures_rx.recv())

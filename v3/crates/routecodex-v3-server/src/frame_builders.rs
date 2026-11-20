@@ -1,7 +1,7 @@
 use crate::*;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Response, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode};
 use futures_util::{FutureExt, StreamExt};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -524,14 +524,17 @@ pub(crate) struct V3ProviderTerminalEvidence<'a> {
     pub request_id: &'a str,
 }
 
-/// Project a provider-terminal outcome onto the client boundary.
+/// A client-protocol error frame prepared by the Server protocol owner.
 ///
-/// The client entry is never coupled to a provider. A provider terminal is either
-/// absorbed by a remaining candidate or becomes a client transport break. The
-/// provider's status, headers, and body stay in the typed Error chain and
-/// provider-terminal evidence; they are never projected as a client response.
-/// Matching dispositions exhaustively makes each terminal shape use the same
-/// client boundary.
+/// The committed SSE transport may consume this sidecar, but it must not
+/// inspect provider status or body bytes to reconstruct terminal eligibility.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct V3ClientSseProtocolErrorSidecar {
+    pub(crate) bytes: Vec<u8>,
+}
+
+/// Record the typed failure before applying the terminal disposition. A
+/// qualified final HTTP error reaches the client through its protocol boundary.
 pub(crate) fn provider_terminal_response(
     state: &Arc<V3ListenerState>,
     connection: Option<V3FrontConnectionIdentity>,
@@ -539,11 +542,7 @@ pub(crate) fn provider_terminal_response(
     requested_stream: bool,
     evidence: V3ProviderTerminalEvidence<'_>,
 ) -> Response<Body> {
-    // The provider's real error is recorded before the transport breaks. This is
-    // the only production reader of the witness: without it the provider status,
-    // headers, and body would be carried through every attempt and discarded.
-    // The debug sink cannot fail this boundary: it records persistence failures
-    // in its own ledger and reports them out of band.
+    // The diagnostic sink reports persistence failures out of band.
     persist_v3_provider_terminal_evidence(
         state,
         evidence.entry_protocol,
@@ -551,7 +550,204 @@ pub(crate) fn provider_terminal_response(
         evidence.request_id,
         &disposition,
     );
+    if let routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(witness) =
+        &disposition
+    {
+        let mut response = provider_terminal_http_error_response(witness);
+        if requested_stream {
+            if let Some(sidecar) =
+                provider_terminal_sse_error_sidecar(evidence.entry_protocol, witness)
+            {
+                response.extensions_mut().insert(sidecar);
+            }
+        }
+        return response;
+    }
     model_transport_break_response(state, connection, disposition, requested_stream)
+}
+
+fn provider_terminal_http_error_response(
+    witness: &routecodex_v3_error::V3ExternalHttpWitness,
+) -> Response<Body> {
+    let connection_headers = witness
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("connection"))
+        .flat_map(|(_, value)| value.split(|byte| *byte == b','))
+        .filter_map(|name| HeaderName::from_bytes(name.trim_ascii()).ok())
+        .collect::<std::collections::HashSet<_>>();
+    let mut builder = Response::builder()
+        .status(StatusCode::from_u16(witness.status()).expect("provider status"));
+    for (name, value) in witness.headers() {
+        let Ok(name) = HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        if is_hop_by_hop_header(&name) || connection_headers.contains(&name) {
+            continue;
+        }
+        let Ok(value) = HeaderValue::from_bytes(value) else {
+            continue;
+        };
+        builder = builder.header(name, value);
+    }
+    builder
+        .body(Body::from(witness.body().to_vec()))
+        .expect("provider HTTP error response")
+}
+
+fn provider_terminal_sse_error_sidecar(
+    entry_protocol: &str,
+    witness: &routecodex_v3_error::V3ExternalHttpWitness,
+) -> Option<V3ClientSseProtocolErrorSidecar> {
+    if entry_protocol == "responses" {
+        let body = responses_provider_error_body(witness)?;
+        let mut event = body.as_object().cloned().unwrap_or_default();
+        for (name, value) in responses_provider_error_details(&body) {
+            if name != "type" && name != "error" {
+                event.insert(name, value);
+            }
+        }
+        event.insert("type".to_string(), json!("error"));
+        event.insert("sequence_number".to_string(), json!(0));
+        return Some(V3ClientSseProtocolErrorSidecar {
+            bytes: encode_provider_sse_error_event(
+                Some("error"),
+                &serde_json::to_vec(&event).ok()?,
+            )?,
+        });
+    }
+    let mut body = match serde_json::from_slice::<Value>(witness.body()) {
+        Ok(body) => body,
+        Err(_) if entry_protocol == "openai_chat" => {
+            let message = std::str::from_utf8(witness.body()).ok()?;
+            let error = serde_json::to_vec(&json!({"error":{"message":message}})).ok()?;
+            return Some(V3ClientSseProtocolErrorSidecar {
+                bytes: encode_provider_sse_error_event(None, &error)?,
+            });
+        }
+        Err(_) => return None,
+    };
+    let event_name = match entry_protocol {
+        // These profiles require an explicit SSE error event and an object with
+        // the protocol error type. Add only that required outer field.
+        "anthropic" => {
+            let object = body.as_object_mut()?;
+            let already_typed = object
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == "error");
+            object
+                .entry("type")
+                .or_insert_with(|| Value::String("error".to_string()));
+            Some(("error", already_typed))
+        }
+        // Chat and Gemini carry the complete provider error JSON as the SSE
+        // data value. Keep its original valid UTF-8 bytes unchanged.
+        "openai_chat" | "gemini" => None,
+        _ => return None,
+    };
+    let (event_name, already_typed) = match event_name {
+        Some((name, already_typed)) => (Some(name), already_typed),
+        None => (None, false),
+    };
+    let encoded_body = if already_typed {
+        // Preserve the Provider's exact JSON representation when it already
+        // satisfies the entry protocol's required error type.
+        witness.body().to_vec()
+    } else if event_name.is_some() {
+        serde_json::to_vec(&body).ok()?
+    } else {
+        witness.body().to_vec()
+    };
+    Some(V3ClientSseProtocolErrorSidecar {
+        bytes: encode_provider_sse_error_event(event_name, &encoded_body)?,
+    })
+}
+
+fn responses_provider_error_body(
+    witness: &routecodex_v3_error::V3ExternalHttpWitness,
+) -> Option<Value> {
+    match serde_json::from_slice(witness.body()) {
+        Ok(body) => Some(body),
+        Err(_) => Some(Value::String(
+            std::str::from_utf8(witness.body()).ok()?.to_owned(),
+        )),
+    }
+}
+
+fn responses_provider_error_details(body: &Value) -> serde_json::Map<String, Value> {
+    let detail = body.get("error").unwrap_or(body);
+    let mut fields = detail.as_object().cloned().unwrap_or_default();
+    let message = fields.remove("message").unwrap_or_else(|| detail.clone());
+    fields.insert("message".to_string(), responses_error_string(message));
+    for field in ["code", "param"] {
+        let value = fields.remove(field).unwrap_or(Value::Null);
+        fields.insert(
+            field.to_string(),
+            if value.is_null() {
+                value
+            } else {
+                responses_error_string(value)
+            },
+        );
+    }
+    fields
+}
+
+fn responses_error_string(value: Value) -> Value {
+    match value {
+        Value::String(_) => value,
+        value => Value::String(value.to_string()),
+    }
+}
+
+pub(crate) fn responses_websocket_provider_error_event(
+    witness: &routecodex_v3_error::V3ExternalHttpWitness,
+) -> Option<Value> {
+    let body = responses_provider_error_body(witness)?;
+    let mut event = match body.get("error") {
+        Some(_) => body.as_object().cloned().unwrap_or_default(),
+        None => serde_json::Map::new(),
+    };
+    let mut error = responses_provider_error_details(&body);
+    let error_type = error.remove("type").unwrap_or_else(|| json!("error"));
+    error.insert("type".to_string(), responses_error_string(error_type));
+    event.insert("type".to_string(), json!("error"));
+    event.insert("status".to_string(), json!(witness.status()));
+    event.insert("error".to_string(), Value::Object(error));
+    Some(Value::Object(event))
+}
+
+fn encode_provider_sse_error_event(event_name: Option<&str>, body: &[u8]) -> Option<Vec<u8>> {
+    let body = std::str::from_utf8(body).ok()?;
+    let mut encoded = Vec::with_capacity(body.len() + 32);
+    if let Some(event_name) = event_name {
+        encoded.extend_from_slice(b"event: ");
+        encoded.extend_from_slice(event_name.as_bytes());
+        encoded.extend_from_slice(b"\n");
+    }
+    for line in body.split('\n') {
+        encoded.extend_from_slice(b"data: ");
+        encoded.extend_from_slice(line.strip_suffix('\r').unwrap_or(line).as_bytes());
+        encoded.extend_from_slice(b"\n");
+    }
+    encoded.extend_from_slice(b"\n");
+    Some(encoded)
+}
+
+fn is_hop_by_hop_header(name: &HeaderName) -> bool {
+    matches!(
+        name.as_str(),
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "content-length"
+    )
 }
 
 /// Break the model client's transport for a terminal outcome that has no client payload.
@@ -569,11 +765,10 @@ fn model_transport_break_response(
     requested_stream: bool,
 ) -> Response<Body> {
     match disposition {
-        // A real compatible upstream HTTP error is still a provider error. Its real
-        // status, headers, and body are recorded as provider-terminal evidence and in
-        // the Error chain, and the client observes a transport break instead of the
-        // provider's response.
+        // An unqualified real upstream HTTP error is still provider evidence only.
+        // The qualified variant is handled before this break path.
         routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+        | routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(_)
         | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => {}
     }
     if requested_stream {
@@ -1393,4 +1588,47 @@ pub(crate) fn json_response(status: u16, body: serde_json::Value) -> Response<Bo
             serde_json::to_vec(&body).expect("JSON projection"),
         ))
         .expect("fixed response")
+}
+
+#[cfg(test)]
+mod provider_terminal_sse_error_tests {
+    use super::*;
+
+    #[test]
+    fn sidecar_preserves_anthropic_error_shape_without_inventing_message_fields() {
+        let witness = routecodex_v3_error::V3ExternalHttpWitness::new(
+            503,
+            vec![],
+            br#"{"error":"upstream unavailable"}"#.to_vec(),
+        );
+        let sidecar = provider_terminal_sse_error_sidecar("anthropic", &witness)
+            .expect("valid Anthropic JSON error must be representable");
+        assert_eq!(
+            sidecar.bytes,
+            b"event: error\ndata: {\"error\":\"upstream unavailable\",\"type\":\"error\"}\n\n"
+        );
+    }
+
+    #[test]
+    fn responses_sidecar_preserves_qualified_utf8_as_the_actual_error_message() {
+        let invalid_utf8 =
+            routecodex_v3_error::V3ExternalHttpWitness::new(503, vec![], vec![b'{', 0xff, b'}']);
+        assert!(
+            provider_terminal_sse_error_sidecar("responses", &invalid_utf8).is_none(),
+            "invalid UTF-8 must not be disguised in an SSE sidecar"
+        );
+
+        let raw_text = br#"{"error":"unterminated""#;
+        let text_error =
+            routecodex_v3_error::V3ExternalHttpWitness::new(503, vec![], raw_text.to_vec());
+        let sidecar = provider_terminal_sse_error_sidecar("responses", &text_error).unwrap();
+        let field = std::str::from_utf8(&sidecar.bytes)
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .unwrap();
+        let event: Value = serde_json::from_str(field).unwrap();
+        assert_eq!(event["message"], std::str::from_utf8(raw_text).unwrap());
+        assert!(event["code"].is_null());
+    }
 }

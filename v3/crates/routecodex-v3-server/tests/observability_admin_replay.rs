@@ -304,20 +304,25 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         .send()
         .await;
 
-    // 1. The failure is real: the provider was contacted exactly once, and the
-    //    client observes a transport break. The provider's own status and body
-    //    are provider-private evidence and never reach the client.
+    // 1. Each provider is contacted exactly once. The second provider supplies
+    //    the final actual status, headers, and body.
     assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         fallback_calls.load(Ordering::SeqCst),
         1,
         "the eligible fallback really failed before exhaustion"
     );
-    assert!(
-        response.is_err(),
-        "a provider HTTP failure must not fabricate a client HTTP response"
+    let response = response.expect("the final actual provider HTTP error must be delivered");
+    let client_status = response.status();
+    assert_eq!(client_status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response.headers()["openai-request-id"],
+        "upstream-obs-replay-1"
     );
-    let client_status = "transport_break";
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}}"#
+    );
 
     // 2. The runtime wrote a row for this request; read it back over HTTP.
     let list_url = format!("http://{admin_addr}/api/observability/records?range=all&page_size=50");
@@ -349,7 +354,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     // on the projected Error06 node, while the provider 503 remains visible on
     // both the attempt rows and the terminal evidence asserted below.
     assert_eq!(list_row["meta"]["provider_status"], 503);
-    assert_eq!(list_row["meta"]["error_category"], "http_503");
+    assert_eq!(list_row["meta"]["error_category"], "provider_http_503");
 
     let (detail_status, detail) = get_json(
         &client,
@@ -613,9 +618,11 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         }))
         .send()
         .await;
-    assert!(
-        response.is_err(),
-        "a cooled identity must not fabricate a client HTTP response"
+    let response = response.expect("the eligible fallback must return its real final error");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}}"#
     );
     assert_eq!(
         upstream_calls.load(Ordering::SeqCst),

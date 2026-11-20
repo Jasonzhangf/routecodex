@@ -308,12 +308,14 @@ async fn issue127_disabled_health_persistence_direct_public_blackbox() {
         "the ignored cooldown must not block the first business send"
     );
 
-    // 2) A real upstream failure reaches the upstream, closes only this
-    //    transport without a client error payload, and writes no cooldown.
+    // 2) Both declared identities fail, and the final complete HTTP error is
+    //    projected while health stays disabled and writes no cooldown.
     let response = issue127_send(&client, &base, "main", "issue127-fail-real").await;
-    assert!(
-        response.is_err(),
-        "exhausted real provider failure must close the transport without a fabricated client response"
+    let response = response.expect("the final real Provider error must reach the client");
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response.text().await.unwrap(),
+        json!({"error":{"type":"server_error","code":"server_error","message":"controlled real upstream failure"}}).to_string()
     );
     assert!(
         issue127_receipts(&upstream, "issue127-fail-real").await == 2,

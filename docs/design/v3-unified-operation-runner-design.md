@@ -131,10 +131,13 @@ The design validates three DAGpipe SESE graphs:
   compiled run executes all six nodes for every source. Runtime slices execute Err01 at the raw
   failure boundary, then Err02, Err03, Err04, and Err05 as sequential decision slices. Recoverable
   outcomes exit at `error-execution-decision` and Runtime retains the live typed Err05 decision;
-  only a terminal Err05 decision admits the Err06 slice. Err06 emits internal outcome evidence,
-  never a fake recovery mutation or client-error candidate. The graph nodes carry typed
-  `v3.error.action_plan`, `v3.error.exhaustion_decision`, `v3.error.execution_decision`, and
-  `v3.error.client_projection_candidate` resource reads/writes.
+  only a terminal Err05 decision admits the Err06 slice. Err06 emits internal outcome evidence and,
+  only for the current exhausted final identity's complete genuine non-2xx response before business
+  commit, typed Server-projection eligibility. It never authorizes a proxy-generated client error
+  or a recovery mutation. The graph nodes carry typed `v3.error.action_plan`,
+  `v3.error.exhaustion_decision`, `v3.error.execution_decision`,
+  `v3.error.client_projection_candidate`, and
+  `v3.error.final_external_http_projection_eligibility` resource reads/writes.
 
 Each graph uses exact `operator@operator_version` bindings. The graphs are design DAGs, not
 executable claims. A Runtime candidate must parse them, compile them with `pipeline_runtime`,
@@ -199,7 +202,7 @@ or payload-carried control replaces this chain.
 | error_err03_target_local_action | `routecodex-v3-error` target action builder (Error03) | error-classified | error-target-local-action | error.chain read; v3.error.action_plan written | `V3Error03TargetLocalAction` produced | action failure remains in the typed Error chain | local action and health-affecting policy stay typed |
 | error_err04_target_exhaustion | `routecodex-v3-error` exhaustion builder (Error04) | error-target-local-action | error-target-exhaustion | v3.error.action_plan read; v3.error.exhaustion_decision written | `V3Error04TargetExhaustionDecision` produced | exhaustion failure remains in the typed Error chain | candidate availability and exhaustion remain target-local |
 | error_err05_execution_decision | `routecodex-v3-error` execution builder (Error05) | error-target-exhaustion | error-execution-decision | v3.error.exhaustion_decision read; v3.error.execution_decision written | live `V3Error05ExecutionDecision` produced | decision failure remains in the typed Error chain | recoverable decisions exit here; recovery witness stays live |
-| error_err06_client_projected | `routecodex-v3-error` terminal projection builder (Error06; internal outcome) | error-execution-decision | internal-error-outcome | error.chain and typed execution decision read; error projection candidate written | typed internal outcome evidence; no client error candidate | no recovery invocation; terminal construction is explicit | terminal-only slice; Runtime/Server terminates transport without an error payload |
+| error_err06_client_projected | `routecodex-v3-error` terminal outcome builder (Error06; internal outcome) | error-execution-decision | internal-error-outcome | error.chain and typed execution decision read; internal candidate and final-real-HTTP eligibility written | typed internal outcome; eligibility only for a complete real non-2xx response from the current exhausted final identity before business commit | no recovery invocation; terminal construction is explicit | terminal-only slice; Server projects only the qualified real response through the entry protocol and otherwise terminates transport |
 
 ## Runtime runner
 

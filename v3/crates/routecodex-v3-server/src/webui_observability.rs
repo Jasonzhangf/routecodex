@@ -73,6 +73,9 @@ pub(crate) fn record_v3_webui_error_projection(
                 routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => {
                     Some(witness.status())
                 }
+                routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
+                    witness,
+                ) => Some(witness.status()),
                 routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => None,
             });
     let external_error_status = typed
@@ -110,6 +113,15 @@ pub(crate) fn record_v3_webui_error_projection(
                 format!("http_{}", witness.status()),
                 format!("HTTP status {}", witness.status()),
             ),
+            (
+                _,
+                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
+                    witness,
+                )),
+            ) if witness.status() >= 400 => (
+                format!("provider_http_{}", witness.status()),
+                format!("HTTP status {}", witness.status()),
+            ),
             (Some(body), _) => crate::v3_error_body_code_message(body),
             (None, typed_terminal) => match (typed.diagnostic_source, typed_terminal) {
                 // NoResponse (timeout, transport break, client cancel) or a 2xx
@@ -121,6 +133,15 @@ pub(crate) fn record_v3_webui_error_projection(
                     Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)),
                 ) => (
                     format!("http_{}", witness.status()),
+                    format!("HTTP status {}", witness.status()),
+                ),
+                (
+                    None,
+                    Some(routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
+                        witness,
+                    )),
+                ) => (
+                    format!("provider_http_{}", witness.status()),
                     format!("HTTP status {}", witness.status()),
                 ),
                 (None, _) => (format!("http_{status}"), format!("HTTP status {status}")),

@@ -4,7 +4,7 @@
 //! `cargo test -p routecodex-v3-server --test client_transport_boundary_controlled`):
 //! - `chat_sse_head_commit_keeps_the_client_transport_live_while_the_provider_stalls`
 //! - `chat_json_client_still_waits_for_the_runtime_outcome`
-//! - `chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client`
+//! - `chat_sse_head_commit_projects_only_the_qualified_final_provider_terminal`
 //! - `chat_sse_head_commit_carries_a_json_success_for_an_sse_client`
 //! - `exec_preparation_drains_an_in_flight_client_response_before_closing_transports`
 //! - `exec_preparation_waits_for_real_provider_timeout_without_fabricated_terminal`
@@ -43,6 +43,7 @@ static TEST_LOCK: fa22072_test_home::ServerTestLock = fa22072_test_home::ServerT
 
 const KEEPALIVE_MS: u64 = 300;
 const KEEPALIVE_FRAME: &[u8] = b": keepalive\n\n";
+const PLAIN_PROVIDER_ERROR: &str = "Provider gateway unavailable\nRetain the full UTF-8 body: 错误";
 
 struct ProviderState {
     captures: mpsc::UnboundedSender<Value>,
@@ -69,13 +70,20 @@ async fn controlled_gated_openai_chat_upstream(
     let _ = release.wait_for(|released| *released).await;
 
     if stream_requested && content == "fail-slow" {
-        // A real provider terminal whose raw body must never reach the client.
         return Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header("content-type", "application/json")
             .body(Body::from(
                 r#"{"error":{"type":"invalid_api_key","message":"raw provider secret detail"}}"#,
             ))
+            .unwrap();
+    }
+
+    if stream_requested && content == "fail-slow-text" {
+        return Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .header("content-type", "text/plain; charset=utf-8")
+            .body(Body::from(PLAIN_PROVIDER_ERROR))
             .unwrap();
     }
 
@@ -339,8 +347,21 @@ async fn chat_json_client_still_waits_for_the_runtime_outcome() {
 }
 
 #[tokio::test]
-async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client() {
+async fn chat_sse_head_commit_projects_only_the_qualified_final_provider_terminal() {
     let _guard = TEST_LOCK.lock().await;
+    assert_chat_sse_provider_terminal(
+        "fail-slow",
+        json!({"error":{"type":"invalid_api_key","message":"raw provider secret detail"}}),
+    )
+    .await;
+    assert_chat_sse_provider_terminal(
+        "fail-slow-text",
+        json!({"error":{"message": PLAIN_PROVIDER_ERROR}}),
+    )
+    .await;
+}
+
+async fn assert_chat_sse_provider_terminal(prompt: &str, expected: Value) {
     // A failed last identity must not wait for the request recovery budget.
     let mut entry = start_controlled_entry_with_timeout_and_budget(None, Some(1800)).await;
     let started = std::time::Instant::now();
@@ -352,7 +373,7 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
             .post(&entry.endpoint)
             .json(&json!({
                 "model": "chat-client-alias",
-                "messages": [{"role": "user", "content": "fail-slow"}],
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": true
             }))
             .send(),
@@ -386,31 +407,23 @@ async fn chat_sse_head_commit_never_projects_a_provider_terminal_to_the_client()
             Ok(None) => break,
         }
     }
+    let elapsed = started.elapsed();
+    stop_controlled_entry(entry).await;
     assert!(
-        aborted,
-        "a provider terminal must stay an explicit client transport failure, not a clean end"
-    );
-    assert!(
-        started.elapsed() < Duration::from_millis(1500),
+        elapsed < Duration::from_millis(1500),
         "provider failure must not wait for the retired recovery budget"
     );
-    let received = String::from_utf8_lossy(&received).to_string();
+    let received = String::from_utf8(received).unwrap();
+    let frames: Vec<Value> = received
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|data| serde_json::from_str(data).unwrap())
+        .collect();
+    assert_eq!(frames, [expected], "complete Provider error for {prompt}");
     assert!(
-        received
-            .lines()
-            .filter(|line| !line.is_empty())
-            .all(|line| line.starts_with(':')),
-        "only transport comment frames may follow the committed head before the terminal: {received:?}"
+        !aborted,
+        "the qualified final provider error must terminate the SSE response without a transport failure"
     );
-    assert!(
-        !received.contains("raw provider secret detail"),
-        "provider detail must never reach the client: {received}"
-    );
-    assert!(
-        !received.contains("data:"),
-        "no error frame may be projected to the client: {received}"
-    );
-    stop_controlled_entry(entry).await;
 }
 
 /// A successful runtime outcome must reach an SSE client even when the projected
