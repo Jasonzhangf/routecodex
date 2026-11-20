@@ -58,6 +58,42 @@ async fn upstream(
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
     let input = body["input"].as_str().unwrap_or_default();
+    if input.contains("flowing-business") {
+        // A healthy business response that keeps flowing well past the
+        // whole-request wall clock (issue 5c24057). The first semantic frame
+        // arrives promptly; subsequent frames keep coming every 80ms for
+        // several hundred milliseconds, then the provider terminal lands.
+        let (tx, mut rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
+        tokio::spawn(async move {
+            for index in 0..6_u32 {
+                let delta = json!({
+                    "type": "response.output_text.delta",
+                    "delta": format!("flowing-{index}"),
+                    "item_id": "msg_e041a3b_flowing",
+                    "output_index": 0,
+                    "content_index": 0,
+                    "sequence_number": index + 1
+                });
+                let frame = format!("event: response.output_text.delta\ndata: {delta}\n\n");
+                let _ = tx.send(Ok(Bytes::from(frame)));
+                tokio::time::sleep(Duration::from_millis(80)).await;
+            }
+            let completed = format!(
+                "event: response.completed\ndata: {}\n\n",
+                json!({"type":"response.completed","response":completed()})
+            );
+            let _ = tx.send(Ok(Bytes::from(completed)));
+        });
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(futures_util::stream::unfold(
+                rx,
+                |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
+            )))
+            .unwrap();
+    }
+
     if input.contains("committed-deadline") {
         let delta = json!({
             "type": "response.output_text.delta",
@@ -276,6 +312,29 @@ async fn raw_committed_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Re
     (wire, started.elapsed(), ended)
 }
 
+async fn raw_flowing_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Result<usize>) {
+    let body = json!({
+        "model": "test.test",
+        "input": "flowing-business",
+        "stream": true
+    })
+    .to_string();
+    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
+        .await
+        .unwrap();
+    let request = format!(
+        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: e041a3b-flowing\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    let started = Instant::now();
+    socket.write_all(request.as_bytes()).await.unwrap();
+    let mut wire = Vec::new();
+    let ended = timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
+        .await
+        .expect("flowing business request must terminate before the fixture watchdog");
+    (wire, started.elapsed(), ended)
+}
+
 #[tokio::test]
 async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_and_survives() {
     let _guard = TEST_LOCK.lock().await;
@@ -376,6 +435,54 @@ async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_a
     assert!(
         !wire.ends_with(b"0\r\n\r\n"),
         "client received a normal chunked completion: {wire_text}"
+    );
+
+    entry.stop().await;
+}
+
+#[tokio::test]
+async fn healthy_direct_sse_flows_past_whole_request_wall_clock_through_public_entry() {
+    let _guard = TEST_LOCK.lock().await;
+    // request_timeout_ms == sse_first_frame_timeout_ms == 300, exactly the F0
+    // coupling (120000 == 120000) that cut a healthy stream at the whole-request
+    // wall clock. The upstream keeps flowing for ~480ms, then lands its terminal.
+    let entry = start_with(15000, 300, false, false).await;
+
+    let (wire, elapsed, ended) = raw_flowing_request(&entry).await;
+    let wire_text = String::from_utf8_lossy(&wire);
+    eprintln!(
+        "e041a3b-flowing elapsed_ms={} wire_bytes={} wire={} ended={ended:?}",
+        elapsed.as_millis(),
+        wire.len(),
+        wire_text
+    );
+
+    // The still-flowing business stream must not be cut at the 300ms wall clock.
+    assert!(
+        elapsed >= Duration::from_millis(400),
+        "healthy stream was cut at the whole-request wall clock: {elapsed:?}"
+    );
+    assert!(
+        wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),
+        "unexpected client transport framing: {wire_text}"
+    );
+    assert!(
+        wire_text.contains("flowing-0") && wire_text.contains("flowing-5"),
+        "client did not receive the complete flowing business stream: {wire_text}"
+    );
+    assert!(
+        wire_text.contains("response.completed") && wire_text.contains("sibling-success"),
+        "client did not receive the provider terminal: {wire_text}"
+    );
+    assert!(
+        wire.ends_with(b"0\r\n\r\n"),
+        "healthy stream must complete with a normal chunked terminator: {wire_text}"
+    );
+    assert!(
+        !wire_text.contains("\"error\"")
+            && !wire_text.contains("network_error")
+            && !wire_text.contains("502"),
+        "client received a provider/proxy error payload for a healthy stream: {wire_text}"
     );
 
     entry.stop().await;
