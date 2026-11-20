@@ -1,5 +1,5 @@
-//! e041a3b public-entry reproduction: Direct Responses SSE must honor the
-//! execution attempt residence deadline before the provider request timeout.
+//! Public Responses regressions for setup deadlines, progressing streams,
+//! rolling idle timeouts, cancellation, failover and counter persistence.
 use axum::{
     body::{Body, Bytes},
     extract::State,
@@ -58,6 +58,36 @@ async fn upstream(
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
     let input = body["input"].as_str().unwrap_or_default();
+    if input == "continuous-provider-stream" {
+        let mut frames: Vec<_> = ["sibling", "-", "success"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, delta)| {
+                let value = json!({
+                    "type": "response.output_text.delta", "delta": delta,
+                    "item_id": "msg_e041a3b_sibling", "output_index": 0,
+                    "content_index": 0, "sequence_number": index
+                });
+                format!("event: response.output_text.delta\ndata: {value}\n\n")
+            })
+            .collect();
+        frames.push(format!(
+            "event: response.completed\ndata: {}\n\n",
+            json!({"type":"response.completed","response":completed()})
+        ));
+        let stream =
+            stream::iter(frames.into_iter().enumerate()).then(|(index, frame)| async move {
+                if index > 0 {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+                Ok::<_, Infallible>(Bytes::from(frame))
+            });
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(stream))
+            .unwrap();
+    }
     if input.contains("committed-deadline") {
         let delta = json!({
             "type": "response.output_text.delta",
@@ -79,11 +109,9 @@ async fn upstream(
 
     if input.contains("deadline") && body["model"] != "wire-recover" {
         // The initial SSE guard waits for the provider's first semantic event
-        // with the configured first-frame timeout, so a body that emits nothing
-        // never reaches the attempt collector's residence deadline. Emit one
-        // reasoning-only delta: it is a semantic event (clears the guard) but
-        // carries no visible business text, so the commit probe never commits
-        // the client channel and the attempt stays on the uncommitted path.
+        // Emit one semantic frame to start the rolling idle guard. A reasoning
+        // delta carries no visible business payload, so the client stays
+        // uncommitted and the attempt can be recovered if the provider stalls.
         let reasoning = json!({
             "type": "response.reasoning_summary_text.delta",
             "delta": "deadline-reasoning",
@@ -141,6 +169,25 @@ async fn start() -> Entry {
 }
 
 async fn start_with(residence_ms: u64, timeout_ms: u64, recovery: bool, health: bool) -> Entry {
+    start_with_budgets(
+        residence_ms,
+        timeout_ms,
+        timeout_ms,
+        recovery,
+        health,
+        "direct",
+    )
+    .await
+}
+
+async fn start_with_budgets(
+    residence_ms: u64,
+    timeout_ms: u64,
+    first_byte_ms: u64,
+    recovery: bool,
+    health: bool,
+    process: &str,
+) -> Entry {
     std::env::set_var("E041A3B_DEADLINE_KEY", "owned-fixture-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
@@ -161,9 +208,15 @@ async fn start_with(residence_ms: u64, timeout_ms: u64, recovery: bool, health: 
     });
 
     let declaration = hub_v1_fixture::hub_v1_test_declaration();
+    hub_v1_fixture::pin_test_process_refill_off();
     let execution = format!(
-        "{}\nattempt_store = {{ residence_timeout_ms = {residence_ms} }}\n",
-        hub_v1_fixture::hub_v1_server_execution("owned")
+        r#"
+[servers.owned.execution]
+allowed_modes = ["{process}"]
+allowed_invocation_sources = ["client", "refill", "dry_run"]
+allowed_transports = ["json", "sse"]
+attempt_store = {{ residence_timeout_ms = {residence_ms} }}
+"#
     );
     let port = test_ports::free_port();
     let backup_target = if recovery {
@@ -187,9 +240,9 @@ base_url = "http://{upstream_addr}/v1"
 default_model = "test"
 auth = {{type="api_key",entries=[{{alias="key",env="E041A3B_DEADLINE_KEY"}}]}}
 health = {{enabled={health},failure_threshold=1,cooldown_ms=5000}}
-responses = {{process="direct",streaming="always"}}
+responses = {{process="{process}",streaming="client"}}
 request_timeout_ms = {timeout_ms}
-sse_first_frame_timeout_ms = {timeout_ms}
+sse_first_frame_timeout_ms = {first_byte_ms}
 [providers.test.models.test]
 wire_name = "wire-e041a3b"
 capabilities = ["text"]
@@ -277,9 +330,9 @@ async fn raw_committed_request(entry: &Entry) -> (Vec<u8>, Duration, std::io::Re
 }
 
 #[tokio::test]
-async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_and_survives() {
+async fn idle_timeout_terminates_uncommitted_direct_sse_with_typed_error_and_survives() {
     let _guard = TEST_LOCK.lock().await;
-    let entry = start().await;
+    let entry = start_with_budgets(5_000, 5_000, 250, false, false, "direct").await;
 
     let (wire, elapsed, ended) = raw_deadline_request(&entry).await;
     let wire_text = String::from_utf8_lossy(&wire);
@@ -337,11 +390,11 @@ async fn residence_deadline_terminates_uncommitted_direct_sse_with_typed_error_a
 
     assert!(
         elapsed <= Duration::from_millis(2000),
-        "deadline request took {elapsed:?}; expected the 250ms residence deadline, not the 5s provider timeout"
+        "idle request took {elapsed:?}; expected the 250ms provider idle timeout"
     );
     assert!(
         elapsed >= Duration::from_millis(200),
-        "deadline request ended before the declared 250ms residence deadline: {elapsed:?}"
+        "idle request ended before the declared 250ms provider idle timeout: {elapsed:?}"
     );
     assert!(
         six_node_chain,
@@ -430,6 +483,89 @@ async fn provider_timeout_recovers_while_residence_remains() {
 }
 
 #[tokio::test]
+async fn continuous_responses_stream_has_no_wall_clock_deadline_after_first_frame() {
+    let _guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let first_byte_ms = 500;
+    for (process, residence_ms, whole_request_ms) in [
+        ("direct", 5_000, 500),
+        ("direct", 500, 2_500),
+        ("relay", 5_000, 500),
+        ("relay", 500, 2_500),
+    ] {
+        let mut entry = start_with_budgets(
+            residence_ms,
+            whole_request_ms,
+            first_byte_ms,
+            true,
+            false,
+            process,
+        )
+        .await;
+        let response = client
+            .post(format!("{}/v1/responses", entry.base()))
+            .json(&json!({"input":"continuous-provider-stream","stream":true}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let wire = response.text().await.unwrap_or_else(|error| {
+            panic!("{process} continuous stream ended with request budget {whole_request_ms}ms and residence {residence_ms}ms: {error}")
+        });
+        let payload_event = if process == "direct" {
+            "event: response.output_text.delta"
+        } else {
+            "event: response.output_item.done"
+        };
+        assert!(wire.contains(payload_event), "{process}: {wire}");
+        assert!(wire.contains("sibling-success"), "{wire}");
+        assert_eq!(
+            wire.matches("event: response.completed").count(),
+            1,
+            "{wire}"
+        );
+        assert_eq!(entry.captures.try_recv().unwrap()["model"], "wire-e041a3b");
+        assert!(entry.captures.try_recv().is_err());
+        entry.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn json_responses_request_accepts_progressing_upstream_sse_past_both_deadlines() {
+    let _guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let mut entry = start_with_budgets(500, 500, 500, true, false, "relay").await;
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"input":"continuous-provider-stream","stream":false}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["status"], "completed", "{body}");
+    assert_eq!(body["id"], "resp_e041a3b_sibling", "{body}");
+    assert_eq!(
+        body["output"][0]["content"][0]["text"], "sibling-success",
+        "{body}"
+    );
+    let dispatched = entry.captures.try_recv().unwrap();
+    assert_eq!(dispatched["model"], "wire-e041a3b");
+    assert_ne!(dispatched["stream"], true, "{dispatched}");
+    assert!(entry.captures.try_recv().is_err());
+    entry.stop().await;
+}
+
+#[tokio::test]
 async fn request_counter_write_failure_preserves_responses_and_counts() {
     let _guard = TEST_LOCK.lock().await;
     let mut entry = start().await;
@@ -477,7 +613,7 @@ async fn request_counter_write_failure_preserves_responses_and_counts() {
 #[tokio::test]
 async fn expired_request_never_dispatches_or_cools_backup_candidate() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start_with(250, 5000, true, true).await;
+    let mut entry = start_with_budgets(250, 5_000, 500, true, true, "direct").await;
     let body = json!({"input":"deadline-no-backup-budget","stream":true}).to_string();
     let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
         .await
@@ -570,9 +706,9 @@ async fn client_disconnect_releases_activity_without_provider_cooldown() {
 }
 
 #[tokio::test]
-async fn committed_first_frame_then_residence_deadline_breaks_transport_without_backup_dispatch() {
+async fn committed_first_frame_then_idle_timeout_breaks_transport_without_backup_dispatch() {
     let _guard = TEST_LOCK.lock().await;
-    let mut entry = start_with(250, 5000, true, true).await;
+    let mut entry = start_with_budgets(250, 5_000, 600, true, true, "direct").await;
 
     let (wire, elapsed, ended) = raw_committed_request(&entry).await;
     let wire_text = String::from_utf8_lossy(&wire);
@@ -586,11 +722,11 @@ async fn committed_first_frame_then_residence_deadline_breaks_transport_without_
 
     assert!(
         elapsed <= Duration::from_millis(2000),
-        "committed deadline request took {elapsed:?}; expected the 250ms residence deadline, not the 5s provider timeout"
+        "committed stream took {elapsed:?}; expected the 600ms provider idle timeout"
     );
     assert!(
-        elapsed >= Duration::from_millis(200),
-        "committed deadline request ended before the declared 250ms residence deadline: {elapsed:?}"
+        elapsed >= Duration::from_millis(500),
+        "committed stream ended before the provider idle window: {elapsed:?}"
     );
     assert!(
         wire_text.starts_with("HTTP/1.1 200") && wire_text.contains("text/event-stream"),

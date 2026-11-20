@@ -1515,8 +1515,8 @@ features:
     - issue0afb440_healthy_sibling_completes_while_first_request_recovers
     - issue0afb440_client_cancel_after_recovery_direct
     - issue0afb440_client_cancel_after_recovery_relay
-    - issue0afb440_original_deadline_after_recovery_direct
-    - issue0afb440_original_deadline_after_recovery_relay
+    - issue0afb440_idle_timeout_after_recovery_direct
+    - issue0afb440_idle_timeout_after_recovery_relay
     - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_direct
     - issue0afb440_ninth_visible_candidate_completes_after_eight_provider_failures_relay
   jenny_sse_nonblocking_blackbox:
@@ -2747,10 +2747,14 @@ features:
   - V3 SSE transport rejects invalid UTF-8, unterminated EOF, line/frame/buffer limits, cancellation, and upstream failure with typed transport errors.
   - V3 server closeout emits only transport EOF/error/drop outcomes and does not parse SSE event names or data JSON.
   - Provider HTTP response-header wait applies the configured SSE first-frame timeout as a typed transport hang and never hangs on the shared request timeout.
+  - A Provider Responses SSE stream that keeps producing frames finishes on the same connection even when it crosses the configured request or residence duration. The receiving client gets the real terminal.
+  - When a non-streaming Responses Relay request receives an upstream SSE body, Relay finishes reading the progressing stream and projects the completed result as JSON.
   required_gates:
   - npm run verify:sse-architecture-boundary
   - npm run test:v3-sse-transport-core
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --lib relay_sse_closeout -- --nocapture
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e041a3b_response_timeout continuous_responses_stream_has_no_wall_clock_deadline_after_first_frame -- --exact
+  - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server --test e041a3b_response_timeout json_responses_request_accepts_progressing_upstream_sse_past_both_deadlines -- --exact
   - npm run verify:v3-architecture-docs
   - npm run verify:architecture-wiki-html-sync
   - git diff --check
@@ -3462,7 +3466,7 @@ features:
   - A full or cooled candidate never becomes a Deferred admission state; request selection never acquires a business lease, permit, FIFO ticket, or queue.
   - The only request-local exclusion state is a failed-key/cooled-identity set; capacity-busy provenance and provider_concurrency_busy are removed from active request contracts.
   - A same-provider untried sibling key and the declared default successor remain eligible immediately after a failed key; no shared admission or recovery lane is entered.
-  - Real client cancellation, actual transport timeout, and original deadline remain true terminal inputs; no artificial residence sleep or attempt-limit wait is applied.
+  - Client cancellation, actual transport timeout and pre-stream deadline expiry remain terminal inputs. A successor that has started producing frames uses its rolling idle timeout.
   - A provider HTTP429 is exact-identity background health/cooldown evidence only; current and fresh requests use healthy alternatives without joining that identity's wait lane.
   - A received HTTP429 constrains only its exact identity; current and fresh requests immediately use healthy alternatives without joining that identity's wait lane, and unrelated keys/models retain their configured parallelism
   - Post-attempt failure scans declared successors once without awaiting cooled peers, probes, capacity, acquisition budgets or a residence deadline. When no candidate remains, typed Error records exhaustion and the client transport ends detectably without an error payload.
@@ -3965,7 +3969,7 @@ features:
   status: active
   change_risk: critical
   owner_kind: rust_v3_bounded_attempt_payload_store
-  owner_scope: Direct and Relay append only through byte, frame, request, process, and residence admission before copy.
+  owner_scope: Direct and Relay apply byte, frame, request, and process limits to stream payloads. Residence bounds setup and first-frame waiting.
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server hard_attempt_cap_waits -- --nocapture
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test multi_listener_server all_tried_transport_failure -- --nocapture
@@ -4445,7 +4449,7 @@ features:
   - The request-level predicate only filters which attempts carry the content probe; the DSML and thinking whole-attempt rewrites run for the whole attempt. A governed marker observed before the commit prevents it. After the commit the probe only suspends projection and the owner decides the whole attempt at the terminal, so protected business text (fenced or inline code, quoted text) is delivered unchanged and governed text never reaches the client.
   - A request that declares tools carries the same content probe and commits its first visible business delta before the provider terminal. Its probe extends the governed-marker set with the declared-tool harvest opener, so serialized markup on the output text stays buffered until the complete-attempt DSML owner harvests it into the client function_call item, instead of flushing text that the owner would then have to rewrite.
   - After delivery, provider failure records provider health for the attempted identity, switches no candidate, re-issues no attempt, and ends the committed transport as a 200 SSE body break without an error frame, keepalive, or normal chunked terminator.
-  - A failed pre-commit attempt is still discarded before any replacement attempt is exposed; residence expiry still terminates through the typed Error chain.
+  - A failed pre-commit attempt is discarded before a replacement attempt is exposed. Setup and first-frame deadlines enter the typed Error chain. A progressing provider SSE stream uses the rolling idle timeout and retains its real terminal even after the configured residence duration.
   required_negative:
   - No frame is delivered before the content probe certifies the attempt as ungoverned visible text; a marker split across provider frames, a marker that only appears in the terminal snapshot, and a trailing marker prefix or bare `>` close-residue line all block the commit.
   - A delivered frame is never rewritten, replaced, suppressed, or re-emitted; the attempt builder rejects any whole-attempt rewrite that would change an already-delivered frame.

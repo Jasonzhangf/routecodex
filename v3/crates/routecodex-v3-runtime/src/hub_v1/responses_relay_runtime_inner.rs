@@ -1162,20 +1162,38 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     } else {
                         None
                     };
+                    let stream = crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
+                        &input.request_id,
+                        &selected_target_provider_id,
+                        stream,
+                        sse_idle_timeout,
+                    );
+                    let local_failure = std::sync::Arc::new(std::sync::Mutex::new(None));
+                    let stream = crate::hub_v1::relay_runtime_core::guard_v3_relay_sse_payload(
+                        &input.request_id,
+                        &selected_target_provider_id,
+                        stream,
+                        &attempt_budget,
+                        std::sync::Arc::clone(&local_failure),
+                    );
                     let provider_value_result =
                     build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol_with_context_and_projection(
                         provider_wire_protocol,
-                        crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                            &input.request_id,
-                            &selected_target_provider_id,
-                            stream,
-                            sse_idle_timeout,
-                        ),
+                        stream,
                         &stream_observation,
                         &anthropic_response_projection_context,
                         relay_client_projection.as_mut(),
                     )
                     .await;
+                    if let Some(error) = local_failure
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .take()
+                    {
+                        return Err(V3ResponsesRelayRuntimeError::ExecutionControlResponse(
+                            error.to_string(),
+                        ));
+                    }
                     handle_error_before_resp03!(runtime_timing
                         .finish_external()
                         .map_err(V3ResponsesRelayRuntimeError::RuntimeTiming));

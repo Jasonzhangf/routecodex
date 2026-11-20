@@ -620,7 +620,8 @@ pub fn build_v3_transport_13_responses_http_request_with_provider_headers_from_p
     )
 }
 
-/// 带 per-request 总超时（覆盖连接、响应头等待与 body 读取；None = 不设置，仅由 client 级 `read_timeout` 兜底）的 transport request 构建。
+/// HTTP request budget for authentication, response headers and non-streaming bodies.
+/// An SSE body uses the first-frame and rolling idle timeouts.
 #[allow(clippy::too_many_arguments)]
 pub fn build_v3_transport_13_responses_http_request_from_parts_with_timeout(
     request_id: impl Into<String>,
@@ -1068,13 +1069,15 @@ impl ProviderResponsesTransport {
         stream_intent: V3ResponsesStreamIntent,
         body: Value,
         provider_headers: Vec<V3ProviderRequestHeader>,
-        timeout: Option<Duration>,
+        deadline: Option<Instant>,
         sse_first_frame_timeout_ms: Option<u64>,
         attempt_control: Option<&V3ProviderTransportAttemptControl>,
         cancellation: Option<V3ProviderCancellation>,
     ) -> Result<reqwest::Response, V3ProviderError> {
         ensure_not_cancelled(&request_id, &provider_id, cancellation.as_ref())?;
-        let deadline = timeout.map(|timeout| Instant::now() + timeout);
+        let timeout = deadline
+            .map(|deadline| remaining_timeout(deadline, request_id, provider_id))
+            .transpose()?;
         let secret = resolve_secret(
             &request_id,
             &provider_id,
@@ -1096,9 +1099,33 @@ impl ProviderResponsesTransport {
             V3ProviderHttpAuthCarrier::ExistingBearer => request.bearer_auth(&secret),
             V3ProviderHttpAuthCarrier::GeminiApiKey => request.header("x-goog-api-key", &secret),
         };
-        if let Some(deadline) = deadline {
-            request = request.timeout(remaining_timeout(deadline, &request_id, &provider_id)?);
-        }
+        let remaining = deadline
+            .map(|deadline| remaining_timeout(deadline, request_id, provider_id))
+            .transpose()?;
+        // The response content type decides the body deadline. Even a JSON
+        // request can receive SSE, so the header timeout must end at the head.
+        let setup_timeout = remaining.map(|remaining| {
+            (
+                remaining,
+                "provider request budget exhausted before response headers",
+            )
+        });
+        let header_timeout = if stream_intent == V3ResponsesStreamIntent::Sse {
+            let first_frame =
+                Duration::from_millis(sse_first_frame_timeout_ms.unwrap_or_else(
+                    routecodex_v3_config::default_provider_sse_first_frame_timeout_ms,
+                ));
+            if remaining.is_some_and(|remaining| remaining < first_frame) {
+                setup_timeout
+            } else {
+                Some((
+                    first_frame,
+                    routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX,
+                ))
+            }
+        } else {
+            setup_timeout
+        };
         if anthropic_messages {
             request = apply_anthropic_messages_compat_headers(request, &secret, &provider_headers);
         } else {
@@ -1112,10 +1139,7 @@ impl ProviderResponsesTransport {
             provider_id.to_string(),
             send,
             cancellation.clone(),
-            match stream_intent {
-                V3ResponsesStreamIntent::Sse => sse_first_frame_timeout_ms,
-                V3ResponsesStreamIntent::Json => None,
-            },
+            header_timeout,
         )
         .await
     }
@@ -1137,6 +1161,7 @@ impl ProviderResponsesTransport {
         cancellation: Option<V3ProviderCancellation>,
         compatibility_profile: Option<String>,
     ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        let deadline = timeout.map(|timeout| Instant::now() + timeout);
         let response = self
             .send_http_headers(
                 &request_id,
@@ -1147,7 +1172,7 @@ impl ProviderResponsesTransport {
                 stream_intent,
                 body,
                 provider_headers,
-                timeout,
+                deadline,
                 sse_first_frame_timeout_ms,
                 attempt_control,
                 cancellation.clone(),
@@ -1159,9 +1184,14 @@ impl ProviderResponsesTransport {
         if status >= 400 {
             // `read_response_body_bytes` already carries the received status and
             // any read failure reason into its own typed error.
-            let body =
-                read_response_body_bytes(response, &request_id, &provider_id, cancellation.clone())
-                    .await?;
+            let body = read_response_body_bytes(
+                response,
+                &request_id,
+                &provider_id,
+                cancellation.clone(),
+                deadline,
+            )
+            .await?;
             return Err(V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {
                     request_id,
@@ -1178,8 +1208,14 @@ impl ProviderResponsesTransport {
             .as_deref()
             .is_some_and(|value| value.starts_with("application/json"))
         {
-            let body =
-                read_response_body_bytes(response, &request_id, &provider_id, cancellation).await?;
+            let body = read_response_body_bytes(
+                response,
+                &request_id,
+                &provider_id,
+                cancellation,
+                deadline,
+            )
+            .await?;
             return Ok(V3ProviderResp14Raw::from_json(
                 request_id,
                 provider_id,
@@ -1451,12 +1487,24 @@ async fn read_response_body_bytes(
     request_id: &str,
     provider_id: &str,
     cancellation: Option<V3ProviderCancellation>,
+    deadline: Option<Instant>,
 ) -> Result<Vec<u8>, V3ProviderError> {
     let status = response.status().as_u16();
     // The head survives a failed body read for every status, not only for error
     // statuses: the upstream really answered, and the head is that evidence.
     let headers = collect_response_headers(response.headers());
-    let read = response.bytes();
+    let read = async {
+        let read = response.bytes();
+        let result = match deadline {
+            Some(deadline) => tokio::time::timeout_at(deadline.into(), read)
+                .await
+                .map_err(|_| {
+                    "provider request budget exhausted while reading response body".to_string()
+                })?,
+            None => read.await,
+        };
+        result.map_err(|error| crate::shared::format_v3_provider_transport_error(&error))
+    };
     let bytes = match cancellation {
         Some(cancellation) => {
             tokio::select! {
@@ -1471,8 +1519,7 @@ async fn read_response_body_bytes(
         }
         None => read.await,
     }
-    .map_err(|error| {
-        let reason = crate::shared::format_v3_provider_transport_error(&error);
+    .map_err(|reason| {
         if status >= 400 {
             V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {

@@ -586,6 +586,63 @@ fn http_transport_request(
 }
 
 #[tokio::test]
+async fn streaming_intent_keeps_nonstreaming_body_budget_and_received_status() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    for (status, line) in [(200, "200 OK"), (429, "429 Too Many Requests")] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(connection.read(&mut request).await.unwrap() > 0);
+            let head = format!(
+                "HTTP/1.1 {line}\r\ncontent-type: application/json\r\ncontent-length: 2\r\n\r\n"
+            );
+            connection.write_all(head.as_bytes()).await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let request = build_v3_transport_13_responses_http_request_from_parts_with_timeout(
+            "req-sse-nonstreaming-body-timeout",
+            "sse-provider",
+            format!("http://{addr}/v1/responses"),
+            V3ProviderAuthHandle {
+                alias: "key1".into(),
+                secret: V3ProviderAuthSecretHandle::ApiKey("sk-test-sse-json-body".into()),
+            },
+            V3ResponsesStreamIntent::Sse,
+            json!({"model":"wire-model","input":"hello","stream":true}),
+            vec![],
+            Some(Duration::from_millis(300)),
+        )
+        .unwrap();
+        let error = tokio::time::timeout(
+            Duration::from_secs(3),
+            ProviderResponsesTransport::default().send(request),
+        )
+        .await
+        .expect("the configured request deadline must bound a non-streaming body")
+        .expect_err("the provider did not send the body");
+        server.abort();
+
+        match error {
+            V3ProviderError::ResponseBodyUnreadable {
+                status: 200,
+                reason,
+                ..
+            } if status == 200 => {
+                assert!(reason.contains("budget exhausted"), "{reason}");
+            }
+            V3ProviderError::HttpStatus { response } if status == 429 => {
+                assert_eq!(response.status, status);
+                assert!(response.body_read_failure.is_some());
+            }
+            other => panic!("expected timed out HTTP {status} body, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
 async fn transport_http_status_preserves_body_when_read_succeeds() {
     let body = br#"{"error":{"message":"upstream rejected request"}}"#;
     let content_length = body.len().to_string();

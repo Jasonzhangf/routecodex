@@ -639,9 +639,9 @@ fn compile_providers(
                 "provider {id} sse_first_frame_timeout_ms must not exceed request_timeout_ms"
             )));
         }
-        // Only the pre-first-byte budget is capped. `request_timeout_ms` owns the
-        // whole request lifetime, so a long streaming response may legitimately
-        // exceed it; capping that value would cut healthy streams.
+        // The remote cap applies to the first-frame setting.
+        // The request budget covers setup and non-streaming bodies.
+        // Progressing SSE uses the rolling idle timeout.
         if !provider.local {
             if let Some(sse_first_frame_timeout_ms) = provider.sse_first_frame_timeout_ms {
                 if sse_first_frame_timeout_ms > V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS {

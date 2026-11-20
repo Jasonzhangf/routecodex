@@ -546,7 +546,8 @@ pub struct V3ProviderAuthoringConfig {
     /// first-byte budget below.
     #[serde(default)]
     pub local: bool,
-    /// per-request 总超时（毫秒）；默认 60_000（60s）。
+    /// 请求建立及非流式 body 的超时（毫秒）；默认 60_000（60s）。
+    /// SSE 收到上游帧后使用独立的帧间空闲超时。
     #[serde(default = "default_provider_request_timeout_ms")]
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30_000（30s）。
@@ -559,7 +560,7 @@ pub struct V3ProviderAuthoringConfig {
     pub headers: BTreeMap<String, String>,
 }
 
-/// provider per-request 总超时默认值（毫秒）：60s。
+/// Provider 请求建立和非流式 body 的默认超时（毫秒）。
 pub fn default_provider_request_timeout_ms() -> u64 {
     60_000
 }
@@ -567,9 +568,9 @@ pub fn default_provider_request_timeout_ms() -> u64 {
 /// Upper bound for any remote provider's pre-first-byte wait, expressed through
 /// the SSE first-frame timeout. A remote provider that produces no first frame
 /// within this budget is a failed candidate, not a request to keep waiting.
-/// Only a provider declared `local = true` may exceed it. The whole-request
-/// `request_timeout_ms` is a separate budget and is not capped here, so a long
-/// healthy stream is not cut off.
+/// Only a provider declared `local = true` may exceed it.
+/// `request_timeout_ms` bounds setup and non-streaming bodies independently.
+/// A progressing SSE body uses its rolling idle timeout.
 pub const V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS: u64 = 120_000;
 
 /// provider SSE 首帧/帧间隔超时默认值（毫秒）：30s。
@@ -1222,7 +1223,7 @@ pub struct V3ProviderManifest {
     /// Declares a provider served on this machine. Only such a provider may
     /// exceed the remote first-byte budget.
     pub local: bool,
-    /// per-request 总超时（毫秒）
+    /// Provider 请求建立和非流式 body 的超时（毫秒）。
     pub request_timeout_ms: u64,
     /// provider SSE 首帧/帧间隔超时（毫秒）；None = 默认 30s。
     pub sse_first_frame_timeout_ms: Option<u64>,

@@ -1087,16 +1087,7 @@ async fn responses_sse_strips_untyped_signature_from_anthropic_client_governance
 #[tokio::test]
 async fn responses_sse_without_terminal_fails_before_anthropic_success_projection() {
     let scope = "anthropic_terminal_missing";
-    let mut manifest = manifest(scope);
-    manifest
-        .servers
-        .get_mut(scope)
-        .expect("anthropic relay test server")
-        .execution
-        .as_mut()
-        .expect("execution policy")
-        .attempt_store
-        .residence_timeout_ms = 500;
+    let manifest = manifest(scope);
     let output = execute_v3_anthropic_relay_runtime(
         &manifest,
         V3AnthropicRelayRuntimeInput {
@@ -1118,7 +1109,7 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
         &ResponsesThinkingSseWithoutTerminalTransport,
     )
     .await
-    .expect("SSE without a terminal must terminate at the residence bound");
+    .expect("EOF without a semantic terminal must use the typed Error chain");
 
     assert_eq!(output.status, 502);
     assert_eq!(output.client_response["error"]["code"], "network_error");
@@ -1151,7 +1142,7 @@ async fn responses_sse_without_terminal_fails_before_anthropic_success_projectio
 }
 
 #[tokio::test]
-async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
+async fn anthropic_relay_continuous_sse_obeys_attempt_frame_limit() {
     let scope = "anthropic_continuous_non_terminal";
     let mut manifest = manifest(scope);
     manifest
@@ -1162,7 +1153,7 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
         .as_mut()
         .expect("execution policy")
         .attempt_store
-        .residence_timeout_ms = 250;
+        .attempt_max_frames = 8;
 
     let outcome = tokio::time::timeout(
         Duration::from_secs(2),
@@ -1188,44 +1179,18 @@ async fn anthropic_relay_continuous_non_terminal_sse_returns_typed_failure() {
         ),
     )
     .await
-    .expect("continuous non-terminal Anthropic stream must not hang the runtime");
+    .expect("continuous Anthropic stream must obey its attempt-store limit")
+    .expect_err("exceeding the frame limit is a local response failure");
 
-    match outcome {
-        Ok(output) => {
-            assert_eq!(output.status, 502);
-            assert_eq!(output.client_response["error"]["code"], "network_error");
-            assert_eq!(
-                output.error_chain.as_deref(),
-                Some(
-                    &[
-                        "V3Error01SourceRaised",
-                        "V3Error02Classified",
-                        "V3Error03TargetLocalAction",
-                        "V3Error04TargetExhaustionDecision",
-                        "V3Error05ExecutionDecision",
-                        "V3Error06ClientProjected",
-                    ][..]
-                )
-            );
-        }
-        Err(routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
-            message,
-        )) => {
-            assert!(
-                message.contains("request residence deadline"),
-                "unexpected request-stage failure: {message}"
-            );
-            let projected = routecodex_v3_runtime::project_v3_anthropic_relay_runtime_failure(
-                routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlRequest(
-                    message,
-                ),
-            );
-            assert_eq!(projected.status, 598);
-            assert_eq!(projected.error_chain.as_ref().map(Vec::len), Some(6));
-            assert!(projected.client_response.get("error").is_some());
-        }
-        Err(error) => panic!("unexpected Anthropic relay failure: {error}"),
-    }
+    assert!(matches!(
+        &outcome,
+        routecodex_v3_runtime::V3AnthropicRelayRuntimeError::ExecutionControlResponse(message)
+            if message.contains("frame limit (8)")
+    ));
+    let projected = routecodex_v3_runtime::project_v3_anthropic_relay_runtime_failure(outcome);
+    assert_eq!(projected.status, 599);
+    assert_eq!(projected.error_chain.as_ref().map(Vec::len), Some(6));
+    assert!(projected.provider_failure_attempts.is_empty());
 }
 
 fn manifest(scope: &str) -> routecodex_v3_config::V3Config05ManifestPublished {

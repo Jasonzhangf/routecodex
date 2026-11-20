@@ -5,7 +5,7 @@
 //! `issue7517a07_body_timeout_not_provider_502`,
 //! `issue7517a07_genuine_provider_502_keeps_502`,
 //! `issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502`, and
-//! `issue7517a07_multi_candidate_residence_does_not_inherit_primary_502`.
+//! `issue7517a07_multi_candidate_idle_does_not_inherit_primary_502`.
 //!
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue7517a07_terminal_ledger_status -- --nocapture`
@@ -77,9 +77,8 @@ fn completed() -> Value {
 
 /// Controlled Responses upstream. The request `input` selects the behavior:
 /// - `deliver-then-hang`: emit one committed business delta, then never finish;
-/// - `reasoning-then-hang`: emit one reasoning-only delta (clears the first-frame
-///   guard but never commits) then never finish, so the attempt residence
-///   deadline fires and the runtime reports a typed transport NoResponse;
+/// - `reasoning-then-hang`: emit one reasoning-only delta, then go idle without
+///   committing. The rolling idle timeout produces a typed transport NoResponse;
 /// - `provider-502`: answer a real HTTP 502 with a JSON body.
 async fn upstream(
     State(captures): State<mpsc::UnboundedSender<Value>>,
@@ -807,9 +806,7 @@ async fn issue7517a07_client_cancel_not_provider_502() {
 async fn issue7517a07_body_timeout_not_provider_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
-    // Residence deadline well beyond the provider request timeout so the
-    // response-body read timeout owns the terminal and the runtime reports the
-    // typed `provider_response_body_error`, matching the live sample family.
+    // The fixture fails the upstream body read directly, before the idle guard.
     let entry = start_with(3000, 600, 500).await;
     let server_port = entry.handle.listeners[0].addr.port();
 
@@ -1421,14 +1418,14 @@ async fn issue7517a07_multi_candidate_cancel_does_not_inherit_primary_502() {
 }
 
 /// Multi-candidate sub-form: candidate A returns a real HTTP 502, candidate B
-/// sends only a reasoning delta and hangs until the typed residence terminal.
+/// sends only a reasoning delta and hangs until the typed idle terminal.
 /// The terminal belongs to candidate B and must not inherit A's 502; A's own
 /// attempt row keeps the real 502.
 #[tokio::test]
-async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
+async fn issue7517a07_multi_candidate_idle_does_not_inherit_primary_502() {
     let (home_guard, _lock) = TEST_LOCK.lock().await;
     let home = std::env::var("HOME").map(PathBuf::from).unwrap();
-    let mut entry = start_multi(3000, 5000, 5000).await;
+    let mut entry = start_multi(500, 5000, 850).await;
     let server_port = entry.handle.listeners[0].addr.port();
 
     let client = reqwest::Client::builder()
@@ -1440,7 +1437,7 @@ async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
         .post(format!("{}/v1/responses", entry.base()))
         .json(&json!({
             "model": CLIENT_MODEL,
-            "input": "reasoning-then-hang multi-candidate residence regression",
+            "input": "reasoning-then-hang multi-candidate idle regression",
             "stream": true
         }))
         .send()
@@ -1453,31 +1450,29 @@ async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
             format!("status={status} body_bytes={body}")
         }
     };
-    eprintln!("[issue7517a07-multi-residence] client_outcome={client_outcome}");
+    eprintln!("[issue7517a07-multi-idle] client_outcome={client_outcome}");
 
     let path = request_records_path(&home, server_port);
     let rows = wait_terminal(&path, Duration::from_secs(15)).await;
-    let terminals = dump_rows("issue7517a07-multi-residence", &rows);
+    let terminals = dump_rows("issue7517a07-multi-idle", &rows);
     assert!(
         !terminals.is_empty(),
-        "the multi-candidate residence terminal must leave a ledger row: {}",
+        "the multi-candidate idle terminal must leave a ledger row: {}",
         path.display()
     );
     let terminal = terminals
         .iter()
         .find(|terminal| terminal["meta"]["provider_id"] == json!(PROVIDER_B))
-        .unwrap_or_else(|| {
-            panic!("the residence terminal must belong to candidate B: {terminals:#?}")
-        });
+        .unwrap_or_else(|| panic!("the idle terminal must belong to candidate B: {terminals:#?}"));
     assert_eq!(
         terminal["event_type"],
         json!("request.failed"),
-        "a typed residence terminal is a failed terminal: {terminal}"
+        "a typed idle terminal is a failed terminal: {terminal}"
     );
     assert_eq!(
         terminal["meta"]["error_category"],
-        json!("provider_response_residence_timeout"),
-        "the typed residence source owns the terminal category: {terminal}"
+        json!("provider_response_sse_inter_event_timeout"),
+        "the typed SSE idle source owns the terminal category: {terminal}"
     );
     assert_eq!(
         terminal["meta"]["provider_status"],
@@ -1487,19 +1482,19 @@ async fn issue7517a07_multi_candidate_residence_does_not_inherit_primary_502() {
     assert_ne!(
         terminal["meta"]["provider_status"],
         json!(502),
-        "the residence terminal must not inherit candidate A's 502: {terminal}"
+        "the idle terminal must not inherit candidate A's 502: {terminal}"
     );
     assert_ne!(
         terminal["meta"]["error_category"],
         json!("http_502"),
-        "the residence terminal must not inherit candidate A's http_502: {terminal}"
+        "the idle terminal must not inherit candidate A's http_502: {terminal}"
     );
     assert_eq!(
         terminal["meta"]["observed_error"]["source"],
         json!("error06_projection"),
-        "the Direct residence lane holds the typed Error06 chain: {terminal}"
+        "the Direct idle failure holds the typed Error06 chain: {terminal}"
     );
-    assert_no_terminal_keeps_provider_502("multi-candidate residence", &terminals);
+    assert_no_terminal_keeps_provider_502("multi-candidate idle", &terminals);
     assert_primary_attempt_kept_502(&rows);
 
     let a_requests = entry.drain_a_requests();
