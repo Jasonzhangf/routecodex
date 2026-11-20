@@ -45,7 +45,7 @@ struct TestHomeGuard {
 
 impl TestHomeGuard {
     fn new() -> Self {
-        let path = PathBuf::from("/private/tmp").join(format!(
+        let path = std::env::temp_dir().join(format!(
             "routecodex-issue639a73f-home-{}",
             std::process::id()
         ));
