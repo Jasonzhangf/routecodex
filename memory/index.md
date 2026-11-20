@@ -51,6 +51,10 @@ _Empty._
 - tags: `20261120`, `contract`, `error-chain`, `ontology`, `provider`, `terminal-projection`, `user-audited`
 - details: [L3/knowledge.routecodex.provider-error-terminal-projection.md](L3/knowledge.routecodex.provider-error-terminal-projection.md)
 
+### 正式重启按上游派发状态接续请求
+- tags: `20261120`, `admission`, `contract`, `ontology`, `request-continuity`, `restart`, `user-audited`
+- details: [L3/knowledge.routecodex.restart-handoff-request-continuity.md](L3/knowledge.routecodex.restart-handoff-request-continuity.md)
+
 ### Record contract and implementation separately
 - tags: `architecture`, `lesson`, `memory`, `remediation`, `v2`, `verification`
 - details: [L3/lesson.routecodex.memory-truth-admission.md](L3/lesson.routecodex.memory-truth-admission.md)
