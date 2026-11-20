@@ -47,6 +47,10 @@ _Empty._
 - tags: `allowlist`, `contract`, `denylist`, `outbound`, `projection`
 - details: [L3/knowledge.routecodex.outbound-contract.md](L3/knowledge.routecodex.outbound-contract.md)
 
+### Provider 真实 HTTP 错误的切换与最终透传
+- tags: `20261120`, `contract`, `error-chain`, `ontology`, `provider`, `terminal-projection`, `user-audited`
+- details: [L3/knowledge.routecodex.provider-error-terminal-projection.md](L3/knowledge.routecodex.provider-error-terminal-projection.md)
+
 ### Record contract and implementation separately
 - tags: `architecture`, `lesson`, `memory`, `remediation`, `v2`, `verification`
 - details: [L3/lesson.routecodex.memory-truth-admission.md](L3/lesson.routecodex.memory-truth-admission.md)
@@ -106,4 +110,4 @@ Base budget: 8 lines. Copy the compact lines into the project Skill `description
 - L3: 全缓冲业务提交边界 (knowledge) [20261120,buffer,commit,contract,provider,reselection,sse,user-audited] -> L3/knowledge.routecodex.full-attempt-buffer.md
 - L3: Inbound contract (knowledge) [contract,extensions,inbound,lossless,normalization] -> L3/knowledge.routecodex.inbound-contract.md
 - L3: Outbound contract (knowledge) [allowlist,contract,denylist,outbound,projection] -> L3/knowledge.routecodex.outbound-contract.md
-- L3: Record contract and implementation separately (lesson) [architecture,lesson,memory,remediation,v2,verification] -> L3/lesson.routecodex.memory-truth-admission.md
+- L3: Provider 真实 HTTP 错误的切换与最终透传 (knowledge) [20261120,contract,error-chain,ontology,provider,terminal-projection,user-audited] -> L3/knowledge.routecodex.provider-error-terminal-projection.md
