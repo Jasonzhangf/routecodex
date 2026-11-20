@@ -18,6 +18,73 @@ struct DirectTransportFailureWithoutResponse {
     sends: AtomicUsize,
 }
 
+struct DirectProviderInterruptedHttpError;
+
+#[async_trait]
+impl ResponsesTransport for DirectProviderInterruptedHttpError {
+    async fn send(
+        &self,
+        request: V3Transport13ResponsesHttpRequest,
+    ) -> Result<V3ProviderResp14Raw, V3ProviderError> {
+        Ok(V3ProviderResp14Raw::from_sse(
+            request.request_id().into(),
+            request.provider_id().into(),
+            503,
+            vec![V3ProviderResponseHeader {
+                name: "content-type".into(),
+                value: b"text/event-stream".to_vec(),
+            }],
+            Box::pin(futures_util::stream::iter([
+                Ok(b"data: {\"error\":".to_vec()),
+                Err(V3ProviderError::Transport {
+                    request_id: request.request_id().into(),
+                    provider_id: request.provider_id().into(),
+                    reason: "controlled incomplete Provider body".into(),
+                }),
+            ])),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn direct_incomplete_http_error_remains_private_evidence() {
+    let scope = "direct_incomplete_http_error";
+    let manifest = scoped_test_manifest(provider_compat_single_manifest(), scope);
+    let raw = V3Server03HttpRequestRaw {
+        request_purpose: V3RequestPurpose::Conversation,
+        port: Some(7777),
+        pipeline_id: Some(format!("test-pipeline:test-session:{scope}")),
+        server_id: "test".into(),
+        failure_session_scope: test_failure_session_scope(scope),
+        request_id: scope.into(),
+        execution_id: scope.into(),
+        method: "POST".into(),
+        path: "/v1/responses".into(),
+        body: json!({"model":"client-model","input":"hello","stream":true}),
+    };
+    let output = execute_v3_responses_direct_runtime_kernel(
+        &manifest,
+        raw,
+        crate::register_responses_direct_hooks(),
+        &DirectProviderInterruptedHttpError,
+    )
+    .await;
+    let Some(V3ProviderTerminalDisposition::ExternalHttp(witness)) =
+        output.terminal_disposition.as_ref()
+    else {
+        panic!("the incomplete HTTP response must stay private: {output:?}");
+    };
+    assert_eq!(witness.status(), 503);
+    assert_eq!(
+        witness.headers(),
+        &[("content-type".into(), b"text/event-stream".to_vec())]
+    );
+    assert!(witness
+        .body_read_failure()
+        .is_some_and(|failure| failure.contains("body was not materialized")));
+    assert!(output.error_chain.is_some());
+}
+
 #[async_trait]
 impl ResponsesTransport for DirectOnlyFailureTransport {
     async fn send(
@@ -216,9 +283,9 @@ async fn direct_generic_provider_http_400_exhaustion_records_exact_identity_with
     );
     assert_eq!(output.observability.as_ref().and_then(|value| value.attempts), Some(1),
         "exhaustion must preserve its completed provider attempt: {output:?}");
-    assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ExternalHttp(ref witness))
+    assert!(matches!(output.terminal_disposition, Some(V3ProviderTerminalDisposition::ProjectExternalHttp(ref witness))
         if witness.status() == 400 && String::from_utf8_lossy(witness.body()).contains("prompt is too long")),
-        "original provider400 stays in the typed terminal witness, not the client wire: {output:?}");
+        "the complete final provider400 is qualified for client projection: {output:?}");
     assert!(
         output.error_chain.is_some(),
         "generic provider HTTP 400 exhaustion must retain its internal error: {output:?}"

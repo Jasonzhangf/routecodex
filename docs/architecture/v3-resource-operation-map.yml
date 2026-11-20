@@ -1313,6 +1313,22 @@ resources:
     may_enter_provider_body: false
     may_enter_client_body: false
     binding_status: anchored
+  - resource_id: v3.error.final_external_http_projection_eligibility
+    resource_kind: side_channel
+    lifecycle: v3.debug_error_foundation.mainline
+    owner_crate: routecodex-v3-error
+    owner_node: V3Error06ClientProjected
+    identity: [currentTerminal, exhaustedFinalIdentity, completeNon2xxWitness, businessCommitted]
+    semantic_contract:
+      allowed_projection: only the complete real non-2xx HTTP response from the current exhausted final identity, before any business byte is committed, authorizes Server protocol projection
+      forbidden_projection: an earlier attempt witness, 2xx response followed by internal failure, incomplete body, transport failure, local synthetic status, or a post-business-commit failure
+      payload_rule: this resource is typed control state; Server consumes it and never reconstructs eligibility from payload text, status alone, logs, or diagnostics
+    allowed_writers: [V3ErrorHandlingCenter::provider_terminal_disposition, run_v3_error_06_terminal_projection_operator]
+    allowed_readers: [V3ProviderTerminalClientProjection, provider_terminal_response, responses_websocket_provider_terminal_projection]
+    forbidden_writers: [routecodex-v3-server, routecodex-v3-provider-responses, request.normal_payload, response.client_payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    binding_status: anchored
   - resource_id: v3.provider.failure_session_scope
     resource_kind: side_channel
     lifecycle: v3.debug_error_foundation.mainline

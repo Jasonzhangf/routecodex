@@ -3531,7 +3531,7 @@ flowchart TD
 
 ## v3.operation_runner.dagpipe.error
 
-Canonical DAGpipe ErrorErr01-06 graph has source, classification, target-local action, exhaustion, execution decision, and internal terminal projection. Relay and health consumers execute the declared SDK slices; remaining callers are pending. Error06 records internal evidence only; Runtime consumes Error05 and terminates exhausted transport without a client error commit through Server/SSE. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
+Canonical DAGpipe ErrorErr01-06 graph has source, classification, target-local action, exhaustion, execution decision, and one terminal outcome. Relay and health consumers execute the declared SDK slices; remaining callers are pending. Error06 records internal evidence and, only for the current exhausted final identity's complete genuine non-2xx HTTP response, emits typed projection eligibility. Runtime consumes Error05; Server alone performs the qualified protocol projection, while every other terminal remains a detectable transport break. Retry launches a new attempt after typed attempt_cleanup; terminal failure releases attempt scope before RuntimeRequestFinalizer.
 
 Owner feature: `v3.unified_operation_runner_design`
 Manifest: `docs/architecture/dagpipe/v3.operation_runner.error.graph.json`

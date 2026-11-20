@@ -163,14 +163,17 @@ pub(crate) fn persist_v3_provider_terminal_evidence(
         // The provider's real status, headers, and body are the error truth this
         // artifact exists to keep: they are recorded losslessly here and never
         // reach the client.
-        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness) => json!({
-            "object": "routecodex.v3.provider_terminal_evidence",
-            "kind": "external_http",
-            "status": witness.status(),
-            "headers": witness.headers(),
-            "body": witness.body(),
-            "body_read_failure": witness.body_read_failure(),
-        }),
+        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+        | routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(witness) => {
+            json!({
+                "object": "routecodex.v3.provider_terminal_evidence",
+                "kind": "external_http",
+                "status": witness.status(),
+                "headers": witness.headers(),
+                "body": witness.body(),
+                "body_read_failure": witness.body_read_failure(),
+            })
+        }
         routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => json!({
             "object": "routecodex.v3.provider_terminal_evidence",
             "kind": "no_response",

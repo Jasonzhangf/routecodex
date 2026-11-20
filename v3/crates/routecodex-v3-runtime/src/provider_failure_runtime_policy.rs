@@ -1096,7 +1096,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                         matched_policy,
                     )
                     .map_err(Err)?,
-                    terminal_disposition: terminal_disposition_for(&decision, state),
+                    terminal_disposition: terminal_disposition_for(
+                        &decision,
+                        state,
+                        provider_body_read_failure,
+                    ),
                     decision,
                     retry_selected: Some(Box::new(alternative)),
                     event: build_v3_relay_provider_failure_policy_event(
@@ -1194,7 +1198,11 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
                 matched_policy,
             )
             .map_err(Err)?,
-            terminal_disposition: terminal_disposition_for(&decision, state),
+            terminal_disposition: terminal_disposition_for(
+                &decision,
+                state,
+                provider_body_read_failure,
+            ),
             decision,
             retry_selected: None,
             event: build_v3_relay_provider_failure_policy_event(
@@ -1232,7 +1240,8 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     .map_err(Err)?;
     let terminal_projection =
         terminal_projection_for(decision_projection, &decision, matched_policy).map_err(Err)?;
-    let terminal_disposition = terminal_disposition_for(&decision, state);
+    let terminal_disposition =
+        terminal_disposition_for(&decision, state, provider_body_read_failure);
     Ok(V3RelayProviderFailurePolicyResult {
         terminal_projection,
         terminal_disposition,
@@ -1257,6 +1266,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
 fn terminal_disposition_for(
     decision: &V3Error05ExecutionDecision,
     state: &V3RelayProviderFailurePolicyState<'_>,
+    provider_body_read_failure: Option<&str>,
 ) -> Option<routecodex_v3_error::V3ProviderTerminalDisposition> {
     decision.clone().try_into_terminal().ok().map(|terminal| {
         if terminal
@@ -1270,10 +1280,15 @@ fn terminal_disposition_for(
         {
             return routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse;
         }
-        V3ErrorHandlingCenter::provider_terminal_disposition(
-            terminal,
-            state.last_external_http.clone(),
-        )
+        let witness =
+            state
+                .last_external_http
+                .clone()
+                .map(|witness| match provider_body_read_failure {
+                    Some(reason) => witness.with_body_read_failure(reason),
+                    None => witness,
+                });
+        V3ErrorHandlingCenter::provider_terminal_disposition(terminal, witness)
     })
 }
 

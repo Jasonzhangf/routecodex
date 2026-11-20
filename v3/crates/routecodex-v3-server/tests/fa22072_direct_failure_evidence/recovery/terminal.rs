@@ -3,8 +3,8 @@
 use super::*;
 
 /// P6: seeded Relay A(503) -> B(503) exhaustion. The artifact still records the
-/// ordered [A, B] and carries B's original terminal source; the client transport
-/// terminates without an error payload or fabricated success.
+/// ordered [A, B] and carries B's original terminal source; the client receives
+/// B's final real HTTP error with required protocol framing only.
 #[tokio::test]
 async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
     let (home, _lock) = LOCK.lock().await;
@@ -52,21 +52,19 @@ async fn fa22072_seeded_relay_terminal_failure_evidence_public_entry() {
         let marker = format!("OWNED_RECOVERY_P6_STREAM_{stream}");
         let raw = raw_post_chat(case.port, &recovery_chat_request(&marker, stream)).await;
         let text = String::from_utf8_lossy(&raw);
-        if !stream && !raw.is_empty() {
-            controls.push(format!(
-                "{label}: exhausted JSON transport delivered bytes: {text}"
-            ));
-        }
-        if stream
-            && (text.contains("data:")
-                || text.contains("[DONE]")
-                || text.contains("event: error")
-                || text.contains("\"error\"")
-                || text.contains(KEY)
-                || text.contains("503"))
+        let expected_body = owned_b_503_body().to_string();
+        if !text.starts_with("HTTP/1.1 503 ")
+            || !text.contains("content-type: application/json")
+            || !text.contains("connection: close")
+            || !text.contains(&expected_body)
         {
             controls.push(format!(
-                "{label}: exhausted SSE delivered a business/error terminal: {text}"
+                "{label}: final B provider 503 lost status, framing, or body: {text}"
+            ));
+        }
+        if text.contains(KEY) || text.contains("OWNED_A_503_PRIVATE") {
+            controls.push(format!(
+                "{label}: final B projection leaked the key or non-final A error: {text}"
             ));
         }
         let counts = case.counts().await;

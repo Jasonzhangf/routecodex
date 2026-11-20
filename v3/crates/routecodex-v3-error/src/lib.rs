@@ -686,19 +686,18 @@ impl V3ExternalHttpWitness {
     }
 }
 
-/// The provider failure terminal is either the real upstream HTTP response the
-/// provider returned, or no HTTP response at all.
-///
-/// Provider failures never authorize a client error payload: neither branch
-/// fabricates a proxy 502, and neither branch decides what the client sees —
-/// every provider terminal is a client transport break. The real response is
-/// carried here only so the boundary can record it as provider-private
-/// evidence.
+/// The provider failure terminal carries either the real upstream HTTP response
+/// as private evidence, a qualified final response that the client boundary may
+/// project, or no HTTP response at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ProviderTerminalDisposition {
     /// A real upstream HTTP response was received and is recorded losslessly as
-    /// provider-private evidence, whatever its status.
+    /// provider-private evidence. This variant never authorizes client
+    /// projection.
     ExternalHttp(V3ExternalHttpWitness),
+    /// The current exhausted attempt returned a complete real non-2xx HTTP
+    /// response. The Server may project it using the client entry protocol.
+    ProjectExternalHttp(V3ExternalHttpWitness),
     /// No upstream HTTP response exists at all: the provider was never reached,
     /// or the transport failed before any response head arrived.
     NoResponse,
@@ -1262,28 +1261,47 @@ pub struct V3ErrorHandlingCenterInput {
 pub struct V3ErrorHandlingCenter;
 
 impl V3ErrorHandlingCenter {
+    /// Classify the current provider terminal while keeping raw evidence
+    /// separate from the client-projection qualification.
+    pub fn provider_terminal_disposition_for_source(
+        source: &V3Error01SourceRaised,
+        target_exhausted: bool,
+        witness: Option<V3ExternalHttpWitness>,
+    ) -> V3ProviderTerminalDisposition {
+        let Some(witness) = witness else {
+            return V3ProviderTerminalDisposition::NoResponse;
+        };
+        let can_project = target_exhausted
+            && source.source_kind == V3ErrorSourceKind::ProviderFailure
+            && source
+                .external_error
+                .as_ref()
+                .and_then(|error| error.status)
+                == Some(witness.status())
+            && !(200..300).contains(&witness.status())
+            && witness.body_read_failure().is_none();
+        if can_project {
+            V3ProviderTerminalDisposition::ProjectExternalHttp(witness)
+        } else {
+            V3ProviderTerminalDisposition::ExternalHttp(witness)
+        }
+    }
+
     pub fn provider_terminal_disposition(
         terminal: V3Error05TerminalDecision,
         witness: Option<V3ExternalHttpWitness>,
     ) -> V3ProviderTerminalDisposition {
-        debug_assert_eq!(
-            terminal
+        let target_exhausted = is_v3_provider_pool_exhausted(&terminal.execution().exhaustion);
+        Self::provider_terminal_disposition_for_source(
+            &terminal
                 .execution()
                 .exhaustion
                 .local_action
                 .classified
-                .source
-                .source_kind,
-            V3ErrorSourceKind::ProviderFailure,
-        );
-        // The witness is evidence, never a client projection: exhaustion does
-        // not authorize a client error response, including a real upstream HTTP
-        // error, and the boundary records the witness as provider-private
-        // evidence before it breaks the client transport.
-        match witness {
-            Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-            None => V3ProviderTerminalDisposition::NoResponse,
-        }
+                .source,
+            target_exhausted,
+            witness,
+        )
     }
 
     pub fn project_terminal_decision(

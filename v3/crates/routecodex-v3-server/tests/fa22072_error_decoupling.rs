@@ -11,7 +11,7 @@ use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, Notify},
     time::timeout,
 };
 use tokio_tungstenite::{
@@ -29,6 +29,7 @@ static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
 struct Peer {
     captures: mpsc::UnboundedSender<Value>,
+    release_held_error: Arc<Notify>,
 }
 fn completed() -> Value {
     json!({"id":"resp_owned","object":"response","status":"completed","model":"wire-owned","output":[{"id":"msg_owned","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"business error word survives","annotations":[]}]}]})
@@ -36,29 +37,33 @@ fn completed() -> Value {
 async fn upstream(State(peer): State<Arc<Peer>>, Json(body): Json<Value>) -> Response<Body> {
     peer.captures.send(body.clone()).unwrap();
     let input = body["input"].to_string();
-    let (status, media, bytes) =
-        if input.contains("provider-failure") && body["model"] != "wire-recover" {
-            (
+    if input.contains("held-provider-failure") {
+        peer.release_held_error.notified().await;
+    }
+    let (status, media, bytes) = if input.contains("provider-failure")
+        && body["model"] != "wire-recover"
+    {
+        (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "application/json",
-                r#"{"error":{"message":"owned private provider cause"}}"#.to_owned(),
+                r#"{"error":{"message":"owned private provider cause","type":"server_error","opaque":{"carrier":"must-survive"}}}"#.to_owned(),
             )
-        } else if input.contains("response-failure") && body["model"] != "wire-recover" {
-            (
-                StatusCode::OK,
-                "text/event-stream",
-                "data: {unparseable-json}\n\n".to_owned(),
-            )
-        } else {
-            (
-                StatusCode::OK,
-                "text/event-stream",
-                format!(
-                    "event: response.completed\ndata: {}\n\n",
-                    json!({"type":"response.completed","response":completed()})
-                ),
-            )
-        };
+    } else if input.contains("response-failure") && body["model"] != "wire-recover" {
+        (
+            StatusCode::OK,
+            "text/event-stream",
+            "data: {unparseable-json}\n\n".to_owned(),
+        )
+    } else {
+        (
+            StatusCode::OK,
+            "text/event-stream",
+            format!(
+                "event: response.completed\ndata: {}\n\n",
+                json!({"type":"response.completed","response":completed()})
+            ),
+        )
+    };
     Response::builder()
         .status(status)
         .header("content-type", media)
@@ -70,6 +75,7 @@ struct Entry {
     captures: mpsc::UnboundedReceiver<Value>,
     shutdown: oneshot::Sender<()>,
     peer: tokio::task::JoinHandle<()>,
+    release_held_error: Arc<Notify>,
 }
 impl Entry {
     fn base(&self) -> String {
@@ -108,12 +114,17 @@ async fn start(process: &str, recovery: bool) -> Entry {
     let upstream_addr = listener.local_addr().unwrap();
     let (captures, rx) = mpsc::unbounded_channel();
     let (shutdown, stop) = oneshot::channel();
+    let release_held_error = Arc::new(Notify::new());
+    let upstream_state = Arc::new(Peer {
+        captures,
+        release_held_error: Arc::clone(&release_held_error),
+    });
     let peer = tokio::spawn(async move {
         axum::serve(
             listener,
             Router::new()
                 .route("/v1/responses", post(upstream))
-                .with_state(Arc::new(Peer { captures })),
+                .with_state(upstream_state),
         )
         .with_graceful_shutdown(async {
             let _ = stop.await;
@@ -170,6 +181,7 @@ codex_samples = true
         captures: rx,
         shutdown,
         peer,
+        release_held_error,
     }
 }
 async fn raw(entry: &Entry, path: &str, header: &str, body: &str) -> Vec<u8> {
@@ -849,11 +861,37 @@ async fn websocket_three_sources_close_without_business_or_error_frames_and_rele
             let terminal = timeout(Duration::from_secs(5), socket.next())
                 .await
                 .expect("WS failure must terminate");
-            assert!(
-                matches!(terminal, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
-                "WS leaked frame: {terminal:?}"
-            );
-            eprintln!("public-ws process={process} source={input} terminal={terminal:?}");
+            if input == "provider-failure" {
+                let message = terminal
+                    .expect("the final provider error must reach the WebSocket")
+                    .expect("the WebSocket error message must use valid framing");
+                let message: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                assert_eq!(message["type"], "error");
+                assert_eq!(message["status"], 500);
+                let details = message
+                    .get("error")
+                    .expect("Responses WebSocket error details are required");
+                assert_eq!(
+                    details.get("message"),
+                    Some(&json!("owned private provider cause"))
+                );
+                assert_eq!(details.get("type"), Some(&json!("server_error")));
+                assert!(details.get("code").is_some_and(Value::is_null));
+                assert!(details.get("param").is_some_and(Value::is_null));
+                assert!(
+                    message.to_string().contains("must-survive"),
+                    "unknown provider error data must remain opaque: {message}"
+                );
+                eprintln!(
+                    "public-ws process={process} source={input} projected_final_error={message}"
+                );
+            } else {
+                assert!(
+                    matches!(terminal, None | Some(Err(_)) | Some(Ok(Message::Close(_)))),
+                    "WS local failure leaked frame: {terminal:?}"
+                );
+                eprintln!("public-ws process={process} source={input} terminal={terminal:?}");
+            }
             if input == "malformed-request" {
                 assert!(entry.captures.try_recv().is_err());
             } else {
@@ -899,6 +937,56 @@ async fn provider_http_failure_recovers_before_client_business_commit() {
 }
 
 #[tokio::test]
+async fn final_provider_error_projects_native_responses_sse_error_event() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut entry = start("chat", false).await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let response = client
+        .post(format!("{}/v1/responses", entry.base()))
+        .json(&json!({"input":"held-provider-failure","stream":true}))
+        .send()
+        .await
+        .unwrap();
+    entry.release_held_error.notify_one();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")),
+        "the committed client channel must remain SSE"
+    );
+    let body = response.text().await.unwrap();
+    let data = body
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .unwrap_or_else(|| panic!("SSE error data missing: {body}"));
+    let event: Value = serde_json::from_str(data)
+        .unwrap_or_else(|error| panic!("invalid SSE error JSON {error}: {body}"));
+    assert_eq!(event["type"], "error");
+    assert_eq!(event["message"], "owned private provider cause");
+    assert!(event.get("code").is_some_and(Value::is_null));
+    assert!(event.get("param").is_some_and(Value::is_null));
+    assert_eq!(event["sequence_number"], 0);
+    assert_eq!(event["opaque"], json!({"carrier":"must-survive"}));
+    assert!(
+        event
+            .get("error")
+            .and_then(|error| error.get("error"))
+            .is_none(),
+        "Responses SSE must not nest another error envelope: {event}"
+    );
+    eprintln!("public-native-sse-error event={event}");
+    drained(&entry).await;
+    entry.stop().await;
+}
+
+#[tokio::test]
 async fn three_failed_requests_do_not_block_concurrent_or_same_identity_followup() {
     let _guard = TEST_LOCK.lock().await;
     for origin in ["request", "response-failure", "provider-failure"] {
@@ -933,10 +1021,25 @@ async fn three_failed_requests_do_not_block_concurrent_or_same_identity_followup
             );
         };
         let (wire, ()) = tokio::join!(raw(&entry, "/v1/responses", &headers, &failed), sibling);
-        assert!(
-            wire.is_empty(),
-            "JSON failure must close before any HTTP head"
-        );
+        let wire_text = String::from_utf8_lossy(&wire);
+        if origin == "provider-failure" {
+            assert!(
+                wire_text.starts_with("HTTP/1.1 500"),
+                "final JSON provider error must project its real status: {wire_text}"
+            );
+            assert!(
+                wire_text.contains(
+                    r#"{"error":{"message":"owned private provider cause","type":"server_error","opaque":{"carrier":"must-survive"}}}"#
+                )
+                    && wire_text.ends_with("0\r\n\r\n"),
+                "final JSON provider error must preserve its real body and complete the frame: {wire_text}"
+            );
+        } else {
+            assert!(
+                wire.is_empty(),
+                "local JSON failure must close before any HTTP head"
+            );
+        }
         let expected_attempts = if origin == "request" { 1 } else { 2 };
         for _ in 0..expected_attempts {
             entry.captures.try_recv().unwrap();

@@ -19,6 +19,8 @@ mod test_home;
 mod test_ports;
 static LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
+const FINAL_PROVIDER_ERROR_BODY: &str = r#"{"error":{"message":"controlled provider failure"}}"#;
+
 struct Upstream {
     calls: AtomicUsize,
     fail: bool,
@@ -73,6 +75,12 @@ struct Entry {
     b: Arc<Upstream>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
+
+struct ClientResponse {
+    status: reqwest::StatusCode,
+    body: String,
+}
+
 impl Entry {
     async fn start(two: bool) -> Self {
         Self::start_with_b_failure(two, false).await
@@ -156,6 +164,20 @@ targets = {targets}
             .text()
             .await
     }
+    async fn request_response(&self, stream: bool) -> Result<ClientResponse, reqwest::Error> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+        let response = client
+            .post(format!("{}/v1/responses", self.base))
+            .json(&json!({"model":"client","input":"controlled request","stream":stream}))
+            .send()
+            .await?;
+        let status = response.status();
+        let body = response.text().await?;
+        Ok(ClientResponse { status, body })
+    }
     async fn cooldown(&self) -> Value {
         reqwest::get(format!("{}/_routecodex/health/cooldown-pool", self.base))
             .await
@@ -169,6 +191,19 @@ targets = {targets}
             .post(format!("{}/v1/messages", self.base))
             .json(&json!({"model":"client","max_tokens":100,"messages":[{"role":"user","content":"controlled request"}]}))
             .send().await?.text().await
+    }
+    async fn relay_response(&self) -> Result<ClientResponse, reqwest::Error> {
+        let response = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+            .post(format!("{}/v1/messages", self.base))
+            .json(&json!({"model":"client","max_tokens":100,"messages":[{"role":"user","content":"controlled request"}]}))
+            .send()
+            .await?;
+        let status = response.status();
+        let body = response.text().await?;
+        Ok(ClientResponse { status, body })
     }
     async fn stop(self) {
         self.handle.shutdown().await;
@@ -220,7 +255,7 @@ async fn i86_last_eligible_failure_is_terminal() {
     let entry = Entry::start(false).await;
     let mut replies = Vec::new();
     for _ in 0..3 {
-        replies.push(entry.request().await);
+        replies.push(entry.request_response(true).await);
     }
     let calls = entry.a.calls.load(Ordering::SeqCst);
     let pool = entry.cooldown().await;
@@ -233,10 +268,11 @@ async fn i86_last_eligible_failure_is_terminal() {
         pool["entries"].as_array().unwrap().is_empty(),
         "last candidate must not acquire cooldown: {pool}"
     );
-    assert!(
-        replies.iter().all(Result::is_err),
-        "failed attempt must terminate transport, never return normal empty success"
-    );
+    for reply in replies {
+        let reply = reply.expect("the final real Provider HTTP 503 must reach the client");
+        assert_eq!(reply.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(reply.body, FINAL_PROVIDER_ERROR_BODY);
+    }
 }
 
 #[tokio::test]
@@ -245,8 +281,8 @@ async fn i86_multi_last_eligible_stays_routable() {
     let entry = Entry::start_with_b_failure(true, true).await;
     let added = reqwest::Client::new().post(format!("{}/_routecodex/health/cooldown-pool/add",entry.base)).json(&json!({"provider_id":"a","interface_id":"default","auth_alias":"key","model_id":"wire-a","kind":"probe","duration_ms":60000})).send().await.unwrap();
     assert!(added.status().is_success());
-    let one = entry.request().await;
-    let two = entry.request().await;
+    let one = entry.request_response(true).await;
+    let two = entry.request_response(true).await;
     let calls = (
         entry.a.calls.load(Ordering::SeqCst),
         entry.b.calls.load(Ordering::SeqCst),
@@ -258,7 +294,12 @@ async fn i86_multi_last_eligible_stays_routable() {
         (0, 2),
         "last eligible B must remain usable on the next request without retrying A"
     );
-    assert!(one.is_err() && two.is_err());
+    let one = one.expect("the final real Provider HTTP 503 must reach the client");
+    let two = two.expect("the final real Provider HTTP 503 must reach the client");
+    assert_eq!(one.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(one.body, FINAL_PROVIDER_ERROR_BODY);
+    assert_eq!(two.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(two.body, FINAL_PROVIDER_ERROR_BODY);
     assert!(
         pool["entries"]
             .as_array()
@@ -275,8 +316,10 @@ async fn i86_exhaustion_is_request_local() {
     for stream in [false, true] {
         let entry = Entry::start_with_b_failure(true, true).await;
         let sibling = Entry::start(true).await;
-        let (failed, healthy) =
-            tokio::join!(entry.request_stream(stream), sibling.request_stream(stream));
+        let (failed, healthy) = tokio::join!(
+            entry.request_response(stream),
+            sibling.request_stream(stream)
+        );
         let calls = (
             entry.a.calls.load(Ordering::SeqCst),
             entry.b.calls.load(Ordering::SeqCst),
@@ -285,10 +328,9 @@ async fn i86_exhaustion_is_request_local() {
         entry.stop().await;
         sibling.stop().await;
         assert_eq!(calls, (1, 1), "each failed candidate is sent once");
-        assert!(
-            failed.is_err(),
-            "JSON/SSE exhaustion must be detectable transport termination"
-        );
+        let failed = failed.expect("the final real Provider HTTP 503 must reach the client");
+        assert_eq!(failed.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(failed.body, FINAL_PROVIDER_ERROR_BODY);
         assert!(
             healthy.unwrap().contains("BUSINESS_B"),
             "failure must not terminate an independent request"
@@ -318,8 +360,8 @@ async fn i86_relay_switch_and_last_terminal() {
     assert!(reply.unwrap().contains("BUSINESS_B"));
 
     let single = Entry::start(false).await;
-    let one = single.relay_request().await;
-    let two = single.relay_request().await;
+    let one = single.relay_response().await;
+    let two = single.relay_response().await;
     let calls = single.a.calls.load(Ordering::SeqCst);
     let pool = single.cooldown().await;
     single.stop().await;
@@ -327,7 +369,12 @@ async fn i86_relay_switch_and_last_terminal() {
         calls, 2,
         "Relay must send each new request once without terminal retry"
     );
-    assert!(one.is_err() && two.is_err());
+    let one = one.expect("the final real Anthropic Relay HTTP 503 must reach the client");
+    let two = two.expect("the final real Anthropic Relay HTTP 503 must reach the client");
+    assert_eq!(one.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(one.body, FINAL_PROVIDER_ERROR_BODY);
+    assert_eq!(two.status, reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(two.body, FINAL_PROVIDER_ERROR_BODY);
     assert!(
         pool["entries"].as_array().unwrap().is_empty(),
         "Relay last candidate cannot cool: {pool}"

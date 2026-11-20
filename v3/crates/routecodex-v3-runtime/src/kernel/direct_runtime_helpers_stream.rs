@@ -1810,9 +1810,11 @@ pub(crate) fn provider_terminal_output(
             )
         }
     };
-    let disposition = match witness {
-        Some(response) => V3ProviderTerminalDisposition::ExternalHttp(response),
-        None => V3ProviderTerminalDisposition::NoResponse,
+    let disposition = match decision.clone().try_into_terminal() {
+        Ok(terminal) => V3ErrorHandlingCenter::provider_terminal_disposition(terminal, witness),
+        Err(_) => witness
+            .map(V3ProviderTerminalDisposition::ExternalHttp)
+            .unwrap_or(V3ProviderTerminalDisposition::NoResponse),
     };
     provider_terminal_output_with_decision_projection(
         decision,
@@ -1858,6 +1860,7 @@ fn provider_terminal_output_with_decision_projection(
             ),
             match disposition.clone() {
                 V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
+                V3ProviderTerminalDisposition::ProjectExternalHttp(witness) => Some(witness),
                 V3ProviderTerminalDisposition::NoResponse => None,
             },
             node_trace,
@@ -1870,6 +1873,7 @@ fn provider_terminal_output_with_decision_projection(
             sdk_fault_leaf_source("V3Error06ClientProjected", error),
             match disposition {
                 V3ProviderTerminalDisposition::ExternalHttp(witness) => Some(witness),
+                V3ProviderTerminalDisposition::ProjectExternalHttp(witness) => Some(witness),
                 V3ProviderTerminalDisposition::NoResponse => None,
             },
             node_trace,

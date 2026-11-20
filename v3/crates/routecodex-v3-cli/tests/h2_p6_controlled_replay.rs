@@ -98,25 +98,29 @@ impl Drop for CliProcess {
 
 #[tokio::test]
 async fn bug_705d624_real_http_429_never_reaches_the_client() {
-    let success = start_controlled_upstream(ProviderMode::Success).await;
-    let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
-    let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
-    let ports = H2Ports::allocate();
-    let config = write_h2_config(&ports, &success, &rate_a, &rate_b, "");
-    let client = reqwest::Client::new();
-    let mut cli = start_cli_server(&config, ports.all());
-    wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
+    for stream in [false, true] {
+        let success = start_controlled_upstream(ProviderMode::Success).await;
+        let mut rate_a = start_controlled_upstream(ProviderMode::RateLimited).await;
+        let mut rate_b = start_controlled_upstream(ProviderMode::RateLimited).await;
+        let ports = H2Ports::allocate();
+        let config = write_h2_config(&ports, &success, &rate_a, &rate_b, "");
+        let client = reqwest::Client::new();
+        let mut cli = start_cli_server(&config, ports.all());
+        wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
 
-    // The declared recovery budget expires while all candidates keep returning 429,
-    // so both client lanes eventually observe a transport break after waiting.
-    // The real upstream 429 stays in the typed Error chain: the client never receives
-    // the provider status, a provider header, or a provider error body.
-    assert_no_front_http_headers(ports.exhausted, false).await;
-    assert_front_sse_transport_break(ports.exhausted).await;
-    next_capture(&mut rate_a.captures, "429 first upstream").await;
-    next_capture(&mut rate_b.captures, "429 second upstream").await;
-    drop(cli);
-    wait_ports_closed(&client, &ports.all()).await;
+        assert_final_provider_http_error(
+            &client,
+            ports.exhausted,
+            stream,
+            429,
+            r#"{"error":{"type":"rate_limit_error","code":"rate_limit_error","message":"controlled rate limit"}}"#,
+        )
+        .await;
+        next_capture(&mut rate_a.captures, "429 first upstream").await;
+        next_capture(&mut rate_b.captures, "429 second upstream").await;
+        drop(cli);
+        wait_ports_closed(&client, &ports.all()).await;
+    }
 }
 
 #[tokio::test]
@@ -259,8 +263,14 @@ async fn bug_705d624_real_upstream_http_502_is_not_forwarded_to_client() {
     let mut cli = start_cli_server(&config, ports.all());
     wait_for_health(&client, &mut cli, ports.exhausted, "h2_exhausted").await;
 
-    assert_no_front_http_headers(ports.exhausted, false).await;
-    assert_front_sse_transport_break(ports.exhausted).await;
+    assert_final_provider_http_error(
+        &client,
+        ports.exhausted,
+        false,
+        502,
+        r#"{"error":{"type":"upstream_gateway_error","message":"controlled upstream 502"}}"#,
+    )
+    .await;
     next_capture(
         &mut bad_gateway_a.captures,
         "first actual HTTP 502 upstream",
@@ -307,6 +317,63 @@ async fn assert_no_front_http_headers(port: u16, stream: bool) {
         response.is_empty(),
         "stream={stream} expected zero HTTP response bytes, got {}",
         String::from_utf8_lossy(&response)
+    );
+}
+
+async fn assert_final_provider_http_error(
+    client: &reqwest::Client,
+    port: u16,
+    stream: bool,
+    expected_status: u16,
+    expected_body: &str,
+) {
+    let response = client
+        .post(format!("http://127.0.0.1:{port}/v1/responses"))
+        .json(&json!({
+            "model": "client-test",
+            "input": "final provider error",
+            "stream": stream,
+        }))
+        .send()
+        .await
+        .expect("the final provider HTTP error must reach the HTTP client");
+    let status = response.status();
+    let is_sse = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"));
+    let body = response
+        .text()
+        .await
+        .expect("the final provider error body must be readable");
+    if stream && status == ReqwestStatusCode::OK {
+        assert!(
+            is_sse,
+            "a committed Responses SSE head must retain its native content type"
+        );
+        assert_eq!(body.matches("event: error\n").count(), 1, "{body}");
+        let event = sse_data_payload(&body, "error");
+        let expected: Value = serde_json::from_str(expected_body).unwrap();
+        assert_eq!(event["type"], "error");
+        assert_eq!(event["message"], expected["error"]["message"]);
+        assert_eq!(event["code"], expected["error"]["code"]);
+        assert!(
+            !body.contains("response.completed")
+                && !body.contains("response.failed")
+                && !body.contains("data: [DONE]"),
+            "a committed Provider error must not become a normal Responses terminal: {body}"
+        );
+        return;
+    }
+    assert_eq!(
+        status,
+        ReqwestStatusCode::from_u16(expected_status).unwrap(),
+        "the final provider status must be preserved, body={body}"
+    );
+    assert_eq!(
+        body, expected_body,
+        "the final provider body must be preserved without proxy rewriting"
     );
 }
 
@@ -539,10 +606,16 @@ async fn h2_p6_cli_controlled_upstream_replay_covers_equivalence_baseline() {
     );
     assert_eq!(reselect_success.body["model"], "wire-success");
 
-    // The exhausted lane has no eligible candidate left, so the client boundary is a
-    // transport break. The last real upstream 503 stays in the typed Error chain: the
-    // client never receives a provider status, a provider error code, or a provider body.
-    assert_no_front_http_headers(ports.exhausted, false).await;
+    // The exhausted lane has no eligible candidate left, so the final complete
+    // Provider 503 is projected with its real status and body.
+    assert_final_provider_http_error(
+        &client,
+        ports.exhausted,
+        false,
+        503,
+        r#"{"error":"controlled_failure-b"}"#,
+    )
+    .await;
     let exhausted_first = next_capture(&mut failure_a.captures, "exhaustion first").await;
     assert_eq!(exhausted_first.body["model"], "wire-failure-a");
     let exhausted_second = next_capture(&mut failure_b.captures, "exhaustion second").await;

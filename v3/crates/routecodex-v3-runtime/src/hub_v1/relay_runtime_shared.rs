@@ -25,8 +25,9 @@ use futures_util::StreamExt;
 use routecodex_v3_config::V3Config05ManifestPublished;
 use routecodex_v3_error::{
     V3Error05ExecutionAction, V3Error05RecoveryAdmissionWitness, V3Error06ClientProjected,
-    V3ErrorActionScope, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
-    V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS, V3_TRANSIENT_TRANSPORT_HANG_CODE,
+    V3ErrorActionScope, V3ErrorHandlingCenter, V3ErrorSourceKind, V3ExternalErrorKind,
+    V3ExternalErrorLink, V3ExternalHttpWitness, V3_ERROR_CHAIN_NODE_IDS,
+    V3_TRANSIENT_TRANSPORT_HANG_CODE,
 };
 use routecodex_v3_provider_responses::{
     v3_provider_auth_handle_from_manifest_entry, V3ProviderAuthHandle, V3ProviderError,
@@ -575,11 +576,17 @@ fn external_http_witness_from_head(
 /// Evidence capture only. It does not change client projection, provider
 /// rotation, or health.
 pub fn external_http_witness_head(response: &V3ProviderResp14Raw) -> V3ExternalHttpWitness {
-    external_http_witness_from_head(
+    let body = response.json_body();
+    let witness = external_http_witness_from_head(
         response.status(),
         response.headers(),
-        response.json_body().map(<[u8]>::to_vec).unwrap_or_default(),
-    )
+        body.map(<[u8]>::to_vec).unwrap_or_default(),
+    );
+    if response.status() >= 400 && body.is_none() {
+        witness.with_body_read_failure("Provider HTTP error body was not materialized")
+    } else {
+        witness
+    }
 }
 
 /// Build the witness from a provider error that carries a real response head.
@@ -1022,9 +1029,11 @@ pub fn terminalize_provider_failure_with_source(
     }
     if failure.terminal_disposition.is_none() {
         failure.terminal_disposition = Some(match last_external_http {
-            Some(witness) => {
-                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
-            }
+            Some(witness) => V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+                &source,
+                true,
+                Some(witness),
+            ),
             None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
         });
     }
@@ -1056,15 +1065,15 @@ pub fn terminalize_provider_failure(
     if failure.terminal_projection.is_some() {
         return failure;
     }
-    if failure.terminal_disposition.is_none() {
-        failure.terminal_disposition = Some(match last_external_http {
-            Some(witness) => {
-                routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
-            }
-            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
-        });
-    }
     if failure.error_operator_fault.is_some() {
+        if failure.terminal_disposition.is_none() {
+            failure.terminal_disposition = Some(match last_external_http {
+                Some(witness) => {
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness)
+                }
+                None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+            });
+        }
         return failure;
     }
     let (external_code, external_link_code) = failure_external_classification(&failure);
@@ -1094,6 +1103,16 @@ pub fn terminalize_provider_failure(
             return failure;
         }
     };
+    if failure.terminal_disposition.is_none() {
+        failure.terminal_disposition = Some(match last_external_http {
+            Some(witness) => V3ErrorHandlingCenter::provider_terminal_disposition_for_source(
+                &source,
+                true,
+                Some(witness),
+            ),
+            None => routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse,
+        });
+    }
     match crate::provider_failure_runtime_policy::project_v3_relay_error_source(
         source,
         V3ErrorActionScope::None,
@@ -1659,7 +1678,11 @@ mod tests {
             let terminal = terminalize_provider_failure(failure, Some(witness.clone()));
             assert_eq!(
                 terminal.terminal_disposition,
-                Some(routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(witness))
+                Some(
+                    routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
+                        witness
+                    )
+                )
             );
             let projection = terminal
                 .terminal_projection

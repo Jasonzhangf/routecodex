@@ -86,7 +86,7 @@
       "iterator": "Whole",
       "resources": {
         "reads": ["v3.error.chain", "v3.error.execution_decision"],
-        "writes": ["v3.error.client_projection_candidate"]
+        "writes": ["v3.error.client_projection_candidate", "v3.error.final_external_http_projection_eligibility"]
       }
     }
   ],
@@ -97,5 +97,9 @@
     { "from": "error_err04_target_exhaustion", "to": "error_err05_execution_decision", "arc_id": "error-target-exhaustion" },
     { "from": "error_err05_execution_decision", "to": "error_err06_client_projected", "arc_id": "error-execution-decision" }
   ],
-  "outputs": ["internal-error-outcome"]
+  "outputs": ["internal-error-outcome"],
+  "semantic_contract": {
+    "sink": "internal-error-outcome",
+    "sink_rule": "The one graph sink carries typed internal failure evidence. For a complete genuine non-2xx Provider HTTP response from the current exhausted final identity, it also carries a typed projection-eligibility resource. Server alone converts that qualified witness into the entry protocol; every other terminal remains a transport break and never borrows a prior attempt witness or fabricates a response."
+  }
 }

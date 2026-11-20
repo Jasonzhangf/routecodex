@@ -91,11 +91,12 @@ export function assertClientResult(clientResult, expected, entryProtocol, deps =
   }
 
   if (hasStatus) {
-    if (result.status < 200 || result.status >= 300) {
+    if (expected?.status !== undefined && expected?.status !== null) {
+      if (result.status !== expected.status) {
+        diagnostics.push(`client status ${result.status} != ${expected.status}`);
+      }
+    } else if (result.status < 200 || result.status >= 300) {
       diagnostics.push(`client status ${result.status} not 2xx`);
-    }
-    if (expected?.status !== undefined && expected?.status !== null && result.status !== expected.status) {
-      diagnostics.push(`client status ${result.status} != ${expected.status}`);
     }
   } else if (transport === 'complete') {
     diagnostics.push('client status missing for completed response');

@@ -19,7 +19,7 @@
 //!   terminal row that is not a provider HTTP 502;
 //! - a provider response-body/transport timeout records its typed transport
 //!   terminal, not a fabricated provider 502;
-//! - a genuine provider HTTP 502 keeps `provider_status=502`/`http_502`.
+//! - a genuine provider HTTP 502 keeps `provider_status=502`/`provider_http_502`.
 
 use axum::{
     body::{Body, Bytes},
@@ -885,14 +885,26 @@ async fn issue7517a07_genuine_provider_502_keeps_502() {
         }))
         .send()
         .await;
-    let client_outcome = match response {
-        Err(error) => format!("transport_error: {error}"),
-        Ok(response) => {
-            let status = response.status();
-            let body = response.bytes().await.map(|b| b.len()).unwrap_or(0);
-            format!("status={status} body_bytes={body}")
-        }
-    };
+    let response = response.expect("the final real Provider HTTP 502 must reach the client");
+    let client_status = response.status();
+    let client_body = response
+        .bytes()
+        .await
+        .expect("the final Provider HTTP 502 body must be readable");
+    assert_eq!(
+        client_status,
+        StatusCode::BAD_GATEWAY,
+        "the final real Provider HTTP 502 must keep its client status"
+    );
+    assert_eq!(
+        client_body.as_ref(),
+        br#"{"error":{"type":"server_error","message":"controlled provider 502"}}"#,
+        "the final Provider HTTP 502 body must be delivered exactly"
+    );
+    let client_outcome = format!(
+        "status={client_status} body={:?}",
+        String::from_utf8_lossy(&client_body)
+    );
     eprintln!("[issue7517a07-502] client_outcome={client_outcome}");
 
     let path = request_records_path(&home, server_port);
@@ -905,11 +917,11 @@ async fn issue7517a07_genuine_provider_502_keeps_502() {
     );
     let kept = terminals.iter().any(|terminal| {
         terminal["meta"]["provider_status"] == json!(502)
-            && terminal["meta"]["error_category"] == json!("http_502")
+            && terminal["meta"]["error_category"] == json!("provider_http_502")
     });
     assert!(
         kept,
-        "a genuine provider HTTP 502 must keep provider_status=502/http_502: {terminals:#?}"
+        "a genuine provider HTTP 502 must keep provider_status=502/provider_http_502: {terminals:#?}"
     );
 
     entry.stop().await;

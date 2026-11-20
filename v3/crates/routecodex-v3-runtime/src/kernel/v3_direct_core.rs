@@ -208,6 +208,7 @@ where
     let allowed_modes =
         direct_runtime_allowed_execution_modes(manifest, C::server_id(&standardized));
     loop {
+        last_external_http = None;
         let expands_target = matches!(
             target_source,
             crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::OpaqueHit(_)
@@ -727,34 +728,38 @@ where
                 .iter()
                 .map(|header| (header.name.clone(), header.value.clone()))
                 .collect();
-            let response_body = provider_raw.into_body_bytes().await.ok();
-            if let Some(body) = response_body.as_ref() {
-                // Retained regardless of client-projection eligibility (bug
-                // `705d624`): an upstream 502 is still a real upstream
-                // response and its status and body must survive as evidence.
-                last_external_http = Some(V3ExternalHttpWitness::new(
-                    provider_status,
-                    response_headers,
-                    body.clone(),
-                ));
-            }
-            let provider_detail = response_body.and_then(|body| {
-                serde_json::from_slice::<serde_json::Value>(&body)
-                    .ok()
-                    .and_then(|value| {
-                        value
-                            .pointer("/error/message")
-                            .or_else(|| value.pointer("/message"))
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::to_string)
-                    })
-                    .or_else(|| {
-                        String::from_utf8(body)
-                            .ok()
-                            .filter(|text| !text.trim().is_empty())
-                            .map(|text| text.chars().take(512).collect())
-                    })
+            let (response_body, body_read_failure) = match provider_raw.into_body_bytes().await {
+                Ok(body) => (Some(body), None),
+                Err(error) => (None, Some(error.to_string())),
+            };
+            let witness = V3ExternalHttpWitness::new(
+                provider_status,
+                response_headers,
+                response_body.as_ref().cloned().unwrap_or_default(),
+            );
+            last_external_http = Some(match body_read_failure.as_deref() {
+                Some(reason) => witness.with_body_read_failure(reason),
+                None => witness,
             });
+            let provider_detail = response_body
+                .and_then(|body| {
+                    serde_json::from_slice::<serde_json::Value>(&body)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .pointer("/error/message")
+                                .or_else(|| value.pointer("/message"))
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .or_else(|| {
+                            String::from_utf8(body)
+                                .ok()
+                                .filter(|text| !text.trim().is_empty())
+                                .map(|text| text.chars().take(512).collect())
+                        })
+                })
+                .or(body_read_failure);
             if let Err(timing_error) = runtime_timing.finish_external() {
                 return direct_runtime_helpers_stream::source_failure_output(
                     runtime_source("V3RuntimeTimingExternal", timing_error),

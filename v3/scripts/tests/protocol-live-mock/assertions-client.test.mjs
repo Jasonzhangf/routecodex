@@ -95,6 +95,28 @@ test('strict closed rejects HTTP 500, empty HTTP 200, and any received bytes', (
   assert.equal(headersOnly.ok, false);
 });
 
+test('a fully framed Provider error matches only its declared status and body', () => {
+  const error = { type: 'rate_limit_error', message: 'controlled rate limit' };
+  const actual = {
+    ...COMPLETE_RECEIPT,
+    status: 429,
+    headers: { 'content-type': 'application/json' },
+    body: { error },
+    bodyText: JSON.stringify({ error }),
+  };
+  const expected = {
+    transport: 'complete',
+    status: 429,
+    body_must: { 'error.type': error.type, 'error.message': error.message },
+  };
+  const check = (result, contract = expected) => assertClientResult(result, contract, 'openai_chat').ok;
+  assert.equal(check(actual), true);
+  assert.equal(check(actual, { ...expected, status: 200 }), false);
+  assert.equal(check({ ...actual, status: 503 }), false);
+  assert.equal(check({ ...actual, body: {}, bodyText: '{}' }), false);
+  assert.equal(check({ ...actual, aborted: true }), false);
+});
+
 test('genuine socket close with no status or bytes satisfies expected closed', () => {
   const expected = { transport: 'closed', status: null };
   assert.deepEqual(

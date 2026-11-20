@@ -260,19 +260,18 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             );
             match outcome {
                 V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
-                    // A provider terminal never projects onto the client. The
-                    // WebSocket client boundary is a transport break, exactly
-                    // like the HTTP/SSE boundary: close without a payload. The
-                    // provider's own status, headers, and body are recorded as
-                    // provider-private evidence first, because otherwise the
-                    // witness built and carried across every attempt would be
-                    // dropped at this boundary with no reader at all.
                     record_responses_websocket_provider_terminal_evidence(
                         state,
                         &evidence_request_id,
                         &terminal.disposition,
                     );
-                    Err(())
+                    match terminal.disposition {
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
+                            witness,
+                        ) => send_responses_websocket_provider_error(socket, &witness).await,
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+                        | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => Err(()),
+                    }
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
@@ -308,19 +307,18 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
             );
             match outcome {
                 V3ResponsesDirectServerOutcome::ProviderTerminal(terminal) => {
-                    // A provider terminal never projects onto the client. The
-                    // WebSocket client boundary is a transport break, exactly
-                    // like the HTTP/SSE boundary: close without a payload. The
-                    // provider's own status, headers, and body are recorded as
-                    // provider-private evidence first, because otherwise the
-                    // witness built and carried across every attempt would be
-                    // dropped at this boundary with no reader at all.
                     record_responses_websocket_provider_terminal_evidence(
                         state,
                         &evidence_request_id,
                         &terminal.disposition,
                     );
-                    Err(())
+                    match terminal.disposition {
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(
+                            witness,
+                        ) => send_responses_websocket_provider_error(socket, &witness).await,
+                        routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+                        | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => Err(()),
+                    }
                 }
                 V3ResponsesDirectServerOutcome::DirectFrame(frame) => {
                     send_responses_websocket_frame(socket, frame).await
@@ -605,12 +603,14 @@ pub(crate) async fn send_responses_relay_websocket_output(
     output: V3ResponsesRelayRuntimeOutput,
 ) -> Result<(), ()> {
     if let Some(disposition) = output.terminal_disposition.as_ref() {
-        // A provider terminal never projects onto the client: close the socket
-        // without a payload, exactly like the HTTP/SSE transport break. The
-        // witness is still recorded as provider-private evidence first, because
-        // the relay lane is a client boundary with no other reader.
         record_responses_websocket_provider_terminal_evidence(state, request_id, disposition);
-        return Err(());
+        return match disposition {
+            routecodex_v3_error::V3ProviderTerminalDisposition::ProjectExternalHttp(witness) => {
+                send_responses_websocket_provider_error(socket, witness).await
+            }
+            routecodex_v3_error::V3ProviderTerminalDisposition::ExternalHttp(_)
+            | routecodex_v3_error::V3ProviderTerminalDisposition::NoResponse => Err(()),
+        };
     }
     if !output.error_chain.as_ref().is_none_or(Vec::is_empty) || output.status >= 400 {
         let message = match output.client_body {
@@ -811,6 +811,14 @@ async fn send_responses_websocket_projected_error(
         projected.error_class, projected.error_detail
     );
     Err(())
+}
+
+async fn send_responses_websocket_provider_error(
+    socket: &mut WebSocket,
+    witness: &routecodex_v3_error::V3ExternalHttpWitness,
+) -> Result<(), ()> {
+    let event = responses_websocket_provider_error_event(witness).ok_or(())?;
+    send_responses_websocket_json(socket, &event).await
 }
 
 pub(crate) async fn send_responses_websocket_json(

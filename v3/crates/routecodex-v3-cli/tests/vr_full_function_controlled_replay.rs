@@ -31,8 +31,10 @@ struct ProviderCapture {
 #[derive(Debug, Clone)]
 enum ProviderMode {
     Success,
-    Failure,
+    Failure(&'static str),
 }
+
+const DEFAULT_PROVIDER_FAILURE: &str = r#"{"error":"controlled_default_failure"}"#;
 
 #[derive(Clone)]
 struct ProviderState {
@@ -70,8 +72,12 @@ impl Drop for CliProcess {
 #[tokio::test]
 async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
     let mut success = start_controlled_upstream(ProviderMode::Success).await;
-    let mut failure_a = start_controlled_upstream(ProviderMode::Failure).await;
-    let mut failure_b = start_controlled_upstream(ProviderMode::Failure).await;
+    let mut failure_a = start_controlled_upstream(ProviderMode::Failure(
+        r#"{"error":"controlled_optional_failure"}"#,
+    ))
+    .await;
+    let mut failure_b =
+        start_controlled_upstream(ProviderMode::Failure(DEFAULT_PROVIDER_FAILURE)).await;
     let success_port = free_port();
     let exhausted_port = free_port();
     let config_path = write_config(
@@ -137,12 +143,15 @@ async fn cli_replay_proves_pool_match_default_floor_and_total_exhaustion() {
             "tools":[{"type":"function","name":"run","parameters":{"type":"object"}}]
         }))
         .send()
-        .await;
-    // Total exhaustion is provider-private: the client observes a transport
-    // break, never the provider's 503 or its body.
-    assert!(
-        exhausted_response.is_err(),
-        "a fully exhausted pool must not project a provider status to the client"
+        .await
+        .unwrap();
+    assert_eq!(
+        exhausted_response.status(),
+        ReqwestStatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        exhausted_response.text().await.unwrap(),
+        DEFAULT_PROVIDER_FAILURE
     );
     let exhausted_optional = next_capture(&mut failure_a.captures, "exhaust optional").await;
     assert_eq!(exhausted_optional.body["model"], "wire-optional");
@@ -165,10 +174,10 @@ async fn upstream_handler(State(state): State<Arc<ProviderState>>, body: String)
             .header("content-type", "application/json")
             .body(Body::from(r#"{"id":"vr_success","output_text":"ok"}"#))
             .unwrap(),
-        ProviderMode::Failure => Response::builder()
+        ProviderMode::Failure(body) => Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"error":"controlled_failure"}"#))
+            .body(Body::from(*body))
             .unwrap(),
     }
 }

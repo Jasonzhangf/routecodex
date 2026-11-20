@@ -17,8 +17,9 @@
 //! that always answers HTTP 400 with an empty body. It asserts:
 //! - the provider attempt row carries the incident signature;
 //! - exactly one terminal row (`request.failed`) is persisted;
-//! - the client observes a transport break, not a fabricated provider HTTP
-//!   status, error payload, or success.
+//! - the client receives the final provider HTTP 400 with its exact empty body;
+//! - the ledger still records the failed terminal and does not fabricate
+//!   success.
 
 use axum::{
     body::Body, extract::State, http::StatusCode, response::Response, routing::post, Router,
@@ -182,35 +183,27 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
         .send()
         .await;
 
-    // The provider is contacted exactly once and the client boundary must not
-    // fabricate a provider HTTP status, an error payload, or a success.
+    // The provider is contacted exactly once and the final real Provider
+    // response reaches the client without a fabricated body or success.
     assert_eq!(
         calls.0.load(Ordering::SeqCst),
         1,
         "the sole candidate must be attempted exactly once"
     );
-    let (client_status, client_body) = match response {
-        Err(_) => (None, String::new()),
-        Ok(response) => {
-            let status = Some(response.status());
-            let body = response
-                .bytes()
-                .await
-                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
-            match body {
-                Ok(body) => (status, body),
-                Err(_) => (status, String::new()),
-            }
-        }
-    };
-    assert_ne!(
+    let response = response.expect("the final real Provider HTTP 400 must reach the client");
+    let client_status = response.status();
+    let client_body = response
+        .bytes()
+        .await
+        .expect("the final Provider HTTP 400 body must be readable");
+    assert_eq!(
         client_status,
-        Some(reqwest::StatusCode::BAD_REQUEST),
-        "a provider HTTP 400 must never be projected as the client status"
+        reqwest::StatusCode::BAD_REQUEST,
+        "the final real Provider HTTP 400 must keep its client status"
     );
     assert!(
-        !client_body.contains("\"error\"") && !client_body.contains("400"),
-        "the provider error payload must not reach the client: {client_body:?}"
+        client_body.is_empty(),
+        "the final Provider fixture body is empty and must remain empty: {client_body:?}"
     );
 
     let records_path = request_records_path(&home, server_port);
@@ -260,6 +253,18 @@ async fn issue6a2766a_direct_provider_terminal_record_written_once() {
     assert_eq!(
         terminal_row["result"], "error",
         "the terminal row must record the failed result"
+    );
+    assert_eq!(
+        terminal_row["meta"]["provider_status"], 400,
+        "the terminal row must preserve the final Provider HTTP status"
+    );
+    assert_eq!(
+        terminal_row["meta"]["error_category"], "provider_http_400",
+        "the terminal row must preserve final Provider provenance"
+    );
+    assert_eq!(
+        terminal_row["meta"]["observed_error"]["external_error_status"], 400,
+        "the typed Error source must preserve the final Provider HTTP status"
     );
     assert_eq!(
         terminal_row["meta"]["observed_error"]["source"], "error06_projection",
