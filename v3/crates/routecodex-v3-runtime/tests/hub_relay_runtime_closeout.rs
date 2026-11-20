@@ -993,7 +993,7 @@ impl ResponsesTransport for ContinuousNonTerminalSseTransport {
 }
 
 #[tokio::test]
-async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
+async fn responses_relay_continuous_sse_obeys_attempt_frame_limit() {
     let mut manifest = manifest();
     manifest
         .servers
@@ -1003,9 +1003,9 @@ async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
         .as_mut()
         .expect("execution policy")
         .attempt_store
-        .residence_timeout_ms = 250;
+        .attempt_max_frames = 8;
 
-    let output = tokio::time::timeout(
+    let error = tokio::time::timeout(
         Duration::from_secs(2),
         execute_v3_responses_relay_runtime(
             &manifest,
@@ -1028,17 +1028,13 @@ async fn responses_relay_continuous_non_terminal_sse_returns_typed_failure() {
         ),
     )
     .await
-    .expect("continuous non-terminal provider stream must not hang the runtime")
-    .expect("runtime must project a typed provider terminal failure");
+    .expect("continuous Responses stream must obey its attempt-store limit")
+    .expect_err("exceeding the frame limit is a local response failure");
 
-    assert_eq!(output.status, 502);
-    assert_eq!(
-        output.error_chain.as_deref(),
-        Some(V3_ERROR_CHAIN_NODE_IDS.as_slice())
-    );
     assert!(matches!(
-        output.client_body,
-        V3ResponsesRelayClientBody::Json(_)
+        error,
+        routecodex_v3_runtime::V3ResponsesRelayRuntimeError::ExecutionControlResponse(message)
+            if message.contains("frame limit (8)")
     ));
 }
 

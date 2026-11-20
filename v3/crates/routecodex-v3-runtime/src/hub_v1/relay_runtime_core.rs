@@ -35,6 +35,7 @@ use routecodex_v3_provider_responses::{
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 enum V3RelayAttemptCollectFailure {
     ResponseGovernance(V3HubRelayResponseError),
@@ -43,6 +44,50 @@ enum V3RelayAttemptCollectFailure {
     ClientDisconnect,
     LocalStore(V3AttemptStoreError),
     Observation(String),
+}
+
+pub(super) fn guard_v3_relay_sse_payload(
+    request_id: &str,
+    provider_id: &str,
+    stream: V3ProviderSseStream,
+    budget: &crate::nodes::V3AttemptBudget,
+    failure: Arc<Mutex<Option<V3AttemptStoreError>>>,
+) -> V3ProviderSseStream {
+    let request_id = request_id.to_string();
+    let provider_id = provider_id.to_string();
+    let reservation = budget.reserve_payload();
+    Box::pin(futures_util::stream::unfold(
+        Some((stream, reservation, 0)),
+        move |state| {
+            let failure = Arc::clone(&failure);
+            let request_id = request_id.clone();
+            let provider_id = provider_id.clone();
+            async move {
+                let (mut stream, mut reservation, mut frame_count) = state?;
+                let next = stream.next().await?;
+                if let Ok(chunk) = &next {
+                    if !chunk.is_empty() {
+                        if let Err(error) = reservation.reserve_frame(frame_count, chunk.len()) {
+                            *failure.lock().unwrap_or_else(|error| error.into_inner()) =
+                                Some(error);
+                            return Some((
+                                Err(V3ProviderError::ResponseBody {
+                                    request_id,
+                                    provider_id,
+                                    reason:
+                                        "provider collection stopped by the local attempt store"
+                                            .to_string(),
+                                }),
+                                None,
+                            ));
+                        }
+                        frame_count += 1;
+                    }
+                }
+                Some((next, Some((stream, reservation, frame_count))))
+            }
+        },
+    ))
 }
 
 /// Relay SSE 首帧守卫：provider 返回 SSE 后、投影前 await 首帧。首帧错误/空流/
@@ -200,7 +245,8 @@ async fn guard_relay_sse_first_frame(
     }
 }
 
-/// Relay SSE idle guard: a configured window applies between every two frames.
+/// The residence deadline can end the wait for the first provider frame.
+/// Once frames arrive, the idle guard owns the read boundary.
 pub(crate) fn guard_v3_provider_sse_attempt_deadline(
     request_id: &str,
     provider_id: &str,
@@ -210,39 +256,28 @@ pub(crate) fn guard_v3_provider_sse_attempt_deadline(
     let request_id = request_id.to_string();
     let provider_id = provider_id.to_string();
     Box::pin(futures_util::stream::unfold(
-        (stream, false),
-        move |(mut stream, timed_out)| {
+        (stream, Some(deadline), false),
+        move |(mut stream, deadline, timed_out)| {
             let request_id = request_id.clone();
             let provider_id = provider_id.clone();
             async move {
                 if timed_out {
                     return None;
                 }
-                if std::time::Instant::now() >= deadline {
-                    return Some((
-                        Err(V3ProviderError::Transport {
-                            request_id,
-                            provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
-                        }),
-                        (stream, true),
-                    ));
-                }
-                match tokio::time::timeout_at(
-                    tokio::time::Instant::from_std(deadline),
-                    stream.next(),
-                )
-                .await
-                {
-                    Ok(Some(chunk)) => Some((chunk, (stream, false))),
+                let next = match deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline.into(), stream.next()).await,
+                    None => Ok(stream.next().await),
+                };
+                match next {
+                    Ok(Some(chunk)) => Some((chunk, (stream, None, false))),
                     Ok(None) => None,
                     Err(_) => Some((
                         Err(V3ProviderError::Transport {
                             request_id,
                             provider_id,
-                            reason: "provider SSE attempt exceeded the request residence deadline before a semantic terminal".to_string(),
+                            reason: "provider SSE attempt exceeded the request residence deadline before the first frame".to_string(),
                         }),
-                        (stream, true),
+                        (stream, None, true),
                     )),
                 }
             }
@@ -1343,62 +1378,29 @@ where
                     selected_target_provider_id.clone(),
                 );
                 if transport_intent == V3HubTransportIntent::Json {
-                    let local_failure = std::sync::Arc::new(tokio::sync::Mutex::new(None));
-                    let collector =
-                        V3CommittedClientSseBuilder::with_budget(attempt_budget.clone()).map_err(
-                            |error| {
-                                V3RelayCoreError::Target(format!(
-                            "V3ExecutionAttemptPayloadStore rejected relay attempt: {error}"))
-                            },
-                        )?;
-                    let stream: V3ProviderSseStream = Box::pin(futures_util::stream::unfold(
-                        (
-                            idle_guarded_stream,
-                            collector,
-                            local_failure.clone(),
-                            request_id.to_string(),
-                            selected_target_provider_id.clone(),
-                            false,
-                        ),
-                        |(mut stream, mut collector, failure, request_id, provider_id, stopped)| async move {
-                            if stopped {
-                                return None;
-                            }
-                            let next = stream.next().await?;
-                            let mut stopped = false;
-                            let next = match next {
-                                Ok(chunk) if !chunk.is_empty() => {
-                                    match collector.push(chunk.clone()) {
-                                        Ok(()) => Ok(chunk),
-                                        Err(error) => {
-                                            *failure.lock().await = Some(error);
-                                            stopped = true;
-                                            Err(V3ProviderError::ResponseBody {
-                                            request_id: request_id.clone(), provider_id: provider_id.clone(),
-                                            reason: "provider collection stopped by the local attempt store".to_string(),
-                                        })
-                                        }
-                                    }
-                                }
-                                other => other,
-                            };
-                            Some((
-                                next,
-                                (stream, collector, failure, request_id, provider_id, stopped),
-                            ))
-                        },
-                    ));
-                    let materialized = tokio::time::timeout_at(attempt_deadline,
+                    let local_failure = Arc::new(Mutex::new(None));
+                    let stream = guard_v3_relay_sse_payload(
+                        request_id,
+                        &selected_target_provider_id,
+                        idle_guarded_stream,
+                        &attempt_budget,
+                        Arc::clone(&local_failure),
+                    );
+                    let materialized =
                         super::responses_relay_runtime::materialize_v3_provider_sse_as_canonical_response(
-                            provider_wire_protocol, stream)).await;
-                    if let Some(error) = local_failure.lock().await.take() {
+                            provider_wire_protocol, stream).await;
+                    if let Some(error) = local_failure
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .take()
+                    {
                         return Err(V3RelayCoreError::Target(format!(
                             "V3ExecutionAttemptPayloadStore relay local resource failure: {error}"
                         )));
                     }
                     let provider_value = match materialized {
-                        Ok(Ok(value)) => Ok(value),
-                        Ok(Err(error)) => Err(match error {
+                        Ok(value) => Ok(value),
+                        Err(error) => Err(match error {
                             super::responses_relay_runtime::V3ResponsesRelayRuntimeError::ProviderResponseEmpty { .. } =>
                                 provider_request_failure("V3ProviderRespInbound01Raw", "provider_response_empty",
                                     "provider returned no deliverable business content"),
@@ -1407,10 +1409,6 @@ where
                                 reason: other.to_string(),
                             }, &selected_target_provider_id),
                         }),
-                        Err(_) => Err(provider_runtime_failure(V3ProviderError::Transport {
-                            request_id: request_id.to_string(), provider_id: selected_target_provider_id.clone(),
-                            reason: format!("provider SSE stream exceeded the configured request timeout ({}ms) before terminal EOF", attempt_timeout.as_millis()),
-                        }, &selected_target_provider_id)),
                     };
                     let projection = match provider_value {
                         Ok(value) => {
@@ -1591,18 +1589,7 @@ where
                 })?;
                 let mut projected_sse = projected_sse;
                 let mut stream_failure = loop {
-                    let next = match tokio::time::timeout_at(attempt_deadline, projected_sse.next())
-                        .await
-                    {
-                        Ok(next) => next,
-                        Err(_) => {
-                            break Some(V3RelayAttemptCollectFailure::ProviderTransport(format!(
-                                "provider SSE stream exceeded the configured request timeout ({}ms) before terminal EOF",
-                                attempt_timeout.as_millis()
-                            )));
-                        }
-                    };
-                    match next {
+                    match projected_sse.next().await {
                         Some(Ok(frame)) => {
                             if let Err(error) = committed_attempt.push(frame) {
                                 break Some(V3RelayAttemptCollectFailure::LocalStore(error));

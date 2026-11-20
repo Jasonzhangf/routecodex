@@ -57,6 +57,7 @@ impl ProviderResponsesTransport {
             unreachable!("HTTP checked before admission")
         };
         let auth_carrier = request.auth_carrier;
+        let deadline = timeout.map(|timeout| std::time::Instant::now() + timeout);
         let result = async {
             let response = self
                 .send_http_headers(
@@ -68,7 +69,7 @@ impl ProviderResponsesTransport {
                     stream_intent,
                     body,
                     provider_headers,
-                    timeout,
+                    deadline,
                     sse_first_frame_timeout_ms,
                     None,
                     cancellation.clone(),
@@ -80,8 +81,14 @@ impl ProviderResponsesTransport {
                 return Ok(());
             }
             let headers = collect_response_headers(response.headers());
-            let body =
-                read_response_body_bytes(response, &request_id, &provider_id, cancellation).await?;
+            let body = read_response_body_bytes(
+                response,
+                &request_id,
+                &provider_id,
+                cancellation,
+                deadline,
+            )
+            .await?;
             Err(V3ProviderError::HttpStatus {
                 response: Box::new(V3ProviderHttpFailure {
                     request_id,

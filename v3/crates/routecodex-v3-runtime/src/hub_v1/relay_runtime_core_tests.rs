@@ -361,38 +361,38 @@ async fn guard_idle_times_out_after_first_frame() {
 }
 
 #[tokio::test]
-async fn relay_attempt_deadline_stops_continuous_non_terminal_stream() {
-    let stream: routecodex_v3_provider_responses::V3ProviderSseStream = Box::pin(
-        futures_util::stream::iter(vec![Ok(b"data: response.created\n\n".to_vec())]).chain(
-            futures_util::stream::unfold((), |_| async {
-                Some((
-                    Ok::<Vec<u8>, V3ProviderError>(b"data: response.progress\n\n".to_vec()),
-                    (),
-                ))
-            }),
-        ),
-    );
+async fn relay_attempt_deadline_only_guards_first_frame() {
+    let first = b"data: response.created\n\n".to_vec();
+    let terminal = b"data: response.completed\n\n".to_vec();
+    let delayed_terminal = terminal.clone();
+    let stream = Box::pin(futures_util::stream::iter([Ok(first.clone())]).chain(
+        futures_util::stream::once(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            Ok(delayed_terminal)
+        }),
+    ));
     let mut stream = guard_v3_provider_sse_attempt_deadline(
         "req-residence-deadline",
         "provider-1",
         stream,
         std::time::Instant::now() + std::time::Duration::from_millis(50),
     );
-    let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            match stream.next().await {
-                Some(Ok(_)) => {}
-                other => break other,
-            }
-        }
-    })
-    .await
-    .expect("attempt deadline guard must not hang");
+    assert_eq!(stream.next().await.unwrap().unwrap(), first);
+    assert_eq!(stream.next().await.unwrap().unwrap(), terminal);
+    assert!(stream.next().await.is_none());
+
+    let mut pending = guard_v3_provider_sse_attempt_deadline(
+        "req-residence-deadline",
+        "provider-1",
+        Box::pin(futures_util::stream::pending()),
+        std::time::Instant::now() + std::time::Duration::from_millis(50),
+    );
     assert!(matches!(
-        result,
+        pending.next().await,
         Some(Err(V3ProviderError::Transport { reason, .. }))
-            if reason.contains("residence deadline")
+            if reason.contains("residence deadline before the first frame")
     ));
+    assert!(pending.next().await.is_none());
 }
 
 #[tokio::test]

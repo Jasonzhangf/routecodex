@@ -780,7 +780,7 @@ struct PostCommitRecoverySseTransport {
     provider_ids: std::sync::Arc<Mutex<Vec<String>>>,
 }
 
-struct WholeAttemptTimeoutThenSuccessTransport {
+struct ProgressingSseTransport {
     provider_ids: Mutex<Vec<String>>,
 }
 
@@ -1003,7 +1003,7 @@ data: [DONE]
 }
 
 #[async_trait]
-impl ResponsesTransport for WholeAttemptTimeoutThenSuccessTransport {
+impl ResponsesTransport for ProgressingSseTransport {
     async fn send(
         &self,
         request: V3Transport13ResponsesHttpRequest,
@@ -1015,14 +1015,14 @@ impl ResponsesTransport for WholeAttemptTimeoutThenSuccessTransport {
             vec![
                 (
                     Duration::ZERO,
-                    br#"data: {"id":"primary-partial","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"primary-partial-must-not-commit"},"finish_reason":null}]}
+                    br#"data: {"id":"primary-stream","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"primary-progress"},"finish_reason":null}]}
 
 "#
                     .to_vec(),
                 ),
                 (
                     Duration::from_millis(20),
-                    br#"data: {"id":"primary-terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"primary-timeout-must-not-commit"},"finish_reason":"stop"}]}
+                    br#"data: {"id":"primary-stream","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"primary-finished"},"finish_reason":"stop"}]}
 
 data: [DONE]
 
@@ -1033,7 +1033,7 @@ data: [DONE]
         } else {
             vec![(
                 Duration::ZERO,
-                br#"data: {"id":"secondary-terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"secondary-after-timeout"},"finish_reason":"stop"}]}
+                br#"data: {"id":"secondary-terminal","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"unexpected-secondary"},"finish_reason":"stop"}]}
 
 data: [DONE]
 
@@ -1476,9 +1476,9 @@ async fn post_first_frame_provider_failure_hands_off_without_client_error_event(
 }
 
 #[tokio::test]
-async fn relay_sse_whole_attempt_timeout_reselects_before_client_commit() {
+async fn chat_relay_progressing_sse_completes_past_request_timeout() {
     use futures_util::StreamExt;
-    let server_id = "openai_chat_whole_attempt_timeout";
+    let server_id = "openai_chat_progressing_sse";
     let mut manifest = manifest_with_two_providers_for_scope(server_id, true);
     let primary = format!("{server_id}_primary");
     manifest
@@ -1486,7 +1486,7 @@ async fn relay_sse_whole_attempt_timeout_reselects_before_client_commit() {
         .get_mut(&primary)
         .expect("primary provider exists")
         .request_timeout_ms = 30;
-    let transport = WholeAttemptTimeoutThenSuccessTransport {
+    let transport = ProgressingSseTransport {
         provider_ids: Mutex::new(Vec::new()),
     };
     let output = execute_v3_openai_chat_relay_runtime(
@@ -1499,28 +1499,25 @@ async fn relay_sse_whole_attempt_timeout_reselects_before_client_commit() {
                 concat!(module_path!(), ":", line!()),
             )
             .expect("test provider failure session scope"),
-            request_id: "req-whole-attempt-timeout-reselect".into(),
+            request_id: "req-chat-relay-progressing-sse".into(),
             payload: json!({
                 "model":"chat-client-alias",
-                "messages":[{"role":"user","content":"recover after a slow whole attempt"}],
+                "messages":[{"role":"user","content":"stream a response"}],
                 "stream":true
             }),
         },
         &transport,
     )
     .await
-    .expect("whole-attempt timeout must reselect before client projection");
+    .expect("the progressing primary stream must complete");
 
     assert_eq!(output.status, 200, "{output:?}");
-    assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
+    assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
     let provider_ids = transport.provider_ids.lock().unwrap().clone();
     assert_eq!(
         provider_ids,
-        [
-            format!("{server_id}_primary"),
-            format!("{server_id}_secondary")
-        ],
-        "whole-attempt timeout must exclude the timed-out provider"
+        [primary],
+        "a progressing stream must stay on the current provider"
     );
     let stream = match output.client_body {
         V3OpenAiChatRelayClientBody::Sse(stream) => stream,
@@ -1533,9 +1530,9 @@ async fn relay_sse_whole_attempt_timeout_reselects_before_client_commit() {
         .map(String::from_utf8)
         .collect::<Result<String, _>>()
         .unwrap();
-    assert!(text.contains("secondary-after-timeout"), "{text}");
-    assert!(!text.contains("primary-partial-must-not-commit"), "{text}");
-    assert!(!text.contains("primary-timeout-must-not-commit"), "{text}");
+    assert!(text.contains("primary-progress"), "{text}");
+    assert!(text.contains("primary-finished"), "{text}");
+    assert!(text.contains("[DONE]"), "{text}");
     assert!(!text.contains("event: error"), "{text}");
 }
 

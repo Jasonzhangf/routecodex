@@ -15,7 +15,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// provider per-request 总超时默认值（毫秒）：60s。
+/// Provider 请求建立和非流式 body 的默认超时（毫秒）。
 pub(crate) const DEFAULT_PROVIDER_REQUEST_TIMEOUT_MS: u64 = 60_000;
 
 pub(crate) fn validate_provider_headers(
@@ -505,7 +505,7 @@ pub struct V2ProviderConfig {
     /// provider may exceed the remote first-byte budget.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<bool>,
-    /// per-request 总超时（毫秒）；默认 60_000（60s）。覆盖连接、响应头等待与 body 读取。
+    /// 请求建立和非流式 body 超时（毫秒）；默认 60s。SSE 使用首帧与帧间空闲超时。
     #[serde(default)]
     pub timeout: Option<u64>,
     /// provider SSE 首帧/帧间隔超时（毫秒）；默认 30s。本地慢部署按 provider 放宽。

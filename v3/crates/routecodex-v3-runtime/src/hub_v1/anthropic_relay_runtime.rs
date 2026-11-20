@@ -1091,16 +1091,31 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
                         stream,
                         attempt_budget.residence_deadline(),
                     );
-                let chunks = match collect_v3_anthropic_relay_provider_sse_chunks(
-                    crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
-                        &input.request_id,
-                        &selected_target_provider_id,
-                        stream,
-                        sse_idle_timeout,
-                    ),
-                )
-                .await
+                let stream = crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
+                    &input.request_id,
+                    &selected_target_provider_id,
+                    stream,
+                    sse_idle_timeout,
+                );
+                let local_failure = Arc::new(Mutex::new(None));
+                let stream = crate::hub_v1::relay_runtime_core::guard_v3_relay_sse_payload(
+                    &input.request_id,
+                    &selected_target_provider_id,
+                    stream,
+                    &attempt_budget,
+                    Arc::clone(&local_failure),
+                );
+                let chunks = collect_v3_anthropic_relay_provider_sse_chunks(stream).await;
+                if let Some(error) = local_failure
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take()
                 {
+                    return Err(V3AnthropicRelayRuntimeError::ExecutionControlResponse(
+                        error.to_string(),
+                    ));
+                }
+                let chunks = match chunks {
                     Ok(chunks) => chunks,
                     Err(error) => {
                         let failure = provider_runtime_failure(error, &selected_target_provider_id);

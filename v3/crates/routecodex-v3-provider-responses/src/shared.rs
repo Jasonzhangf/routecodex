@@ -4,7 +4,6 @@ use crate::{
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use reqwest::header::HeaderMap;
-use routecodex_v3_error::V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX;
 use routecodex_v3_oauth::{
     resolve_oauth_access_token_with_client, V3OAuthDeclaration, V3OAuthError, V3OAuthRefreshClient,
 };
@@ -127,20 +126,18 @@ pub(crate) async fn send_http_await(
     provider_id: String,
     send: impl std::future::Future<Output = Result<reqwest::Response, reqwest::Error>> + Send,
     cancellation: Option<V3ProviderCancellation>,
-    header_timeout_ms: Option<u64>,
+    header_timeout: Option<(Duration, &'static str)>,
 ) -> Result<reqwest::Response, V3ProviderError> {
-    match header_timeout_ms {
-        Some(header_timeout_ms) if header_timeout_ms > 0 => tokio::time::timeout(
-            std::time::Duration::from_millis(header_timeout_ms),
+    match header_timeout {
+        Some((header_timeout, reason)) => tokio::time::timeout(
+            header_timeout,
             send_http_await_inner(request_id.clone(), provider_id.clone(), send, cancellation),
         )
         .await
         .map_err(|_| V3ProviderError::Transport {
             request_id,
             provider_id,
-            reason: format!(
-                "{V3_PROVIDER_RESPONSE_HEADER_TIMEOUT_REASON_PREFIX} ({header_timeout_ms}ms)"
-            ),
+            reason: format!("{reason} ({}ms)", header_timeout.as_millis()),
         })?,
         _ => send_http_await_inner(request_id, provider_id, send, cancellation).await,
     }

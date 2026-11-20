@@ -54,6 +54,7 @@ const IMMEDIATE_SWITCH_BOUND: Duration = Duration::from_secs(1);
 const RECOVERY_HOLD_RESIDENCE_MS: u64 = 5_000;
 const RECOVERY_DEADLINE_RESIDENCE_MS: u64 = 1_000;
 const RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS: u64 = 600;
+const RECOVERY_SUCCESSOR_IDLE_TIMEOUT_MS: u64 = 850;
 const SSE_KEEPALIVE_ENV: &str = "ROUTECODEX_HTTP_SSE_KEEPALIVE_MS";
 
 struct EnvironmentValueGuard {
@@ -787,6 +788,7 @@ targets = [
 async fn start_recovery_hold(
     relay: bool,
     residence_ms: u64,
+    successor_idle_timeout_ms: Option<u64>,
 ) -> (
     V3ServerAggregateHandle,
     PeerHandle,
@@ -840,15 +842,21 @@ targets = [
 ]
 "#
     );
-    let handle = spawn_v3_server_aggregate(manifest_with_execution(
+    let mut manifest = manifest_with_execution(
         free_port(),
         &test_declaration(relay),
         &provider_blocks,
         &route_pools,
         &format!("attempt_store = {{ residence_timeout_ms = {residence_ms} }}"),
-    ))
-    .await
-    .unwrap();
+    );
+    if let Some(idle_timeout_ms) = successor_idle_timeout_ms {
+        manifest
+            .providers
+            .get_mut("recoveryholdsuccessor")
+            .expect("successor provider")
+            .sse_first_frame_timeout_ms = Some(idle_timeout_ms);
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
     let server_addr = handle.listeners[0].addr;
     (handle, failing, successor, server_addr, attempt_order)
 }
@@ -952,7 +960,7 @@ async fn run_issue0afb440_cancel_after_recovery(relay: bool) {
     let home = PathBuf::from(std::env::var("HOME").unwrap());
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let (handle, failing, successor, server_addr, attempt_order) =
-        start_recovery_hold(relay, RECOVERY_HOLD_RESIDENCE_MS).await;
+        start_recovery_hold(relay, RECOVERY_HOLD_RESIDENCE_MS, None).await;
     let session_id = if relay {
         "issue0afb440-cancel-relay"
     } else {
@@ -1050,13 +1058,17 @@ async fn run_issue0afb440_cancel_after_recovery(relay: bool) {
     );
 }
 
-async fn run_issue0afb440_deadline_after_recovery(relay: bool) {
+async fn run_issue0afb440_idle_timeout_after_recovery(relay: bool) {
     let (_home_guard, _guard) = TEST_LOCK.lock().await;
     let _keepalive = EnvironmentValueGuard::set(SSE_KEEPALIVE_ENV, "50");
     let home = PathBuf::from(std::env::var("HOME").unwrap());
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
-    let (handle, failing, successor, server_addr, attempt_order) =
-        start_recovery_hold(relay, RECOVERY_DEADLINE_RESIDENCE_MS).await;
+    let (handle, failing, successor, server_addr, attempt_order) = start_recovery_hold(
+        relay,
+        RECOVERY_DEADLINE_RESIDENCE_MS,
+        Some(RECOVERY_SUCCESSOR_IDLE_TIMEOUT_MS),
+    )
+    .await;
     failing
         .blocked_inputs
         .lock()
@@ -1085,9 +1097,11 @@ async fn run_issue0afb440_deadline_after_recovery(relay: bool) {
         "{} recovery must dispatch the successor before the original deadline",
         if relay { "Relay" } else { "Direct" }
     );
+    let successor_started = std::time::Instant::now();
     let mut wire = Vec::new();
     let ended = timeout(Duration::from_secs(3), socket.read_to_end(&mut wire)).await;
     let elapsed = started.elapsed();
+    let successor_elapsed = successor_started.elapsed();
     let wire_text = format!(
         "{}{}",
         String::from_utf8_lossy(&initial_wire),
@@ -1130,22 +1144,16 @@ async fn run_issue0afb440_deadline_after_recovery(relay: bool) {
     };
     assert!(
         transport_ended,
-        "deadline transport did not end within 3s of successor dispatch: {ended:?}; elapsed={elapsed:?}; {wire_text}"
+        "idle transport did not end within 3s of successor dispatch: {ended:?}; elapsed={elapsed:?}; {wire_text}"
     );
     assert!(
-        elapsed >= Duration::from_millis(RECOVERY_DEADLINE_RESIDENCE_MS - 100)
-            && elapsed
-                < Duration::from_millis(
-                    RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS
-                        + RECOVERY_DEADLINE_RESIDENCE_MS
-                        - 200,
-                )
-            && elapsed < Duration::from_millis(DECLARED_RETRY_BACKOFF_MS),
-        "the original {RECOVERY_DEADLINE_RESIDENCE_MS}ms residence deadline must survive the {RECOVERY_DEADLINE_FIRST_FAILURE_DELAY_MS}ms first failure and end before a deadline reset or the declared {DECLARED_RETRY_BACKOFF_MS}ms retry delay: {elapsed:?}"
+        elapsed > Duration::from_millis(RECOVERY_DEADLINE_RESIDENCE_MS)
+            && successor_elapsed >= Duration::from_millis(RECOVERY_SUCCESSOR_IDLE_TIMEOUT_MS - 100),
+        "the successor sent a frame and must use its own idle window: total={elapsed:?}; successor={successor_elapsed:?}"
     );
     assert!(
         failed_terminal_recorded && failed_identity,
-        "deadline recovery must record request.failed for the held successor; rows={rows:#?}"
+        "idle timeout must record request.failed for the held successor; rows={rows:#?}"
     );
     assert!(
         !wire_text.contains("response.completed")
@@ -1189,13 +1197,13 @@ async fn issue0afb440_client_cancel_after_recovery_relay() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn issue0afb440_original_deadline_after_recovery_direct() {
-    run_issue0afb440_deadline_after_recovery(false).await;
+async fn issue0afb440_idle_timeout_after_recovery_direct() {
+    run_issue0afb440_idle_timeout_after_recovery(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn issue0afb440_original_deadline_after_recovery_relay() {
-    run_issue0afb440_deadline_after_recovery(true).await;
+async fn issue0afb440_idle_timeout_after_recovery_relay() {
+    run_issue0afb440_idle_timeout_after_recovery(true).await;
 }
 
 async fn wait_for_terminal_evidence(samples_root: &std::path::Path) -> Value {

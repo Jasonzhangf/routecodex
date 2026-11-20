@@ -240,15 +240,12 @@ fn execution_control_payload_architecture_anthropic_replay_reuses_request_reserv
 }
 
 #[test]
-fn attempt_store_rejects_expired_request_before_reservation() {
+fn expired_residence_rejects_transport_admission() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let mut limits = test_limits(8, 8, 8);
     limits.residence_timeout = Duration::ZERO;
     let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
-    let error = match V3CommittedClientSseBuilder::with_budget(budget) {
-        Ok(_) => panic!("expired request budget must reject a new attempt store"),
-        Err(error) => error,
-    };
+    let error = budget.admit_transport_attempt().unwrap_err();
     assert!(matches!(
         error,
         V3AttemptStoreError::ResidenceDeadlineExceeded(_)

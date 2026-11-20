@@ -326,8 +326,14 @@ impl V3AttemptBudget {
         self.inner.transport_attempts.load(Ordering::Acquire)
     }
 
+    pub(crate) fn reserve_payload(&self) -> V3AttemptReservation {
+        V3AttemptReservation {
+            budget: self.clone(),
+            bytes: 0,
+        }
+    }
+
     fn reserve(&self, bytes: usize) -> Result<(), V3AttemptStoreError> {
-        self.ensure_resident()?;
         reserve_bounded(
             self.inner.process_resident_bytes.counter(),
             bytes,
@@ -386,12 +392,33 @@ fn reserve_bounded(
         })
 }
 
-struct V3AttemptReservation {
+pub(crate) struct V3AttemptReservation {
     budget: V3AttemptBudget,
     bytes: usize,
 }
 
 impl V3AttemptReservation {
+    pub(crate) fn reserve_frame(
+        &mut self,
+        frames_already_reserved: usize,
+        bytes: usize,
+    ) -> Result<(), V3AttemptStoreError> {
+        let limits = self.budget.inner.limits;
+        if frames_already_reserved >= limits.attempt_max_frames {
+            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
+                "provider SSE attempt exceeded its frame limit ({})",
+                limits.attempt_max_frames
+            )));
+        }
+        if bytes > limits.attempt_max_bytes.saturating_sub(self.bytes) {
+            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
+                "provider SSE attempt exceeded its byte limit ({})",
+                limits.attempt_max_bytes
+            )));
+        }
+        self.reserve(bytes)
+    }
+
     fn reserve(&mut self, bytes: usize) -> Result<(), V3AttemptStoreError> {
         self.budget.reserve(bytes)?;
         self.bytes = self.bytes.checked_add(bytes).ok_or_else(|| {
@@ -696,7 +723,6 @@ impl V3CommittedClientSseBuilder {
     }
 
     pub(crate) fn with_budget(budget: V3AttemptBudget) -> Result<Self, V3AttemptStoreError> {
-        budget.ensure_resident()?;
         let limits = budget.inner.limits;
         Ok(Self {
             frames: Vec::new(),
@@ -716,25 +742,9 @@ impl V3CommittedClientSseBuilder {
                 "provider response event codec produced an empty frame".to_string(),
             ));
         }
-        if self.frames.len() >= self.limits.attempt_max_frames {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
-                "provider SSE attempt exceeded the committed replay frame limit ({})",
-                self.limits.attempt_max_frames
-            )));
-        }
-        let byte_len = self.byte_len.checked_add(frame.len()).ok_or_else(|| {
-            V3AttemptStoreError::LocalResourceExhausted(
-                "provider SSE attempt byte count overflowed".to_string(),
-            )
-        })?;
-        if byte_len > self.limits.attempt_max_bytes {
-            return Err(V3AttemptStoreError::LocalResourceExhausted(format!(
-                "provider SSE attempt exceeded the committed replay byte limit ({})",
-                self.limits.attempt_max_bytes
-            )));
-        }
-        self.reservation.reserve(frame.len())?;
-        self.byte_len = byte_len;
+        self.reservation
+            .reserve_frame(self.frames.len(), frame.len())?;
+        self.byte_len += frame.len();
         self.frames.push(frame);
         self.flush_client_frames();
         Ok(())
@@ -797,7 +807,6 @@ impl V3CommittedClientSseBuilder {
     }
 
     pub(crate) fn mark_last_frame_as_terminal(&mut self) -> Result<(), V3AttemptStoreError> {
-        self.reservation.budget.ensure_resident()?;
         let terminal_frame_index = self.frames.len().checked_sub(1).ok_or_else(|| {
             V3AttemptStoreError::InvalidAttemptState(
                 "committed SSE terminal cannot precede every frame".to_string(),
@@ -939,7 +948,6 @@ impl V3CommittedClientSseBuilder {
     pub(crate) fn seal_after_validated_terminal(
         self,
     ) -> Result<V3CommittedClientSseStream, V3AttemptStoreError> {
-        self.reservation.budget.ensure_resident()?;
         if self.frames.is_empty() {
             return Err(V3AttemptStoreError::InvalidAttemptState(
                 "provider response event codec produced an empty stream".to_string(),

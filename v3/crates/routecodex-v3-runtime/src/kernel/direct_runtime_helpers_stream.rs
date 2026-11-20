@@ -328,7 +328,6 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
     )>,
     client_frames: Option<crate::nodes::V3CommittedClientFrameSink>,
 ) -> crate::shared::V3DirectSourceResult<crate::nodes::V3CommittedClientSseStream> {
-    let deadline = tokio::time::Instant::from_std(attempt_budget.residence_deadline());
     let mut committed = crate::nodes::V3CommittedClientSseBuilder::with_budget(attempt_budget)
         .map_err(|error| {
             crate::shared::direct_plain_error(
@@ -354,20 +353,7 @@ pub(crate) async fn collect_direct_sse_attempt_after_terminal_with_hooks_and_cli
             provider_protocol,
             declared_tools,
         );
-    loop {
-        let next = match tokio::time::timeout_at(deadline, stream.next()).await {
-            Ok(next) => next,
-            Err(_) if terminal_seen => break,
-            Err(_) => {
-                return Err(crate::shared::direct_plain_error(
-                    V3ErrorSourceKind::ProviderFailure,
-                    "V3ProviderResp14Raw",
-                    "provider_response_residence_timeout",
-                    "provider SSE attempt exceeded the request residence deadline before a semantic terminal",
-                ))
-            }
-        };
-        let Some(frame) = next else { break };
+    while let Some(frame) = stream.next().await {
         // The attempt is complete at the protocol terminal.  A provider
         // transport error or an unterminated tail after the terminal is
         // post-terminal noise and must seal the already-validated attempt

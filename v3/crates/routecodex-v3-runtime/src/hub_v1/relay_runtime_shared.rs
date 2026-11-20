@@ -66,10 +66,9 @@ impl fmt::Display for V3RelayCoreError {
     }
 }
 
-/// Provider attempt deadline. A provider that is missing from the compiled
-/// manifest keeps the remote first-byte budget of two minutes. An explicit
-/// whole-request budget is preserved unchanged; the SSE first-frame cap is
-/// enforced on the provider config.
+/// Provider transport setup and non-streaming response budget. A missing
+/// provider declaration uses two minutes. The provider config separately
+/// enforces the SSE first-frame cap.
 pub(crate) fn v3_relay_transport_response_timeout_from_ms(
     request_timeout_ms: Option<u64>,
 ) -> std::time::Duration {
