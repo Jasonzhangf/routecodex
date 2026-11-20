@@ -248,7 +248,6 @@ pub(crate) async fn handle_responses_websocket_message_with_mode(
                 None,
                 None,
                 None,
-                None,
                 V3RequestPurpose::Conversation,
             )
             .await;
@@ -439,7 +438,6 @@ pub(crate) async fn execute_responses_relay_websocket_output(
             Some(&handoff.plan),
             Some(handoff.observability_accumulator),
             Some(request_execution_control),
-            None,
             None,
             None,
             V3RequestPurpose::Conversation,

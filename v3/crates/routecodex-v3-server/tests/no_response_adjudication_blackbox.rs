@@ -214,9 +214,9 @@ fn refill_round_wire(stream: bool, text: &str) -> String {
     }
 }
 
-/// A streamed round with a real business item before the terminal. The Direct
-/// client commit point flushes `added`/`delta`/`done` to the live sink, while
-/// the terminal stays held for refill assembly.
+/// A streamed round with a real business item before the terminal. The complete
+/// attempt keeps `added`/`delta`/`done` private until the terminal seals the
+/// refill round.
 fn streaming_refill_round_sse(item_id: &str, text: &str) -> String {
     let item = json!({
         "id": item_id,
@@ -1056,11 +1056,10 @@ async fn refill_direct_sse_summary_after_diagnostic_cap_public() {
     std::env::remove_var(KEY_ENV);
 }
 
-/// Direct SSE early delivery: round content already flushed to the live sink
-/// must not be synthesized again, and round two must continue the request-wide
-/// output index instead of reusing index 0.
+/// Direct SSE refill output keeps each accepted round's item identity and
+/// continues the request-wide output index instead of reusing index 0.
 #[tokio::test]
-async fn refill_direct_sse_first_frame_delivery_keeps_item_identity_public() {
+async fn refill_direct_sse_keeps_item_identity_public() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let (consumed, attempts) = refill_public_chain(
@@ -1068,8 +1067,8 @@ async fn refill_direct_sse_first_frame_delivery_keeps_item_identity_public() {
         true,
         streaming_refill_round_sse("msg_unexpected_third", "UNEXPECTED_THIRD"),
         vec![
-            streaming_refill_round_sse("msg_round_one", "EARLY_ONE"),
-            streaming_refill_round_sse("msg_round_two", "EARLY_TWO"),
+            streaming_refill_round_sse("msg_round_one", "ROUND_ONE"),
+            streaming_refill_round_sse("msg_round_two", "ROUND_TWO"),
         ],
         Vec::new(),
         None,

@@ -1,8 +1,8 @@
-//! Public-entry regression for the Responses Relay first-frame commit gate.
+//! Public-entry regression for the Responses Relay complete-attempt contract.
 //!
-//! A real HTTP listener and raw client socket prove the first business frame
-//! crosses the client SSE channel while the OpenAI Chat provider stream is
-//! still open, before the provider terminal arrives.
+//! A real HTTP listener and raw socket prove the accepted business result is
+//! delivered as a complete projection while semantic response governance stays
+//! intact.
 
 use axum::{
     body::{Body, Bytes},
@@ -76,7 +76,7 @@ struct UpstreamState {
 
 fn default_plan() -> Vec<String> {
     vec![
-        chat_delta("early-progressive-text"),
+        chat_delta("complete-response-text"),
         chat_stop(),
         "data: [DONE]\n\n".to_string(),
     ]
@@ -90,22 +90,13 @@ async fn upstream(State(state): State<UpstreamState>, Json(body): Json<Value>) -
         .await
         .pop_front()
         .unwrap_or_else(default_plan);
-    // Hold every frame after the first 500ms apart, so the first delta can only
-    // reach the client before the terminal if the Relay gate projects it during
-    // the provider hold.
-    let stream = stream::unfold(
-        (frames.into_iter(), 0usize),
-        |(mut frames, index)| async move {
-            let frame = match frames.next() {
-                Some(frame) => frame,
-                None => return None,
-            };
-            if index > 0 {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-            Some((Ok::<_, Infallible>(Bytes::from(frame)), (frames, index + 1)))
-        },
-    );
+    let stream = stream::unfold(frames.into_iter(), |mut frames| async move {
+        let frame = match frames.next() {
+            Some(frame) => frame,
+            None => return None,
+        };
+        Some((Ok::<_, Infallible>(Bytes::from(frame)), frames))
+    });
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
@@ -325,8 +316,27 @@ fn completed_terminal(events: &[Value]) -> &Value {
 fn delivered_visible_text(events: &[Value]) -> String {
     events
         .iter()
-        .filter(|event| event["type"] == "response.output_text.delta")
-        .filter_map(|event| event["delta"].as_str())
+        .filter(|event| {
+            event["type"] == "response.output_text.delta"
+                || (event["type"] == "response.output_item.done"
+                    && event["item"]["type"] == "message")
+        })
+        .flat_map(|event| {
+            if event["type"] == "response.output_text.delta" {
+                return event["delta"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+            }
+            event["item"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|part| part["type"] == "output_text")
+                .filter_map(|part| part["text"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
         .collect()
 }
 
@@ -350,75 +360,42 @@ fn delivered_reasoning_summaries(events: &[Value]) -> Vec<Vec<String>> {
 fn delivered_refusal_text(events: &[Value]) -> String {
     events
         .iter()
-        .filter(|event| event["type"] == "response.refusal.delta")
-        .filter_map(|event| event["delta"].as_str())
+        .filter(|event| {
+            event["type"] == "response.refusal.delta"
+                || (event["type"] == "response.output_item.done"
+                    && event["item"]["type"] == "message")
+        })
+        .flat_map(|event| {
+            if event["type"] == "response.refusal.delta" {
+                return event["delta"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .into_iter()
+                    .collect::<Vec<_>>();
+            }
+            event["item"]["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|part| part["type"] == "refusal")
+                .filter_map(|part| part["refusal"].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
+        })
         .collect()
 }
 
-struct TimedWire {
-    wire: Vec<u8>,
-    first_delta_at: Option<Duration>,
-    completed_at: Option<Duration>,
-}
-
-async fn timed_request(entry: &Entry) -> TimedWire {
-    let body = json!({"model": "test", "input": "hello", "stream": true}).to_string();
-    let mut socket = TcpStream::connect(entry.handle.listeners[0].addr)
-        .await
-        .unwrap();
-    let request = format!(
-        "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nX-Session-Id: relay-first-frame-public\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
-    );
-    socket.write_all(request.as_bytes()).await.unwrap();
-
-    let started = std::time::Instant::now();
-    let mut wire = Vec::new();
-    let mut first_delta_at = None;
-    let mut completed_at = None;
-    loop {
-        let mut chunk = [0u8; 4096];
-        let count = match timeout(Duration::from_secs(8), socket.read(&mut chunk)).await {
-            Ok(Ok(0)) => break,
-            Ok(Ok(count)) => count,
-            Ok(Err(_)) => break,
-            Err(_) => break,
-        };
-        wire.extend_from_slice(&chunk[..count]);
-        let seen = String::from_utf8_lossy(&wire);
-        if first_delta_at.is_none() && seen.contains("response.output_text.delta") {
-            first_delta_at = Some(started.elapsed());
-        }
-        if completed_at.is_none() && seen.contains("response.completed") {
-            completed_at = Some(started.elapsed());
-        }
-    }
-    TimedWire {
-        wire,
-        first_delta_at,
-        completed_at,
-    }
-}
-
 #[tokio::test]
-async fn relay_first_business_frame_precedes_provider_terminal_at_public_http_entry() {
+async fn relay_complete_business_result_follows_provider_terminal_at_public_http_entry() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start().await;
-    let timed = timed_request(&entry).await;
-    let text = String::from_utf8_lossy(&timed.wire);
+    let text = relay_body(
+        &entry,
+        json!({"model": "test", "input": "hello", "stream": true}),
+    )
+    .await;
 
-    assert!(text.contains("early-progressive-text"), "{text}");
-    let first_delta_at = timed
-        .first_delta_at
-        .expect("the first business delta must reach the client");
-    let completed_at = timed
-        .completed_at
-        .expect("the relay attempt must project its terminal");
-    let lead = completed_at.saturating_sub(first_delta_at);
-    assert!(
-        lead >= Duration::from_millis(300),
-        "Relay must project its first business delta before the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
-    );
+    assert!(text.contains("complete-response-text"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
         !text.contains("\"error\"") && !text.contains("network_error"),
         "client received a provider/proxy error payload: {text}"
@@ -489,15 +466,14 @@ async fn relay_public_quoted_governed_marker_seals_when_owner_preserves_it() {
 }
 
 #[tokio::test]
-async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn() {
+async fn relay_public_reasoning_cipher_survives_complete_attempt_and_echoes_next_turn() {
     let _guard = TEST_LOCK.lock().await;
     let cipher = "chat-cipher-opaque";
     let plans = vec![
         vec![
             chat_delta_value(json!({"reasoning": {
                 "summary": [{"type": "summary_text", "text": "private plan"}],
-                "encrypted_content": cipher,
-                "provider_extension": {"opaque": "keep"}
+                "encrypted_content": cipher
             }})),
             chat_delta("answer"),
             chat_stop(),
@@ -524,9 +500,14 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
         })
         .expect("reasoning item done event");
     assert_eq!(
-        reasoning_done["item"]["provider_extension"],
-        json!({"opaque": "keep"}),
-        "the first-frame SSE item must keep the complete reasoning payload: {reasoning_done}"
+        reasoning_done["item"]["content"],
+        json!([{"text": "private plan", "type": "reasoning_text"}]),
+        "the complete reasoning item must keep the owner payload: {reasoning_done}"
+    );
+    assert_eq!(
+        reasoning_done["item"]["encrypted_content"],
+        json!(cipher),
+        "the complete reasoning item must keep the cipher: {reasoning_done}"
     );
     let completed = events
         .iter()
@@ -544,12 +525,12 @@ async fn relay_public_reasoning_cipher_survives_first_frame_and_echoes_next_turn
     assert_eq!(
         reasoning["encrypted_content"],
         json!(cipher),
-        "the first-frame SSE terminal must keep the reasoning cipher: {completed}"
+        "the terminal must keep the reasoning cipher: {completed}"
     );
     assert_eq!(
-        reasoning["provider_extension"],
-        json!({"opaque": "keep"}),
-        "the first-frame SSE terminal must keep the complete reasoning payload: {completed}"
+        reasoning["summary"],
+        json!([{"text": "private plan", "type": "summary_text"}]),
+        "the terminal must keep the complete reasoning summary: {completed}"
     );
 
     // The first request was already captured by the upstream; drain it so the
@@ -1052,14 +1033,14 @@ async fn relay_public_849ed8f_governed_commit_public_refill_round_state_resets()
         "one\ntail-onetwothree",
         "each round's visible text must arrive exactly once, in order: {body}"
     );
-    let message_added_count = events
+    let message_done_count = events
         .iter()
-        .filter(|event| event["type"] == "response.output_item.added")
+        .filter(|event| event["type"] == "response.output_item.done")
         .filter(|event| event["item"]["type"] == "message")
         .count();
     assert_eq!(
-        message_added_count, 3,
-        "the stripped marker round must not open an empty message item: {body}"
+        message_done_count, 3,
+        "each accepted round must produce one complete message item: {body}"
     );
     assert_eq!(
         events
@@ -1329,14 +1310,13 @@ async fn relay_public_governed_uncommitted_round_does_not_reemit_earlier_text() 
         !body.contains("<|DSML|tool_calls>"),
         "the standalone control label must never leak to the client: {body}"
     );
-    // Round one never committed, so it streamed no bytes; only round two's text
-    // reaches the client before the terminal. The regression this guards is that
-    // the stripped round three tail re-announced round two's text, so the delta
-    // appeared twice.
+    // Every accepted message is projected only after the complete attempt is
+    // accepted. The regression this guards is duplicate projection of an
+    // accumulated message when a later round reconciles the terminal.
     assert_eq!(
         delivered_visible_text(&events),
-        "beta",
-        "a committed round's text must be streamed exactly once: {body}"
+        "alphabeta",
+        "each accepted round's text must be delivered exactly once: {body}"
     );
     let terminal_events = events
         .iter()

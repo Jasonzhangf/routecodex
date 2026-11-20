@@ -44,9 +44,7 @@ use tokio::task::JoinHandle;
 /// The transport-only keepalive comment carried by the committed client channel.
 const V3_CLIENT_SSE_KEEPALIVE_COMMENT: &str = " keepalive";
 
-/// Recording hook for a client that disconnects after the committed client
-/// channel already delivered business bytes but before the runtime outcome
-/// exists.
+/// Recording hook for a client that disconnects while the runtime outcome is pending.
 ///
 /// The transport owns the disconnect fact: only it sees the committed channel
 /// drop. The recorder that turns that fact into a typed terminal row is injected
@@ -123,123 +121,34 @@ impl V3ClientDisconnectSlot {
 /// Accept the client SSE channel while the runtime worker still buffers the
 /// provider attempt.
 ///
-/// Three events race during this stage: the runtime outcome, the first committed
-/// business frame, and one keepalive window.
+/// Two events race during this stage: the runtime outcome and one keepalive
+/// window.
 ///
 /// - The outcome wins: the outcome is returned unchanged, so a client that never
 ///   needed the channel keeps the exact runtime status, headers, and body.
-/// - A committed frame wins: the channel is returned immediately and carries that
-///   frame at its provider arrival time. The runtime keeps running in a task this
-///   channel owns and aborts it on client disconnect.
 /// - The keepalive window expires first: the channel is committed and the
 ///   deferred runtime outcome is spliced into it.
-///
-/// `client_frame_receiver` carries the committed first-business-frame prefix:
-/// bytes the runtime handed to the client channel before the provider terminal
-/// existed. The committed channel emits these bytes first, then the deferred
-/// runtime outcome.
-///
-/// `finalize_runtime_outcome` applies the same model-entry transport projection
-/// the entry handler applies on the fast path. The deferred outcome must apply it
-/// here because the entry handler can no longer see the committed body. The
-/// projection is idempotent, so the entry handler's later application is a no-op.
 pub(crate) async fn accept_v3_client_sse_transport(
     runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>>,
-    client_frame_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
     finalize_runtime_outcome: Box<dyn FnOnce(Response<Body>) -> Response<Body> + Send>,
     keepalive_interval: Duration,
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     client_disconnect_slot: Option<V3ClientDisconnectSlot>,
 ) -> Response<Body> {
     let mut runtime_outcome = runtime_outcome;
-    let mut client_frame_receiver = client_frame_receiver;
 
-    /// Which event ended the accept stage.
     enum V3ClientSseAcceptRace {
-        /// The runtime outcome resolved first.
         Outcome(Response<Body>),
-        /// The runtime committed a business frame first, so the channel must
-        /// carry it before the outcome exists.
-        CommittedFrame(Vec<u8>),
-        /// Neither the outcome nor a frame arrived inside one keepalive window.
         KeepaliveDeadline,
     }
 
-    let raced = if let Some(receiver) = client_frame_receiver.as_mut() {
-        tokio::select! {
-            biased;
-            frame = receiver.recv() => match frame {
-                Some(frame) => V3ClientSseAcceptRace::CommittedFrame(frame),
-                // The runtime dropped the sink without a committed frame, so no
-                // frame can arrive later and the outcome owns the channel.
-                None => match tokio::time::timeout(keepalive_interval, &mut runtime_outcome).await {
-                    Ok(outcome) => V3ClientSseAcceptRace::Outcome(outcome),
-                    Err(_) => V3ClientSseAcceptRace::KeepaliveDeadline,
-                },
-            },
-            outcome = &mut runtime_outcome => V3ClientSseAcceptRace::Outcome(outcome),
-            _ = tokio::time::sleep(keepalive_interval) => V3ClientSseAcceptRace::KeepaliveDeadline,
-        }
-    } else {
-        match tokio::time::timeout(keepalive_interval, &mut runtime_outcome).await {
-            Ok(outcome) => V3ClientSseAcceptRace::Outcome(outcome),
-            Err(_) => V3ClientSseAcceptRace::KeepaliveDeadline,
-        }
+    let raced = match tokio::time::timeout(keepalive_interval, &mut runtime_outcome).await {
+        Ok(outcome) => V3ClientSseAcceptRace::Outcome(outcome),
+        Err(_) => V3ClientSseAcceptRace::KeepaliveDeadline,
     };
 
     match raced {
-        V3ClientSseAcceptRace::Outcome(outcome) => {
-            let mut prefix_frames = Vec::new();
-            if let Some(receiver) = client_frame_receiver.as_mut() {
-                while let Ok(frame) = receiver.try_recv() {
-                    prefix_frames.push(frame);
-                }
-            }
-            if prefix_frames.is_empty() {
-                return finalize_runtime_outcome(outcome);
-            }
-            // The first business frame already crossed the commit point. The
-            // committed channel owns the response head and must emit that prefix
-            // before the remainder, because the sealed outcome body skips the
-            // frames the runtime already flushed.
-            let (outcome_sender, deferred_outcome) = oneshot::channel();
-            let _ = outcome_sender.send(finalize_runtime_outcome(outcome));
-            commit_v3_client_sse_channel(
-                deferred_outcome,
-                None,
-                client_frame_receiver,
-                prefix_frames,
-                keepalive_interval,
-                client_wire_capture,
-                client_disconnect_slot,
-            )
-        }
-        V3ClientSseAcceptRace::CommittedFrame(frame) => {
-            // The runtime committed a business frame before its outcome existed.
-            // Return the channel now so the frame reaches the client at its
-            // provider arrival time; the runtime keeps running in a task this
-            // channel owns and aborts on client disconnect.
-            let mut prefix_frames = vec![frame];
-            if let Some(receiver) = client_frame_receiver.as_mut() {
-                while let Ok(frame) = receiver.try_recv() {
-                    prefix_frames.push(frame);
-                }
-            }
-            let (outcome_sender, deferred_outcome) = oneshot::channel();
-            let outcome_task = tokio::spawn(async move {
-                let outcome = runtime_outcome.await;
-                let _ = outcome_sender.send(finalize_runtime_outcome(outcome));
-            });
-            commit_v3_client_sse_channel(
-                deferred_outcome,
-                Some(outcome_task),
-                client_frame_receiver,
-                prefix_frames,
-                keepalive_interval,
-                client_wire_capture,
-                client_disconnect_slot,
-            )
-        }
+        V3ClientSseAcceptRace::Outcome(outcome) => finalize_runtime_outcome(outcome),
         V3ClientSseAcceptRace::KeepaliveDeadline => {
             let (outcome_sender, outcome) = oneshot::channel();
             let outcome_task = tokio::spawn(async move {
@@ -249,8 +158,6 @@ pub(crate) async fn accept_v3_client_sse_transport(
             commit_v3_client_sse_channel(
                 outcome,
                 Some(outcome_task),
-                client_frame_receiver,
-                Vec::new(),
                 keepalive_interval,
                 client_wire_capture,
                 client_disconnect_slot,
@@ -268,8 +175,6 @@ pub(crate) async fn accept_v3_client_sse_transport(
 fn commit_v3_client_sse_channel(
     outcome: oneshot::Receiver<Response<Body>>,
     outcome_task: Option<JoinHandle<()>>,
-    client_frame_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
-    prefix_frames: Vec<Vec<u8>>,
     keepalive_interval: Duration,
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
     client_disconnect_slot: Option<V3ClientDisconnectSlot>,
@@ -284,9 +189,6 @@ fn commit_v3_client_sse_channel(
     let stream = V3ClientSseChannelStream {
         outcome,
         outcome_task,
-        client_frame_receiver,
-        client_frame_prefix: prefix_frames.into(),
-        client_frame_emitted: false,
         client_wire_capture: client_wire_capture.clone(),
         client_disconnect_slot,
         interval,
@@ -337,15 +239,6 @@ enum V3ClientSseChannelDisposition {
 struct V3ClientSseChannelStream {
     outcome: oneshot::Receiver<Response<Body>>,
     outcome_task: Option<JoinHandle<()>>,
-    /// Frames the runtime committed before the provider terminal existed. They
-    /// are the exact client bytes for the prefix; the drained outcome body skips
-    /// them, so the channel emits them first and never duplicates one.
-    client_frame_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
-    /// Committed frames that arrived before the channel was committed.
-    client_frame_prefix: std::collections::VecDeque<Vec<u8>>,
-    /// Set as soon as one committed frame reached the client. From that point the
-    /// transport never emits another keepalive and never projects an error.
-    client_frame_emitted: bool,
     /// Hands the client-response sample recorder from the runtime outcome to the
     /// transport boundary wrapper that owns the final client wire.
     client_wire_capture: Option<V3LiveSnapClientWireCaptureSlot>,
@@ -363,30 +256,6 @@ struct V3ClientSseChannelStream {
 impl V3ClientSseChannelStream {
     fn keepalive(&self) -> Result<Vec<u8>, io::Error> {
         Ok(self.keepalive_chunk.clone())
-    }
-
-    /// Poll the next committed client frame.
-    ///
-    /// `Closed` means the runtime dropped the sink: no frame can arrive later.
-    fn poll_client_frame(&mut self, cx: &mut Context<'_>) -> Poll<Option<Vec<u8>>> {
-        if let Some(frame) = self.client_frame_prefix.pop_front() {
-            self.client_frame_emitted = true;
-            return Poll::Ready(Some(frame));
-        }
-        let Some(receiver) = self.client_frame_receiver.as_mut() else {
-            return Poll::Ready(None);
-        };
-        match receiver.poll_recv(cx) {
-            Poll::Ready(Some(frame)) => {
-                self.client_frame_emitted = true;
-                Poll::Ready(Some(frame))
-            }
-            Poll::Ready(None) => {
-                self.client_frame_receiver = None;
-                Poll::Ready(None)
-            }
-            Poll::Pending => Poll::Pending,
-        }
     }
 
     /// A committed SSE channel carries a successful client payload. An SSE payload
@@ -460,31 +329,16 @@ impl Stream for V3ClientSseChannelStream {
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
-            // Poll the committed client prefix before the state machine: a
-            // committed frame must reach the client even while the runtime
-            // outcome is pending, and the method borrow must not overlap the
-            // state match.
-            if matches!(this.state, V3ClientSseChannelState::AwaitOutcome { .. }) {
-                if let Poll::Ready(Some(frame)) = this.poll_client_frame(cx) {
-                    this.flush_yield = true;
-                    return Poll::Ready(Some(Ok(frame)));
-                }
-            }
             match &mut this.state {
                 V3ClientSseChannelState::AwaitOutcome { keepalive_sent } => {
-                    // A committed frame is business payload, not transport
-                    // liveness: the keepalive has no owner once one was emitted.
-                    if !this.client_frame_emitted {
-                        if !*keepalive_sent {
-                            *keepalive_sent = true;
-                            return Poll::Ready(Some(this.keepalive()));
-                        }
-                        if this.interval.poll_tick(cx).is_ready() {
-                            this.flush_yield = true;
-                            return Poll::Ready(Some(this.keepalive()));
-                        }
+                    if !*keepalive_sent {
+                        *keepalive_sent = true;
+                        return Poll::Ready(Some(this.keepalive()));
                     }
-                    let committed_already = this.client_frame_emitted;
+                    if this.interval.poll_tick(cx).is_ready() {
+                        this.flush_yield = true;
+                        return Poll::Ready(Some(this.keepalive()));
+                    }
                     match Pin::new(&mut this.outcome).poll(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(mut response)) => {
@@ -493,31 +347,12 @@ impl Stream for V3ClientSseChannelStream {
                             // runtime outcome, but this channel owns the response
                             // head the client actually sees. Adopt the recorder
                             // here so the transport boundary records the final
-                            // wire, including the committed prefix frames.
+                            // wire.
                             if let Some(capture_slot) = this.client_wire_capture.as_ref() {
                                 capture_slot.adopt_from_response(&mut response);
                             }
                             let disposition =
                                 V3ClientSseChannelStream::committed_channel_disposition(&response);
-                            if committed_already {
-                                // The client already holds committed business
-                                // bytes. Only the continuing committed SSE body
-                                // may follow; any other outcome is a silent
-                                // transport close without an error frame.
-                                match disposition {
-                                    V3ClientSseChannelDisposition::Drain => {
-                                        this.state = V3ClientSseChannelState::Drain(Box::pin(
-                                            response.into_body().into_data_stream(),
-                                        ));
-                                    }
-                                    V3ClientSseChannelDisposition::Close(_)
-                                    | V3ClientSseChannelDisposition::FrameCommittedPayload => {
-                                        this.state = V3ClientSseChannelState::Finished;
-                                        return Poll::Ready(None);
-                                    }
-                                }
-                                continue;
-                            }
                             match disposition {
                                 V3ClientSseChannelDisposition::Close(error) => {
                                     this.state = V3ClientSseChannelState::Finished;
@@ -538,9 +373,6 @@ impl Stream for V3ClientSseChannelStream {
                         }
                         Poll::Ready(Err(_)) => {
                             this.state = V3ClientSseChannelState::Finished;
-                            if committed_already {
-                                return Poll::Ready(None);
-                            }
                             return Poll::Ready(Some(Err(io::Error::other(
                                 "committed client SSE channel lost the runtime outcome channel; the client transport closes without an error frame",
                             ))));
@@ -671,9 +503,6 @@ mod tests {
         V3ClientSseChannelStream {
             outcome,
             outcome_task: Some(task),
-            client_frame_receiver: None,
-            client_frame_prefix: std::collections::VecDeque::new(),
-            client_frame_emitted: false,
             client_wire_capture: None,
             client_disconnect_slot: None,
             interval,
@@ -683,17 +512,6 @@ mod tests {
                 keepalive_sent: false,
             },
         }
-    }
-
-    fn channel_with_client_frames(
-        outcome: oneshot::Receiver<Response<Body>>,
-        task: JoinHandle<()>,
-        client_frame_receiver: Option<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>,
-        interval: Duration,
-    ) -> V3ClientSseChannelStream {
-        let mut stream = channel(outcome, task, interval);
-        stream.client_frame_receiver = client_frame_receiver;
-        stream
     }
 
     async fn collect(stream: V3ClientSseChannelStream) -> Vec<Result<Vec<u8>, io::Error>> {
@@ -922,41 +740,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_sse_channel_records_a_delivered_prefix_disconnect_once() {
-        let (_outcome_sender, outcome) = oneshot::channel();
-        let task = tokio::spawn(std::future::pending::<()>());
-        let mut stream = Box::pin(channel_with_client_frames(
-            outcome,
-            task,
-            None,
-            Duration::from_millis(50),
-        ));
-        stream
-            .client_frame_prefix
-            .push_back(b"data: first\n\n".to_vec());
-        let calls = Arc::new(AtomicUsize::new(0));
-        let slot = disconnect_slot(&calls);
-        stream.client_disconnect_slot = Some(slot.clone());
-
-        assert_eq!(
-            stream.next().await.expect("prefix").expect("frame"),
-            b"data: first\n\n".to_vec(),
-            "the committed prefix must reach the client before the disconnect"
-        );
-        drop(stream);
-
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "a delivered prefix followed by a disconnect must record one cancelled terminal"
-        );
-        assert!(
-            slot.take().is_none(),
-            "the disconnect recorder must remain single-use"
-        );
-    }
-
-    #[tokio::test]
     async fn client_sse_channel_does_not_record_a_ready_outcome_as_cancelled() {
         let (outcome_sender, outcome) = oneshot::channel();
         let task = tokio::spawn(std::future::pending::<()>());
@@ -986,7 +769,6 @@ mod tests {
             Box::pin(async move { json_outcome(200, "application/json", r#"{"ok":true}"#) });
         let response = accept_v3_client_sse_transport(
             runtime_outcome,
-            None,
             Box::new(|outcome| outcome),
             Duration::from_millis(50),
             None,
@@ -1011,122 +793,5 @@ mod tests {
         fn drop(&mut self) {
             self.0.store(true, Ordering::SeqCst);
         }
-    }
-
-    #[tokio::test]
-    async fn client_sse_first_frame_channel_emits_the_committed_frame_before_the_runtime_outcome() {
-        let (outcome_sender, outcome) = oneshot::channel();
-        let (frame_sender, frames) = tokio::sync::mpsc::unbounded_channel();
-        let mut stream = Box::pin(channel_with_client_frames(
-            outcome,
-            tokio::spawn(async {}),
-            Some(frames),
-            Duration::from_millis(50),
-        ));
-        frame_sender
-            .send(b"data: first\n\n".to_vec())
-            .expect("committed frame channel");
-        let first = stream.next().await.expect("first frame").expect("frame");
-        assert_eq!(
-            first, b"data: first\n\n",
-            "the committed business frame reaches the client before the runtime outcome"
-        );
-        // The committed prefix already crossed the client boundary. A lost
-        // runtime outcome is a silent transport close, not an error frame.
-        drop(outcome_sender);
-        assert!(stream.next().await.is_none());
-    }
-
-    #[tokio::test]
-    async fn client_sse_first_frame_channel_closes_silently_after_a_committed_frame_on_failure() {
-        let (outcome_sender, outcome) = oneshot::channel();
-        let (frame_sender, frames) = tokio::sync::mpsc::unbounded_channel();
-        let mut stream = Box::pin(channel_with_client_frames(
-            outcome,
-            tokio::spawn(async {}),
-            Some(frames),
-            Duration::from_millis(50),
-        ));
-        frame_sender
-            .send(b"data: committed\n\n".to_vec())
-            .expect("committed frame channel");
-        assert_eq!(
-            stream.next().await.expect("first frame").expect("frame"),
-            b"data: committed\n\n"
-        );
-        let mut failed = Response::builder()
-            .status(StatusCode::from_u16(507).expect("status"))
-            .body(Body::empty())
-            .expect("response");
-        failed.headers_mut().insert(
-            header::CONTENT_TYPE,
-            "application/json".parse().expect("content type"),
-        );
-        outcome_sender.send(failed).expect("runtime outcome");
-        assert!(
-            stream.next().await.is_none(),
-            "a post-commit failure ends the channel without an error frame"
-        );
-    }
-
-    #[tokio::test]
-    async fn client_sse_first_frame_channel_returns_a_committed_prefix_before_the_fast_outcome() {
-        let (frame_sender, frames) = tokio::sync::mpsc::unbounded_channel();
-        frame_sender
-            .send(b"data: prefix\n\n".to_vec())
-            .expect("committed frame channel");
-        let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
-            Box::pin(async move { sse_outcome(vec![b"data: rest\n\n"], Duration::ZERO) });
-        let response = accept_v3_client_sse_transport(
-            runtime_outcome,
-            Some(frames),
-            Box::new(|outcome| outcome),
-            Duration::from_millis(50),
-            None,
-            None,
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let mut stream = response.into_body().into_data_stream();
-        let first = stream.next().await.expect("prefix chunk").expect("prefix");
-        assert_eq!(
-            &first[..],
-            b"data: prefix\n\n",
-            "the committed prefix is not lost when the outcome is already ready"
-        );
-        let second = stream.next().await.expect("remainder chunk").expect("rest");
-        assert_eq!(&second[..], b"data: rest\n\n");
-    }
-
-    #[tokio::test]
-    async fn client_sse_first_frame_channel_returns_the_frame_before_a_slow_outcome() {
-        let (frame_sender, frames) = tokio::sync::mpsc::unbounded_channel();
-        frame_sender
-            .send(b"data: prefix\n\n".to_vec())
-            .expect("committed frame channel");
-        let runtime_outcome: Pin<Box<dyn Future<Output = Response<Body>> + Send>> =
-            Box::pin(async move {
-                tokio::time::sleep(Duration::from_millis(40)).await;
-                sse_outcome(vec![b"data: rest\n\n"], Duration::ZERO)
-            });
-        let response = accept_v3_client_sse_transport(
-            runtime_outcome,
-            Some(frames),
-            Box::new(|outcome| outcome),
-            Duration::from_millis(500),
-            None,
-            None,
-        )
-        .await;
-        assert_eq!(response.status(), StatusCode::OK);
-        let mut stream = response.into_body().into_data_stream();
-        let first = stream.next().await.expect("prefix chunk").expect("prefix");
-        assert_eq!(
-            &first[..],
-            b"data: prefix\n\n",
-            "the committed frame crosses the client channel before a slower runtime outcome"
-        );
-        let second = stream.next().await.expect("remainder chunk").expect("rest");
-        assert_eq!(&second[..], b"data: rest\n\n");
     }
 }

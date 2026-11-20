@@ -74,7 +74,6 @@ pub struct V3ResponsesDirectRuntimeSharedState {
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
-    client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
     debug_node_publication: V3DirectDebugNodePublication,
 }
 
@@ -88,7 +87,6 @@ impl V3ResponsesDirectRuntimeSharedState {
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
-            client_frame_sink: None,
             debug_node_publication: V3DirectDebugNodePublication::Runtime,
         }
     }
@@ -105,13 +103,6 @@ impl V3ResponsesDirectRuntimeSharedState {
         self
     }
 
-    pub fn with_client_frame_sink(
-        mut self,
-        sink: Option<crate::nodes::V3CommittedClientFrameSink>,
-    ) -> Self {
-        self.client_frame_sink = sink;
-        self
-    }
 
     pub fn with_provider_failure_event_sink(
         mut self,
@@ -154,7 +145,6 @@ struct V3ResponsesDirectRuntimeCoreState {
     initial_plan_trace: Option<Vec<&'static str>>,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
-    client_frame_sink: Option<crate::nodes::V3CommittedClientFrameSink>,
 }
 
 impl V3ResponsesDirectRuntimeCoreState {
@@ -177,7 +167,6 @@ impl V3ResponsesDirectRuntimeCoreState {
             initial_plan_trace: None,
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
-            client_frame_sink: None,
         }
     }
 
@@ -251,13 +240,6 @@ impl V3ResponsesDirectRuntimeCoreState {
         self
     }
 
-    fn with_client_frame_sink(
-        mut self,
-        sink: Option<crate::nodes::V3CommittedClientFrameSink>,
-    ) -> Self {
-        self.client_frame_sink = sink;
-        self
-    }
 }
 
 #[derive(Debug)]

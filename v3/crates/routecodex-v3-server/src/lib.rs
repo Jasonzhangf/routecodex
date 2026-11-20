@@ -1219,17 +1219,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
         || (entry_protocol == "gemini" && path.ends_with(":streamGenerateContent")))
     .then_some(Duration::from_millis(state.server.http_sse_keepalive_ms))
     .filter(|interval| !interval.is_zero());
-    // The runtime owns the commit point: it hands over the first real business
-    // frame of a Direct SSE attempt, and the client channel emits those bytes
-    // while the provider attempt is still running. A request that never commits
-    // leaves this channel empty, so the transport behaves exactly as before.
-    let (client_frame_sink, client_frame_receiver) = match client_sse_channel {
-        Some(_) => {
-            let (sink, receiver) = routecodex_v3_runtime::V3CommittedClientFrameSink::channel();
-            (Some(sink), Some(receiver))
-        }
-        None => (None, None),
-    };
     let client_disconnect_slot = client_sse_channel
         .is_some()
         .then(V3ClientDisconnectSlot::new);
@@ -1245,7 +1234,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
             execution_mode,
             pending_owner_symbol,
             request_purpose,
-            client_frame_sink,
             payload,
             client_disconnect_slot.clone(),
         ));
@@ -1259,7 +1247,6 @@ async fn pending_model_request(state: Arc<V3ListenerState>, request: Request) ->
                 .then(V3LiveSnapClientWireCaptureSlot::new);
             accept_v3_client_sse_transport(
                 runtime_outcome,
-                client_frame_receiver,
                 Box::new(move |outcome| {
                     commit_model_transport_outcome(
                         &outcome_state,

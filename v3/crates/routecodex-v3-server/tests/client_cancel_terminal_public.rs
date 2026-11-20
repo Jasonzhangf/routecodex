@@ -11,10 +11,8 @@
 //! Each case enters a real SSE listener through one of three modes: Responses
 //! Direct, Responses Relay, or OpenAI Chat Direct. The controlled upstream
 //! holds each attempt at an explicit barrier so the client can close its socket
-//! before any business frame or, for the modes that commit a business prefix
-//! before the provider terminal, after that committed prefix. OpenAI Chat
-//! Direct buffers the whole attempt, so its applicable cases are cancellation
-//! before business output and a resolved normal outcome. The request ledger is
+//! while the provider attempt is held. Strict buffering keeps every business
+//! prefix private until the complete attempt is accepted. The request ledger is
 //! read from the isolated test home and checked for one effective terminal, not
 //! just one final display row.
 
@@ -724,15 +722,14 @@ async fn run_after_business_prefix(mode: Mode) {
         .expect("the controlled provider must receive the prefix request")
         .expect("provider capture channel");
     assert_eq!(capture["stream"], json!(true));
-    let wire = read_until(
-        &mut socket,
-        AFTER_PREFIX_TEXT.as_bytes(),
-        Duration::from_secs(5),
-    )
-    .await;
+    let wire = read_until(&mut socket, KEEPALIVE_FRAME, Duration::from_secs(3)).await;
     assert!(
-        String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
-        "the client must receive the committed business prefix before closing"
+        String::from_utf8_lossy(&wire).contains(": keepalive\n\n"),
+        "the client must observe a transport keepalive while the provider holds the prefix"
+    );
+    assert!(
+        !String::from_utf8_lossy(&wire).contains(AFTER_PREFIX_TEXT),
+        "the unaccepted provider prefix must stay buffered until closure: {wire:?}"
     );
 
     drop(socket);
@@ -741,7 +738,7 @@ async fn run_after_business_prefix(mode: Mode) {
     assert_eq!(
         terminals.len(),
         1,
-        "the post-prefix disconnect must produce one effective terminal: {terminals:#?}"
+        "the disconnect during the buffered attempt must produce one effective terminal: {terminals:#?}"
     );
     assert_cancelled_terminal(terminals[0]);
     assert_no_failed_or_provider_failure(&rows);

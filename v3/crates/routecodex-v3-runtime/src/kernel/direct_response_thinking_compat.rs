@@ -213,7 +213,9 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
             && value["response"]["output"].is_array() {
             let mut snapshot = value.clone();
             let has_tools = original_output.iter().any(crate::shared_direct_thinking_compat::output_item_has_complete_tool);
-            if crate::shared_direct_thinking_compat::normalize_thinking_json_with_tool_context(&mut snapshot, Some(has_tools)) {
+            trim_confirmed_thinking_snapshot_prefixes(&mut snapshot, &original_output, has_tools);
+            crate::shared_direct_thinking_compat::normalize_thinking_json_with_tool_context(&mut snapshot, Some(has_tools));
+            if snapshot != value {
                 rewritten.push(replace_v3_direct_thinking_event_data(frame, &snapshot));
             } else { rewritten.push(frame.clone()); }
             continue;
@@ -299,6 +301,44 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
 fn direct_thinking_event_value(frame: &[u8]) -> Option<Value> {
     let data = direct_thinking_event_data(frame)?;
     serde_json::from_str(&data).ok()
+}
+
+fn trim_confirmed_thinking_snapshot_prefixes(
+    snapshot: &mut Value,
+    terminal_output: &[Value],
+    has_tools: bool,
+) {
+    let Some(items) = snapshot["response"]["output"].as_array_mut() else {
+        return;
+    };
+    for item in items {
+        let Some(id) = item["id"].as_str() else { continue };
+        let Some(terminal) = terminal_output.iter().find(|terminal| terminal["id"] == id) else {
+            continue;
+        };
+        let (Some(parts), Some(terminal_parts)) =
+            (item.get_mut("content").and_then(Value::as_array_mut), terminal["content"].as_array())
+        else {
+            continue;
+        };
+        for (part, terminal_part) in parts.iter_mut().zip(terminal_parts) {
+            if part["type"] != "output_text" || terminal_part["type"] != "output_text" {
+                continue;
+            }
+            let (Some(text), Some(terminal_text)) =
+                (part["text"].as_str(), terminal_part["text"].as_str())
+            else {
+                continue;
+            };
+            if let Some(visible) = crate::shared_direct_thinking_compat::trim_confirmed_thinking_marker_prefix(
+                text,
+                terminal_text,
+                has_tools,
+            ) {
+                part["text"] = Value::String(visible.to_owned());
+            }
+        }
+    }
 }
 
 fn direct_thinking_event_data(frame: &[u8]) -> Option<String> {

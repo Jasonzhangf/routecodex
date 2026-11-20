@@ -119,6 +119,32 @@ pub(crate) fn analyze_v3_direct_thinking_output(
         .collect()
 }
 
+/// A nonterminal mirror may end partway through a marker. Remove that fragment
+/// only when the same terminal part confirms an unprotected complete marker.
+pub(crate) fn trim_confirmed_thinking_marker_prefix<'a>(
+    snapshot: &'a str,
+    terminal: &str,
+    has_complete_tools: bool,
+) -> Option<&'a str> {
+    let start = snapshot.rfind('<')?;
+    let fragment = &snapshot[start..];
+    if !terminal.starts_with(snapshot) {
+        return None;
+    }
+    let marker = [THINKING_OPEN, THINKING_CLOSE].into_iter().find(|marker| {
+        fragment.len() < marker.len()
+            && marker.starts_with(fragment)
+            && terminal[start..].starts_with(marker)
+    })?;
+    if !project_v3_thinking_tag_text_with_tools(terminal, has_complete_tools).tag_observed
+        || find_unprotected(terminal, marker, start, &protected_text_ranges(terminal))
+            != Some(start)
+    {
+        return None;
+    }
+    Some(&snapshot[..start])
+}
+
 pub(crate) fn normalize_v3_direct_thinking_json(value: &mut Value) -> bool {
     normalize_thinking_json_with_tool_context(value, None)
 }

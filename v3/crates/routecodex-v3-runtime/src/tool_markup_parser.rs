@@ -34,47 +34,6 @@ const MINIMAX_PREFIX: &str = "]<]minimax[>[";
 const MINIMAX_OPEN: &str = "]<]minimax[>[<tool_call>";
 const MINIMAX_CLOSE: &str = "]<]minimax[>[</tool_call>";
 
-/// Every standalone text label this owner removes even when no tool is
-/// declared. A client-visible prefix that already contains one of these can
-/// still be rewritten by the complete-attempt DSML owner, so it must never be
-/// flushed ahead of that owner.
-///
-/// This is the single source for the DSML part of the commit probe's
-/// governed-marker set; the probe adds its own thinking markers separately. The
-/// two must not drift, because a label the owner removes but the probe ignores
-/// would reach a committed client prefix untouched.
-pub(crate) fn governed_text_markers() -> Vec<&'static str> {
-    let mut markers = vec![OPEN, CLOSE, BARE_DSML, ASCII_TOOL_CALLS, ORPHAN_TOOL_CLOSE];
-    markers.extend_from_slice(ANALYSIS_CLOSINGS);
-    markers.extend_from_slice(CLOSING_FRAGMENTS);
-    markers
-}
-
-/// Every text marker this owner can act on only because the request declares a
-/// tool. Each harvest entry point requires one of these openers, and a
-/// harvested span is replaced by synthesized output items instead of being
-/// returned as text. If a committed client prefix already carries one, the
-/// complete-attempt rewrite cannot keep the flushed bytes, so the commit probe
-/// must hold the frame until the registered owner decides at the terminal.
-///
-/// The four harvest entry points of [`scan_tool_markup`] are covered:
-///
-/// * `<tool_call>` bounds the plain invocation grammar and the paired
-///   ` calls>` form;
-/// * `<｜｜DSML｜｜ invoke` covers the declared fullwidth envelope when the
-///   whole envelope is written on one line, where the line is not equal to the
-///   standalone [`OPEN`] label;
-/// * `]<]minimax[>[` is the provider prefix that can end a delta before the
-///   `<tool_call>` that follows it arrives in the next one;
-/// * `<|` starts the demonstrated malformed alternate opener `<|name">`.
-///
-/// The probe matches all of them inline. Holding a prefix that merely contains
-/// one of these tokens is conservative: the owner decides at the terminal and
-/// returns the text unchanged when it harvests nothing.
-pub(crate) fn declared_tool_text_markers() -> Vec<&'static str> {
-    vec![TOOL_CALL_OPEN, INVOKE, MINIMAX_PREFIX, "<|"]
-}
-
 // Parse the observed invoke child-tag dialects. The error bool identifies
 // an unfinished declared invocation; unknown/opaque envelopes remain business
 // text. Structural prefixes are consumed here, never stripped from values.

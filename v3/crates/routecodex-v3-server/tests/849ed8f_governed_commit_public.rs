@@ -1,8 +1,8 @@
-//! Public-entry regressions for the Direct Responses first-frame commit gate.
+//! Public-entry regressions for Direct Responses complete-attempt governance.
 //!
 //! These tests use a real HTTP listener and a raw client socket. They cover the
 //! governance cases that cannot be established by the private collector:
-//! semantic terminal ordering, bare close-residue removal, pre-commit recovery,
+//! semantic terminal ordering, bare close-residue removal, failed-attempt recovery,
 //! and interleaved output carriers.
 
 use axum::{
@@ -251,10 +251,8 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
             in_progress(json!([message("clean-prefix")])),
             completed(json!([])),
         ],
-        // The public proof that a declared-tool request projects its first
-        // business delta before the provider terminal. The fixture upstream
-        // holds the terminal back 500ms; the gate under test decides whether
-        // the delta reaches the client socket during that hold.
+        // The public proof that a declared-tool request projects its complete
+        // business result after the provider terminal.
         "tool-request-progressive" => vec![
             delta(0, 0, "early-progressive-text"),
             text_done(0, 0, "early-progressive-text"),
@@ -490,15 +488,7 @@ async fn raw_request_body(
     (wire, ended)
 }
 
-/// Read the public stream incrementally and record when the first projected
-/// business delta and the terminal event reach the socket.
-///
-/// The gate under test decides the projection moment, not the byte content, so
-/// a whole-body read cannot observe it. Every provider attempt is buffered and
-/// released at the terminal unless the first-frame commit gate opens; the
-/// arrival gap between the first business delta and `response.completed` is the
-/// only public proof of progressive projection.
-async fn timed_request(entry: &Entry, session: &str, input: &str, tools: Value) -> TimedWire {
+async fn request_with_tools(entry: &Entry, session: &str, input: &str, tools: Value) -> Vec<u8> {
     let body = json!({
         "model": "test",
         "input": input,
@@ -515,38 +505,12 @@ async fn timed_request(entry: &Entry, session: &str, input: &str, tools: Value) 
     );
     socket.write_all(request.as_bytes()).await.unwrap();
 
-    let started = std::time::Instant::now();
     let mut wire = Vec::new();
-    let mut first_delta_at = None;
-    let mut completed_at = None;
-    loop {
-        let mut chunk = [0u8; 4096];
-        let count = match timeout(Duration::from_secs(8), socket.read(&mut chunk)).await {
-            Ok(Ok(0)) => break,
-            Ok(Ok(count)) => count,
-            Ok(Err(_)) => break,
-            Err(_) => break,
-        };
-        wire.extend_from_slice(&chunk[..count]);
-        let seen = String::from_utf8_lossy(&wire);
-        if first_delta_at.is_none() && seen.contains("response.output_text.delta") {
-            first_delta_at = Some(started.elapsed());
-        }
-        if completed_at.is_none() && seen.contains("response.completed") {
-            completed_at = Some(started.elapsed());
-        }
-    }
-    TimedWire {
-        wire,
-        first_delta_at,
-        completed_at,
-    }
-}
-
-struct TimedWire {
-    wire: Vec<u8>,
-    first_delta_at: Option<Duration>,
-    completed_at: Option<Duration>,
+    timeout(Duration::from_secs(8), socket.read_to_end(&mut wire))
+        .await
+        .expect("public request must terminate before the fixture watchdog")
+        .expect("public request read must succeed");
+    wire
 }
 
 fn wire_text(wire: &[u8]) -> String {
@@ -665,7 +629,7 @@ fn assert_no_client_error(text: &str) {
 }
 
 #[tokio::test]
-async fn post_commit_thinking_governance_breaks_before_completion() {
+async fn thinking_governance_projects_complete_reasoning_before_completion() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) = raw_request(
@@ -679,13 +643,22 @@ async fn post_commit_thinking_governance_breaks_before_completion() {
 
     assert!(text.contains("committed-prefix"), "{text}");
     assert!(
-        !text.contains("<thinking>") && !text.contains("secret"),
+        !text.contains("<thinking>") && !text.contains("</thinking>"),
         "{text}"
     );
-    assert!(!text.contains("response.completed"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the complete accepted attempt must close normally: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["committed-prefix ".to_string()]
+    );
+    assert!(
+        text.contains("response.reasoning_summary_text.delta")
+            && text.contains("\"delta\":\"secret\""),
+        "the governed thinking content must remain a reasoning item: {text}"
     );
     assert_no_client_error(&text);
     assert!(
@@ -699,14 +672,14 @@ async fn post_commit_thinking_governance_breaks_before_completion() {
 }
 
 #[tokio::test]
-async fn split_orphan_after_clean_commit_does_not_leak_label_or_completion() {
+async fn split_orphan_failure_does_not_leak_label_or_completion() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, _) = raw_request(&entry, "849ed8f-orphan-after", "split-orphan-after-commit").await;
     let text = wire_text(&wire);
     eprintln!("849ed8f orphan-after wire={text}");
 
-    assert!(text.contains("hello"), "{text}");
+    assert!(!text.contains("hello"), "{text}");
     assert!(!text.contains("tool_calls"), "{text}");
     assert!(!text.contains("response.completed"), "{text}");
     assert!(
@@ -768,7 +741,7 @@ async fn bare_residue_newline_is_removed_before_projection() {
 }
 
 #[tokio::test]
-async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
+async fn snapshot_carrier_collision_keeps_split_marker_private_until_complete() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) =
@@ -779,14 +752,15 @@ async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
     assert!(!text.contains("<thin"), "{text}");
     assert!(!text.contains("<thinking>"), "{text}");
     assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
+    assert!(text.contains("secret"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.contains("response.completed"),
-        "the bounded truncation must not project completion: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the complete accepted attempt must close normally: {text}"
     );
-    assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["safe-prefix  tail".to_string(), "ordinary".to_string()]
     );
     assert_no_client_error(&text);
     assert!(
@@ -800,7 +774,7 @@ async fn snapshot_carrier_collision_does_not_release_split_marker_early() {
 }
 
 #[tokio::test]
-async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
+async fn snapshot_carrier_collision_keeps_bare_residue_private_until_complete() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) =
@@ -821,15 +795,9 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
         !text.contains('>') && !text.contains("DSML"),
         "any projected event form must not carry the residue or label: {text}"
     );
-    // The committed prefix is the first visible delta. The DSML owner removes
-    // the bare close residue from the held tail while keeping the delivered
-    // frame byte-identical, so the attempt now completes instead of breaking
-    // the transport: the append-only precondition of the post-commit failure
-    // path (the owner cannot project the tail without rewriting a flushed
-    // frame) does not hold for this shape.
     assert!(
         text.contains("response.completed"),
-        "the preserved-prefix rewrite must complete the attempt: {text}"
+        "the governed complete attempt must complete: {text}"
     );
     assert!(
         text.ends_with("0\r\n\r\n"),
@@ -838,7 +806,7 @@ async fn snapshot_carrier_collision_does_not_release_bare_residue_early() {
     assert_eq!(
         text.matches("\"delta\":\"hello\\n\"").count(),
         1,
-        "the delivered prefix must not be re-emitted: {text}"
+        "the complete output must be emitted once: {text}"
     );
     let events = response_sse_events(&decoded_chunked_body(&wire));
     let terminal = events
@@ -865,7 +833,7 @@ async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
     .await;
     let text = wire_text(&wire);
 
-    assert!(text.contains("clean-prefix"), "{text}");
+    assert!(!text.contains("clean-prefix"), "{text}");
     assert!(!text.contains("response.completed"), "{text}");
     assert!(
         !text.ends_with("0\r\n\r\n"),
@@ -883,7 +851,7 @@ async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
 }
 
 #[tokio::test]
-async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
+async fn interleaved_carriers_project_complete_governed_result_without_leaking() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     let (wire, ended) = raw_request(&entry, "849ed8f-interleaved", "interleaved-thinking").await;
@@ -891,13 +859,18 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
     eprintln!("849ed8f interleaved wire={text}");
 
     assert!(text.contains("safe-prefix"), "{text}");
+    assert!(text.contains("other"), "{text}");
     assert!(!text.contains("<thinking>"), "{text}");
     assert!(!text.contains("</thinking>"), "{text}");
-    assert!(!text.contains("secret"), "{text}");
-    assert!(!text.contains("response.completed"), "{text}");
+    assert!(text.contains("secret"), "{text}");
+    assert!(text.contains("response.completed"), "{text}");
     assert!(
-        !text.ends_with("0\r\n\r\n"),
-        "normal chunked completion leaked: {text}"
+        text.ends_with("0\r\n\r\n"),
+        "the complete accepted attempt must close normally: {text}"
+    );
+    assert_eq!(
+        completed_output_texts(&wire),
+        vec!["safe-prefix  tail".to_string(), "other".to_string()]
     );
     assert_no_client_error(&text);
     assert!(
@@ -911,7 +884,7 @@ async fn interleaved_carriers_hold_thinking_marker_without_leaking() {
 }
 
 #[tokio::test]
-async fn declared_tool_request_projects_first_business_delta_before_terminal() {
+async fn declared_tool_request_projects_complete_output_after_terminal() {
     let _guard = TEST_LOCK.lock().await;
     let entry = start(false).await;
     // The DSH harness always declares tools and omits `tool_choice`, so a
@@ -926,27 +899,17 @@ async fn declared_tool_request_projects_first_business_delta_before_terminal() {
             "required": ["path"]
         }
     }]);
-    let timed = timed_request(
+    let wire = request_with_tools(
         &entry,
         "849ed8f-tool-first-frame",
         "tool-request-progressive",
         tools,
     )
     .await;
-    let text = wire_text(&timed.wire);
+    let text = wire_text(&wire);
 
     assert!(text.contains("early-progressive-text"), "{text}");
-    let first_delta_at = timed
-        .first_delta_at
-        .expect("the first business delta must reach the client");
-    let completed_at = timed
-        .completed_at
-        .expect("the attempt must project its terminal");
-    let lead = completed_at.saturating_sub(first_delta_at);
-    assert!(
-        lead >= Duration::from_millis(300),
-        "a declared-tool request must project its first business delta before the provider terminal; measured delta={first_delta_at:?} terminal={completed_at:?} lead={lead:?}"
-    );
+    assert!(text.contains("response.completed"), "{text}");
     assert_no_client_error(&text);
     entry.stop().await;
 }
@@ -969,8 +932,9 @@ async fn declared_tool_text_markup_is_held_then_harvested_without_leak() {
             "required": ["path"]
         }
     }]);
-    let timed = timed_request(&entry, "849ed8f-tool-markup", "tool-declared-markup", tools).await;
-    let text = wire_text(&timed.wire);
+    let wire =
+        request_with_tools(&entry, "849ed8f-tool-markup", "tool-declared-markup", tools).await;
+    let text = wire_text(&wire);
 
     assert!(
         text.contains("response.completed"),
@@ -1007,14 +971,14 @@ async fn declared_tool_alternate_opener_is_held_then_harvested_without_leak() {
             "required": ["cmd"]
         }
     }]);
-    let timed = timed_request(
+    let wire = request_with_tools(
         &entry,
         "849ed8f-tool-alternate",
         "tool-alternate-opener-markup",
         tools,
     )
     .await;
-    let text = wire_text(&timed.wire);
+    let text = wire_text(&wire);
 
     assert!(
         text.contains("response.completed"),
@@ -1050,14 +1014,14 @@ async fn declared_tool_one_line_fullwidth_markup_is_held_then_harvested_without_
             "required": ["path"]
         }
     }]);
-    let timed = timed_request(
+    let wire = request_with_tools(
         &entry,
         "849ed8f-tool-fullwidth",
         "tool-one-line-fullwidth-markup",
         tools,
     )
     .await;
-    let text = wire_text(&timed.wire);
+    let text = wire_text(&wire);
 
     assert!(
         text.contains("response.completed"),

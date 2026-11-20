@@ -1263,30 +1263,24 @@ async fn responses_direct_dsml_f665809_partial_attempt_exhaustion_is_transport_f
                 }
                 assert!(failed, "truncated executable envelope completed silently");
                 let wire = String::from_utf8_lossy(&wire);
-                // On the SSE channel the request declares tools, so the
-                // first-frame commit probe certifies the visible prefix before
-                // the minimax harvest opener arrives: the client keeps the
-                // plain "FAILED_ATTEMPT_PROSE\n" prefix it already received
-                // (first-frame-commit design 13.4, committed prefix is
-                // append-only). The non-stream transport never commits, so it
-                // projects no byte at all.
-                if stream {
-                    // The committed prefix is the message carrier frames the
-                    // client already received (per-char deltas), identified by
-                    // the provider item id; its plain text must be present.
-                    assert!(
-                        wire.contains("minimax_message"),
-                        "committed visible prefix was withheld: {wire}"
-                    );
-                } else {
-                    assert!(wire.is_empty(), "non-stream attempt leaked a body: {wire}");
-                }
-                // The held opener, the harvest markup, any synthesized
-                // function_call, the provider terminal, and any error payload
-                // must never reach the committed channel; their absence proves
-                // the harness broke the transport at the append-only boundary
-                // instead of rewriting the flushed prefix.
+                // The attempt is complete before the client can receive any
+                // business byte. Both transports therefore keep the failed
+                // attempt private and break the client transport instead of
+                // projecting a partial executable envelope.
+                assert!(
+                    wire.is_empty()
+                        || wire
+                            .lines()
+                            .filter(|line| !line.is_empty())
+                            .all(|line| line.starts_with(':')),
+                    "unaccepted attempt prefix leaked before transport failure: {wire}"
+                );
+                // The message prefix, held opener, harvest markup, synthesized
+                // function_call, provider terminal and error payload must never
+                // reach the client.
                 for forbidden in [
+                    "minimax_message",
+                    "FAILED_ATTEMPT_PROSE",
                     "]<]minimax[>[",
                     "<tool_call>",
                     "<invoke",
