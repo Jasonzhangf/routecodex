@@ -218,6 +218,7 @@ async fn execute_responses_direct_server_outcome_inner(
     request_purpose: V3RequestPurpose,
 ) -> V3ResponsesDirectServerOutcome {
     let requested_stream = v3_request_wants_sse(request_headers, &payload);
+    let client_identity_headers = responses_client_identity_headers(request_headers);
     let now_epoch_ms = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
         Ok(duration) => duration.as_millis() as u64,
         Err(error) => {
@@ -321,6 +322,7 @@ async fn execute_responses_direct_server_outcome_inner(
         Some(plan) => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_default_transport_debug_and_initial_target(
                 V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
+                .with_client_identity_headers(client_identity_headers.clone())
                 .with_provider_failure_event_sink(
                     provider_failure_event_sink
                         .as_ref()
@@ -347,6 +349,7 @@ async fn execute_responses_direct_server_outcome_inner(
         None => {
             execute_v3_responses_direct_runtime_kernel_with_shared_state_and_default_transport_debug(
                 V3ResponsesDirectRuntimeSharedState::new(state.provider_health.runtime_health())
+                .with_client_identity_headers(client_identity_headers.clone())
                 .with_provider_failure_event_sink(
                     provider_failure_event_sink
                         .as_ref()
@@ -381,7 +384,8 @@ async fn execute_responses_direct_server_outcome_inner(
         let capture_provider_response = state
             .debug
             .should_capture_snapshot_stage("provider-response");
-        let relay_runtime_seeds = handoff.relay_runtime_seeds();
+        let mut relay_runtime_seeds = handoff.relay_runtime_seeds();
+        relay_runtime_seeds.client_identity_headers = client_identity_headers.clone();
         let relay_result = if capture_provider_request || capture_provider_response {
             execute_v3_responses_relay_runtime_with_default_transport_health(
                 &state.manifest,

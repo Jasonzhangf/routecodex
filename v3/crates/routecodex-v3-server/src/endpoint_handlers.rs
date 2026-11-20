@@ -553,12 +553,15 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
             plan.map(|plan| plan.decision.target.clone()),
             plan.map(|plan| plan.expanded.clone()),
             BTreeSet::new(),
-            plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
-                let mut seeds = plan.relay_runtime_seeds();
+            {
+                let mut seeds = plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
+                    plan.relay_runtime_seeds()
+                });
                 seeds.request_execution_control = responses_request_execution_control.clone();
                 seeds.client_frame_sink = client_frame_sink.clone();
+                seeds.client_identity_headers = responses_client_identity_headers(&request_headers);
                 seeds
-            }),
+            },
         )
         .await
         {

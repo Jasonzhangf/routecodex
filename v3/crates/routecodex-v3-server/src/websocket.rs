@@ -378,6 +378,10 @@ pub(crate) async fn execute_responses_relay_websocket_output(
         request_id: request_id.clone(),
         payload: payload.clone(),
     };
+    let mut seeds = protocol_plan.map_or_else(V3ResponsesRelayRuntimeSeeds::default, |plan| {
+        plan.relay_runtime_seeds()
+    });
+    seeds.client_identity_headers = responses_client_identity_headers(headers);
     let output = match protocol_plan {
         Some(plan) => {
             execute_v3_responses_relay_runtime_with_default_transport_health(
@@ -390,7 +394,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 Some(plan.decision.target.clone()),
                 Some(plan.expanded.clone()),
                 BTreeSet::new(),
-                plan.relay_runtime_seeds(),
+                seeds,
             )
             .await
         }
@@ -405,7 +409,7 @@ pub(crate) async fn execute_responses_relay_websocket_output(
                 None,
                 None,
                 BTreeSet::new(),
-                V3ResponsesRelayRuntimeSeeds::default(),
+                seeds,
             )
             .await
         }

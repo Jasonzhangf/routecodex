@@ -393,8 +393,10 @@ resources:
     owner_crate: routecodex-v3-server
     owner_node: V3Server03HttpRequestRaw
     identity: [requestId, serverId, endpoint, method]
+    semantic_contract:
+      client_identity_headers: the actual user-agent and originator values are request-local protocol fields carried to the selected Provider; absent values remain absent and no client credentials enter the carrier
     allowed_writers: [V3Server03HttpRequestRaw]
-    allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Server16HttpFrame]
+    allowed_readers: [V3Req04StandardizedResponses, V3Execution11ProtocolDecision, V3Transport13ResponsesHttpRequest, V3Server16HttpFrame]
     forbidden_writers: [routecodex-v3-provider-responses]
     may_enter_provider_body: false
     may_enter_client_body: false
@@ -583,6 +585,7 @@ resources:
     identity: [requestId, providerId, interfaceId, providerType, upstreamUrl]
     semantic_contract:
       configured_headers: selected Target headers are carried on the typed transport request and applied by the generic HTTP send owner; the resolved auth handle alone supplies Authorization
+      client_identity_headers: actual client identity headers are carried per request through Direct, Relay, and reselection; selected Target configuration takes precedence on duplicate names
       projection: configured header names may be projected for diagnosis, but configured header values are redacted from dry-run/debug artifacts
       scope: provider transport consumes the already selected Target and never reads configuration or branches on deployment provider ID
     allowed_writers: [V3Transport13ResponsesHttpRequest, build_v3_openai_chat_transport_request_from_v3_provider_08]

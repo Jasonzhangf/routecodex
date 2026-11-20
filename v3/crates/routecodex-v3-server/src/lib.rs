@@ -1442,6 +1442,26 @@ fn record_and_emit_v3_error_projection(
     None
 }
 
+fn responses_client_identity_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    ["user-agent", "originator"]
+        .into_iter()
+        .filter(|name| {
+            !headers
+                .get_all("connection")
+                .iter()
+                .filter_map(|value| value.to_str().ok())
+                .flat_map(|value| value.split(','))
+                .any(|option| option.trim().eq_ignore_ascii_case(name))
+        })
+        .filter_map(|name| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| (name.to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
 fn request_accepts_sse(headers: &HeaderMap) -> bool {
     headers
         .get("accept")

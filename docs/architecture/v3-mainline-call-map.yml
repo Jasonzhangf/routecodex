@@ -2153,10 +2153,12 @@ chains:
       consumes:
       - v3.provider.responses_wire_payload
       - v3.secret.provider_auth_handle
+      - v3.request.protocol_fields
       produces:
       - v3.provider.transport_request
       side_channel_reads:
       - v3.secret.provider_auth_handle
+      - v3.request.protocol_fields
       side_channel_writes: []
   - step_id: v3-rd-12
     from_node: V3Transport13ResponsesHttpRequest

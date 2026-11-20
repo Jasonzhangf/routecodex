@@ -1353,6 +1353,7 @@ features:
   test_design:
   - docs/goals/v3-responses-direct-mvp-test-design.md
   required_unit:
+  - Responses public entry forwards actual user-agent and originator per request to the selected Provider across Direct and Relay; absent values do not fabricate identity and client credentials do not reach the Provider
   - OpenAI Chat selected Target headers reach generic HTTP wire sends; configured Authorization headers fail config validation and cannot replace the resolved auth handle
   - An explicit upstream-SSE provider contract forces the OpenAI Chat provider body to stream=true with the SSE transport intent for a JSON client, while a provider without that contract keeps stream=false with the JSON intent
   - Provider request projections redact configured header values while HTTP sends preserve the configured values

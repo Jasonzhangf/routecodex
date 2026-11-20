@@ -140,6 +140,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
 > {
     Box::pin(async move {
         chat_process_refill.clear();
+        let client_identity_headers = initial_relay_seeds.client_identity_headers.clone();
         let observability_accumulator = initial_relay_seeds
             .observability_accumulator
             .unwrap_or_else(V3RuntimeObservabilityAccumulator::start);
@@ -675,6 +676,12 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     handle_provider_request_failure!(V3ResponsesRelayRuntimeError::Target(error));
                 }
             };
+            let transport_request =
+                if provider_wire_protocol == V3HubProviderWireProtocol::Responses {
+                    transport_request.with_client_identity_headers(&client_identity_headers)
+                } else {
+                    transport_request
+                };
             // 声明契约可以强制 provider transport intent 为 SSE。守卫保留并改为对照该
             // 期望值，这样契约被破坏时仍在本地点出，而不是静默放行。
             let expected_provider_request_transport_intent = if upstream_requires_sse {

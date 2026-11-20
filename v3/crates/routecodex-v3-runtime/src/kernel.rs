@@ -133,6 +133,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
     let mut trace = vec!["V3Config05ManifestPublished", "V3Server03HttpRequestRaw"];
     require_static_hooks(&hook_registry);
     let V3ResponsesDirectRuntimeCoreState {
+        client_identity_headers,
         now_epoch_ms,
         provider_health,
         initial_selected_target,
@@ -696,7 +697,8 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     &hook_registry,
                 );
             }
-        };
+        }
+        .with_client_identity_headers(&client_identity_headers);
         let handoff_scope = match (
             standardized.pipeline_id.clone(),
             standardized.port,
