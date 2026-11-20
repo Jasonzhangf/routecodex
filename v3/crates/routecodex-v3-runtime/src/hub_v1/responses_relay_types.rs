@@ -92,6 +92,9 @@ pub struct V3ResponsesProtocolDirectHandoff {
 /// or Direct handoff. Grouped so the call sites stay compact.
 #[derive(Clone, Default)]
 pub struct V3ResponsesRelayRuntimeSeeds {
+    /// Actual client identity headers for this request. Provider-declared
+    /// headers retain precedence when the transport request merges them.
+    pub client_identity_headers: Vec<(String, String)>,
     pub route_policy_pending: Option<crate::route_policy::V3RoutePolicyPendingGuard>,
     pub route_policy_scope: Option<crate::route_policy::V3RoutePolicyScope>,
     pub observability_accumulator: Option<V3RuntimeObservabilityAccumulator>,

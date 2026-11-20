@@ -115,6 +115,7 @@ async fn execute_v3_responses_direct_runtime_kernel_with_refill(
             .clone()
             .map(|sink| sink.with_output_index_offset(accumulated_items.len()));
         let mut state = V3ResponsesDirectRuntimeCoreState::new()
+            .with_client_identity_headers(shared_state.client_identity_headers.clone())
             .with_now_epoch_ms(now_epoch_ms)
             .with_provider_health(shared_state.provider_health.clone())
             .with_provider_failure_event_sink(shared_state.provider_failure_event_sink.clone())

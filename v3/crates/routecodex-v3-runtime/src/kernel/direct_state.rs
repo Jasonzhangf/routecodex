@@ -70,6 +70,7 @@ enum V3DirectDebugNodePublication {
 }
 
 pub struct V3ResponsesDirectRuntimeSharedState {
+    client_identity_headers: Vec<(String, String)>,
     provider_health: V3ProviderFailureRuntimeHealth,
     provider_failure_event_sink: Option<V3RuntimeProviderFailureEventSink>,
     route_selection_event_sink: Option<V3RuntimeRouteSelectionEventSink>,
@@ -83,12 +84,18 @@ impl V3ResponsesDirectRuntimeSharedState {
         H: Into<V3ProviderFailureRuntimeHealth>,
     {
         Self {
+            client_identity_headers: Vec::new(),
             provider_health: provider_health.into(),
             provider_failure_event_sink: None,
             route_selection_event_sink: None,
             client_frame_sink: None,
             debug_node_publication: V3DirectDebugNodePublication::Runtime,
         }
+    }
+
+    pub fn with_client_identity_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.client_identity_headers = headers;
+        self
     }
 
     /// The Server composes nested protocol outcomes before publishing their
@@ -125,6 +132,7 @@ impl V3ResponsesDirectRuntimeSharedState {
 
 #[derive(Clone)]
 struct V3ResponsesDirectRuntimeCoreState {
+    client_identity_headers: Vec<(String, String)>,
     now_epoch_ms: u64,
     provider_health: Option<V3ProviderFailureRuntimeHealth>,
     provider_health_neutral: bool,
@@ -152,6 +160,7 @@ struct V3ResponsesDirectRuntimeCoreState {
 impl V3ResponsesDirectRuntimeCoreState {
     fn new() -> Self {
         Self {
+            client_identity_headers: Vec::new(),
             now_epoch_ms: 0,
             provider_health: None,
             provider_health_neutral: false,
@@ -170,6 +179,11 @@ impl V3ResponsesDirectRuntimeCoreState {
             route_selection_event_sink: None,
             client_frame_sink: None,
         }
+    }
+
+    fn with_client_identity_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.client_identity_headers = headers;
+        self
     }
 
     fn with_provider_health(mut self, provider_health: V3ProviderFailureRuntimeHealth) -> Self {

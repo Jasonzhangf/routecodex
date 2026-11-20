@@ -983,6 +983,7 @@ features:
   - v3/crates/routecodex-v3-runtime/src/hooks.rs
   - v3/crates/routecodex-v3-target/src/lib.rs
   resource_bindings:
+  - v3.request.protocol_fields
   - v3.request.normal_payload
   - v3.target.concrete_provider
   - v3.responses_direct.policy

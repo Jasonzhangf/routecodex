@@ -201,6 +201,25 @@ impl V3Transport13ResponsesRequest {
 }
 
 impl V3Transport13ResponsesRequest {
+    pub fn with_client_identity_headers(mut self, headers: &[(String, String)]) -> Self {
+        if let V3Transport13ResponsesRequestKind::Http {
+            provider_headers, ..
+        } = &mut self.kind
+        {
+            for (name, value) in headers {
+                if (name.eq_ignore_ascii_case("user-agent")
+                    || name.eq_ignore_ascii_case("originator"))
+                    && !provider_headers
+                        .iter()
+                        .any(|header| header.name().eq_ignore_ascii_case(name))
+                {
+                    provider_headers.push(V3ProviderRequestHeader::new(name, value));
+                }
+            }
+        }
+        self
+    }
+
     pub fn request_id(&self) -> &str {
         match &self.kind {
             V3Transport13ResponsesRequestKind::Http { request_id, .. }
