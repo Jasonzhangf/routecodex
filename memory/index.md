@@ -31,8 +31,12 @@ _Empty._
 - tags: `502`, `598`, `599`, `contract`, `error`, `external-status`
 - details: [L3/knowledge.routecodex.error-status-policy.md](L3/knowledge.routecodex.error-status-policy.md)
 
-### Full-attempt client commit barrier
-- tags: `buffer`, `commit`, `contract`, `provider`, `reselection`, `sse`
+### 失败的完整 Provider 身份禁止在同一请求重试
+- tags: `20261120`, `contract`, `no-same-retry`, `provider-switch`, `request-independence`, `user-audited`
+- details: [L3/knowledge.routecodex.failed-provider-no-same-retry.md](L3/knowledge.routecodex.failed-provider-no-same-retry.md)
+
+### 全缓冲业务提交边界
+- tags: `20261120`, `buffer`, `commit`, `contract`, `provider`, `reselection`, `sse`, `user-audited`
 - details: [L3/knowledge.routecodex.full-attempt-buffer.md](L3/knowledge.routecodex.full-attempt-buffer.md)
 
 ### Inbound contract
@@ -98,8 +102,8 @@ Base budget: 8 lines. Copy the compact lines into the project Skill `description
 - L3: Chat Process contract (knowledge) [chat-process,contract,extensions,relay,semantics] -> L3/knowledge.routecodex.chat-process-contract.md
 - L3: Provider Compat contract (knowledge) [compat,contract,owner,private-protocol,provider] -> L3/knowledge.routecodex.compat-contract.md
 - L3: Error status policy (knowledge) [502,598,599,contract,error,external-status] -> L3/knowledge.routecodex.error-status-policy.md
-- L3: Full-attempt client commit barrier (knowledge) [buffer,commit,contract,provider,reselection,sse] -> L3/knowledge.routecodex.full-attempt-buffer.md
+- L3: 失败的完整 Provider 身份禁止在同一请求重试 (knowledge) [20261120,contract,no-same-retry,provider-switch,request-independence,user-audited] -> L3/knowledge.routecodex.failed-provider-no-same-retry.md
+- L3: 全缓冲业务提交边界 (knowledge) [20261120,buffer,commit,contract,provider,reselection,sse,user-audited] -> L3/knowledge.routecodex.full-attempt-buffer.md
 - L3: Inbound contract (knowledge) [contract,extensions,inbound,lossless,normalization] -> L3/knowledge.routecodex.inbound-contract.md
 - L3: Outbound contract (knowledge) [allowlist,contract,denylist,outbound,projection] -> L3/knowledge.routecodex.outbound-contract.md
 - L3: Record contract and implementation separately (lesson) [architecture,lesson,memory,remediation,v2,verification] -> L3/lesson.routecodex.memory-truth-admission.md
-- L3: Do not conflate two relay concepts (lesson) [chat-process,direct,lesson,owner,relay,transport] -> L3/lesson.routecodex.mode-vs-transport-relay.md
