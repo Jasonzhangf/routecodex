@@ -703,7 +703,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
         };
     req02.previous.payload.0 = Arc::new(planned_request);
     let retained_expanded = initial_plan.expanded;
-    failed_candidates = initial_plan.request_local_excluded_candidates;
+    failed_candidates.extend(initial_plan.request_local_excluded_candidates);
     request_local_busy_candidates = BTreeSet::new();
     let execution_mode = initial_plan.execution_mode;
     let mut initial_selected = Some(initial_plan.selected);
@@ -769,7 +769,7 @@ async fn execute_v3_anthropic_relay_runtime_inner<T: ResponsesTransport>(
             match target_resolution {
                 Ok((planned_request, plan)) => {
                     req05.previous.previous.previous.payload.0 = Arc::new(planned_request);
-                    failed_candidates = plan.request_local_excluded_candidates;
+                    failed_candidates.extend(plan.request_local_excluded_candidates);
                     request_local_busy_candidates = BTreeSet::new();
                     plan.selected
                 }

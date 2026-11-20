@@ -211,6 +211,11 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
         };
         if matches!(value["type"].as_str(), Some("response.created" | "response.in_progress" | "response.queued"))
             && value["response"]["output"].is_array() {
+            if value["type"] == "response.in_progress"
+                && direct_thinking_snapshot_has_partial_marker(&value["response"]["output"])
+            {
+                continue;
+            }
             let mut snapshot = value.clone();
             let has_tools = original_output.iter().any(crate::shared_direct_thinking_compat::output_item_has_complete_tool);
             if crate::shared_direct_thinking_compat::normalize_thinking_json_with_tool_context(&mut snapshot, Some(has_tools)) {
@@ -294,6 +299,38 @@ pub(crate) fn rewrite_v3_direct_thinking_attempt(
         }
     }
     terminal_index.map(|terminal_index| (rewritten, terminal_index))
+}
+
+fn direct_thinking_snapshot_has_partial_marker(value: &Value) -> bool {
+    let markers = [
+        crate::shared_direct_thinking_compat::THINKING_OPEN,
+        crate::shared_direct_thinking_compat::THINKING_CLOSE,
+    ];
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::String(text) => {
+                if markers
+                    .iter()
+                    .any(|marker| marker_has_partial_prefix_suffix(text, marker))
+                {
+                    return true;
+                }
+            }
+            Value::Array(values) => pending.extend(values),
+            Value::Object(values) => pending.extend(values.values()),
+            _ => {}
+        }
+    }
+    false
+}
+
+fn marker_has_partial_prefix_suffix(text: &str, marker: &str) -> bool {
+    let text = text.as_bytes();
+    let marker = marker.as_bytes();
+    (1..marker.len()).any(|length| {
+        text.len() >= length && text.ends_with(&marker[..length])
+    })
 }
 
 fn direct_thinking_event_value(frame: &[u8]) -> Option<Value> {

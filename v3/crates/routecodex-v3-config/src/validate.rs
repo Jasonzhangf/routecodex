@@ -642,16 +642,17 @@ fn compile_providers(
         // Only the pre-first-byte budget is capped. `request_timeout_ms` owns the
         // whole request lifetime, so a long streaming response may legitimately
         // exceed it; capping that value would cut healthy streams.
-        if !provider.local {
-            if let Some(sse_first_frame_timeout_ms) = provider.sse_first_frame_timeout_ms {
-                if sse_first_frame_timeout_ms > V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS {
-                    return Err(validation(format!(
-                        "provider {id} sse_first_frame_timeout_ms {sse_first_frame_timeout_ms} \
-                         exceeds the {}ms remote first-byte budget; declare local = true only when \
-                         the provider runs on this machine.",
-                        V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS
-                    )));
-                }
+        if let Some(sse_first_frame_timeout_ms) = provider.sse_first_frame_timeout_ms {
+            let (budget, kind) = if provider.local {
+                (V3_PROVIDER_LOCAL_FIRST_BYTE_TIMEOUT_MAX_MS, "local")
+            } else {
+                (V3_PROVIDER_REMOTE_FIRST_BYTE_TIMEOUT_MAX_MS, "remote")
+            };
+            if sse_first_frame_timeout_ms > budget {
+                return Err(validation(format!(
+                    "provider {id} sse_first_frame_timeout_ms {sse_first_frame_timeout_ms} \
+                     exceeds the {budget}ms {kind} first-byte budget"
+                )));
             }
         }
         let auth = compile_auth(&id, provider.auth)?;

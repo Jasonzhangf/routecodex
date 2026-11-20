@@ -1628,6 +1628,17 @@ fn sse_payloads(frames: &[String]) -> Vec<serde_json::Value> {
         .collect()
 }
 
+fn live_relay_projection(
+    sink: crate::nodes::V3CommittedClientFrameSink,
+) -> super::relay_client_frames::V3RelayClientProjectionHandle {
+    std::sync::Arc::new(std::sync::Mutex::new(Some(
+        super::relay_client_frames::V3RelayChatClientStreamProjector::new(
+            sink,
+            crate::nodes::V3AttemptBudget::process_default(),
+        ),
+    )))
+}
+
 #[async_trait::async_trait]
 impl ResponsesTransport for CommittedHookFailureTransport {
     async fn send(
@@ -1661,7 +1672,7 @@ impl ResponsesTransport for CommittedHookFailureTransport {
 }
 
 #[tokio::test]
-async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_second_candidate() {
+async fn fully_buffered_relay_hook_failure_retries_next_identity_and_keeps_client_silent() {
     std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
     std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
     let manifest = committed_hook_failure_manifest();
@@ -1695,7 +1706,80 @@ async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_sec
         None,
         BTreeSet::new(),
         V3ResponsesRelayRuntimeSeeds {
-            client_frame_sink: Some(sink),
+            client_frame_sink: Some(sink.clone()),
+            client_stream_projection: Some(projection),
+            ..V3ResponsesRelayRuntimeSeeds::default()
+        },
+    )
+    .await
+    .expect("a fully buffered stream must end through its typed provider failure");
+
+    // Relay buffers the whole attempt before the seal, so this hook failure
+    // happens before the client channel holds one byte. The failed identity is
+    // excluded and the next eligible identity is attempted exactly once.
+    let attempted = transport.provider_ids.lock().expect("provider ids").clone();
+    assert_eq!(
+        attempted.len(),
+        2,
+        "both complete identities must be attempted once: {attempted:?}"
+    );
+    assert_ne!(
+        attempted[0], attempted[1],
+        "the failed identity must never be retried: {attempted:?}"
+    );
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    assert!(
+        frames.is_empty(),
+        "a failed pre-seal attempt must not hand the client a response head: {frames:?}"
+    );
+    assert!(
+        !sink.is_committed(),
+        "the full-buffer pre-seal path must not mark the client channel committed"
+    );
+}
+
+#[tokio::test]
+async fn client_sink_committed_relay_stream_ends_after_a_response_hook_failure_without_a_second_candidate(
+) {
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let transport = CommittedHookFailureTransport {
+        provider_ids: Mutex::new(Vec::new()),
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    // Seed the live-commit projector explicitly. The normal Relay production
+    // path uses new_fully_buffered(); this control isolates the post-commit
+    // transport rule: once the real sink has bytes, no second head is allowed.
+    let projection = live_relay_projection(sink.clone());
+
+    let _output = execute_v3_responses_relay_runtime_inner(
+        &manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: "test".to_string(),
+            failure_session_scope: V3ProviderFailureSessionScope::new(
+                "test",
+                "default",
+                "committed-hook-failure-session",
+            )
+            .expect("session scope"),
+            request_id: "req-committed-hook-failure".to_string(),
+            payload: json!({"model": "client-model", "stream": true, "input": "hello"}),
+        },
+        &transport,
+        V3ProviderFailureRuntimeHealth::from_manifest(&manifest),
+        V3ResponsesRelayRetryPolicy::default(),
+        false,
+        None,
+        None,
+        None,
+        None,
+        BTreeSet::new(),
+        V3ResponsesRelayRuntimeSeeds {
+            client_frame_sink: Some(sink.clone()),
             client_stream_projection: Some(projection),
             ..V3ResponsesRelayRuntimeSeeds::default()
         },
@@ -1703,29 +1787,41 @@ async fn committed_relay_stream_ends_after_a_response_hook_failure_without_a_sec
     .await
     .expect("a committed stream must end through its typed provider failure");
 
-    // The committed channel owns the response head: no second candidate may be
-    // attempted, because a second attempt would append a second response.
+    assert!(
+        sink.is_committed(),
+        "the first visible business text must commit the real client sink"
+    );
     assert_eq!(
         transport.provider_ids.lock().expect("provider ids").len(),
         1,
-        "a failure after the first business frame must not select another candidate"
+        "a failure after the real client sink commits must not select another candidate"
     );
     let mut frames = Vec::new();
     while let Ok(frame) = receiver.try_recv() {
         frames.push(String::from_utf8_lossy(&frame).to_string());
     }
-    let heads = frames
-        .iter()
-        .filter(|frame| frame.contains("response.created"))
-        .count();
+    let payloads = sse_payloads(&frames);
     assert_eq!(
-        heads, 1,
-        "the committed stream must carry exactly one response head, got {frames:?}"
+        payloads
+            .iter()
+            .filter(
+                |payload| payload.get("type").and_then(serde_json::Value::as_str)
+                    == Some("response.created")
+            )
+            .count(),
+        1,
+        "the committed stream must carry exactly one response head: {frames:?}"
+    );
+    assert!(
+        !payloads.iter().any(|payload| {
+            payload.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+        }),
+        "the failed committed stream must not fabricate completion: {frames:?}"
     );
 }
 
 #[tokio::test]
-async fn committed_relay_sse_round_then_json_hook_failure_does_not_retry_or_add_a_head() {
+async fn fully_buffered_relay_cross_round_hook_failure_retries_next_identity_without_a_head() {
     std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
     std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
     let manifest = committed_hook_failure_manifest();
@@ -1776,6 +1872,95 @@ async fn committed_relay_sse_round_then_json_hook_failure_does_not_retry_or_add_
     .await
     .expect("a committed hook failure must end through its typed provider failure");
 
+    let attempted = second_transport
+        .provider_ids
+        .lock()
+        .expect("provider ids")
+        .clone();
+    assert_eq!(
+        attempted.len(),
+        2,
+        "both complete identities must be attempted once: {attempted:?}"
+    );
+    assert_ne!(
+        attempted[0], attempted[1],
+        "the failed identity must never be retried: {attempted:?}"
+    );
+    assert!(
+        failure.error_chain.is_some(),
+        "the typed response hook failure must remain observable"
+    );
+
+    let mut frames = Vec::new();
+    while let Ok(frame) = receiver.try_recv() {
+        frames.push(String::from_utf8_lossy(&frame).to_string());
+    }
+    assert!(
+        frames.is_empty(),
+        "no round may deliver a head before the request-level seal: {frames:?}"
+    );
+    assert!(
+        !sink.is_committed(),
+        "a request that never reached its seal must not mark the client channel committed"
+    );
+}
+
+#[tokio::test]
+async fn client_sink_committed_relay_sse_round_then_json_hook_failure_does_not_retry_or_add_a_head()
+{
+    std::env::set_var("COMMITTED_FIRST_KEY", "first-secret");
+    std::env::set_var("COMMITTED_SECOND_KEY", "second-secret");
+    let manifest = committed_hook_failure_manifest();
+    let first_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::SseFirst,
+    };
+    let (sink, mut receiver) = crate::nodes::V3CommittedClientFrameSink::channel();
+    let projection = live_relay_projection(sink.clone());
+
+    let _first_output =
+        execute_committed_first_round(&manifest, &first_transport, &sink, &projection).await;
+    assert!(
+        sink.is_committed(),
+        "the first SSE round must commit the real client sink"
+    );
+    {
+        let mut slot = projection.lock().expect("projection handle");
+        slot.as_mut()
+            .expect("committed projection")
+            .close_round()
+            .expect("close the committed round");
+    }
+
+    let second_transport = CommittedRoundTransport {
+        provider_ids: Mutex::new(Vec::new()),
+        reply: CommittedRoundReply::Json(
+            json!({
+                "id": "chatcmpl_committed_json_failure",
+                "object": "chat.completion",
+                "choices": [{
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "second\n</\u{FF5C}DSML\u{FF5C}tool_calls>"
+                    }
+                }]
+            })
+            .to_string()
+            .into_bytes(),
+        ),
+    };
+    let failure = execute_committed_follow_up_round(
+        &manifest,
+        &second_transport,
+        &sink,
+        &projection,
+        "req-committed-json-hook-failure",
+    )
+    .await
+    .expect("a committed hook failure must end through its typed provider failure");
+
     assert_eq!(
         second_transport
             .provider_ids
@@ -1783,7 +1968,7 @@ async fn committed_relay_sse_round_then_json_hook_failure_does_not_retry_or_add_
             .expect("provider ids")
             .len(),
         1,
-        "the JSON hook failure must not retry or select another candidate"
+        "the JSON hook failure must not retry after the real client sink commits"
     );
     assert!(
         failure.error_chain.is_some(),

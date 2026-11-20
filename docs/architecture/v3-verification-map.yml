@@ -3065,7 +3065,7 @@ features:
   - A committed channel never closes the connection cleanly in place of the typed transport break.
   required_blackbox:
   - The real /v1/chat/completions entry returns a 200 text/event-stream head plus a keepalive comment while the controlled provider attempt is still gated.
-  - client_cancel_terminal_public covers Responses Direct, Responses Relay, and OpenAI Chat Direct. Responses Direct and Relay prove one cancelled terminal before first business output, one after a committed business prefix, and no cancelled terminal after a resolved normal outcome. OpenAI Chat Direct proves the shared recorder for a buffered whole-attempt mode through cancellation before first business output and a resolved normal outcome; it must not fabricate a business prefix before the provider terminal.
+  - client_cancel_terminal_public covers Responses Direct, Responses Relay, and OpenAI Chat Direct. Each mode proves one cancelled terminal before first business output, one after the upstream emitted a business prefix that the whole-attempt buffer still withheld, and no cancelled terminal after a resolved normal outcome. A buffered mode must not fabricate or project a business prefix before the provider terminal.
   - The buffered provider payload and the runtime terminal still stream through the committed channel once the provider is released.
   - A non-SSE client on the same entry receives no committed channel and still receives the runtime JSON outcome.
   - An SSE client whose released provider returns a complete JSON document receives that successful payload by SSE transport framing with no transport failure and no error frame.
@@ -3722,11 +3722,13 @@ features:
   - OpenAI Chat [DONE] after terminal finish_reason commits the complete attempt.
   - A failed pre-commit attempt is discarded before any replacement attempt is exposed.
   - A provider SSE timeout recovers to a completed candidate while request residence remains.
+  - e742d27_cross_candidate_failures_never_retry_prior_provider_identity proves through the public Responses SSE entry that a 429-failed complete identity is excluded after an intermediate 503 candidate and is not selected again from a later default pool before a healthy recovery candidate succeeds.
   - Residence expiry terminates through the typed Error chain without a store598 or client error commit; client cancellation releases activity without provider cooldown.
   required_negative:
   - OpenAI Chat [DONE] before terminal finish_reason enters the typed provider response error chain.
   - Semantic frames after [DONE] do not become a successful client stream.
   - An expired request never dispatches or cools an unattempted backup candidate.
+  - e742d27_cross_candidate_exhaustion_does_not_replay_failed_identity proves that cross-pool exhaustion records exactly one failed attempt per complete identity, never retries an earlier failed identity, and exposes no provider status, body, internal error, or error frame to the client.
   required_gates:
   - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test e041a3b_response_timeout -- --test-threads=1
   - cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-runtime --lib direct_sse_full_attempt_commit -- --nocapture

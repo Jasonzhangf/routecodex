@@ -147,7 +147,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         allow_exhaustion_rescue_probe,
         provider_failure_event_sink,
         route_selection_event_sink,
-        client_frame_sink,
+        client_frame_sink: _,
         observability_accumulator: _,
         request_execution_control,
     } = state;
@@ -363,7 +363,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                 {
                     Ok((planned_request, plan)) => {
                         standardized.body = planned_request;
-                        failed_candidates = plan.request_local_excluded_candidates;
+                        failed_candidates.extend(plan.request_local_excluded_candidates);
                         expanded = Some(plan.expanded.clone());
                         target_source = Some(crate::operation_runner::plan_execution::V3PlanExecutionTargetSource::Expanded(plan.expanded));
                         if expands_target { trace.extend(["V3Target08KindClassified", "V3Target09CandidateSetExpanded"]); }
@@ -1354,27 +1354,12 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                     .clone()
                     .unwrap_or_default();
                 response_projection.stream_observation = Some(stream_observation.clone());
-                // A committed client prefix can never be retracted. This
-                // request-level predicate only removes the whole-attempt
-                // rewrites that are decided before the stream starts (memory
-                // capture) or are scoped to a declared profile (thinking-tags).
-                // The complete-attempt Direct response hook stays content
-                // driven, so the collector's frame-level commit probe decides
-                // the actual commit and the hook still runs after the terminal.
-                // Tool declarations do not gate early commit: the probe already
-                // holds any governed text (DSML labels and thinking markers)
-                // before the terminal, and the complete-attempt owners only
-                // rewrite content that carries those exact markers. The DSH
-                // harness injects tools into every request and omits
-                // `tool_choice`, so a declaration-based gate here would block
-                // first-frame commit for all live traffic.
-                let attempt_client_frame_sink = client_frame_sink.clone().filter(|_| {
-                    !manifest.memory_raw_capture.enabled
-                        && !response_projection.compat_plan.has_block(
-                            crate::direct_response_hooks::V3DirectResponseCompatBlock::ThinkingTags,
-                        )
-                });
-                let client_commit_probe = attempt_client_frame_sink.clone();
+                // Every provider attempt stays fully buffered until its
+                // terminal has passed complete-response governance, business
+                // acceptance and sealing. The Server keeps ownership of the
+                // SSE response head and transport-only keepalives; provider
+                // business frames must not cross that boundary early.
+                let client_commit_probe: Option<crate::nodes::V3CommittedClientFrameSink> = None;
                 let committed =
                     match direct_runtime_helpers_stream::project_and_collect_direct_sse_attempt(
                         stream,
@@ -1390,7 +1375,7 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
                         &hook_registry,
                         &direct_failure_session_scope,
                         attempt_budget.clone(),
-                        attempt_client_frame_sink,
+                        None,
                     )
                     .await
                     {

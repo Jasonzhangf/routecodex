@@ -355,7 +355,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
             };
         let initial_execution_mode = initial_plan.execution_mode;
         let retained_expanded = initial_plan.expanded;
-        failed_candidates = initial_plan.request_local_excluded_candidates;
+        failed_candidates.extend(initial_plan.request_local_excluded_candidates);
         request_local_busy_candidates = BTreeSet::new();
         let mut initial_selected = Some((initial_plan.selected, initial_plan.protocol_decision));
         let mut req02 = req02;
@@ -430,7 +430,7 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                     Ok((execution_planned_request, plan)) => {
                         req05.previous.previous.previous.payload.0 =
                             std::sync::Arc::new(execution_planned_request);
-                        failed_candidates = plan.request_local_excluded_candidates;
+                        failed_candidates.extend(plan.request_local_excluded_candidates);
                         request_local_busy_candidates = BTreeSet::new();
                         (plan.selected, plan.protocol_decision)
                     }
@@ -1131,11 +1131,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             attempt_budget.residence_deadline(),
                         );
                     let stream_observation = V3RuntimeStreamObservation::default();
-                    // Relay projects the client frames at provider arrival time
-                    // for the requests whose response governance cannot rewrite
-                    // already-projected business carriers. Everything else keeps
-                    // the whole-attempt buffering. The first business frame
-                    // commits; the server channel takes over from there.
+                    // Keep every Relay provider attempt fully buffered until
+                    // its terminal has passed complete-response governance.
+                    // The projector still builds the complete Responses frame
+                    // sequence, but its deferred sink does not receive a byte
+                    // until the accepted terminal is sealed.
                     let projection_handle = initial_relay_seeds.client_stream_projection.clone();
                     let mut relay_client_projection = if client_response_transport_intent
                         == V3HubTransportIntent::Sse
@@ -1150,7 +1150,8 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 if let Some(sink) = initial_relay_seeds.client_frame_sink.clone() {
                                     *slot = Some(
                                             super::relay_client_frames::
-                                                V3RelayChatClientStreamProjector::new(
+                                                V3RelayChatClientStreamProjector::
+                                                new_fully_buffered(
                                                     sink,
                                                     attempt_budget.clone(),
                                                 ),
