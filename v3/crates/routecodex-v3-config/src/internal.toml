@@ -219,6 +219,12 @@ port = 8777
 [hidden_models]
   exact = ["gpt-5.6"]
   prefixes = ["gpt-5.6-"]
+  # Codex GPT 家族版本下限：归一化 id 去掉 future_family_prefix 后若是
+  # `<major>[.<minor>]` 且 (major, minor) >= future_min_version，即隐藏，
+  # 不依赖尾部变体名。让 5.6 之后所有 Codex GPT 版本在 Responses Lite /
+  # code_mode_only 工具面实现前都留在 /v1/models 之外；两项必须同时声明。
+  future_family_prefix = "gpt-"
+  future_min_version = [5, 6]
 
 # 内部 debug 样本策略：不暴露在用户 config manifest；显式 --snap/--snap-stages
 # 仍由 lifecycle 授权覆盖为全量样本。

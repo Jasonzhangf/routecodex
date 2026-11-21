@@ -192,6 +192,10 @@ struct HiddenModels {
     exact: Vec<String>,
     #[serde(default)]
     prefixes: Vec<String>,
+    #[serde(default)]
+    future_family_prefix: Option<String>,
+    #[serde(default)]
+    future_min_version: Option<[u64; 2]>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -429,6 +433,26 @@ fn validate_internal_config(config: &InternalConfig) {
             "internal.toml [hidden_models].prefixes entries must be normalized (trimmed lowercase)"
         );
     }
+    match (
+        config.hidden_models.future_family_prefix.as_deref(),
+        config.hidden_models.future_min_version.as_ref(),
+    ) {
+        (Some(prefix), Some(_)) => {
+            assert!(
+                !prefix.trim().is_empty(),
+                "internal.toml [hidden_models].future_family_prefix must be non-empty"
+            );
+            assert_eq!(
+                &normalized_model_id(prefix),
+                prefix,
+                "internal.toml [hidden_models].future_family_prefix must be normalized (trimmed lowercase)"
+            );
+        }
+        (None, None) => {}
+        _ => panic!(
+            "internal.toml [hidden_models] future_family_prefix and future_min_version must be declared together"
+        ),
+    }
 }
 
 /// 家族名 key（对应 `internal.toml` `[model_families]` 的 key）。
@@ -472,6 +496,56 @@ pub fn is_v3_hidden_codex_future_model(model_id: &str) -> bool {
             .prefixes
             .iter()
             .any(|prefix| normalized.starts_with(prefix))
+        || is_hidden_future_codex_gpt_version(&normalized)
+}
+
+/// Codex GPT 未来版本判定（`internal.toml` `[hidden_models]`
+/// `future_family_prefix` + `future_min_version`）：归一化 id 去掉族前缀后必须是
+/// `<major>[.<minor>]`，且版本号后紧邻合法边界（结尾、`-`、`.`、`/`、`_`）；
+/// `(major, minor)` 字典序 >= 声明下限即隐藏。族前缀不匹配、无版本号或边界非法
+/// （如 `gpt-5.6x`）一律不隐藏，避免误伤无关模型。
+fn is_hidden_future_codex_gpt_version(normalized: &str) -> bool {
+    let hidden = &INTERNAL_CONFIG.hidden_models;
+    let (Some(prefix), Some(min)) = (
+        hidden.future_family_prefix.as_deref(),
+        hidden.future_min_version.as_ref(),
+    ) else {
+        return false;
+    };
+    let Some(rest) = normalized.strip_prefix(prefix) else {
+        return false;
+    };
+    let Some((version, boundary_ok)) = parse_codex_gpt_version(rest) else {
+        return false;
+    };
+    boundary_ok && version >= (min[0], min[1])
+}
+
+/// 解析 `<major>[.<minor>]`，返回版本与版本段后边界是否合法。
+fn parse_codex_gpt_version(rest: &str) -> Option<((u64, u64), bool)> {
+    let (major, tail) = split_leading_digits(rest)?;
+    let (minor, after) = match tail.strip_prefix('.') {
+        Some(remainder) => {
+            let (minor, after) = split_leading_digits(remainder)?;
+            (minor, after)
+        }
+        None => (0, tail),
+    };
+    let boundary_ok = matches!(after.chars().next(), None | Some('-' | '.' | '/' | '_'));
+    Some(((major, minor), boundary_ok))
+}
+
+fn split_leading_digits(value: &str) -> Option<(u64, &str)> {
+    let end = value
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(value.len());
+    if end == 0 {
+        return None;
+    }
+    value[..end]
+        .parse()
+        .ok()
+        .map(|number| (number, &value[end..]))
 }
 
 /// gpt 家族模型判定（`internal.toml` `[model_families.gpt]`）：路由层特殊场景
@@ -624,9 +698,14 @@ mod tests {
         assert!(is_v3_hidden_codex_future_model("gpt-5.6"));
         assert!(is_v3_hidden_codex_future_model("gpt-5.6-sol"));
         assert!(is_v3_hidden_codex_future_model("GPT-5.6-SOL"));
+        assert!(is_v3_hidden_codex_future_model("gpt-5.7"));
+        assert!(is_v3_hidden_codex_future_model("gpt-6"));
+        assert!(is_v3_hidden_codex_future_model("gpt-6.1-terra"));
+        assert!(is_v3_hidden_codex_future_model("gpt-6-astra"));
         assert!(!is_v3_hidden_codex_future_model("gpt-5.5"));
-        assert!(!is_v3_hidden_codex_future_model("gpt-5.7"));
+        assert!(!is_v3_hidden_codex_future_model("gpt-4o"));
         assert!(!is_v3_hidden_codex_future_model("deepseek-v4-flash"));
+        assert!(!is_v3_hidden_codex_future_model("gpt-5.6x"));
     }
 
     #[test]
