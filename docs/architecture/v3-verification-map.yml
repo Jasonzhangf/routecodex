@@ -3894,10 +3894,14 @@ features:
   - v3/admin-webui/records-error-terminal-status-smoke.mjs
   contract:
   - docs/architecture/dags/v3.admin_error_row_status.graph.json
+  - docs/architecture/dagpipe/graphs/v3.provider_usage_query.graph.json
   - docs/architecture/v3-resource-operation-map.yml
   - docs/architecture/v3-function-map.yml
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
+  - The records API reports provider usage for a unified calendar range and provider/listener selection, deduplicates requests and failed attempts independently, and computes cache hit rate from comparable token totals before pagination.
+  - A legacy display-provider filter preserves retained-detail membership and totals, including when intersected with exact Provider IDs; exact-only usage retains durable coverage.
+  - The records API and Usage view expose capacity gaps for the affected listener; an independent listener remains queryable under its own coverage.
   - A retained error row with error_category=http_200, provider_status=200, and no stored typed terminal status renders the terminal status unknown in both the records API facets/filter and the served usage.js status label, while result=error, error_origin=local, and the original meta fields stay unchanged.
   - The retained error row is selected by status=error&error_status_code=unknown&error_origin=local and is not selected by the same filter with error_status_code=200.
   - A successful request with provider_status=200 still renders 200, carries no error origin, and contributes no error facet.
@@ -3909,6 +3913,7 @@ features:
   - Reading records does not rewrite the stored rows; the store is byte-identical before and after the GET.
   - Detail-endpoint not_reached placeholders, internal_code, Error02 class, and external_error_status are not read as a client terminal status.
   required_gates:
+  - CARGO_NET_OFFLINE=true node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-admin --test l4_admin_observability provider_usage
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin --test l4_admin_observability observability_error_row_terminal_status_never_uses_success_carrier -- --exact --nocapture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-admin
   - npm run verify:webui-smoke
@@ -4037,6 +4042,14 @@ features:
   change_risk: high
   owner_kind: rust_v3_bounded_request_ledger_single_writer
   owner_scope: Server queues outside its request mutex, Debug owns runtime JSONL append/read and hard caps, and Config publishes path/policy only.
+  contract:
+  - docs/architecture/dagpipe/graphs/v3.provider_usage_persistence.graph.json
+  required_positive:
+  - Stable terminal and provider-attempt facts survive backfill, detail rotation and restart without counting a replay twice.
+  - Identical fact replay does not grow the journal; lossless compaction keeps the latest contribution per identity and survives writer reopen.
+  required_negative:
+  - Failed statistic persistence cannot rotate away uncaptured detail or block proxy requests; incomplete coverage stays visible after later successful writes.
+  - Fact and reader limits reject over-capacity input explicitly without deleting previous facts, clearing sticky coverage, or returning a complete report.
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib

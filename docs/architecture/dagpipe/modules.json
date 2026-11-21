@@ -24,6 +24,16 @@
   ],
   "extensions": [
     {
+      "id": "provider-usage-persistence",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/v3.provider_usage_persistence.graph.json"
+    },
+    {
+      "id": "provider-usage-query",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/v3.provider_usage_query.graph.json"
+    },
+    {
       "id": "provider-listener-health",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/graphs/provider-listener-health.graph.json"

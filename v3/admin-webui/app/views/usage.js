@@ -142,6 +142,11 @@ const state = {
   tab: "entries",
   entriesGroup: "pool",
   stats: {},
+  providerUsage: [],
+  providerUsageSummary: {},
+  providerUsageRange: null,
+  providerUsageCoverage: null,
+  providerUsageError: null,
   timeseries: [],
   facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, entry_protocols: {}, error_status_codes: {} },
   errorStatusCode: null,
@@ -150,6 +155,7 @@ const state = {
   errorOrigin: null,
   tableWidths: { entries: null, attempts: null, errors: null },
   loading: false,
+  queryEpoch: 0,
   // layered filter model: port tabs (Layer 1) → status kinds (Layer 2) →
   // provider (Layer 3) → model (Layer 4); within a layer selections are OR,
   // across layers they AND.
@@ -186,6 +192,20 @@ const state = {
   detailRow: null,
   detailTimer: null,
 };
+
+function rowStableKey(row) {
+  const attemptIndex = row?.meta?.observed_error?.attempt_index;
+  const suffix = row?.result === "failed-attempt" || row?.event_type === "request.provider_attempt_failed"
+    ? `|attempt-${attemptIndex ?? row?.attempts ?? "unknown"}`
+    : "|request";
+  return `${row?.request_key ?? "unknown"}${suffix}`;
+}
+
+function rowType(row) {
+  return row?.result === "failed-attempt" || row?.event_type === "request.provider_attempt_failed"
+    ? "attempt"
+    : "request";
+}
 
 function statusOf(row) {
   const r = row.result;
@@ -321,92 +341,12 @@ function attachColumnResizers(table, tab) {
   });
 }
 
-function activePlans() {
-  const kinds = state.statusKinds.size ? [...state.statusKinds] : [null];
-  const providers = state.providerSel.size ? [...state.providerSel] : [null];
-  const models = state.modelSel.size ? [...state.modelSel] : [null];
-  const plans = [];
-  for (const status of kinds) {
-    for (const provider of providers) {
-      for (const model of models) {
-        plans.push({ status, provider, model });
-      }
-    }
-  }
-  return plans;
-}
-
-async function fetchPlan(base, plan) {
-  const params = new URLSearchParams(base);
-  if (plan.status) params.set("status", plan.status);
-  if (plan.provider) params.set("provider", plan.provider);
-  if (plan.model) params.set("model", plan.model);
-  return api(`/api/observability/records?${params}`);
-}
-
-function mergeFacets(target, source) {
-  for (const [key, values] of Object.entries(source || {})) {
-    const bucket = target[key] || (target[key] = {});
-    for (const [value, count] of Object.entries(values || {})) {
-      // `error_status_origins` is the one nested facet:
-      // { "<status>": { upstream, local, unknown } }. Merging it as a number
-      // would produce NaN in multi-plan mode, so recurse one level.
-      if (count && typeof count === "object") {
-        const nested = bucket[value] || (bucket[value] = {});
-        for (const [innerKey, innerCount] of Object.entries(count)) {
-          nested[innerKey] = (nested[innerKey] || 0) + Number(innerCount || 0);
-        }
-        continue;
-      }
-      bucket[value] = (bucket[value] || 0) + Number(count || 0);
-    }
-  }
-  return target;
-}
-
-function mergeStats(statsList, rowsTotal) {
-  if (statsList.length === 1) return statsList[0] || {};
-  const keys = ["count", "success_count", "error_count", "cancelled_count", "active_count",
-    "switch_count", "input_tokens", "output_tokens", "cached_tokens",
-    "cache_read_input_tokens", "cache_creation_input_tokens", "total_tokens",
-    "provider_failure_count"];
-  const merged = {};
-  for (const key of keys) {
-    merged[key] = statsList.reduce((sum, item) => sum + Number(item?.[key] || 0), 0);
-  }
-  // Cache hit rate recomputed from summed read/input; the server uses the
-  // effective input denominator, so multi-plan mode is a close estimate.
-  merged.cache_hit_rate_percent = merged.input_tokens > 0
-    ? (merged.cache_read_input_tokens / merged.input_tokens) * 100
-    : 0;
-  const durationWeighted = statsList.reduce((sum, item) => {
-    const avg = Number(item?.avg_duration_ms || 0);
-    const withDuration = Number(item?.count || 0);
-    return sum + avg * withDuration;
-  }, 0);
-  merged.avg_duration_ms = merged.count > 0 ? durationWeighted / merged.count : 0;
-  const byPort = {};
-  const byProvider = {};
-  for (const item of statsList) {
-    for (const [port, entry] of Object.entries(item?.by_port || {})) {
-      const bucket = byPort[port] || (byPort[port] = { total: 0, active: 0, success: 0, error: 0, provider_failures: 0, cancelled: 0 });
-      for (const field of Object.keys(bucket)) bucket[field] += Number(entry?.[field] || 0);
-    }
-    for (const [provider, entry] of Object.entries(item?.by_provider || {})) {
-      const bucket = byProvider[provider] || (byProvider[provider] = { total: 0, active: 0, success: 0, error: 0, provider_failures: 0, cancelled: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 });
-      for (const field of Object.keys(bucket)) bucket[field] += Number(entry?.[field] || 0);
-    }
-  }
-  merged.by_port = byPort;
-  merged.by_provider = byProvider;
-  return merged;
-}
-
-// Latest-wins loading: a filter change that lands while a query is in
-// flight queues exactly one trailing reload instead of being dropped.
+// Latest-wins loading: a later selection gets one trailing query, and its
+// epoch prevents a slower response from replacing newer state.
 let loadInFlight = false;
 let loadQueued = false;
 async function loadRecords() {
+  const epoch = ++state.queryEpoch;
   if (loadInFlight) {
     loadQueued = true;
     return;
@@ -414,29 +354,48 @@ async function loadRecords() {
   loadInFlight = true;
   state.loading = true;
   try {
-    await loadRecordsInner();
+    await loadRecordsInner(epoch);
   } finally {
     loadInFlight = false;
     state.loading = false;
     if (loadQueued) {
       loadQueued = false;
-      loadRecords();
+      await loadRecords();
     }
   }
 }
 
-// An absolute range overrides the relative Range selector; the server rewrites
-// time_from_ms for range=today|week|month, so the explicit bounds are only
-// honoured with range=all.
+function portFacets() {
+  const facets = {};
+  for (const port of Object.keys(state.portCountsCache || {})) {
+    facets[String(port)] = 0;
+  }
+  for (const [port, count] of Object.entries(state.facets?.ports || {})) {
+    facets[String(port)] = Number(count || 0);
+  }
+  if (state.port !== "all") {
+    facets[String(state.port)] ??= 0;
+  }
+  return facets;
+}
+
 function activeRange() {
-  return state.timeFrom != null || state.timeTo != null
-    ? "all"
-    : document.getElementById("chart-range").value;
+  if (state.timeFrom != null || state.timeTo != null) return "all";
+  const period = document.getElementById("calendar-period").value;
+  return period === "day" ? "today" : "all";
 }
 
 function applyTimeRange(params) {
   params.set("range", activeRange());
   params.set("timezone_offset_minutes", String(new Date().getTimezoneOffset()));
+  const period = document.getElementById("calendar-period").value;
+  const timezone = document.getElementById("timezone").value.trim();
+  const grain = document.getElementById("chart-grain").value;
+  const anchor = document.getElementById("calendar-anchor").value;
+  params.set("calendar_period", period);
+  if (timezone) params.set("timezone", timezone);
+  if (grain) params.set("grain", grain);
+  if (anchor) params.set("anchor_date", anchor);
   if (state.timeFrom != null) params.set("time_from_ms", String(state.timeFrom));
   if (state.timeTo != null) params.set("time_to_ms", String(state.timeTo));
 }
@@ -461,8 +420,6 @@ function buildQueryParams(page) {
   }
   const port = document.getElementById("port-filter").value;
   if (port !== "all") params.set("port", port);
-  const provider = document.getElementById("provider-filter").value;
-  if (provider !== "all") params.set("provider", provider);
   const model = document.getElementById("model-filter").value;
   if (model !== "all") params.set("model", model);
   const endpoint = document.getElementById("endpoint-filter").value;
@@ -475,51 +432,73 @@ function buildQueryParams(page) {
   if (mode !== "all") params.set("execution_mode", mode);
   const search = document.getElementById("search-filter").value.trim();
   if (search) params.set("search", search);
+  if (state.providerSel.size) params.set("provider_ids", JSON.stringify([...state.providerSel]));
   if (state.errorStatusCode) params.set("error_status_code", state.errorStatusCode);
   if (state.errorOrigin) params.set("error_origin", state.errorOrigin);
   return params;
 }
 
-async function loadRecordsInner() {
+function applyAttemptViewParams(params) {
+  params.set("status", "retrying");
+  params.set("view", "attempts");
+  params.set("sort_by", "updated_epoch_ms");
+  params.set("sort_order", "desc");
+  return params;
+}
+
+async function loadRecordsInner(epoch) {
   try {
     const params = buildQueryParams(state.page);
-    // Rail multi-selects win over the single-value facet selects when set.
-    const plans = activePlans();
-    if (plans.length > 12) {
-      showStatus("err", "Too many checked combinations (>12 queries) — uncheck some Layer 2-4 selections.");
-      return;
+    params.set("view", "requests");
+    const response = await api(`/api/observability/records?${params}`);
+    if (epoch !== state.queryEpoch) return;
+    state.records = response.records || [];
+    state.total = Number(response.total || 0);
+    state.stats = response.stats || {};
+    state.timeseries = response.provider_usage?.timeseries?.map((bucket) => ({
+      ...bucket,
+      count: bucket.request_count,
+      total_tokens: bucket.reported_total_tokens,
+      input_tokens: bucket.effective_input_tokens,
+      cached_tokens: bucket.cache_read_tokens,
+    })) || response.timeseries || [];
+    state.facets = response.facets || {};
+    state.providerUsage = (response.provider_usage?.by_provider || [])
+      .filter((item) => item.provider_id !== "");
+    state.providerUsageSummary = response.provider_usage?.summary || state.stats;
+    state.providerUsageRange = response.provider_usage?.range || null;
+    state.providerUsageCoverage = response.provider_usage?.coverage || null;
+    state.providerUsageError = null;
+    state.portCountsCache = { ...(state.portCountsCache || {}) };
+    for (const listener of response.provider_usage?.coverage?.listeners || []) {
+      const listenerPort = listener?.listener_id;
+      if (listenerPort != null && listenerPort !== "") {
+        state.portCountsCache[String(listenerPort)] ??= 0;
+      }
     }
-    const responses = await Promise.all(plans.map((plan) => fetchPlan(params, plan)));
-    state.records = responses.flatMap((response) => response.records || []);
-    state.total = responses.reduce((sum, response) => sum + Number(response.total || 0), 0);
-    state.stats = mergeStats(responses.map((response) => response.stats || {}), state.total);
-    state.timeseries = responses[0]?.timeseries || [];
-    const mergedFacets = {};
-    for (const response of responses) mergeFacets(mergedFacets, response.facets || {});
-    state.facets = mergedFacets;
-    if (state.port === "all") state.portCountsCache = { ...(mergedFacets.ports || {}) };
-    await Promise.all([loadAttempts(), loadErrors()]);
+    state.portCountsCache = portFacets();
+    await Promise.all([loadAttempts(epoch), loadErrors(epoch)]);
+    if (epoch !== state.queryEpoch) return;
     renderAll();
   } catch (error) {
+    if (epoch !== state.queryEpoch) return;
+    state.providerUsageError = error.message;
     showStatus("err", `records query failed: ${error.message}`);
+    renderProviderUsage();
   }
 }
 
-async function loadAttempts() {
+async function loadAttempts(epoch = state.queryEpoch) {
   try {
     // `status=retrying` is the failed-attempt projection: exactly the provider
     // attempt rows, with a server-side total that matches the filter.
-    const params = new URLSearchParams();
-    params.set("status", "retrying");
-    params.set("page", String(state.attemptsPage));
-    params.set("page_size", String(state.pageSize));
-    params.set("sort_by", "updated_epoch_ms");
-    params.set("sort_order", "desc");
-    applyTimeRange(params);
+    const params = applyAttemptViewParams(buildQueryParams(state.attemptsPage));
     const response = await api(`/api/observability/records?${params}`);
+    if (epoch !== state.queryEpoch) return;
     state.attemptRecords = response.records || [];
     state.attemptsTotal = Number(response.total || 0);
   } catch (error) {
+    if (epoch !== state.queryEpoch) return;
     state.attemptRecords = [];
     state.attemptsTotal = 0;
   }
@@ -568,7 +547,7 @@ function errorOriginRows(facets) {
     .sort((left, right) => Number(left.code) - Number(right.code));
 }
 
-async function loadErrors() {
+async function loadErrors(epoch = state.queryEpoch) {
   try {
     const pairs = errorOriginRows(state.facets);
     state.errorFacets = [...pairs].sort((a, b) => b.count - a.count);
@@ -589,16 +568,20 @@ async function loadErrors() {
         params.set("error_status_code", item.code);
         if (item.origin) params.set("error_origin", item.origin);
         params.set("page_size", "1");
+        params.set("view", "requests");
         const response = await api(`/api/observability/records?${params}`);
+        if (epoch !== state.queryEpoch) return;
         const first = (response.records || [])[0];
         state.errorExamples[errorPairKey(item)] = first?.meta?.error_detail
           || first?.meta?.error_category
           || "—";
       } catch (error) {
+        if (epoch !== state.queryEpoch) return;
         state.errorExamples[errorPairKey(item)] = "—";
       }
     }));
   } catch (error) {
+    if (epoch !== state.queryEpoch) return;
     state.errorFacets = [];
     state.errorStatuses = 0;
   }
@@ -966,7 +949,10 @@ function renderStats(stats) {
     const failed = Number(item.provider_failures || 0);
     const cls = item.error || failed > 0 ? "status-error" : item.active ? "status-active" : "status-success";
     const row = el("tr", cls);
-    row.append(el("td", null, String(port)), numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(failed), numberCell(item.cancelled));
+    row.append(
+      selectionCell(String(port), null, () => selectPort(Number(port)), "port", state.port === String(port)),
+      numberCell(item.total), numberCell(item.active), numberCell(item.success), numberCell(item.error), numberCell(failed), numberCell(item.cancelled)
+    );
     return row;
   }));
   if (!ports.length) {
@@ -1001,17 +987,65 @@ function renderStats(stats) {
     errorBody.replaceChildren(emptyRow);
   }
   const portSelect = document.getElementById("port-filter");
-  const selectedPort = portSelect.value;
-  const allPorts = el("option", null, "all ports");
-  allPorts.value = "all";
-  portSelect.replaceChildren(allPorts, ...Object.entries(state.facets.ports || {}).sort(([a],[b])=>Number(a)-Number(b)).map(([port]) => {
-    const option = el("option", null, String(port)); option.value = String(port); return option;
-  }));
-  portSelect.value = [...portSelect.options].some((option) => option.value === selectedPort) ? selectedPort : "all";
+  renderPortOptions(portSelect);
   populateFacetSelect("protocol-filter", state.facets.entry_protocols || {});
-  populateFacetSelect("provider-filter", state.facets.providers || {}, "all providers");
+  populateFacetSelect("provider-filter", providerFacets(), "all providers");
   populateFacetSelect("model-filter", state.facets.models || {}, "all models");
   populateFacetSelect("endpoint-filter", state.facets.endpoints || {}, "all endpoints");
+}
+
+function renderProviderUsage() {
+  const body = document.querySelector("#provider-usage-table tbody");
+  const coverage = document.getElementById("provider-usage-coverage");
+  if (!body || !coverage) return;
+  if (state.providerUsageError) {
+    body.replaceChildren(el("tr", null, el("td", "error-summary", `Provider usage unavailable: ${state.providerUsageError}`)));
+    coverage.textContent = "The records API did not return provider usage.";
+    return;
+  }
+  const rows = state.providerUsage || [];
+  if (!rows.length) {
+    const cell = el("td", "empty-state", "No matching provider usage in the selected range.");
+    cell.colSpan = 10;
+    body.replaceChildren(el("tr", null, cell));
+  } else {
+    body.replaceChildren(...rows.map((item) => {
+      const providerId = item.provider_id ?? null;
+      const label = providerId ?? "unattributed";
+      const selected = providerId != null && state.providerSel.has(providerId);
+      const row = el("tr", "provider-usage-row");
+      row.append(
+        selectionCell(label, null, () => selectProvider(providerId), "provider", selected),
+        numberCell(item.request_count),
+        numberCell(item.failed_attempt_count),
+        usageNumberCell(item.reported_effective_input_tokens),
+        usageNumberCell(item.output_tokens),
+        usageNumberCell(item.reported_total_tokens),
+        usageNumberCell(item.cache_read_tokens),
+        usageNumberCell(item.cache_write_tokens),
+        el("td", "num", item.cache_hit_rate_percent == null ? "—" : `${Number(item.cache_hit_rate_percent).toFixed(1)}%`)
+      );
+      const actions = el("td", null);
+      actions.appendChild(selectionButton(selected ? "Clear" : "Filter", () => selectProvider(providerId), "provider", selected));
+      row.appendChild(actions);
+      return row;
+    }));
+  }
+  const range = state.providerUsageRange || {};
+  const scope = state.providerUsageCoverage || {};
+  const timezone = range.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const formatTime = (value) => value == null ? null : new Date(Number(value)).toLocaleString(undefined, { timeZone: timezone });
+  const from = formatTime(range.resolved_from_ms) ?? "open start";
+  const to = formatTime(range.resolved_to_ms) ?? "open end";
+  const detailStart = formatTime(scope.detail_started_epoch_ms ?? scope.retained_from_ms) ?? "unknown";
+  const statsStart = formatTime(scope.statistics_started_epoch_ms) ?? "unknown";
+  const source = scope.source === "durable_facts" ? "Recorded statistics" : "Retained statistics";
+  const partial = scope.partial ? " · partial coverage" : "";
+  coverage.textContent = `${timezone} · ${from} to ${to} · ${source} from ${statsStart} · request details from ${detailStart}${partial}`;
+}
+
+function usageNumberCell(value) {
+  return value == null ? el("td", "num", "—") : numberCell(value);
 }
 function populateFacetSelect(id, facet, allLabel = "all") {
   const select = document.getElementById(id);
@@ -1067,25 +1101,142 @@ function checkCell(row) {
   const td = el("td", "col-check");
   const input = el("input");
   input.type = "checkbox";
-  input.checked = state.selection.has(row.request_key);
+  const stableKey = rowStableKey(row);
+  input.checked = state.selection.has(stableKey);
   input.setAttribute("aria-label", `Select row ${timeText(row.started_epoch_ms)} ${statusText(row)} ${metaValue(row, "model")}`);
   input.addEventListener("click", (event) => event.stopPropagation());
   input.addEventListener("change", () => {
-    input.checked ? state.selection.add(row.request_key) : state.selection.delete(row.request_key);
+    input.checked ? state.selection.add(stableKey) : state.selection.delete(stableKey);
     renderSelection();
   });
   td.appendChild(input);
   return td;
 }
 
+function providerIdOf(row) {
+  const explicit = row?.meta?.provider_id;
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  return null;
+}
+
+function providerFacets() {
+  const facets = {};
+  for (const item of state.providerUsage || []) {
+    if (item.provider_id == null) continue;
+    const providerId = String(item.provider_id).trim();
+    if (providerId) facets[providerId] = Number(item.request_count || 0) + Number(item.failed_attempt_count || 0);
+  }
+  if (!Object.keys(facets).length) {
+    for (const row of [...state.records, ...(state.attemptRecords || [])]) {
+      const providerId = providerIdOf(row);
+      if (providerId) facets[providerId] = (facets[providerId] || 0) + 1;
+    }
+  }
+  return facets;
+}
+
+function renderPortOptions(select) {
+  if (!select) return;
+  const selected = select.value;
+  const allPorts = el("option", null, "all ports");
+  allPorts.value = "all";
+  select.replaceChildren(allPorts, ...Object.entries(portFacets())
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .map(([port]) => {
+      const option = el("option", null, String(port));
+      option.value = String(port);
+      return option;
+    }));
+  select.value = [...select.options].some((option) => option.value === selected) ? selected : "all";
+}
+
+function selectionButton(label, onClick, subject, pressed = false) {
+  const button = el("button", `selection-link${pressed ? " active" : ""}`, String(label ?? "—"));
+  button.type = "button";
+  button.setAttribute("aria-pressed", String(pressed));
+  button.setAttribute("aria-label", `${pressed ? "Clear" : "Filter by"} ${subject} ${label ?? "unknown"}`);
+  button.disabled = typeof onClick !== "function";
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (typeof onClick === "function") onClick();
+  });
+  return button;
+}
+
+function selectionCell(label, className, onClick, subject, pressed = false) {
+  const td = el("td", className);
+  td.appendChild(selectionButton(label, onClick, subject, pressed));
+  return td;
+}
+
+function selectPort(port) {
+  const next = port == null ? "all" : String(port);
+  if (document.getElementById("port-filter").value === next) return;
+  document.getElementById("port-filter").value = next;
+  state.port = next;
+  resetSelectionAndPage();
+  renderPortTabs();
+  renderSelectionSummary();
+  loadRecords();
+}
+
+function selectProvider(providerId) {
+  if (providerId == null || providerId === "") return;
+  if (state.providerSel.has(providerId)) state.providerSel.delete(providerId);
+  else state.providerSel.add(providerId);
+  document.getElementById("provider-filter").value = "all";
+  resetSelectionAndPage();
+  renderSelectionSummary();
+  loadRecords();
+}
+
+function clearSelectedPort() {
+  document.getElementById("port-filter").value = "all";
+  state.port = "all";
+  resetSelectionAndPage();
+  renderPortTabs();
+  renderSelectionSummary();
+  loadRecords();
+}
+
+function clearSelectedProvider() {
+  state.providerSel.clear();
+  document.getElementById("provider-filter").value = "all";
+  resetSelectionAndPage();
+  renderSelectionSummary();
+  loadRecords();
+}
+
+function resetSelectionAndPage() {
+  state.page = 1;
+  state.attemptsPage = 1;
+  state.selection.clear();
+}
+
+function renderSelectionSummary() {
+  const port = document.getElementById("port-filter")?.value || state.port || "all";
+  const ports = port === "all" ? [] : [port];
+  const providers = [...state.providerSel];
+  const portLabel = document.getElementById("selected-port-label");
+  const providerLabel = document.getElementById("selected-provider-label");
+  if (portLabel) portLabel.textContent = ports.length ? `Port ${ports.join(", ")}` : "All ports";
+  if (providerLabel) providerLabel.textContent = providers.length ? `Provider ${providers.join(", ")}` : "All providers";
+  const clearPort = document.getElementById("clear-selected-port");
+  const clearProvider = document.getElementById("clear-selected-provider");
+  if (clearPort) clearPort.disabled = !ports.length;
+  if (clearProvider) clearProvider.disabled = !providers.length;
+}
+
 function requestRow(row) {
   const tr = el("tr");
   tr.dataset.requestKey = row.request_key;
+  tr.dataset.rowKey = rowStableKey(row);
   tr.style.cursor = "pointer";
   tr.addEventListener("click", () => openRequestDetail(row));
   tr.appendChild(checkCell(row));
   tr.appendChild(el("td", "mono", timeText(row.started_epoch_ms)));
-  tr.appendChild(el("td", "col-port", String(row.scope?.port ?? "—")));
+  const port = row.scope?.port;
+  tr.appendChild(selectionCell(String(port ?? "—"), "col-port", () => selectPort(port), "port"));
   const code = statusText(row);
   const kind = statusOf(row);
   const codeCell = el("td", "col-code");
@@ -1093,7 +1244,13 @@ function requestRow(row) {
   codeCell.title = row.meta?.error_category ? `${row.meta.error_category}: ${row.meta.error_detail || ""}`.trim() : kind;
   tr.appendChild(codeCell);
   const modelCell = el("td", "col-model");
-  modelCell.innerHTML = `<span>${escapeHtml(metaValue(row, "provider"))}/${escapeHtml(metaValue(row, "model"))}</span> <span class="key">· ${escapeHtml(metaValue(row, "auth_alias"))}</span>`;
+  const providerId = providerIdOf(row);
+  const providerButton = selectionButton(metaValue(row, "provider"), () => selectProvider(providerId), "provider");
+  providerButton.disabled = providerId == null;
+  providerButton.title = providerId ? `Filter by provider ${providerId}` : "Provider id unavailable for this row";
+  const model = el("span", null, `/${metaValue(row, "model")}`);
+  const key = el("span", "key", ` · ${metaValue(row, "auth_alias")}`);
+  modelCell.append(providerButton, model, key);
   tr.appendChild(modelCell);
   if ((state.entriesGroup || "pool") === "reason") {
     tr.appendChild(el("td", "col-route", metaValue(row, "route_reason")));
@@ -1498,6 +1655,7 @@ function renderRequests() {
   if (tab === "attempts") {
     renderAttemptsPanel(panel);
     wireTableResizers(panel, "attempts");
+    renderSelection();
     return;
   }
   if (tab === "errors") {
@@ -1582,7 +1740,7 @@ function renderEntriesPanel(panel) {
         const inputs = [...panel.querySelectorAll("#table-body td.col-check input")];
         inputs.forEach((input) => {
           input.checked = checkAll.checked;
-          const key = input.closest("tr").dataset.requestKey;
+          const key = input.closest("tr").dataset.rowKey;
           checkAll.checked ? state.selection.add(key) : state.selection.delete(key);
         });
         renderSelection();
@@ -1644,6 +1802,7 @@ function renderAttemptsPanel(panel) {
   const table = el("table", "request-table");
   const head = el("tr");
   const columns = [
+    { key: "__check", label: "", colClass: "col-check" },
     { key: "status", label: "Status", colClass: "col-code" },
     { key: "scope.port", label: "Port", colClass: "col-port" },
     { key: "meta.pool", label: "Pool", colClass: "col-pool" },
@@ -1663,10 +1822,26 @@ function renderAttemptsPanel(panel) {
   const tableHead = document.createElement("thead");
   tableHead.appendChild(trh);
   table.appendChild(tableHead);
+  const checkAll = el("input");
+  checkAll.type = "checkbox";
+  checkAll.id = "check-all";
+  checkAll.setAttribute("aria-label", "Select all visible attempts");
+  checkAll.addEventListener("change", () => {
+    const inputs = [...panel.querySelectorAll("td.col-check input")];
+    inputs.forEach((input) => {
+      input.checked = checkAll.checked;
+      const key = input.closest("tr").dataset.rowKey;
+      checkAll.checked ? state.selection.add(key) : state.selection.delete(key);
+    });
+    renderSelection();
+  });
+  trh.children[0].textContent = "";
+  trh.children[0].appendChild(checkAll);
   const body = document.createElement("tbody");
   rows.forEach((row) => {
     const tr = el("tr");
     tr.dataset.requestKey = row.request_key;
+    tr.dataset.rowKey = rowStableKey(row);
     tr.style.cursor = "pointer";
     tr.addEventListener("click", () => openRequestDetail(row));
     const detail = row.meta?.error_category
@@ -1675,6 +1850,7 @@ function renderAttemptsPanel(panel) {
     const codeCell = el("td", "col-code");
     codeCell.appendChild(el("span", "status-text error", statusText(row)));
     codeCell.title = detail;
+    tr.appendChild(checkCell(row));
     tr.appendChild(codeCell);
     tr.appendChild(el("td", "col-port", String(row.scope?.port ?? "—")));
     tr.appendChild(el("td", "col-pool", metaValue(row, "pool")));
@@ -1692,6 +1868,9 @@ function renderAttemptsPanel(panel) {
   state.tableWidths.attempts = loadTableWidths("attempts");
   applyTableWidths(table, state.tableWidths.attempts);
   attachColumnResizers(table, "attempts");
+  const inputs = [...panel.querySelectorAll("td.col-check input")];
+  checkAll.checked = inputs.length > 0 && inputs.every((input) => input.checked);
+  checkAll.indeterminate = inputs.some((input) => input.checked) && !inputs.every((input) => input.checked);
 }
 
 function renderErrorsPanel(panel) {
@@ -1748,10 +1927,7 @@ function renderErrorsPanel(panel) {
 function renderPortTabs() {
   const bar = document.getElementById("port-tabs");
   if (!bar) return;
-  // Counts come from the unfiltered-by-port response; keep the last known
-  // per-port counts while a specific port tab is active.
-  const source = state.port === "all" ? (state.facets.ports || {}) : (state.portCountsCache || {});
-  const ports = Object.entries(source).sort(([a], [b]) => Number(a) - Number(b));
+  const ports = Object.entries(portFacets()).sort(([a], [b]) => Number(a) - Number(b));
   const tabs = [{ value: "all", label: "All ports", count: state.port === "all" ? state.total : null }];
   for (const [port, count] of ports) {
     tabs.push({ value: port, label: port, count: Number(count) });
@@ -1762,14 +1938,16 @@ function renderPortTabs() {
     btn.role = "tab";
     btn.dataset.port = tab.value;
     btn.setAttribute("aria-selected", String(state.port === tab.value));
+    btn.setAttribute("aria-pressed", String(state.port === tab.value));
     btn.append(el("span", null, tab.label));
     if (tab.count != null) btn.appendChild(el("span", "count", String(tab.count)));
     btn.addEventListener("click", () => {
       if (state.port === tab.value) return;
       state.port = tab.value;
       document.getElementById("port-filter").value = tab.value;
-      state.page = 1;
+      resetSelectionAndPage();
       renderPortTabs();
+      renderSelectionSummary();
       loadRecords();
     });
     return btn;
@@ -1795,8 +1973,8 @@ function renderRail() {
     new Set([...state.statusKinds].map((kind) => STATUS_KIND_LABELS[kind])),
     (label, on) => {
       const kind = Object.keys(STATUS_KIND_LABELS).find((key) => STATUS_KIND_LABELS[key] === label);
-      on ? state.statusKinds.add(kind) : state.statusKinds.delete(kind);
-      state.page = 1;
+      state.statusKinds = new Set(on ? [kind] : []);
+      resetSelectionAndPage();
       loadRecords();
     });
   checkboxList(document.getElementById("filter-provider"),
@@ -1804,7 +1982,8 @@ function renderRail() {
     state.providerSel,
     (value, on) => {
       on ? state.providerSel.add(value) : state.providerSel.delete(value);
-      state.page = 1;
+      resetSelectionAndPage();
+      renderSelectionSummary();
       loadRecords();
     });
   checkboxList(document.getElementById("filter-model"),
@@ -1812,16 +1991,18 @@ function renderRail() {
     state.modelSel,
     (value, on) => {
       on ? state.modelSel.add(value) : state.modelSel.delete(value);
-      state.page = 1;
+      resetSelectionAndPage();
       loadRecords();
     });
-  document.querySelectorAll(".filter-clear").forEach((btn) => {
+  document.querySelectorAll(".filter-clear[data-clear]").forEach((btn) => {
     btn.onclick = () => {
       state[btn.dataset.clear].clear();
-      state.page = 1;
+      resetSelectionAndPage();
+      renderSelectionSummary();
       loadRecords();
     };
   });
+  renderSelectionSummary();
 }
 
 function checkboxList(container, entries, selectedSet, onToggle) {
@@ -1841,7 +2022,10 @@ function checkboxList(container, entries, selectedSet, onToggle) {
 }
 
 // ---------- selection & export ----------
-const CSV_HEAD = ["time", "port", "status", "endpoint", "provider", "model", "key", "pool", "input", "output", "duration", "request_id", "error_detail"];
+const CSV_HEAD = [
+  "row_type", "row_key", "time", "port", "status", "endpoint", "provider", "provider_id", "model", "key", "pool",
+  "input", "output", "total", "cache_read", "cache_write", "cache_hit_rate", "duration", "request_id", "error_detail",
+];
 // Upper bound for a filtered export so one click cannot page the whole store.
 const MAX_EXPORT_ROWS = 5000;
 function selectedRows() {
@@ -1849,17 +2033,25 @@ function selectedRows() {
 }
 function exportFields(row) {
   const usage = row.usage || {};
+  const normalized = row.usage_normalized || {};
   return [
+    rowType(row),
+    rowStableKey(row),
     timeText(row.started_epoch_ms),
     String(row.scope?.port ?? "—"),
     statusText(row),
     endpointLabel(row.meta?.endpoint),
     String(row.meta?.provider ?? "—"),
+    String(providerIdOf(row) ?? "—"),
     String(row.meta?.model ?? "—"),
     String(row.meta?.auth_alias ?? "—"),
     String(row.meta?.pool ?? "—"),
-    fmtCompact(usage.input_tokens ?? 0),
-    fmtCompact(usage.output_tokens ?? 0),
+    fmtCompact(normalized.effective_input_tokens ?? usage.input_tokens ?? 0),
+    fmtCompact(normalized.output_tokens ?? usage.output_tokens ?? 0),
+    fmtCompact(normalized.reported_total_tokens ?? usage.total_tokens ?? 0),
+    fmtCompact(normalized.cache_read_tokens ?? usage.cache_read_input_tokens ?? usage.cached_tokens ?? 0),
+    fmtCompact(normalized.cache_write_tokens ?? usage.cache_creation_input_tokens ?? 0),
+    normalized.cache_hit_rate_percent != null ? Number(normalized.cache_hit_rate_percent).toFixed(1) : "—",
     fmtMs(row.duration_ms),
     String(row.meta?.request_id || row.request_key || "—"),
     String(row.meta?.error_detail || row.meta?.error_category || "—"),
@@ -1874,38 +2066,34 @@ function toCSV(rows) {
 }
 function renderSelection() {
   const bar = document.getElementById("selection-bar");
-  state.exports = state.records.filter((row) => state.selection.has(row.request_key));
+  const { attempts, total } = activePagination();
+  const visibleRows = attempts ? state.attemptRecords : state.records;
+  state.exports = visibleRows.filter((row) => state.selection.has(rowStableKey(row)));
   // The bar reflects what a selection export would actually contain: the
   // selected rows among the currently loaded records.
   bar.classList.toggle("show", state.exports.length > 0);
   document.getElementById("sel-count").textContent = String(state.exports.length);
   // The top buttons export the whole current filter, not just this page.
-  const hasFiltered = Number(state.total || 0) > 0;
+  const hasFiltered = total > 0;
   for (const id of ["export-csv-top", "copy-tsv-top"]) document.getElementById(id).disabled = !hasFiltered;
 }
 
 /** Page through the current filter (including the rail multi-selects) so an
  *  export is not limited to the visible page. */
 async function fetchFilteredRows() {
-  const plans = activePlans();
-  if (plans.length > 12) {
-    throw new Error("too many checked combinations (>12 queries) — uncheck some Layer 2-4 selections");
-  }
   const rows = [];
   let total = 0;
-  for (const plan of plans) {
-    let collected = 0;
-    let planTotal = 0;
-    for (let page = 1; ; page += 1) {
-      const response = await fetchPlan(buildQueryParams(page), plan);
-      planTotal = Number(response.total || 0);
-      const batch = response.records || [];
-      rows.push(...batch);
-      collected += batch.length;
-      if (!batch.length || collected >= planTotal || rows.length >= MAX_EXPORT_ROWS) break;
-    }
-    total += planTotal;
-    if (rows.length >= MAX_EXPORT_ROWS) break;
+  const attempts = (state.tab || "entries") === "attempts";
+  for (let page = 1; ; page += 1) {
+    const params = attempts
+      ? applyAttemptViewParams(buildQueryParams(page))
+      : buildQueryParams(page);
+    if (!attempts) params.set("view", "requests");
+    const response = await api(`/api/observability/records?${params}`);
+    total = Number(response.total || 0);
+    const batch = response.records || [];
+    rows.push(...batch);
+    if (!batch.length || rows.length >= total || rows.length >= MAX_EXPORT_ROWS) break;
   }
   return { rows, total };
 }
@@ -1934,7 +2122,7 @@ async function exportFilteredCSV() {
       showStatus("warn", "No rows match the current filter.");
       return;
     }
-    downloadCSV(rows);
+    downloadCSV(rows, (state.tab || "entries") === "attempts" ? "attempts" : "requests");
     showStatus(rows.length < total ? "warn" : "ok", rows.length < total
       ? `Exported ${rows.length} of ${total.toLocaleString()} filtered rows (export cap ${MAX_EXPORT_ROWS}).`
       : `Exported ${rows.length} filtered rows to CSV.`);
@@ -1943,11 +2131,11 @@ async function exportFilteredCSV() {
   }
 }
 
-function downloadCSV(rows) {
+function downloadCSV(rows, view = "requests") {
   const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `rcc-requests-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
+  a.download = `rcc-${view}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1967,25 +2155,25 @@ async function copyTSV() {
 function exportCSV() {
   const rows = selectedRows();
   if (!rows.length) return;
-  downloadCSV(rows);
+  downloadCSV(rows, (state.tab || "entries") === "attempts" ? "attempts" : "requests");
   showStatus("ok", `Exported ${rows.length} selected rows to CSV.`);
 }
 
 function renderStatsCards() {
-  const stats = state.stats || {};
+  const stats = state.providerUsageSummary || state.stats || {};
   const cards = document.getElementById("summary-cards");
   cards.replaceChildren();
-  const total = Number(stats.count || 0);
-  const providerFails = Number(stats.provider_failure_count ?? 0);
+  const total = Number(stats.request_count ?? stats.count ?? 0);
+  const providerFails = Number(stats.failed_attempt_count ?? stats.provider_failure_count ?? 0);
   const values = [
     ["Requests", total],
     ["Success", Number(stats.success_count ?? 0)],
     ["Errors", Number(stats.error_count ?? 0), stats.error_count > 0 ? "bad" : ""],
     ["Provider fails", providerFails, providerFails > 0 ? "bad" : ""],
-    ["Input tokens", fmtCompact(Number(stats.input_tokens || 0))],
+    ["Input tokens", fmtCompact(Number(stats.effective_input_tokens ?? stats.input_tokens ?? 0))],
     ["Output tokens", fmtCompact(Number(stats.output_tokens || 0))],
-    ["Cached tokens", fmtCompact(Number(stats.cached_tokens || 0))],
-    ["Total tokens", fmtCompact(Number(stats.total_tokens || 0))],
+    ["Cached tokens", fmtCompact(Number(stats.cache_read_tokens ?? stats.cached_tokens ?? 0))],
+    ["Total tokens", fmtCompact(Number(stats.reported_total_tokens ?? stats.total_tokens ?? 0))],
     ["Avg cache hit", stats.cache_hit_rate_percent != null ? `${Number(stats.cache_hit_rate_percent).toFixed(1)}%` : "—"],
     ["Avg duration", stats.avg_duration_ms != null ? `${Math.round(Number(stats.avg_duration_ms))} ms` : "—"],
   ];
@@ -2036,12 +2224,14 @@ function renderPagination() {
 
 function renderAll() {
   renderStats(state.stats);
+  renderProviderUsage();
   renderStatsCards();
   renderTimeseries();
   renderTimeHint();
   renderTabCounts();
   renderRequests();
   renderPagination();
+  renderSelectionSummary();
 }
 
 function renderTabCounts() {
@@ -2072,26 +2262,55 @@ document.querySelectorAll("#entries-sub-tab-bar .sub-tab-btn").forEach((btn) => 
     renderAll();
   });
 });
-["chart-range","chart-metric"].forEach((id) => {
+["calendar-period","chart-grain","chart-metric"].forEach((id) => {
   document.getElementById(id).addEventListener("change", () => {
-    state.page = 1;
-    state.attemptsPage = 1;
+    resetSelectionAndPage();
     loadRecords();
   });
 });
-["provider-filter","model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
+["model-filter","endpoint-filter","route-filter","protocol-filter","mode-filter","search-filter"].forEach((id) => {
   const input = document.getElementById(id);
   let timer = null;
   input.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => { state.page = 1; state.attemptsPage = 1; loadRecords(); }, 400);
+    timer = setTimeout(() => {
+      resetSelectionAndPage();
+      loadRecords();
+    }, 400);
   });
   if (input.tagName === "SELECT") input.addEventListener("change", () => {
-    state.page = 1;
-    state.attemptsPage = 1;
+    resetSelectionAndPage();
     loadRecords();
   });
 });
+document.getElementById("provider-filter").addEventListener("change", (event) => {
+  const value = event.currentTarget.value;
+  state.providerSel.clear();
+  if (value !== "all") state.providerSel.add(value);
+  resetSelectionAndPage();
+  renderSelectionSummary();
+  loadRecords();
+});
+document.getElementById("port-filter").addEventListener("change", (event) => {
+  state.port = event.currentTarget.value;
+  resetSelectionAndPage();
+  renderPortTabs();
+  renderSelectionSummary();
+  loadRecords();
+});
+document.getElementById("timezone").addEventListener("change", (event) => {
+  const timezone = event.currentTarget.value.trim();
+  if (!timezone) event.currentTarget.value = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  resetSelectionAndPage();
+  loadRecords();
+});
+document.getElementById("calendar-anchor").addEventListener("change", () => {
+  resetSelectionAndPage();
+  loadRecords();
+});
+document.getElementById("clear-selected-port").addEventListener("click", clearSelectedPort);
+document.getElementById("clear-selected-provider").addEventListener("click", clearSelectedProvider);
+document.getElementById("provider-usage-clear").addEventListener("click", clearSelectedProvider);
 document.getElementById("sort-field").addEventListener("change", () => {
   setSortMode(null);
   state.page = 1;
@@ -2321,6 +2540,8 @@ document.getElementById("live-mode").addEventListener("change", (event) => {
 // The add form is static and survives the 5 s pool refresh; its port options
 // are repopulated on every render while the operator keeps typing.
 initCooldownAddForm();
+document.getElementById("timezone").value = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+renderSelectionSummary();
 
 // Polling stays the fallback path and is suppressed while the stream is live.
 startAutoRefresh(() => { if (!state.live) loadRecords(); }, 5000);

@@ -27,7 +27,8 @@ function region(source, from, to) {
 }
 
 const values = {
-  "chart-range": "all", "sort-field": "started_epoch_ms", "sort-order": "desc",
+  "calendar-period": "all", "chart-grain": "day", "timezone": "UTC",
+  "calendar-anchor": "", "sort-field": "started_epoch_ms", "sort-order": "desc",
   "port-filter": "all", "provider-filter": "all", "model-filter": "all",
   "endpoint-filter": "all", "route-filter": "", "protocol-filter": "all",
   "mode-filter": "all", "search-filter": "",
@@ -39,6 +40,8 @@ const state = {
   records: [], attemptRecords: [], errorFacets: [], page: 1, pageSize: 100,
   total: 0, attemptsTotal: 0, attemptsPage: 1, errorStatuses: 0,
   errorExamples: {}, tab: "entries", entriesGroup: "pool", stats: {},
+  queryEpoch: 0, providerUsage: [], providerUsageSummary: {},
+  providerUsageRange: null, providerUsageCoverage: null, providerUsageError: null,
   timeseries: [],
   facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, entry_protocols: {}, error_status_codes: {} },
   statusKinds: new Set(), providerSel: new Set(), modelSel: new Set(),
@@ -62,8 +65,7 @@ const context = vm.createContext({
 vm.runInContext("let adminToken = null;\n" +
   region(core, "export async function api(", "export function el(").replace(/^export /, "") +
   region(view, "function statusText(row)", "function compactFinishReason(row)") +
-  region(view, "function activePlans()", "async function loadAttempts()") +
-  region(view, "// ---------- error origin ----------", "function drilldownErrorStatus(code, origin = null)") +
+  region(view, "// Latest-wins loading", "async function load()") +
   region(view, "function drilldownErrorStatus(code, origin = null)", "// ---------- error-detail modal"), context);
 
 await context.loadRecords();

@@ -1,0 +1,57 @@
+{
+  "id": "v3.provider_usage_query",
+  "version": "1",
+  "inputs": [{"id": "用量查询", "schema": "Object"}],
+  "nodes": [
+    {
+      "id": "解析筛选与自然周期",
+      "operator": "routecodex.v3.admin.resolve_provider_usage_query",
+      "operator_version": "1",
+      "inputs": ["用量查询"],
+      "output": {"id": "查询范围或参数错误", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": []}
+    },
+    {
+      "id": "有界读取统计事实或按旧筛选读取留存明细",
+      "operator": "routecodex.v3.admin.read_provider_usage_source",
+      "operator_version": "1",
+      "inputs": ["查询范围或参数错误"],
+      "output": {"id": "观测记录及覆盖或不可用处置", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.provider_usage_facts", "v3.observability.webui_store"], "writes": []}
+    },
+    {
+      "id": "归并请求与尝试并汇总用量",
+      "operator": "routecodex.v3.admin.aggregate_provider_usage",
+      "operator_version": "1",
+      "inputs": ["观测记录及覆盖或不可用处置"],
+      "output": {"id": "汇总趋势与分页或失败处置", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": []}
+    },
+    {
+      "id": "返回查询结果",
+      "operator": "routecodex.v3.admin.respond_provider_usage_query",
+      "operator_version": "1",
+      "inputs": ["汇总趋势与分页或失败处置"],
+      "output": {"id": "查询处置回执", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": []}
+    }
+  ],
+  "edges": [
+    {"from": "解析筛选与自然周期", "to": "有界读取统计事实或按旧筛选读取留存明细", "arc_id": "查询范围或参数错误"},
+    {"from": "有界读取统计事实或按旧筛选读取留存明细", "to": "归并请求与尝试并汇总用量", "arc_id": "观测记录及覆盖或不可用处置"},
+    {"from": "归并请求与尝试并汇总用量", "to": "返回查询结果", "arc_id": "汇总趋势与分页或失败处置"}
+  ],
+  "outputs": ["查询处置回执"]
+}

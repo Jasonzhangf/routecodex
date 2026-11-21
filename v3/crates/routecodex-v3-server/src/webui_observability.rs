@@ -10,7 +10,7 @@
 // projects already-typed observability data. Store IO errors remain explicit
 // and are never recovered into success.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,6 +20,7 @@ use serde_json::Value;
 
 const V3_WEBUI_RECENT_REQUEST_CAPACITY: usize = 10_000;
 const V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY: usize = 1_024;
+const V3_WEBUI_PERSISTENCE_GAP_CAPACITY: usize = 256;
 const V3_WEBUI_HISTORY_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The transport-cancel path holds a typed Error01 `ClientDisconnect` source
@@ -717,28 +718,181 @@ struct V3WebuiObservabilityInner {
 
 #[derive(Debug)]
 enum V3WebuiObservabilityPersistenceCommand {
-    Append(V3ObsRequestRow),
+    Append {
+        row: V3ObsRequestRow,
+        attempt_ordinal: Option<u64>,
+    },
     Flush(mpsc::Sender<Result<(), String>>),
+    Shutdown(mpsc::Sender<Result<(), String>>),
+}
+
+#[derive(Debug, Clone)]
+struct V3WebuiObservabilityQueueGap {
+    listener_id: u16,
+    request_key: String,
+    started_epoch_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct V3WebuiObservabilityPersistenceGaps {
+    pending: VecDeque<V3WebuiObservabilityQueueGap>,
+    dropped_listeners: std::collections::BTreeSet<u16>,
+}
+
+impl V3WebuiObservabilityPersistenceGaps {
+    fn push(&mut self, gap: V3WebuiObservabilityQueueGap) {
+        if self.pending.len() >= V3_WEBUI_PERSISTENCE_GAP_CAPACITY {
+            self.dropped_listeners.insert(gap.listener_id);
+            return;
+        }
+        self.pending.push_back(gap);
+    }
+}
+
+#[derive(Debug, Clone)]
+struct V3WebuiObservabilityGapQueue {
+    pending: Arc<std::sync::Mutex<V3WebuiObservabilityPersistenceGaps>>,
+}
+
+impl V3WebuiObservabilityGapQueue {
+    fn new() -> Self {
+        Self {
+            pending: Arc::new(std::sync::Mutex::new(
+                V3WebuiObservabilityPersistenceGaps::default(),
+            )),
+        }
+    }
+
+    fn push(&self, gap: V3WebuiObservabilityQueueGap, alarm: &RwLock<Option<String>>) {
+        match self.pending.lock() {
+            Ok(mut pending) => pending.push(gap),
+            Err(error) => set_v3_webui_observability_alarm(
+                alarm,
+                format!("observability persistence gap state poisoned: {error}"),
+            ),
+        }
+    }
+
+    fn front(&self) -> Result<Option<V3WebuiObservabilityQueueGap>, String> {
+        self.pending
+            .lock()
+            .map(|pending| pending.pending.front().cloned())
+            .map_err(|error| format!("observability persistence gap state poisoned: {error}"))
+    }
+
+    fn pop_front(&self) -> Result<(), String> {
+        self.pending
+            .lock()
+            .map(|mut pending| {
+                pending.pending.pop_front();
+            })
+            .map_err(|error| format!("observability persistence gap state poisoned: {error}"))
+    }
+
+    fn first_dropped_listener(&self) -> Result<Option<u16>, String> {
+        self.pending
+            .lock()
+            .map(|pending| pending.dropped_listeners.first().copied())
+            .map_err(|error| format!("observability persistence gap state poisoned: {error}"))
+    }
+
+    fn clear_dropped_listener(&self, listener_id: u16) -> Result<(), String> {
+        self.pending
+            .lock()
+            .map(|mut pending| {
+                pending.dropped_listeners.remove(&listener_id);
+            })
+            .map_err(|error| format!("observability persistence gap state poisoned: {error}"))
+    }
 }
 
 #[derive(Debug, Clone)]
 struct V3WebuiObservabilityPersistenceWriter {
     sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+    gaps: V3WebuiObservabilityGapQueue,
     alarm: Arc<RwLock<Option<String>>>,
+    pending_write_error: Arc<std::sync::Mutex<Option<String>>>,
+    history_max_bytes: u64,
+    lifecycle: Arc<V3WebuiObservabilityPersistenceWriterLifecycle>,
+}
+
+#[derive(Debug)]
+struct V3WebuiObservabilityPersistenceWriterLifecycle {
+    sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+    wait_for_completion: bool,
+}
+
+impl V3WebuiObservabilityPersistenceWriterLifecycle {
+    fn new(
+        sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+        wait_for_completion: bool,
+    ) -> Self {
+        Self {
+            sender,
+            wait_for_completion,
+        }
+    }
+}
+
+impl Drop for V3WebuiObservabilityPersistenceWriterLifecycle {
+    fn drop(&mut self) {
+        let (receipt_sender, receipt_receiver) = mpsc::channel();
+        if self
+            .sender
+            .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
+                receipt_sender,
+            ))
+            .is_ok()
+            && self.wait_for_completion
+        {
+            let _ = receipt_receiver.recv();
+        }
+    }
 }
 
 impl V3WebuiObservabilityPersistenceWriter {
     fn start(path: PathBuf, alarm: Arc<RwLock<Option<String>>>) -> Self {
+        Self::start_with_limit(path, alarm, V3_WEBUI_HISTORY_MAX_BYTES)
+    }
+
+    fn start_with_limit(
+        path: PathBuf,
+        alarm: Arc<RwLock<Option<String>>>,
+        history_max_bytes: u64,
+    ) -> Self {
         let (sender, receiver) = mpsc::sync_channel(V3_WEBUI_PERSISTENCE_QUEUE_CAPACITY);
+        let gaps = V3WebuiObservabilityGapQueue::new();
+        let pending_write_error = Arc::new(std::sync::Mutex::new(None));
         let writer_alarm = Arc::clone(&alarm);
-        let spawned = Self::spawn_writer(path, receiver, writer_alarm);
-        Self::after_spawn(sender, alarm, spawned)
+        let writer_gaps = gaps.clone();
+        let writer_pending_error = Arc::clone(&pending_write_error);
+        let spawned = Self::spawn_writer(
+            path,
+            receiver,
+            writer_gaps,
+            writer_alarm,
+            writer_pending_error,
+            history_max_bytes,
+            routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits::default(),
+        );
+        Self::after_spawn(
+            sender,
+            gaps,
+            alarm,
+            pending_write_error,
+            spawned,
+            history_max_bytes,
+        )
     }
 
     fn spawn_writer(
         path: PathBuf,
         receiver: mpsc::Receiver<V3WebuiObservabilityPersistenceCommand>,
+        gaps: V3WebuiObservabilityGapQueue,
         writer_alarm: Arc<RwLock<Option<String>>>,
+        pending_write_error: Arc<std::sync::Mutex<Option<String>>>,
+        history_max_bytes: u64,
+        fact_limits: routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits,
     ) -> std::io::Result<std::thread::JoinHandle<()>> {
         #[cfg(test)]
         {
@@ -751,42 +905,41 @@ impl V3WebuiObservabilityPersistenceWriter {
         let spawned = std::thread::Builder::new()
             .name("v3-webui-observability-writer".to_string())
             .spawn(move || {
-                while let Ok(command) = receiver.recv() {
-                    match command {
-                        V3WebuiObservabilityPersistenceCommand::Append(row) => {
-                            if let Err(error) =
-                                V3WebuiObservability::append_persisted_row(&path, &row)
-                            {
-                                set_v3_webui_observability_alarm(
-                                    &writer_alarm,
-                                    format!("observability persistence write failed: {error}"),
-                                );
-                            } else if let Ok(mut alarm) = writer_alarm.write() {
-                                *alarm = None;
-                            }
+                let store =
+                    match routecodex_v3_debug::V3ProviderUsagePersistenceStore::open_with_limits(
+                        &path,
+                        fact_limits,
+                    ) {
+                        Ok(store) => store,
+                        Err(error) => {
+                            set_v3_webui_observability_alarm(
+                                &writer_alarm,
+                                format!(
+                                "observability persistence write failed: store open failed: {error}"
+                            ),
+                            );
+                            return;
                         }
-                        V3WebuiObservabilityPersistenceCommand::Flush(receipt) => {
-                            let result = writer_alarm
-                                .read()
-                                .map_err(|error| {
-                                    format!("observability alarm lock poisoned: {error}")
-                                })
-                                .and_then(|alarm| match alarm.as_ref() {
-                                    Some(error) => Err(error.clone()),
-                                    None => Ok(()),
-                                });
-                            let _ = receipt.send(result);
-                        }
-                    }
-                }
+                    };
+                run_v3_webui_observability_persistence_writer(
+                    store,
+                    receiver,
+                    gaps,
+                    writer_alarm,
+                    pending_write_error,
+                    history_max_bytes,
+                );
             });
         spawned
     }
 
     fn after_spawn(
         sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+        gaps: V3WebuiObservabilityGapQueue,
         alarm: Arc<RwLock<Option<String>>>,
+        pending_write_error: Arc<std::sync::Mutex<Option<String>>>,
         spawned: std::io::Result<std::thread::JoinHandle<()>>,
+        history_max_bytes: u64,
     ) -> Self {
         if let Err(error) = spawned {
             // The writer thread is the only owner of the receive side. If it
@@ -799,17 +952,42 @@ impl V3WebuiObservabilityPersistenceWriter {
                 format!("observability persistence writer start failed: {error}"),
             );
         }
-        Self { sender, alarm }
+        let lifecycle = Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+            sender.clone(),
+            true,
+        ));
+        Self {
+            sender,
+            gaps,
+            alarm,
+            pending_write_error,
+            history_max_bytes,
+            lifecycle,
+        }
     }
 
-    fn enqueue(&self, row: V3ObsRequestRow) {
+    fn enqueue(&self, row: V3ObsRequestRow, attempt_ordinal: Option<u64>) {
+        let listener_id = row.scope.port;
+        let request_key = row.request_key.clone();
+        let started_epoch_ms = row.started_epoch_ms;
         if let Err(error) = self
             .sender
-            .try_send(V3WebuiObservabilityPersistenceCommand::Append(row))
+            .try_send(V3WebuiObservabilityPersistenceCommand::Append {
+                row,
+                attempt_ordinal,
+            })
         {
             set_v3_webui_observability_alarm(
                 &self.alarm,
                 format!("observability persistence queue rejected row: {error}"),
+            );
+            self.gaps.push(
+                V3WebuiObservabilityQueueGap {
+                    listener_id,
+                    request_key,
+                    started_epoch_ms,
+                },
+                &self.alarm,
             );
         }
     }
@@ -825,6 +1003,113 @@ impl V3WebuiObservabilityPersistenceWriter {
             .recv()
             .map_err(|error| format!("observability persistence flush receipt missing: {error}"))?
     }
+}
+
+fn run_v3_webui_observability_persistence_writer(
+    mut store: routecodex_v3_debug::V3ProviderUsagePersistenceStore,
+    receiver: mpsc::Receiver<V3WebuiObservabilityPersistenceCommand>,
+    gaps: V3WebuiObservabilityGapQueue,
+    writer_alarm: Arc<RwLock<Option<String>>>,
+    pending_write_error: Arc<std::sync::Mutex<Option<String>>>,
+    history_max_bytes: u64,
+) {
+    if let Err(error) = store.backfill_detail() {
+        set_v3_webui_observability_alarm(
+            &writer_alarm,
+            format!("provider usage backfill failed: {error}"),
+        );
+    }
+    while let Ok(command) = receiver.recv() {
+        match command {
+            V3WebuiObservabilityPersistenceCommand::Append {
+                row,
+                attempt_ordinal,
+            } => {
+                let result = V3WebuiObservability::persist_usage_then_detail(
+                    &mut store,
+                    &row,
+                    attempt_ordinal,
+                    history_max_bytes,
+                );
+                if let Err(error) = result {
+                    if let Ok(mut pending_error) = pending_write_error.lock() {
+                        if pending_error.is_none() {
+                            *pending_error = Some(error.clone());
+                        }
+                    }
+                    set_v3_webui_observability_alarm(
+                        &writer_alarm,
+                        format!("observability persistence write failed: {error}"),
+                    );
+                }
+            }
+            V3WebuiObservabilityPersistenceCommand::Flush(receipt) => {
+                let pending_result = pending_write_error
+                    .lock()
+                    .map_err(|error| {
+                        format!("observability persistence write error state poisoned: {error}")
+                    })
+                    .map(|mut pending| pending.take());
+                let gap_result = persist_queue_gaps(&mut store, &gaps);
+                let result = match (gap_result, pending_result) {
+                    (Err(gap_error), Err(pending_error)) => {
+                        Err(format!("{pending_error}; {gap_error}"))
+                    }
+                    (Err(error), _) | (Ok(()), Err(error)) => Err(error),
+                    (Ok(()), Ok(Some(error))) => Err(error),
+                    (Ok(()), Ok(None)) => Ok(()),
+                };
+                if let Err(ref error) = result {
+                    set_v3_webui_observability_alarm(&writer_alarm, error.clone());
+                }
+                let _ = receipt.send(result);
+            }
+            V3WebuiObservabilityPersistenceCommand::Shutdown(receipt) => {
+                let gap_result = persist_queue_gaps(&mut store, &gaps);
+                let close_result = store
+                    .close_generation()
+                    .map_err(|error| format!("observability persistence close failed: {error}"));
+                let result = match (gap_result, close_result) {
+                    (Err(gap_error), Err(close_error)) => {
+                        Err(format!("{close_error}; {gap_error}"))
+                    }
+                    (Err(error), _) | (Ok(()), Err(error)) => Err(error),
+                    (Ok(()), Ok(())) => Ok(()),
+                };
+                if let Err(ref error) = result {
+                    set_v3_webui_observability_alarm(&writer_alarm, error.clone());
+                }
+                let _ = receipt.send(result);
+                break;
+            }
+        }
+    }
+}
+
+fn persist_queue_gaps(
+    store: &mut routecodex_v3_debug::V3ProviderUsagePersistenceStore,
+    gaps: &V3WebuiObservabilityGapQueue,
+) -> Result<(), String> {
+    while let Some(gap) = gaps.front()? {
+        store
+            .persist_queue_gap(
+                gap.listener_id,
+                &gap.request_key,
+                gap.started_epoch_ms,
+                "persistence_queue_rejected",
+            )
+            .map_err(|error| format!("observability persistence queue gap failed: {error}"))?;
+        gaps.pop_front()?;
+    }
+    while let Some(listener_id) = gaps.first_dropped_listener()? {
+        store
+            .mark_coverage_gap_only(listener_id, "persistence_gap_queue_overflow")
+            .map_err(|error| format!("observability persistence gap overflow failed: {error}"))?;
+        gaps.clear_dropped_listener(listener_id)?;
+    }
+    store
+        .flush()
+        .map_err(|error| format!("observability persistence queue gap failed: {error}"))
 }
 
 fn set_v3_webui_observability_alarm(alarm: &RwLock<Option<String>>, message: String) {
@@ -855,6 +1140,17 @@ fn take_v3_webui_force_writer_spawn_failure() -> bool {
     V3_WEBUI_FORCE_WRITER_SPAWN_FAILURE.with(|flag| flag.replace(false))
 }
 
+#[cfg(test)]
+thread_local! {
+    static V3_WEBUI_TEST_HISTORY_MAX_BYTES: std::cell::Cell<Option<u64>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn take_v3_webui_test_history_max_bytes() -> Option<u64> {
+    V3_WEBUI_TEST_HISTORY_MAX_BYTES.with(|limit| limit.take())
+}
+
 impl Default for V3WebuiObservability {
     fn default() -> Self {
         Self::new()
@@ -868,8 +1164,18 @@ impl V3WebuiObservability {
 
     pub(crate) fn with_persistence_path(path: Option<std::path::PathBuf>) -> Self {
         let alarm = Arc::new(RwLock::new(None));
-        let persistence_writer = path.as_ref().map(|path| {
-            V3WebuiObservabilityPersistenceWriter::start(path.clone(), Arc::clone(&alarm))
+        #[cfg(test)]
+        let history_limit = take_v3_webui_test_history_max_bytes();
+        #[cfg(not(test))]
+        let history_limit: Option<u64> = None;
+        let persistence_writer = path.as_ref().map(|path| match history_limit {
+            #[cfg(test)]
+            Some(limit) => V3WebuiObservabilityPersistenceWriter::start_with_limit(
+                path.clone(),
+                Arc::clone(&alarm),
+                limit,
+            ),
+            _ => V3WebuiObservabilityPersistenceWriter::start(path.clone(), Arc::clone(&alarm)),
         });
         Self {
             inner: Arc::new(std::sync::Mutex::new(V3WebuiObservabilityInner::default())),
@@ -1020,6 +1326,7 @@ impl V3WebuiObservability {
         // `merge_v3_obs_error_truth` owns that precedence, and it is monotonic, so
         // a later lane can only strengthen the recorded truth, never weaken it.
         let mut row;
+        let mut persistence_attempt_ordinal = None;
         if terminal_event_after_terminal_row {
             // A request terminates once. A second terminal event must not
             // restart the row's outcome, duration or counters; it only merges
@@ -1031,7 +1338,9 @@ impl V3WebuiObservability {
             row = inner.requests.get(request_key).cloned().unwrap_or_default();
             row.request_key = request_key.to_string();
             row.meta = merge_v3_obs_request_meta(row.meta, meta);
-            row.updated_epoch_ms = now;
+            // A terminal replay must not move an ordinary lifecycle row to the
+            // front of the bounded startup fold. The durable fact file already
+            // owns replay idempotency.
         } else {
             if !inner.requests.contains_key(request_key)
                 && inner.requests.len() >= V3_WEBUI_RECENT_REQUEST_CAPACITY
@@ -1080,6 +1389,7 @@ impl V3WebuiObservability {
                     if let Some(truth) = row.meta.observed_error.as_mut() {
                         truth.attempt_index = Some(attempt_index);
                     }
+                    persistence_attempt_ordinal = Some(attempt_index);
                 }
                 V3ObsEventType::ProviderSwitched => row.switches += 1,
                 V3ObsEventType::Completed => {
@@ -1170,7 +1480,7 @@ impl V3WebuiObservability {
             row.meta.observed_error = None;
         }
         if let Some(writer) = self.persistence_writer.as_ref() {
-            writer.enqueue(row);
+            writer.enqueue(row, persistence_attempt_ordinal);
         }
         Ok(1)
     }
@@ -1195,6 +1505,67 @@ impl V3WebuiObservability {
             max_history_bytes,
         )
         .map_err(|error| format!("write observability store failed: {error}"))
+    }
+
+    fn persist_usage_then_detail(
+        store: &mut routecodex_v3_debug::V3ProviderUsagePersistenceStore,
+        row: &V3ObsRequestRow,
+        attempt_ordinal: Option<u64>,
+        max_history_bytes: u64,
+    ) -> Result<(), String> {
+        let path = store.observability_path().to_path_buf();
+        let value = serde_json::to_value(row)
+            .map_err(|error| format!("encode observability record failed: {error}"))?;
+        let fact_result =
+            store.persist_row_before_detail(&value, attempt_ordinal, attempt_ordinal.is_some());
+        if let Err(fact_error) = fact_result {
+            let detail_result =
+                routecodex_v3_debug::v3_webui_observability_append_row_without_retention_hard_cap(
+                    &path,
+                    &value,
+                    max_history_bytes,
+                );
+            let (failure_result, detail_overflowed) = match detail_result {
+                Ok(()) => (
+                    Err(format!(
+                        "persist provider usage fact failed: {fact_error}; detail appended within hard limit without retention"
+                    )),
+                    false,
+                ),
+                Err(detail_error) => {
+                    (
+                        Err(format!(
+                            "persist provider usage fact failed: {fact_error}; detail dropped at hard limit: {detail_error}; fact_write_failed_detail_overflow"
+                        )),
+                        true,
+                    )
+                }
+            };
+            let _ = store.mark_fact_write_failure(
+                row.scope.port,
+                row.started_epoch_ms,
+                detail_overflowed,
+            );
+            return failure_result;
+        }
+        Self::append_persisted_row_with_limit(&path, row, max_history_bytes).map_err(
+            |detail_error| {
+                if let Err(gap_error) = store.mark_gap(
+                    row.scope.port,
+                    &row.request_key,
+                    attempt_ordinal,
+                    "detail_append_failed",
+                ) {
+                    return format!(
+                        "write observability store failed: {detail_error}; mark detail gap failed: {gap_error}"
+                    );
+                }
+                format!("write observability store failed: {detail_error}")
+            },
+        )?;
+        store
+            .mark_detail_started(row.scope.port, row.started_epoch_ms)
+            .map_err(|error| format!("mark provider usage detail coverage failed: {error}"))
     }
 }
 
@@ -1242,5 +1613,1097 @@ fn resolve_v3_obs_raw_artifact_ref_in(
 }
 
 #[cfg(test)]
-#[path = "webui_observability_tests.rs"]
-mod tests;
+mod tests {
+    include!("webui_observability_tests.rs");
+
+    use routecodex_v3_debug::observability_store::{
+        v3_provider_usage_read_generation, v3_webui_observability_read_provider_usage,
+        v3_webui_observability_read_provider_usage_with_limits, V3ProviderUsageFact,
+        V3ProviderUsageFactResult,
+    };
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    use std::path::PathBuf;
+
+    fn observed_usage(input: u64, output: u64) -> crate::V3RuntimeObservability {
+        crate::V3RuntimeObservability {
+            usage: Some(crate::V3RuntimeUsageSummary {
+                input_tokens: Some(input),
+                output_tokens: Some(output),
+                total_tokens: Some(input.saturating_add(output)),
+                cached_tokens: None,
+                cache_read_input_tokens: None,
+                cache_creation_input_tokens: None,
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn provider_meta(req: &str, provider: &str) -> V3ObsRequestMeta {
+        V3ObsRequestMeta {
+            request_id: req.to_string(),
+            endpoint: "/v1/responses".to_string(),
+            provider_id: Some(provider.to_string()),
+            provider: Some(provider.to_string()),
+            entry_protocol: Some("responses".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn isolated_store(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "v3-provider-usage-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("isolated store directory");
+        dir
+    }
+
+    fn recount_terminal(
+        observability: &V3WebuiObservability,
+        key: &str,
+        port: u16,
+        req: &str,
+        provider: &str,
+        observed: &crate::V3RuntimeObservability,
+    ) {
+        record_observed(
+            observability,
+            V3ObsEventType::Completed,
+            key,
+            scope(port),
+            provider_meta(req, provider),
+            observed,
+        )
+        .expect("terminal replay");
+        observability
+            .flush_persistence()
+            .expect("terminal persistence flush");
+    }
+
+    #[test]
+    fn provider_usage_backfill_reads_historical_attempts_without_overwriting_facts() {
+        let dir = isolated_store("raw-backfill");
+        let records = dir.join("records.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = build_v3_obs_request_key(4444, "r-historical");
+        let rows = [
+            serde_json::json!({
+                "request_key": key,
+                "event_type": "request.started",
+                "started_epoch_ms": 10,
+                "updated_epoch_ms": 10,
+                "scope": { "port": 4444 },
+                "meta": { "request_id": "r-historical" }
+            }),
+            serde_json::json!({
+                "request_key": key,
+                "event_type": "request.provider_attempt_failed",
+                "started_epoch_ms": 10,
+                "updated_epoch_ms": 20,
+                "scope": { "port": 4444 },
+                "meta": {
+                    "request_id": "r-historical",
+                    "provider_id": "p-old",
+                    "observed_error": { "attempt_index": 1 }
+                }
+            }),
+            serde_json::json!({
+                "request_key": key,
+                "event_type": "request.completed",
+                "started_epoch_ms": 10,
+                "updated_epoch_ms": 30,
+                "finished_epoch_ms": 30,
+                "scope": { "port": 4444 },
+                "meta": { "request_id": "r-historical", "provider_id": "p-new" },
+                "result": "success",
+                "usage": { "input_tokens": 40, "output_tokens": 5, "total_tokens": 45 }
+            }),
+        ];
+        for row in &rows {
+            routecodex_v3_debug::v3_webui_observability_append_row(&records, row).unwrap();
+        }
+
+        routecodex_v3_debug::v3_provider_usage_backfill_detail(&records).unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read.facts.iter().any(|fact| {
+            fact.request_key == key
+                && fact.attempt_ordinal == Some(1)
+                && fact.provider_id.as_deref() == Some("p-old")
+                && fact.result == V3ProviderUsageFactResult::FailedAttempt
+        }));
+        let terminal = read
+            .facts
+            .iter()
+            .find(|fact| fact.request_key == key && fact.attempt_ordinal.is_none())
+            .expect("terminal historical fact");
+        assert_eq!(terminal.provider_id.as_deref(), Some("p-new"));
+
+        routecodex_v3_debug::v3_provider_usage_backfill_detail(&records).unwrap();
+        let replay = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert_eq!(replay.facts.len(), read.facts.len());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_survives_backfill_detail_rotation_restart_and_corrected_attribution() {
+        V3_WEBUI_TEST_HISTORY_MAX_BYTES.with(|limit| limit.set(Some(2000)));
+        let dir = isolated_store("lifecycle");
+        let records = dir.join("records.jsonl");
+        let hash = build_v3_obs_request_key(4444, "r-hash");
+        let backfill = build_v3_obs_request_key(4444, "r-backfill");
+        let retry = build_v3_obs_request_key(7777, "r-retry");
+
+        let first = V3WebuiObservability::with_persistence_path(Some(records.clone()));
+        record_observed(
+            &first,
+            V3ObsEventType::Completed,
+            &hash,
+            scope(4444),
+            provider_meta("r-hash", "p1"),
+            &observed_usage(100, 20),
+        )
+        .unwrap();
+        first.flush_persistence().unwrap();
+        let inode_before_backfill = std::fs::metadata(&records).unwrap().ino();
+        record_observed(
+            &first,
+            V3ObsEventType::Completed,
+            &backfill,
+            scope(4444),
+            provider_meta("r-backfill", "p-backfill"),
+            &observed_usage(7, 3),
+        )
+        .unwrap();
+        first.flush_persistence().unwrap();
+        assert_ne!(
+            std::fs::metadata(&records).unwrap().ino(),
+            inode_before_backfill,
+            "backfill must exercise a detail compaction round"
+        );
+        record(
+            &first,
+            V3ObsEventType::ProviderAttemptStarted,
+            &retry,
+            scope(7777),
+            provider_meta("r-retry", "p-a"),
+        )
+        .unwrap();
+        record(
+            &first,
+            V3ObsEventType::ProviderAttemptFailed,
+            &retry,
+            scope(7777),
+            provider_meta("r-retry", "p-a"),
+        )
+        .unwrap();
+        first.flush_persistence().unwrap();
+        let inode_after_first_attempt = std::fs::metadata(&records).unwrap().ino();
+        assert_ne!(
+            inode_after_first_attempt, inode_before_backfill,
+            "attempt detail must exercise the second compaction round"
+        );
+        assert!(
+            std::fs::metadata(&records).unwrap().len() <= 2_000,
+            "each compaction round must enforce the configured retention threshold"
+        );
+        record(
+            &first,
+            V3ObsEventType::ProviderAttemptStarted,
+            &retry,
+            scope(7777),
+            provider_meta("r-retry", "p-b"),
+        )
+        .unwrap();
+        record(
+            &first,
+            V3ObsEventType::ProviderAttemptFailed,
+            &retry,
+            scope(7777),
+            provider_meta("r-retry", "p-b"),
+        )
+        .unwrap();
+        record_observed(
+            &first,
+            V3ObsEventType::Completed,
+            &retry,
+            scope(7777),
+            provider_meta("r-retry", "p-b"),
+            &observed_usage(50, 10),
+        )
+        .unwrap();
+        first.flush_persistence().unwrap();
+        recount_terminal(
+            &first,
+            &hash,
+            4444,
+            "r-hash",
+            "p1",
+            &observed_usage(100, 20),
+        );
+        recount_terminal(
+            &first,
+            &retry,
+            7777,
+            "r-retry",
+            "p-b",
+            &observed_usage(50, 10),
+        );
+
+        let stale_detail = V3ObsRequestRow {
+            request_key: retry.clone(),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 1,
+            updated_epoch_ms: 2,
+            finished_epoch_ms: Some(2),
+            meta: provider_meta("r-retry", "p-a"),
+            scope: scope(7777),
+            result: Some("success".to_string()),
+            usage: Some(V3ObsUsageSummary {
+                input_tokens: Some(999),
+                output_tokens: Some(999),
+                total_tokens: Some(1998),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        drop(first);
+        let second = V3WebuiObservability::load_persisted(&records);
+        V3WebuiObservability::append_persisted_row(&records, &stale_detail).unwrap();
+        second.flush_persistence().unwrap();
+
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert_eq!(
+            read.facts.len(),
+            5,
+            "three terminal requests and two stable ordinal attempts remain five facts"
+        );
+        let retry_facts = read
+            .facts
+            .iter()
+            .filter(|fact| fact.listener_id == 7777 && fact.request_key == retry)
+            .collect::<Vec<_>>();
+        assert_eq!(retry_facts.len(), 3);
+        assert!(retry_facts.iter().any(|fact| {
+            fact.attempt_ordinal == Some(1)
+                && fact.provider_id.as_deref() == Some("p-a")
+                && fact.result == V3ProviderUsageFactResult::FailedAttempt
+        }));
+        assert!(retry_facts.iter().any(|fact| {
+            fact.attempt_ordinal == Some(2)
+                && fact.provider_id.as_deref() == Some("p-b")
+                && fact.result == V3ProviderUsageFactResult::FailedAttempt
+        }));
+        let corrected = retry_facts
+            .iter()
+            .find(|fact| fact.attempt_ordinal.is_none())
+            .expect("terminal fact");
+        assert_eq!(corrected.provider_id.as_deref(), Some("p-b"));
+        assert_eq!(
+            corrected
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.get("input_tokens"))
+                .and_then(serde_json::Value::as_u64),
+            Some(50)
+        );
+        let coverage = read
+            .coverage_for(4444)
+            .expect("listener statistics coverage");
+        assert!(coverage.statistics_started_epoch_ms.is_some());
+        assert!(coverage.detail_started_epoch_ms.is_some());
+        assert!(coverage.detail_incomplete);
+        assert!(coverage.gaps.iter().any(|gap| gap == "detail_unavailable"));
+        assert!(read.coverage_for(7777).is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_restart_after_fact_success_and_detail_failure_keeps_corrected_attribution() {
+        let dir = isolated_store("detail-failure");
+        let records = dir.join("records.jsonl");
+        let key = build_v3_obs_request_key(4444, "r-detail-failure");
+        let first = V3WebuiObservability::with_persistence_path(Some(records.clone()));
+        record_observed(
+            &first,
+            V3ObsEventType::Completed,
+            &key,
+            scope(4444),
+            provider_meta("r-detail-failure", "p-new"),
+            &observed_usage(11, 4),
+        )
+        .unwrap();
+        first.flush_persistence().unwrap();
+
+        std::fs::remove_file(&records).unwrap();
+        std::fs::create_dir(&records).unwrap();
+        record_observed(
+            &first,
+            V3ObsEventType::Completed,
+            &key,
+            scope(4444),
+            provider_meta("r-detail-failure", "p-new"),
+            &observed_usage(11, 4),
+        )
+        .unwrap();
+        assert!(first
+            .flush_persistence()
+            .unwrap_err()
+            .contains("write observability store failed"));
+        drop(first);
+
+        std::fs::remove_dir(&records).unwrap();
+        let legacy = V3ObsRequestRow {
+            request_key: key.clone(),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 10,
+            updated_epoch_ms: 20,
+            finished_epoch_ms: Some(20),
+            meta: provider_meta("r-detail-failure", "p-old"),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            usage: Some(V3ObsUsageSummary {
+                input_tokens: Some(1),
+                output_tokens: Some(1),
+                total_tokens: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        V3WebuiObservability::append_persisted_row(&records, &legacy).unwrap();
+        let restarted = V3WebuiObservability::load_persisted(&records);
+
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        let terminal = read
+            .facts
+            .iter()
+            .find(|fact| {
+                fact.listener_id == 4444
+                    && fact.request_key == key
+                    && fact.attempt_ordinal.is_none()
+            })
+            .expect("terminal fact");
+        assert_eq!(terminal.provider_id.as_deref(), Some("p-new"));
+        assert_eq!(
+            terminal
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.get("input_tokens"))
+                .and_then(serde_json::Value::as_u64),
+            Some(11)
+        );
+        assert!(terminal
+            .gaps
+            .iter()
+            .any(|gap| gap == "detail_append_failed"));
+        assert!(read
+            .coverage_for(4444)
+            .expect("coverage")
+            .gaps
+            .iter()
+            .any(|gap| gap == "detail_append_failed"));
+
+        let later = build_v3_obs_request_key(4444, "r-later");
+        record_observed(
+            &restarted,
+            V3ObsEventType::Completed,
+            &later,
+            scope(4444),
+            provider_meta("r-later", "p-new"),
+            &observed_usage(5, 2),
+        )
+        .unwrap();
+        restarted.flush_persistence().unwrap();
+        let after_success = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(after_success
+            .coverage_for(4444)
+            .expect("coverage after success")
+            .gaps
+            .iter()
+            .any(|gap| gap == "detail_append_failed"));
+        assert!(after_success
+            .facts
+            .iter()
+            .find(|fact| fact.listener_id == 4444 && fact.request_key == key)
+            .expect("terminal after later success")
+            .gaps
+            .iter()
+            .any(|gap| gap == "detail_append_failed"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_marks_incomplete_detail_without_claiming_unfinished_request_usage() {
+        let dir = isolated_store("incomplete");
+        let records = dir.join("records.jsonl");
+        std::fs::create_dir_all(records.parent().unwrap()).unwrap();
+        let complete = serde_json::json!({
+            "schema_version": 1,
+            "row": {
+                "request_key": "4444:r-complete",
+                "event_type": "request.completed",
+                "started_epoch_ms": 10,
+                "updated_epoch_ms": 20,
+                "finished_epoch_ms": 20,
+                "scope": { "port": 4444 },
+                "meta": { "request_id": "r-complete", "provider_id": "p1" },
+                "result": "success",
+                "usage": { "input_tokens": 10, "output_tokens": 0, "total_tokens": 10 }
+            }
+        });
+        let active = serde_json::json!({
+            "schema_version": 1,
+            "row": {
+                "request_key": "4444:r-active",
+                "event_type": "request.started",
+                "started_epoch_ms": 30,
+                "updated_epoch_ms": 30,
+                "scope": { "port": 4444 },
+                "meta": { "request_id": "r-active" }
+            }
+        });
+        let fragment = "{\"schema_version\":1,\"row\":{\"request_key\":\"4444:r-half\"";
+        std::fs::write(&records, format!("{complete}\n{active}\n{fragment}")).unwrap();
+        let observability = V3WebuiObservability::load_persisted(&records);
+        observability.flush_persistence().unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read.facts.iter().any(|fact| {
+            fact.request_key == "4444:r-active"
+                && fact.result == V3ProviderUsageFactResult::Active
+                && fact.usage.is_none()
+        }));
+        let coverage = read.coverage_for(4444).expect("coverage");
+        assert!(coverage.detail_incomplete);
+        assert!(coverage
+            .gaps
+            .iter()
+            .any(|gap| gap == "incomplete_detail_tail"));
+        assert!(coverage.detail_started_epoch_ms.unwrap_or(u64::MAX) <= 10);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_queue_rejection_is_a_visible_gap() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let alarm = Arc::new(RwLock::new(None));
+        let gaps = V3WebuiObservabilityGapQueue::new();
+        let pending_write_error = Arc::new(std::sync::Mutex::new(None));
+        let writer = V3WebuiObservabilityPersistenceWriter {
+            sender: sender.clone(),
+            gaps: gaps.clone(),
+            alarm: Arc::clone(&alarm),
+            pending_write_error: Arc::clone(&pending_write_error),
+            history_max_bytes: V3_WEBUI_HISTORY_MAX_BYTES,
+            lifecycle: Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+                sender.clone(),
+                true,
+            )),
+        };
+        let key = build_v3_obs_request_key(4444, "r-queue");
+        sender
+            .send(V3WebuiObservabilityPersistenceCommand::Append {
+                row: V3ObsRequestRow {
+                    request_key: build_v3_obs_request_key(4444, "r-queue-fill"),
+                    scope: scope(4444),
+                    ..Default::default()
+                },
+                attempt_ordinal: None,
+            })
+            .unwrap();
+        writer.enqueue(
+            V3ObsRequestRow {
+                request_key: key.clone(),
+                event_type: V3ObsEventType::Completed.as_str().to_string(),
+                started_epoch_ms: 100,
+                scope: scope(4444),
+                result: Some("success".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        assert!(alarm
+            .read()
+            .unwrap()
+            .as_deref()
+            .is_some_and(|message| message.contains("queue rejected")));
+        let dir = isolated_store("queue-rejection");
+        let records = dir.join("records.jsonl");
+        let spawned = V3WebuiObservabilityPersistenceWriter::spawn_writer(
+            records.clone(),
+            receiver,
+            gaps.clone(),
+            Arc::clone(&alarm),
+            Arc::clone(&pending_write_error),
+            V3_WEBUI_HISTORY_MAX_BYTES,
+            routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits::default(),
+        )
+        .expect("real persistence writer");
+        let completed = V3ObsRequestRow {
+            request_key: build_v3_obs_request_key(4444, "r-queue-later"),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 200,
+            updated_epoch_ms: 200,
+            finished_epoch_ms: Some(200),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            ..Default::default()
+        };
+        writer.flush().expect("drain queue gap through real writer");
+        writer.enqueue(completed.clone(), None);
+        writer.flush().expect("later successful persistence");
+        drop(writer);
+        spawned.join().expect("real persistence writer completion");
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read
+            .coverage_for(4444)
+            .unwrap()
+            .gaps
+            .iter()
+            .any(|gap| gap == "persistence_queue_rejected"));
+        assert!(read.facts.iter().any(|fact| {
+            fact.request_key == completed.request_key
+                && fact.result == V3ProviderUsageFactResult::Success
+        }));
+        assert!(read
+            .facts
+            .iter()
+            .any(|fact| fact.request_key == "4444:r-queue-fill"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_queue_gap_write_failure_is_retried_before_later_success() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let alarm = Arc::new(RwLock::new(None));
+        let gaps = V3WebuiObservabilityGapQueue::new();
+        let pending_write_error = Arc::new(std::sync::Mutex::new(None));
+        let writer = V3WebuiObservabilityPersistenceWriter {
+            sender: sender.clone(),
+            gaps: gaps.clone(),
+            alarm: Arc::clone(&alarm),
+            pending_write_error: Arc::clone(&pending_write_error),
+            history_max_bytes: V3_WEBUI_HISTORY_MAX_BYTES,
+            lifecycle: Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+                sender.clone(),
+                true,
+            )),
+        };
+        sender
+            .send(V3WebuiObservabilityPersistenceCommand::Append {
+                row: V3ObsRequestRow {
+                    request_key: build_v3_obs_request_key(4444, "r-gap-fill"),
+                    scope: scope(4444),
+                    ..Default::default()
+                },
+                attempt_ordinal: None,
+            })
+            .unwrap();
+        let first = build_v3_obs_request_key(4444, "r-gap-first");
+        let second = build_v3_obs_request_key(4444, "r-gap-second");
+        for (request_key, started_epoch_ms) in [(&first, 100), (&second, 200)] {
+            writer.enqueue(
+                V3ObsRequestRow {
+                    request_key: request_key.clone(),
+                    event_type: V3ObsEventType::Completed.as_str().to_string(),
+                    started_epoch_ms,
+                    scope: scope(4444),
+                    result: Some("success".to_string()),
+                    ..Default::default()
+                },
+                None,
+            );
+        }
+        let dir = isolated_store("queue-gap-retry");
+        let records = dir.join("records.jsonl");
+        routecodex_v3_debug::v3_provider_usage_append_fact(
+            &records,
+            V3ProviderUsageFact {
+                listener_id: 4444,
+                request_key: build_v3_obs_request_key(4444, "r-existing"),
+                attempt_ordinal: None,
+                request_started_epoch_ms: 1,
+                result: V3ProviderUsageFactResult::Success,
+                provider_id: Some("p-existing".to_string()),
+                usage: Some(serde_json::json!({"input_tokens": 1})),
+                gaps: Vec::new(),
+            },
+        )
+        .expect("seed readable facts file");
+        let coverage_path =
+            routecodex_v3_debug::observability_store::v3_provider_usage_coverage_path(&records);
+        std::fs::write(&coverage_path, b"[]").expect("seed readable coverage file");
+        let store = routecodex_v3_debug::V3ProviderUsagePersistenceStore::open(&records)
+            .expect("open real persistence store");
+        std::fs::remove_file(&coverage_path).expect("remove coverage file");
+        std::fs::create_dir(&coverage_path).expect("make coverage write fail");
+        let spawned = std::thread::Builder::new()
+            .name("v3-webui-observability-retry-test".to_string())
+            .spawn({
+                let gaps = gaps.clone();
+                let alarm = Arc::clone(&alarm);
+                let pending_write_error = Arc::clone(&pending_write_error);
+                move || {
+                    run_v3_webui_observability_persistence_writer(
+                        store,
+                        receiver,
+                        gaps,
+                        alarm,
+                        pending_write_error,
+                        V3_WEBUI_HISTORY_MAX_BYTES,
+                    )
+                }
+            })
+            .expect("real persistence writer loop");
+        writer
+            .flush()
+            .expect_err("coverage failure must retain retryable queue gaps");
+        std::fs::remove_dir(&coverage_path).expect("restore coverage path");
+        let _ = writer.flush();
+        writer.flush().expect("retry retained queue gaps");
+
+        let completed = V3ObsRequestRow {
+            request_key: build_v3_obs_request_key(4444, "r-gap-later-success"),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 300,
+            updated_epoch_ms: 300,
+            finished_epoch_ms: Some(300),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            ..Default::default()
+        };
+        writer.enqueue(completed.clone(), None);
+        writer.flush().expect("later successful persistence");
+        drop(writer);
+        spawned.join().expect("real persistence writer completion");
+
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read
+            .coverage_for(4444)
+            .expect("coverage")
+            .gaps
+            .iter()
+            .any(|gap| gap == "persistence_queue_rejected"));
+        assert!(read.facts.iter().any(|fact| {
+            fact.request_key == completed.request_key
+                && fact.result == V3ProviderUsageFactResult::Success
+        }));
+        for request_key in [first, second] {
+            let fact = read
+                .facts
+                .iter()
+                .find(|fact| fact.request_key == request_key)
+                .expect("retried queue gap fact");
+            assert!(fact
+                .gaps
+                .iter()
+                .any(|gap| gap == "persistence_queue_rejected"));
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_queue_rejection_survives_normal_shutdown_without_flush() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let alarm = Arc::new(RwLock::new(None));
+        let gaps = V3WebuiObservabilityGapQueue::new();
+        let pending_write_error = Arc::new(std::sync::Mutex::new(None));
+        let writer = V3WebuiObservabilityPersistenceWriter {
+            sender: sender.clone(),
+            gaps: gaps.clone(),
+            alarm: Arc::clone(&alarm),
+            pending_write_error: Arc::clone(&pending_write_error),
+            history_max_bytes: V3_WEBUI_HISTORY_MAX_BYTES,
+            lifecycle: Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+                sender.clone(),
+                true,
+            )),
+        };
+        sender
+            .send(V3WebuiObservabilityPersistenceCommand::Append {
+                row: V3ObsRequestRow {
+                    request_key: build_v3_obs_request_key(4444, "r-shutdown-fill"),
+                    scope: scope(4444),
+                    ..Default::default()
+                },
+                attempt_ordinal: None,
+            })
+            .unwrap();
+        writer.enqueue(
+            V3ObsRequestRow {
+                request_key: build_v3_obs_request_key(4444, "r-shutdown-gap"),
+                event_type: V3ObsEventType::Completed.as_str().to_string(),
+                started_epoch_ms: 100,
+                scope: scope(4444),
+                result: Some("success".to_string()),
+                ..Default::default()
+            },
+            None,
+        );
+        let dir = isolated_store("shutdown-gap");
+        let records = dir.join("records.jsonl");
+        let spawned = V3WebuiObservabilityPersistenceWriter::spawn_writer(
+            records.clone(),
+            receiver,
+            gaps,
+            Arc::clone(&alarm),
+            pending_write_error,
+            V3_WEBUI_HISTORY_MAX_BYTES,
+            routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits::default(),
+        )
+        .expect("real persistence writer");
+
+        drop(writer);
+        spawned.join().expect("normal writer shutdown");
+
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read
+            .coverage_for(4444)
+            .expect("coverage")
+            .gaps
+            .iter()
+            .any(|gap| gap == "persistence_queue_rejected"));
+        assert!(!v3_provider_usage_read_generation(&records).unwrap().open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_fact_failure_appends_detail_only_within_hard_limit() {
+        let dir = isolated_store("fact-failure");
+        let records = dir.join("records.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store =
+            routecodex_v3_debug::V3ProviderUsagePersistenceStore::open(&records).unwrap();
+        std::fs::create_dir(routecodex_v3_debug::v3_provider_usage_facts_path(&records)).unwrap();
+        let row = V3ObsRequestRow {
+            request_key: build_v3_obs_request_key(4444, "r-fact-failure"),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 10,
+            updated_epoch_ms: 20,
+            finished_epoch_ms: Some(20),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            usage: Some(V3ObsUsageSummary {
+                input_tokens: Some(9),
+                output_tokens: Some(1),
+                total_tokens: Some(10),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        V3WebuiObservability::append_persisted_row(&records, &row).unwrap();
+        let within_limit =
+            V3WebuiObservability::persist_usage_then_detail(&mut store, &row, None, 100_000)
+                .unwrap_err();
+        assert!(within_limit.contains("detail appended within hard limit without retention"));
+        let rows = routecodex_v3_debug::v3_webui_observability_read_raw_rows(&records).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.last()
+                .and_then(|row| row.get("request_key"))
+                .and_then(serde_json::Value::as_str),
+            Some(row.request_key.as_str())
+        );
+        let inode_before = std::fs::metadata(&records).unwrap().ino();
+        let error =
+            V3WebuiObservability::persist_usage_then_detail(&mut store, &row, None, 1).unwrap_err();
+        assert!(error.contains("detail dropped at hard limit"));
+        assert_eq!(std::fs::metadata(&records).unwrap().ino(), inode_before);
+        let rows = routecodex_v3_debug::v3_webui_observability_read_raw_rows(&records).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.last()
+                .and_then(|row| row.get("request_key"))
+                .and_then(serde_json::Value::as_str),
+            Some(row.request_key.as_str())
+        );
+        std::fs::remove_dir(routecodex_v3_debug::v3_provider_usage_facts_path(&records)).unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read
+            .coverage_for(4444)
+            .expect("coverage")
+            .gaps
+            .iter()
+            .any(|gap| gap == "provider_usage_fact_write_failed"));
+        assert!(read
+            .coverage_for(4444)
+            .expect("coverage")
+            .gaps
+            .iter()
+            .any(|gap| gap == "provider_usage_fact_write_failed_detail_overflow"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_detail_started_is_only_recorded_after_detail_append() {
+        let dir = isolated_store("detail-start");
+        let records = dir.join("records.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store =
+            routecodex_v3_debug::V3ProviderUsagePersistenceStore::open(&records).unwrap();
+        std::fs::create_dir(&records).unwrap();
+        let row = V3ObsRequestRow {
+            request_key: build_v3_obs_request_key(4444, "r-detail-start"),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 50,
+            updated_epoch_ms: 60,
+            finished_epoch_ms: Some(60),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            ..Default::default()
+        };
+        assert!(
+            V3WebuiObservability::persist_usage_then_detail(&mut store, &row, None, 100_000,)
+                .unwrap_err()
+                .contains("write observability store failed")
+        );
+        std::fs::remove_dir(&records).unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        let coverage = read.coverage_for(4444).expect("statistics coverage");
+        assert_eq!(coverage.statistics_started_epoch_ms, Some(50));
+        assert_eq!(coverage.detail_started_epoch_ms, None);
+        assert!(coverage
+            .gaps
+            .iter()
+            .any(|gap| gap == "detail_append_failed"));
+        drop(store);
+        let mut store =
+            routecodex_v3_debug::V3ProviderUsagePersistenceStore::open(&records).unwrap();
+        V3WebuiObservability::persist_usage_then_detail(&mut store, &row, None, 100_000).unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert_eq!(
+            read.coverage_for(4444)
+                .expect("detail coverage")
+                .detail_started_epoch_ms,
+            Some(50)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_capacity_rejection_survives_real_writer_success_and_shutdown() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let alarm = Arc::new(RwLock::new(None));
+        let gaps = V3WebuiObservabilityGapQueue::new();
+        let pending_write_error = Arc::new(std::sync::Mutex::new(None));
+        let writer = V3WebuiObservabilityPersistenceWriter {
+            sender: sender.clone(),
+            gaps: gaps.clone(),
+            alarm: Arc::clone(&alarm),
+            pending_write_error: Arc::clone(&pending_write_error),
+            history_max_bytes: 100_000,
+            lifecycle: Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+                sender.clone(),
+                true,
+            )),
+        };
+        let dir = isolated_store("capacity-real-writer");
+        let records = dir.join("records.jsonl");
+        let limits = routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits {
+            latest_encoded_fact_bytes: 8_192,
+            max_facts: 1,
+            physical_fact_log_bytes: 8_192,
+            complete_fact_bytes: 8_192,
+            companion_state_bytes: 64 * 1024,
+        };
+        let spawned = V3WebuiObservabilityPersistenceWriter::spawn_writer(
+            records.clone(),
+            receiver,
+            gaps,
+            Arc::clone(&alarm),
+            Arc::clone(&pending_write_error),
+            100_000,
+            limits,
+        )
+        .expect("real persistence writer");
+
+        let first_key = build_v3_obs_request_key(4444, "r-capacity-first");
+        let second_key = build_v3_obs_request_key(4444, "r-capacity-second");
+        let first = V3ObsRequestRow {
+            request_key: first_key.clone(),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 10,
+            updated_epoch_ms: 10,
+            finished_epoch_ms: Some(10),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            meta: provider_meta("r-capacity-first", "p1"),
+            usage: Some(V3ObsUsageSummary {
+                input_tokens: Some(1),
+                output_tokens: Some(1),
+                total_tokens: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        sender
+            .send(V3WebuiObservabilityPersistenceCommand::Append {
+                row: first,
+                attempt_ordinal: None,
+            })
+            .unwrap();
+        let flush_receipt = mpsc::channel();
+        sender
+            .send(V3WebuiObservabilityPersistenceCommand::Flush(
+                flush_receipt.0,
+            ))
+            .unwrap();
+        let _ = flush_receipt.1.recv();
+
+        let rejected = V3ObsRequestRow {
+            request_key: second_key,
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 20,
+            updated_epoch_ms: 20,
+            finished_epoch_ms: Some(20),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            meta: provider_meta("r-capacity-second", "p2"),
+            usage: Some(V3ObsUsageSummary {
+                input_tokens: Some(2),
+                output_tokens: Some(2),
+                total_tokens: Some(4),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        writer.enqueue(rejected, None);
+        let rejection_receipt = mpsc::channel();
+        sender
+            .send(V3WebuiObservabilityPersistenceCommand::Flush(
+                rejection_receipt.0,
+            ))
+            .unwrap();
+        let rejection_error = rejection_receipt
+            .1
+            .recv()
+            .expect("capacity rejection receipt")
+            .expect_err("capacity rejection must stay explicit");
+        assert!(rejection_error.contains("capacity"));
+
+        let corrected = V3ObsRequestRow {
+            request_key: first_key.clone(),
+            event_type: V3ObsEventType::Completed.as_str().to_string(),
+            started_epoch_ms: 10,
+            updated_epoch_ms: 30,
+            finished_epoch_ms: Some(30),
+            scope: scope(4444),
+            result: Some("success".to_string()),
+            meta: provider_meta("r-capacity-first", "p1-corrected"),
+            usage: Some(V3ObsUsageSummary {
+                input_tokens: Some(3),
+                output_tokens: Some(4),
+                total_tokens: Some(7),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        writer.enqueue(corrected, None);
+        writer
+            .flush()
+            .expect("same-key correction must still persist");
+        drop(writer);
+        spawned.join().expect("normal writer shutdown");
+
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        let read_with_limits =
+            v3_webui_observability_read_provider_usage_with_limits(&records, limits).unwrap();
+        assert_eq!(read.facts.len(), read_with_limits.facts.len());
+        let coverage = read.coverage_for(4444).expect("listener coverage");
+        assert!(coverage.detail_incomplete);
+        assert!(coverage
+            .gaps
+            .iter()
+            .any(|gap| gap == "provider_usage_fact_capacity_keys"));
+        let fact = read
+            .facts
+            .iter()
+            .find(|fact| fact.request_key == first_key)
+            .expect("corrected fact");
+        assert_eq!(fact.provider_id.as_deref(), Some("p1-corrected"));
+        assert_eq!(
+            fact.usage
+                .as_ref()
+                .and_then(|usage| usage.get("input_tokens"))
+                .and_then(serde_json::Value::as_u64),
+            Some(3)
+        );
+        assert!(!v3_provider_usage_read_generation(&records).unwrap().open);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_unstable_attempt_ordinal_does_not_overwrite_terminal_fact() {
+        let dir = isolated_store("ambiguous-attempt");
+        let records = dir.join("records.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = build_v3_obs_request_key(4444, "r-ambiguous");
+        let terminal = V3ProviderUsageFact {
+            listener_id: 4444,
+            request_key: key.clone(),
+            attempt_ordinal: None,
+            request_started_epoch_ms: 10,
+            result: V3ProviderUsageFactResult::Success,
+            provider_id: Some("p-terminal".to_string()),
+            usage: Some(serde_json::json!({"input_tokens": 4})),
+            gaps: Vec::new(),
+        };
+        routecodex_v3_debug::v3_provider_usage_append_fact(&records, terminal).unwrap();
+        let ambiguous = V3ProviderUsageFact {
+            listener_id: 4444,
+            request_key: key.clone(),
+            attempt_ordinal: None,
+            request_started_epoch_ms: 10,
+            result: V3ProviderUsageFactResult::FailedAttempt,
+            provider_id: Some("p-attempt".to_string()),
+            usage: None,
+            gaps: vec!["missing_attempt_ordinal".to_string()],
+        };
+        routecodex_v3_debug::v3_provider_usage_append_fact(&records, ambiguous).unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert_eq!(read.facts.len(), 2);
+        let terminal = read
+            .facts
+            .iter()
+            .find(|fact| fact.result == V3ProviderUsageFactResult::Success)
+            .expect("terminal fact");
+        assert_eq!(terminal.provider_id.as_deref(), Some("p-terminal"));
+        let attempt = read
+            .facts
+            .iter()
+            .find(|fact| fact.result == V3ProviderUsageFactResult::FailedAttempt)
+            .expect("unstable attempt fact");
+        assert_eq!(attempt.provider_id.as_deref(), Some("p-attempt"));
+        assert!(attempt
+            .gaps
+            .iter()
+            .any(|gap| gap == "missing_attempt_ordinal"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn provider_usage_missing_request_started_is_a_visible_gap() {
+        let dir = isolated_store("missing-start");
+        let records = dir.join("records.jsonl");
+        std::fs::create_dir_all(&dir).unwrap();
+        let row = serde_json::json!({
+            "request_key": "4444:r-missing-start",
+            "event_type": "request.completed",
+            "scope": {"port": 4444},
+            "result": "success",
+            "meta": {"provider_id": "p1"},
+            "usage": {"input_tokens": 1, "output_tokens": 1}
+        });
+        routecodex_v3_debug::v3_provider_usage_persist_before_detail(&records, &row, None, true)
+            .unwrap();
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert!(read.facts[0]
+            .gaps
+            .iter()
+            .any(|gap| gap == "missing_request_started"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

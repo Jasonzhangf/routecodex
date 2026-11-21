@@ -169,6 +169,67 @@
   .detail-section > h3 { margin: 0 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .artifact-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   .artifact-row .spacer { flex: 1; }
+  .selection-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .selection-link:hover,
+  .selection-link:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .selection-link.active {
+    color: var(--accent);
+    font-weight: 620;
+  }
+  .selection-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .provider-usage-panel {
+    margin-top: 14px;
+    padding: 14px;
+  }
+  .provider-usage-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 10px;
+  }
+  .provider-usage-head h3 {
+    margin: 0 0 4px;
+    font-size: 13px;
+  }
+  .provider-usage-head .help {
+    margin: 0;
+    font-size: 12px;
+  }
+  .provider-usage-table-wrap {
+    overflow-x: auto;
+  }
+  /* A table can keep its internal horizontal scroll only after the wrapper
+     itself can shrink below the table's min-content width. */
+  @media (max-width: 860px) {
+    .chart-controls { flex-wrap: wrap; }
+    .provider-usage-table-wrap {
+      max-width: 100%;
+    }
+  }
+  #provider-usage-table {
+    width: 100%;
+    font-size: 13px;
+  }
 </style>
 </head>
 <body class="ambient">
@@ -194,7 +255,10 @@
       <h2>Statistics</h2>
       <div class="cards" id="summary-cards"></div>
       <div class="chart-controls">
-        <label>Range<select id="chart-range"><option value="today">Today</option><option value="week">Last 7 days</option><option value="month">Last 30 days</option></select></label>
+        <label>Period<select id="calendar-period"><option value="day">Today</option><option value="week">This week</option><option value="month">This month</option><option value="all">All retained</option><option value="custom">Custom</option></select></label>
+        <label>Time zone<input id="timezone" type="text" value="" autocomplete="off" spellcheck="false" aria-label="IANA time zone"></label>
+        <label>Grain<select id="chart-grain"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select></label>
+        <label id="calendar-anchor-label">Anchor<input id="calendar-anchor" type="date" aria-label="Calendar anchor date"></label>
         <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option><option value="cache_hit_rate_percent">Cache hit rate</option></select></label>
       </div>
       <div class="layout">
@@ -206,6 +270,21 @@
       <div class="layout">
         <div class="panel amb-surface amb-elevation-1"><table id="ports-table"><thead><tr><th>Port</th><th class="num">Total</th><th class="num">Active</th><th class="num">Success</th><th class="num">Error</th><th class="num">Failed attempts</th><th class="num">Cancelled</th></tr></thead><tbody><tr><td colspan="7" class="loading">loading…</td></tr></tbody></table></div>
         <div class="panel amb-surface amb-elevation-1"><table id="errors-table"><thead><tr><th>Status code</th><th>Origin</th><th class="num">Errors</th></tr></thead><tbody><tr><td colspan="3" class="loading">no errors</td></tr></tbody></table></div>
+      </div>
+      <div class="panel amb-surface amb-elevation-1 provider-usage-panel">
+        <div class="provider-usage-head">
+          <div>
+            <h3>Provider usage</h3>
+            <p id="provider-usage-coverage" class="help">Loading retained-record coverage…</p>
+          </div>
+          <button class="filter-clear" id="provider-usage-clear" type="button">Clear provider</button>
+        </div>
+        <div class="provider-usage-table-wrap">
+          <table id="provider-usage-table">
+            <thead><tr><th>Provider</th><th class="num">Requests</th><th class="num">Failed attempts</th><th class="num">Effective input</th><th class="num">Output</th><th class="num">Total tokens</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num">Hit rate</th><th></th></tr></thead>
+            <tbody><tr><td colspan="10" class="loading">loading…</td></tr></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -270,9 +349,15 @@
       </div>
     </div>
 
-    <!-- Layer 1: Port tabs (hidden port-filter select kept for compatibility/tests, synced by the tab bar) -->
-    <div class="visually-hidden-select" aria-hidden="true">
-      <select id="port-filter"><option value="all">all ports</option></select>
+    <!-- Layer 1: the select fallback and tab bar share one port filter. -->
+    <div class="selection-summary" id="port-filter-row">
+      <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
+    </div>
+    <div class="selection-summary" id="selection-summary">
+      <span id="selected-port-label">All ports</span>
+      <span id="selected-provider-label">All providers</span>
+      <button class="filter-clear" id="clear-selected-port" type="button">Clear port</button>
+      <button class="filter-clear" id="clear-selected-provider" type="button">Clear provider</button>
     </div>
     <nav class="port-tab-bar" id="port-tabs" role="tablist" aria-label="Port"></nav>
 

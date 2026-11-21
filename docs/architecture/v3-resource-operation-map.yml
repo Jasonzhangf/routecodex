@@ -2430,6 +2430,46 @@ resources:
     binding_status: source_controlled
     required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store, npm run verify:v3-resource-map]
 
+  - resource_id: v3.observability.provider_usage_facts
+    resource_kind: diagnostic_persistence
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.observability_persistence_isolation
+    owner_crate: routecodex-v3-debug
+    owner_node: V3ProviderUsagePersistenceStore
+    identity: [listenerId, requestKey, optionalAttemptOrdinal]
+    semantic_contract:
+      target_contract: The existing ordered writer persists compact terminal and failed-attempt facts and coverage before detail rotation. Replay updates the same fact identity.
+      coverage: historical_backfill_and_sticky_observation_gaps
+      retention: Lossless compaction keeps the latest revision per stable key. Per listener, latest facts are limited to 32 MiB and 100000 identities, the append log to 64 MiB, and individual facts and each companion state to 64 KiB. Capacity rejection retains prior facts and records a persistent partial-coverage disposition.
+    allowed_writers: [V3WebuiObservabilityPersistenceWriter]
+    allowed_readers: [V3ProviderUsagePersistenceStore, v3_webui_observability_read_provider_usage]
+    forbidden_writers: [routecodex-v3-admin, routecodex-v3-config_runtime_io, provider_health, resident_request_controller, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.admin.provider_usage_report
+    resource_kind: derived_control_projection
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: V3AdminProviderUsageQueryResult
+    identity: [resolvedUsageQuery]
+    semantic_contract:
+      format: typed_json_projection
+      derived_only: true
+      sources: [v3.observability.webui_store, v3.observability.provider_usage_facts]
+      mutation: none
+    allowed_writers: [build_provider_usage]
+    allowed_readers: [records, renderProviderUsage]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [npm run verify:v3-resource-map]
+
   - resource_id: v3.admin.environment
     resource_kind: derived_control_projection
     lifecycle: v3.admin.control_plane

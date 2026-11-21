@@ -129,6 +129,7 @@ pub(crate) fn build_timeseries(
     rows: &[TimeseriesRow<'_>],
     range: &str,
     timezone_offset_minutes: i32,
+    bounds: (Option<u64>, Option<u64>),
 ) -> Result<Vec<TimeseriesBucket>, String> {
     if rows.is_empty() {
         return Ok(Vec::new());
@@ -142,6 +143,11 @@ pub(crate) fn build_timeseries(
     let mut buckets: BTreeMap<String, TimeseriesBucket> = BTreeMap::new();
 
     for row in rows {
+        if bounds.0.is_some_and(|from| row.started_epoch_ms < from)
+            || bounds.1.is_some_and(|to| row.started_epoch_ms >= to)
+        {
+            continue;
+        }
         let key = if is_today {
             let hour = local_hour_start(row.started_epoch_ms, timezone_offset_minutes);
             utc_hour_label(hour, timezone_offset_minutes)
@@ -263,7 +269,7 @@ pub(crate) fn build_timeseries(
                     });
                 week_start += 7 * day_ms;
             }
-        } else {
+        } else if bounds.1.is_none() {
             // "week": fill every day from first data to today.
             let first = local_day_start(
                 rows.iter()
@@ -361,7 +367,7 @@ mod tests {
                 result: Some("success"),
             },
         ];
-        let buckets = build_timeseries(&rows, "today", tz).unwrap();
+        let buckets = build_timeseries(&rows, "today", tz, (None, None)).unwrap();
         // 24 hours should be present; only 02:00 and 05:00 have data.
         assert_eq!(buckets.len(), 24);
         let h2_bucket = buckets.iter().find(|b| b.date.contains(" 02:00")).unwrap();
@@ -403,7 +409,7 @@ mod tests {
                 result: Some("success"),
             },
         ];
-        let buckets = build_timeseries(&rows, "month", tz).unwrap();
+        let buckets = build_timeseries(&rows, "month", tz, (None, None)).unwrap();
         let monday_label = utc_date_for_local_day(monday, tz);
         assert!(buckets.iter().any(|b| b.date == monday_label));
         let monday_bucket = buckets.iter().find(|b| b.date == monday_label).unwrap();
@@ -448,7 +454,7 @@ mod tests {
             },
         ];
 
-        let buckets = build_timeseries(&rows, "week", 0).unwrap();
+        let buckets = build_timeseries(&rows, "week", 0, (None, None)).unwrap();
         assert_eq!(buckets.len(), 1);
         let bucket = &buckets[0];
         assert_eq!(bucket.count, 3);
@@ -481,7 +487,7 @@ mod tests {
             },
         ];
 
-        let buckets = build_timeseries(&rows, "week", 0).unwrap();
+        let buckets = build_timeseries(&rows, "week", 0, (None, None)).unwrap();
         assert_eq!(buckets.len(), 1);
         let bucket = &buckets[0];
         assert_eq!(bucket.count, 2);
@@ -523,7 +529,7 @@ mod tests {
             },
         ];
 
-        let buckets = build_timeseries(&rows, "all", 0).unwrap();
+        let buckets = build_timeseries(&rows, "all", 0, (None, None)).unwrap();
         let today = buckets
             .iter()
             .find(|bucket| bucket.date == utc_date_for_local_day(today_start, 0))
@@ -560,7 +566,7 @@ mod tests {
             result: Some("success"),
         }];
 
-        let buckets = build_timeseries(&rows, "all", 0).unwrap();
+        let buckets = build_timeseries(&rows, "all", 0, (None, None)).unwrap();
         assert_eq!(buckets.len(), 1);
         let bucket = &buckets[0];
         // OpenAI input already includes the cache sub-count, so the hit rate is
@@ -603,7 +609,7 @@ mod tests {
             },
         ];
 
-        let buckets = build_timeseries(&rows, "all", 0).unwrap();
+        let buckets = build_timeseries(&rows, "all", 0, (None, None)).unwrap();
         assert_eq!(buckets.len(), 1);
         let bucket = &buckets[0];
         // Canonical per row: OpenAI 250/1000, Anthropic 600/1500.

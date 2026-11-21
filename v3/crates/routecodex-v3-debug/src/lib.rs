@@ -13,11 +13,23 @@ mod sample_retention;
 pub mod sample_store;
 
 pub use observability_store::{
-    v3_webui_observability_append_row, v3_webui_observability_append_row_with_retention,
-    v3_webui_observability_read_raw_rows, v3_webui_observability_read_raw_rows_from,
-    v3_webui_observability_read_rows, v3_webui_observability_read_rows_bounded,
-    V3WebuiObservabilityRawRead, V3WebuiObservabilityStoreError,
-    V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
+    v3_provider_usage_append_fact, v3_provider_usage_backfill_detail,
+    v3_provider_usage_coverage_path, v3_provider_usage_ensure_statistics_coverage,
+    v3_provider_usage_facts_path, v3_provider_usage_generation_path,
+    v3_provider_usage_mark_detail_started, v3_provider_usage_mark_gap,
+    v3_provider_usage_persist_before_detail, v3_provider_usage_read_coverage_with_limits,
+    v3_provider_usage_read_generation, v3_provider_usage_read_generation_with_limits,
+    v3_provider_usage_reconcile_detail, v3_webui_observability_append_row,
+    v3_webui_observability_append_row_with_retention,
+    v3_webui_observability_append_row_without_retention_hard_cap,
+    v3_webui_observability_read_provider_usage,
+    v3_webui_observability_read_provider_usage_with_limits, v3_webui_observability_read_raw_rows,
+    v3_webui_observability_read_raw_rows_from, v3_webui_observability_read_rows,
+    v3_webui_observability_read_rows_bounded, V3ProviderUsageCapacityReason,
+    V3ProviderUsageCoverage, V3ProviderUsageFact, V3ProviderUsageFactResult,
+    V3ProviderUsageGenerationState, V3ProviderUsagePersistenceLimits,
+    V3ProviderUsagePersistenceStore, V3ProviderUsageRead, V3WebuiObservabilityRawRead,
+    V3WebuiObservabilityStoreError, V3_WEBUI_OBSERVABILITY_SCHEMA_VERSION,
 };
 pub use sample_store::{
     encode_v3_codex_sample_path_segment, format_v3_codex_sample_endpoint_dir,

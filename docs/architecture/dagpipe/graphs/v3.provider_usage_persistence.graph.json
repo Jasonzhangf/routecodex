@@ -1,0 +1,57 @@
+{
+  "id": "v3.provider_usage_persistence",
+  "version": "1",
+  "inputs": [{"id": "用量持久化工作项", "schema": "Object"}],
+  "nodes": [
+    {
+      "id": "识别工作项与统计事实",
+      "operator": "routecodex.v3.observability.resolve_provider_usage_work",
+      "operator_version": "1",
+      "inputs": ["用量持久化工作项"],
+      "output": {"id": "统计事实与原始明细或识别失败", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.webui_store"], "writes": []}
+    },
+    {
+      "id": "合并稳定键并有界落盘统计与覆盖",
+      "operator": "routecodex.v3.observability.persist_provider_usage_facts",
+      "operator_version": "1",
+      "inputs": ["统计事实与原始明细或识别失败"],
+      "output": {"id": "未变、已落盘、容量拒收或写入失败及原始明细", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.provider_usage_facts"], "writes": ["v3.observability.provider_usage_facts"]}
+    },
+    {
+      "id": "按落盘结果追加与轮转明细",
+      "operator": "routecodex.v3.observability.retain_provider_usage_detail",
+      "operator_version": "1",
+      "inputs": ["未变、已落盘、容量拒收或写入失败及原始明细"],
+      "output": {"id": "统计与明细写入结果", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.webui_store"], "writes": ["v3.observability.webui_store"]}
+    },
+    {
+      "id": "发布写入处置",
+      "operator": "routecodex.v3.observability.report_provider_usage_persistence",
+      "operator_version": "1",
+      "inputs": ["统计与明细写入结果"],
+      "output": {"id": "用量持久化处置回执", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": []}
+    }
+  ],
+  "edges": [
+    {"from": "识别工作项与统计事实", "to": "合并稳定键并有界落盘统计与覆盖", "arc_id": "统计事实与原始明细或识别失败"},
+    {"from": "合并稳定键并有界落盘统计与覆盖", "to": "按落盘结果追加与轮转明细", "arc_id": "未变、已落盘、容量拒收或写入失败及原始明细"},
+    {"from": "按落盘结果追加与轮转明细", "to": "发布写入处置", "arc_id": "统计与明细写入结果"}
+  ],
+  "outputs": ["用量持久化处置回执"]
+}

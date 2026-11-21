@@ -289,19 +289,22 @@ pub(crate) fn visit_v3_obs_stores(
     Ok(())
 }
 
-/// Folded query projection of every persisted observability row.
+/// Source projection for the records endpoint.
+///
+/// Rows remain the retained detail source. Durable usage facts are read
+/// separately only for a usage query and only for the ports that query selects.
 pub(super) struct V3ObsProjection {
     pub(super) rows: Arc<Vec<QueryRow>>,
     /// Highest `updated_epoch_ms` across every cached row.
     pub(super) max_seq: u64,
 }
 
-/// Reads the folded projection of every configured listener store.
+/// Reads the folded retained-detail projection of every configured listener.
 ///
 /// Only records appended since the previous read are decoded; the fold itself
 /// is reused until a store's content changes or the configured path list
 /// changes. The cache lock also single-flights the concurrent polls of every
-/// open WebUI tab.
+/// open WebUI tab. Durable usage facts are not part of this lock or read.
 pub(super) fn read_v3_obs_projection(
     state: &AppState,
 ) -> Result<V3ObsProjection, (StatusCode, Value)> {
@@ -343,6 +346,54 @@ pub(super) fn read_v3_obs_projection(
         ),
         max_seq,
     })
+}
+
+/// Reads durable usage facts only for the listeners selected by a usage query.
+///
+/// A filtered query reads only its selected ports. An unfiltered usage query
+/// reads every configured listener. The read is outside the retained-detail
+/// cache lock, so old records and stream consumers remain independent.
+pub(super) fn read_provider_usage_facts(
+    state: &AppState,
+    selected_ports: Option<&std::collections::HashSet<u16>>,
+) -> Result<routecodex_v3_debug::V3ProviderUsageRead, (StatusCode, Value)> {
+    let ports = observability_store_paths(state)
+        .map_err(|error| (StatusCode::BAD_GATEWAY, json!({ "error": error })))?;
+    let mut provider_usage = routecodex_v3_debug::V3ProviderUsageRead::default();
+    for (port, path) in &ports {
+        if selected_ports.is_some_and(|selected| !selected.contains(port)) {
+            continue;
+        }
+        let read = routecodex_v3_debug::v3_webui_observability_read_provider_usage(path).map_err(
+            |error| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    json!({
+                        "error": format!(
+                            "provider usage facts unavailable for listener {port}: {error}"
+                        )
+                    }),
+                )
+            },
+        )?;
+        if read.facts.is_empty() && read.coverage.is_empty() {
+            provider_usage
+                .coverage
+                .push(routecodex_v3_debug::V3ProviderUsageCoverage {
+                    listener_id: *port,
+                    statistics_started_epoch_ms: None,
+                    detail_started_epoch_ms: None,
+                    detail_incomplete: true,
+                    gaps: vec![
+                        "provider_usage_facts_unavailable".to_string(),
+                        "coverage_unavailable".to_string(),
+                    ],
+                });
+        }
+        provider_usage.facts.extend(read.facts);
+        provider_usage.coverage.extend(read.coverage);
+    }
+    Ok(provider_usage)
 }
 
 /// Every persisted lifecycle row of one request, in configured listener order.

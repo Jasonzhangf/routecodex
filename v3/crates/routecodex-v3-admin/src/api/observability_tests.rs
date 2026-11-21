@@ -3,11 +3,12 @@
 //! Extracted from `observability.rs` (declared there as `#[path] mod tests;`) to
 //! keep that file under the 1500-line limit enforced by `verify:v3-file-size`.
 
+use super::provider_usage::normalize_retained_usage;
 use super::{
     attempt_status_code, error_category_status_code, row_cache_creation_value,
-    row_cache_hit_numerator, row_cache_read_value, row_cached_value, row_effective_input,
-    row_error_origin, row_error_origin_opt, row_input_value, row_output_value, row_status_code,
-    row_total_value, to_query_row, QueryRow, SourceRow, SourceScope,
+    row_cache_read_value, row_cached_value, row_error_origin, row_error_origin_opt,
+    row_input_value, row_output_value, row_status_code, row_total_value, to_query_row, QueryRow,
+    SourceRow, SourceScope,
 };
 use serde_json::{json, Value};
 
@@ -15,54 +16,65 @@ use serde_json::{json, Value};
 fn openai_cached_subcount_keeps_raw_input_as_denominator() {
     // OpenAI/Responses shape: input_tokens already includes cached_tokens;
     // cache hit is cached / input_tokens.
-    let row = build_usage_row(json!({
+    let usage = json!({
         "input_tokens": 1000,
         "output_tokens": 200,
-        "cached_tokens": 250,
+        "input_tokens_details": {"cached_tokens": 250},
         "total_tokens": 1200,
-    }));
+    });
+    let row = build_usage_row(usage.clone());
+    let normalized = normalize_retained_usage(&usage);
     assert_eq!(row_input_value(&row), 1000);
     assert_eq!(row_output_value(&row), 200);
-    assert_eq!(row_cached_value(&row), Some(250));
+    assert_eq!(row_cached_value(&row), None);
     assert_eq!(row_cache_read_value(&row), None);
     assert_eq!(row_total_value(&row), 1200);
-    assert_eq!(row_cache_hit_numerator(&row), 250);
-    assert_eq!(row_effective_input(&row), 1000);
+    assert_eq!(normalized["effective_input_tokens"], 1000);
+    assert_eq!(normalized["cache_read_tokens"], 250);
+    assert_eq!(normalized["cache_hit_rate_percent"], 25.0);
 }
 
 #[test]
 fn split_anthropic_cache_fields_keep_read_and_creation_distinct() {
-    let row = build_usage_row(json!({
+    let usage = json!({
         "input_tokens": 800,
         "output_tokens": 150,
         "cache_read_input_tokens": 600,
         "cache_creation_input_tokens": 100,
         "total_tokens": 950,
-    }));
+    });
+    let row = build_usage_row(usage.clone());
+    let normalized = normalize_retained_usage(&usage);
     assert_eq!(row_input_value(&row), 800);
     assert_eq!(row_cached_value(&row), None);
     assert_eq!(row_cache_read_value(&row), Some(600));
     assert_eq!(row_cache_creation_value(&row), Some(100));
     // Anthropic input excludes cache, so the denominator is
     // input + read + creation and the hit count is the read count.
-    assert_eq!(row_cache_hit_numerator(&row), 600);
-    assert_eq!(row_effective_input(&row), 1500);
+    assert_eq!(normalized["effective_input_tokens"], 1500);
+    assert_eq!(normalized["cache_read_tokens"], 600);
+    assert_eq!(normalized["cache_write_tokens"], 100);
+    assert_eq!(normalized["cache_hit_rate_percent"], 40.0);
 }
 
 #[test]
 fn split_cache_read_zero_does_not_use_creation_as_hit() {
-    let row = build_usage_row(json!({
+    let usage = json!({
         "input_tokens": 100,
         "output_tokens": 5,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 30,
         "total_tokens": 105,
-    }));
+    });
+    let row = build_usage_row(usage.clone());
+    let normalized = normalize_retained_usage(&usage);
     assert_eq!(row_cache_read_value(&row), Some(0));
     assert_eq!(row_cache_creation_value(&row), Some(30));
     // Creation is never a hit, but it still belongs in the denominator.
-    assert_eq!(row_cache_hit_numerator(&row), 0);
-    assert_eq!(row_effective_input(&row), 130);
+    assert_eq!(normalized["cache_read_tokens"], 0);
+    assert_eq!(normalized["cache_write_tokens"], 30);
+    assert_eq!(normalized["effective_input_tokens"], 130);
+    assert_eq!(normalized["cache_hit_rate_percent"], 0.0);
 }
 
 #[test]
@@ -177,6 +189,7 @@ fn build_usage_row(usage: Value) -> QueryRow {
         failed_attempts: 0,
         switches: 0,
         usage: Some(usage),
+        usage_normalized: None,
         timing_internal_ms: None,
         timing_external_ms: None,
         servertool: false,
