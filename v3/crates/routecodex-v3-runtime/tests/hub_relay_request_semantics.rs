@@ -28,6 +28,38 @@ fn serialized_contains_tool_type(payload: &Value, tool_type: &str) -> bool {
 }
 
 #[test]
+fn issue13d6279_req04_preserves_representable_orphan_history() {
+    let payload = json!({"messages":[
+        {"role":"tool","tool_call_id":"trimmed-call","content":"client error: invalid JSON"}
+    ]});
+    let governed = compile_v3_hub_relay_request_hooks()
+        .run(
+            raw_for(payload.clone(), V3HubEntryProtocol::OpenAiChat),
+            &V3HubRequestHookProfile::disabled(),
+        )
+        .expect("representable orphan history must reach the provider without Req04 admission");
+    assert_eq!(governed.payload(), &payload);
+}
+
+#[test]
+fn issue13d6279_req04_custom_association_survives_intervening_assistant() {
+    let mut payload = json!({"messages":[
+        {"role":"assistant","tool_calls":[{"id":"custom-call","type":"function","function":{"name":"edit","arguments":"invalid model input"},"routecodex_chat_extension":{"responses_tool_call_type":"custom_tool_call"}}]},
+        {"role":"assistant","content":"intervening assistant"},
+        {"role":"tool","tool_call_id":"custom-call","content":"client tool error"}
+    ]});
+    let governed = compile_v3_hub_relay_request_hooks()
+        .run(
+            raw_for(payload.clone(), V3HubEntryProtocol::OpenAiChat),
+            &V3HubRequestHookProfile::disabled(),
+        )
+        .expect("Req04 must retain custom association across assistant messages");
+    payload["messages"][2]["routecodex_chat_extension"] =
+        json!({"responses_tool_output_type":"custom_tool_call_output"});
+    assert_eq!(governed.payload(), &payload);
+}
+
+#[test]
 fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let payload = json!({"model":"client-alias","messages":[{"role":"user","content":"hi"}],"metadata":{"client":"kept"}});
@@ -50,7 +82,6 @@ fn new_request_is_lossless_and_runs_every_entry_exit_hook() {
             V3HubRelayRequestHookEvent::Req02Entry,
             V3HubRelayRequestHookEvent::Req02Exit,
             V3HubRelayRequestHookEvent::Req04Entry,
-            V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned,
             V3HubRelayRequestHookEvent::Req04ToolGoverned,
             V3HubRelayRequestHookEvent::Req04Exit,
         ]
@@ -305,30 +336,21 @@ fn openai_chat_tool_identity_is_governed_at_req04_after_normalization() {
         )
         .unwrap();
     let events = governed.hook_events();
-    let identity = events
-        .iter()
-        .position(|e| *e == V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned)
-        .unwrap();
-    let tool_governed = events
-        .iter()
-        .position(|e| *e == V3HubRelayRequestHookEvent::Req04ToolGoverned)
-        .unwrap();
-    assert!(identity < tool_governed);
+    assert!(events.contains(&V3HubRelayRequestHookEvent::Req04ToolGoverned));
 
-    for invalid in [
+    for representable in [
         json!({"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"x","arguments":"{}"}}]}]}),
         json!({"messages":[{"role":"tool","tool_call_id":"orphan","content":"x"}]}),
+        json!({"messages":[{"role":"tool","content":"missing ID remains missing"}]}),
+        json!({"messages":[{"role":"assistant","tool_calls":{"opaque":"preserve"}}]}),
     ] {
-        assert!(matches!(
-            hooks.run(
-                raw_for(invalid, V3HubEntryProtocol::OpenAiChat),
+        let governed = hooks
+            .run(
+                raw_for(representable.clone(), V3HubEntryProtocol::OpenAiChat),
                 &V3HubRequestHookProfile::disabled(),
-            ),
-            Err(V3HubRelayRequestError::ProtocolToolIdentityInvalid {
-                protocol: "openai_chat",
-                ..
-            })
-        ));
+            )
+            .expect("Req04 must preserve representable tool history");
+        assert_eq!(governed.payload()["messages"], representable["messages"]);
     }
     let duplicate = json!({"messages":[{"role":"assistant","tool_calls":[{"id":"dup","type":"function","function":{"name":"x","arguments":"{}"}},{"id":"dup","type":"function","function":{"name":"y","arguments":"{}"}}]}]});
     let governed = hooks
@@ -358,9 +380,6 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
         .unwrap();
     // ReqInbound02 已把 Gemini 归一化为 canonical Chat `messages`，不再对原始
     // `contents` 二次治理；工具历史统一由既有 canonical Chat 治理处理。
-    assert!(!governed
-        .hook_events()
-        .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
     assert!(governed
         .hook_events()
         .contains(&V3HubRelayRequestHookEvent::Req04ToolGoverned));
@@ -376,19 +395,20 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
     assert_eq!(messages[2]["role"], "tool");
     assert_eq!(messages[2]["tool_call_id"], "call_1");
 
-    // canonical Chat 工具历史治理仍拒绝按 id 无法配对的 orphan 工具输出。
+    // Trimmed history does not authorize rejecting a native tool receipt.
     let orphan = json!({
         "contents":[
             {"role":"user","parts":[{"functionResponse":{"id":"orphan","name":"lookup","response":{"x":1}}}]}
         ]
     });
-    assert!(matches!(
-        hooks.run(
+    let governed = hooks
+        .run(
             raw_for(orphan, V3HubEntryProtocol::Gemini),
             &V3HubRequestHookProfile::disabled(),
-        ),
-        Err(V3HubRelayRequestError::OrphanToolOutput { .. })
-    ));
+        )
+        .expect("orphan Gemini receipt must survive Req04");
+    assert_eq!(governed.payload()["messages"][0]["tool_call_id"], "orphan");
+    assert_eq!(governed.payload()["messages"][0]["content"], "{\"x\":1}");
 
     // no-id functionResponse：原生 id 缺失时保持缺失，不生成 id，也不改写为 user
     // 角色；显式 source 关联随 canonical tool receipt 一起保留。
@@ -425,7 +445,7 @@ fn gemini_function_response_identity_is_governed_at_req04_after_normalization() 
 }
 
 #[test]
-fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
+fn req04_preserves_tool_history_carried_in_responses_messages() {
     let hooks = compile_v3_hub_relay_request_hooks();
     let governed = hooks
         .run(
@@ -435,9 +455,11 @@ fn protocol_tool_identity_governance_uses_entry_protocol_not_payload_shape() {
             &V3HubRequestHookProfile::disabled(),
         )
         .unwrap();
-    assert!(!governed
-        .hook_events()
-        .contains(&V3HubRelayRequestHookEvent::Req04ProtocolToolIdentityGoverned));
+    assert_eq!(
+        governed.payload()["messages"][0]["tool_call_id"],
+        "shape_only"
+    );
+    assert_eq!(governed.payload()["messages"][0]["content"], "preserve");
 }
 
 #[test]

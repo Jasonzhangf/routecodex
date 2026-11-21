@@ -1618,3 +1618,119 @@ fn anthropic_system_extension_consumes_text_without_replaying_or_dropping_residu
         assert_eq!(source, original);
     }
 }
+#[test]
+fn responses_wire_preserves_assistant_text_with_emitted_tool_calls() {
+    let input = build_responses_input_from_chat_messages(&[json!({
+        "role": "assistant",
+        "content": [{"type": "text", "text": "intervening assistant"}],
+        "tool_calls": [{
+            "id": "call_text",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": "{}"}
+        }]
+    })])
+    .expect("assistant text plus tool calls must project");
+    let items = input.as_array().expect("Responses input array");
+    assert_eq!(items.len(), 2, "{input}");
+    assert_eq!(items[0]["type"], json!("function_call"), "{input}");
+    assert_eq!(items[1]["type"], json!("message"), "{input}");
+    assert_eq!(items[1]["role"], json!("assistant"), "{input}");
+    assert!(
+        items[1]["content"].as_array().is_some_and(|parts| parts
+            .iter()
+            .any(|part| part["type"] == json!("output_text")
+                && part["text"] == json!("intervening assistant"))),
+        "{input}"
+    );
+}
+
+#[test]
+fn responses_wire_keeps_tool_call_only_for_empty_assistant_content() {
+    for content in [Value::Null, json!(""), json!([])] {
+        let input = build_responses_input_from_chat_messages(&[json!({
+            "role": "assistant",
+            "content": content,
+            "tool_calls": [{
+                "id": "call_empty",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"}
+            }]
+        })])
+        .expect("empty assistant content with tool calls must project");
+        assert_eq!(input.as_array().map(Vec::len), Some(1), "{input}");
+        assert_eq!(input[0]["type"], json!("function_call"), "{input}");
+    }
+    let input = build_responses_input_from_chat_messages(&[json!({
+        "role": "assistant",
+        "tool_calls": [{
+            "id": "call_absent",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": "{}"}
+        }]
+    })])
+    .expect("absent assistant content with tool calls must project");
+    assert_eq!(input.as_array().map(Vec::len), Some(1), "{input}");
+    assert_eq!(input[0]["type"], json!("function_call"), "{input}");
+}
+
+#[test]
+fn responses_client_history_preserves_intervening_assistant_message() {
+    use crate::hub_v1::{
+        build_v3_hub_req_inbound_01_client_raw,
+        req_inbound_02_normalized::build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01,
+        V3HubEntryProtocol, V3HubInvocationSource, V3HubTransportIntent,
+    };
+
+    let payload = json!({
+        "model": "client-test",
+        "input": [
+            {"type":"function_call_output","call_id":"trimmed-call","output":"prior failure\r\nunchanged"},
+            {"type":"custom_tool_call","id":"ctc-old","call_id":"custom-old","name":"lookup","input":"{broken"},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"intervening assistant"}]},
+            {"type":"custom_tool_call_output","call_id":"custom-old","output":"client error: invalid JSON"}
+        ],
+        "tools": [{"type":"custom","name":"lookup","format":{"type":"text"}}],
+        "stream": false
+    });
+    let raw = build_v3_hub_req_inbound_01_client_raw(
+        payload,
+        V3HubEntryProtocol::Responses,
+        V3HubInvocationSource::Client,
+        V3HubTransportIntent::Json,
+    );
+    let normalized = build_v3_hub_req_inbound_02_result_from_v3_hub_req_inbound_01(raw)
+        .expect("Responses history must normalize");
+    let canonical = normalized.previous.payload.0.as_ref().clone();
+    let messages = canonical["messages"]
+        .as_array()
+        .expect("canonical history must be messages")
+        .clone();
+    let input = build_responses_input_from_chat_messages(&messages)
+        .expect("Responses input projection must succeed");
+    let items = input.as_array().expect("Responses input array");
+    let old_call = items.iter().position(|item| {
+        item["type"] == json!("custom_tool_call") && item["call_id"] == json!("custom-old")
+    });
+    let intervening = items.iter().position(|item| {
+        item["role"] == json!("assistant")
+            && item["content"].as_array().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .any(|part| part["text"] == json!("intervening assistant"))
+            })
+    });
+    let old_output = items.iter().position(|item| {
+        item["type"] == json!("custom_tool_call_output") && item["call_id"] == json!("custom-old")
+    });
+    assert!(
+        matches!((old_call, intervening, old_output), (Some(a), Some(b), Some(c)) if a < b && b < c),
+        "provider shape: {input}"
+    );
+    assert!(
+        items.iter().any(|item| {
+            item["type"] == json!("function_call_output")
+                && item["call_id"] == json!("trimmed-call")
+        }),
+        "provider shape: {input}"
+    );
+}
