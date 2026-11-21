@@ -11,6 +11,7 @@
 //! stream must contain exactly one `request.provider_attempt_failed` line; the
 //! `request.provider_switched` line must not repeat the failed attempt's
 //! `provider_status`, `error_category`, `error_detail`, or `observed_error`.
+//! The SSE case stalls provider `a` before headers with live logging enabled.
 //! The admin HTTP surface must see the same request as one failed attempt that
 //! ends completed. A second request then succeeds on provider `a`'s first
 //! attempt and must add no failure or switch row and count zero failed
@@ -44,11 +45,15 @@ const PROVIDER_KEY_ENV: &str = "ISSUE_5DFAE83_KEY";
 struct Upstream {
     calls: AtomicUsize,
     fail: AtomicBool,
+    stall_before_error: bool,
 }
 
-async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) -> Response<Body> {
+async fn upstream(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
     state.calls.fetch_add(1, Ordering::SeqCst);
     if state.fail.load(Ordering::SeqCst) {
+        if state.stall_before_error {
+            sleep(Duration::from_secs(1)).await;
+        }
         Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .header("content-type", "application/json")
@@ -57,11 +62,7 @@ async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) 
             ))
             .unwrap()
     } else {
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "application/json")
-            .body(Body::from(
-                json!({
+        let completed = json!({
                     "id": "resp-5dfae83",
                     "object": "response",
                     "status": "completed",
@@ -78,19 +79,34 @@ async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) 
                         }]
                     }],
                     "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-                })
-                .to_string(),
-            ))
+        });
+        let (content_type, body) = if body["stream"] == true {
+            let frame = json!({"type": "response.completed", "response": completed});
+            (
+                "text/event-stream",
+                format!("event: response.completed\ndata: {frame}\n\n"),
+            )
+        } else {
+            ("application/json", completed.to_string())
+        };
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", content_type)
+            .body(Body::from(body))
             .unwrap()
     }
 }
 
-async fn start_upstream(fail: bool) -> (u16, Arc<Upstream>, tokio::sync::oneshot::Sender<()>) {
+async fn start_upstream(
+    fail: bool,
+    stall_before_error: bool,
+) -> (u16, Arc<Upstream>, tokio::sync::oneshot::Sender<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let state = Arc::new(Upstream {
         calls: AtomicUsize::new(0),
         fail: AtomicBool::new(fail),
+        stall_before_error,
     });
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let app = Router::new()
@@ -121,7 +137,14 @@ fn temp_home() -> PathBuf {
     dir
 }
 
-fn config_source(server_port: u16, admin_port: u16, a_port: u16, b_port: u16) -> String {
+fn config_source(
+    home: &Path,
+    server_port: u16,
+    admin_port: u16,
+    a_port: u16,
+    b_port: u16,
+    stream: bool,
+) -> String {
     format!(
         r#"
 version = 3
@@ -143,9 +166,10 @@ port = {admin_port}
 type = "responses"
 base_url = "http://127.0.0.1:{a_port}/v1"
 default_model = "wire-a"
+sse_first_frame_timeout_ms = 200
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
-health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "direct", streaming = "never" }}
+health = {{ enabled = {stream}, failure_threshold = 10, cooldown_ms = 3600000 }}
+responses = {{ process = "direct", streaming = "{streaming}" }}
 [providers.a.models.wire-a]
 wire_name = "wire-a"
 capabilities = ["text", "tools"]
@@ -157,16 +181,24 @@ base_url = "http://127.0.0.1:{b_port}/v1"
 default_model = "wire-b"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "direct", streaming = "never" }}
+responses = {{ process = "direct", streaming = "{streaming}" }}
 [providers.b.models.wire-b]
 wire_name = "wire-b"
 capabilities = ["text", "tools"]
 max_context_tokens = 128000
 
 [debug]
-log_console = false
+log_console = true
+log_file = {log_file:?}
 snapshots = false
 dry_run = false
+
+[route_groups.default.pools.thinking]
+selection = {{ strategy = "priority" }}
+match = {{ precedence = 10, required_capabilities = ["thinking"] }}
+targets = [
+  {{ kind = "provider_model", provider = "a", model = "wire-a", key = "key", priority = 1 }}
+]
 
 [route_groups.default.pools.default]
 selection = {{ strategy = "priority" }}
@@ -177,6 +209,12 @@ targets = [
 "#,
         declaration = hub_v1_fixture::hub_v1_test_declaration(),
         execution = hub_v1_fixture::hub_v1_server_execution("main"),
+        streaming = if stream { "always" } else { "never" },
+        log_file = home
+            .join("logs")
+            .join(format!("server-v3-{server_port}.log"))
+            .display()
+            .to_string(),
     )
 }
 
@@ -210,20 +248,29 @@ async fn get_json(client: &reqwest::Client, url: &str) -> (reqwest::StatusCode, 
 
 #[tokio::test]
 async fn issue5dfae83_provider_switch_ledger_dedup() {
+    assert_provider_switch_ledger_dedup(false).await;
+}
+
+#[tokio::test]
+async fn issue5dfae83_provider_switch_ledger_dedup_sse() {
+    assert_provider_switch_ledger_dedup(true).await;
+}
+
+async fn assert_provider_switch_ledger_dedup(stream: bool) {
     let _guard = TEST_LOCK.lock().await;
     env::set_var(PROVIDER_KEY_ENV, "controlled-switch-dedup-secret");
     let home = temp_home();
     let previous_home = env::var_os("HOME");
     env::set_var("HOME", &home);
 
-    let (a_port, a, a_shutdown) = start_upstream(true).await;
-    let (b_port, b, b_shutdown) = start_upstream(false).await;
+    let (a_port, a, a_shutdown) = start_upstream(true, stream).await;
+    let (b_port, b, b_shutdown) = start_upstream(false, false).await;
     let server_port = test_ports::free_port();
     let admin_port = test_ports::free_port();
     let config_path = home.join("config.v3.toml");
     fs::write(
         &config_path,
-        config_source(server_port, admin_port, a_port, b_port),
+        config_source(&home, server_port, admin_port, a_port, b_port, stream),
     )
     .unwrap();
 
@@ -260,7 +307,7 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         .json(&json!({
             "model": "client",
             "input": "controlled request",
-            "stream": false
+            "stream": stream
         }))
         .send()
         .await
@@ -271,6 +318,18 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         client_body.contains("SWITCHED_BUSINESS_OK"),
         "the switched provider's business body must reach the client: {client_body}"
     );
+    if stream {
+        assert!(
+            client_body
+                .lines()
+                .filter_map(|line| line.strip_prefix("data: "))
+                .filter_map(|body| serde_json::from_str::<Value>(body).ok())
+                .filter(|frame| frame["type"] == "response.completed")
+                .count()
+                == 1,
+            "the recovered SSE request must deliver its completed terminal: {client_body}"
+        );
+    }
     assert_eq!(
         a.calls.load(Ordering::SeqCst),
         1,
@@ -308,16 +367,22 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
     assert_eq!(
         failed_rows.len(),
         1,
-        "one failed attempt must write exactly one failure row: {rows:#?}"
+        "one failed attempt must write exactly one failure row"
     );
-    assert!(
-        failed_rows[0]["meta"]["provider_status"].is_number(),
-        "the failed row must carry the upstream status: {failed_rows:?}"
+    assert_eq!(
+        failed_rows[0]["meta"]["provider_id"], "a",
+        "the failure must belong to the failed provider"
     );
-    assert!(
-        failed_rows[0]["meta"]["error_category"].is_string(),
-        "the failed row must carry the error category"
-    );
+    let meta = &failed_rows[0]["meta"];
+    assert_eq!(meta["pool"], "thinking");
+    if stream {
+        assert!(meta["provider_status"].is_null());
+        assert_eq!(meta["error_category"], "provider_response_header_timeout");
+        assert_eq!(meta["observed_error"]["external_error_kind"], "transport");
+    } else {
+        assert_eq!(meta["provider_status"], 503);
+        assert_eq!(meta["error_category"], "provider_http_503");
+    }
     assert!(
         failed_rows[0]["meta"]["error_detail"].is_string(),
         "the failed row must carry the error detail"
@@ -362,6 +427,19 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         1,
         "the switched request must complete exactly once"
     );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row["event_type"] == "request.started")
+            .count(),
+        1,
+        "the request starts once across live observation and closeout"
+    );
+    let console_log = fs::read_to_string(
+        home.join("logs")
+            .join(format!("server-v3-{server_port}.log")),
+    )
+    .unwrap();
+    assert_eq!(console_log.matches("[provider-error]").count(), 1);
 
     // Admin HTTP surface: the same request is one failed attempt that ends
     // completed. This is the public consumer comparison the handoff requires.
@@ -386,10 +464,13 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         row["failed_attempts"], 1,
         "admin consumption must count one failed attempt: {row}"
     );
+    assert_eq!(row["request_key"], failed_rows[0]["request_key"]);
+    assert_eq!(row["switches"], 1);
+    assert_eq!(row["meta"]["pool"], "default");
 
-    // Success control: the second request succeeds on provider a's first
-    // attempt. It must add no failure or switch row, and the admin consumer
-    // must count zero failed attempts for it.
+    // The independent success control must add no failure or switch row.
+    // JSON can directly reuse A. The timeout case may select either live key
+    // while the observation probe is pending.
     a.fail.store(false, Ordering::SeqCst);
     let control_response = client
         .post(format!("http://{server_addr}/v1/responses"))
@@ -407,16 +488,12 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         control_body.contains("SWITCHED_BUSINESS_OK"),
         "the control provider's business body must reach the client: {control_body}"
     );
-    assert_eq!(
-        a.calls.load(Ordering::SeqCst),
-        2,
-        "provider a must be attempted once per request"
-    );
-    assert_eq!(
-        b.calls.load(Ordering::SeqCst),
-        1,
-        "the success control must not reach provider b"
-    );
+    let a_calls = a.calls.load(Ordering::SeqCst);
+    let b_calls = b.calls.load(Ordering::SeqCst);
+    assert_eq!(a_calls + b_calls, 3, "the control adds exactly one send");
+    if !stream {
+        assert_eq!(a_calls, 2, "an independent JSON request may use A again");
+    }
 
     let first_request_key = failed_rows[0]["request_key"]
         .as_str()
@@ -497,13 +574,13 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         "admin consumption must count zero failed attempts for a first-attempt success: {control_row}"
     );
 
-    let _samples_cleanup = fs::remove_dir_all(&home);
+    handle.shutdown().await;
+    let _ = a_shutdown.send(());
+    let _ = b_shutdown.send(());
+    fs::remove_dir_all(&home).unwrap();
     if let Some(previous_home) = previous_home {
         env::set_var("HOME", previous_home);
     } else {
         env::remove_var("HOME");
     }
-    let _ = a_shutdown.send(());
-    let _ = b_shutdown.send(());
-    handle.shutdown().await;
 }
