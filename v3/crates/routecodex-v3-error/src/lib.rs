@@ -1606,9 +1606,12 @@ pub fn project_v3_pending_endpoint_error(
 }
 
 mod sse_disposition;
-/// Consecutive real failures required by the default recoverable health policy.
-/// Authentication and explicitly terminal policies retain their own threshold.
-pub const V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD: u32 = 1;
+/// Consecutive real failures required by the shared recoverable provider
+/// health policy.
+pub const V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD: u32 = 10;
+
+/// Fixed minimum exclusion committed by the shared provider health policy.
+pub const V3_PROVIDER_HEALTH_COOLDOWN_MS: u64 = 60 * 60_000;
 
 mod subscription;
 #[cfg(test)]
@@ -1618,8 +1621,9 @@ pub use sse_disposition::{v3_sse_post_commit_disposition, V3SsePostCommitDisposi
 pub use subscription::{
     build_v3_provider_failure_action_from_v3_error_02, build_v3_provider_global_error_fingerprint,
     build_v3_provider_global_error_fingerprint_from_classified,
-    build_v3_provider_global_failure_policy, V3ProviderErrorFingerprint, V3ProviderFailureAction,
-    V3ProviderHealthScope, V3ProviderRecoveryKind,
+    build_v3_provider_global_failure_policy, v3_irrecoverable_provider_http_body_code,
+    V3ProviderErrorFingerprint, V3ProviderFailureAction, V3ProviderHealthScope,
+    V3ProviderRecoveryKind,
 };
 
 /// Provider compat payload boundary violation: provider request or response

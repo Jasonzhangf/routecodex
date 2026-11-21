@@ -1015,7 +1015,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
     fn unsupported_provider_cooldown_schema_disables_persistence_without_overwriting() {
         let root = tempfile::tempdir().expect("create isolated persistence directory");
         let path = root.path().join("provider-cooldowns.json");
-        let contents = br#"{"schema_version": 4, "entries": []}"#;
+        let contents = br#"{"schema_version": 5, "entries": []}"#;
         std::fs::write(&path, contents).expect("write unsupported cooldown state");
         let manifest = manifest("s", "127.0.0.1", 1);
 
@@ -1035,7 +1035,7 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
             "{alarm}"
         );
         assert!(
-            alarm.contains("unsupported provider cooldown state schema 4"),
+            alarm.contains("unsupported provider cooldown state schema 5"),
             "{alarm}"
         );
         assert_eq!(std::fs::read(&path).expect("read original state"), contents);
@@ -1043,10 +1043,12 @@ targets = [{{ kind = "provider_model", provider = "p", model = "m", key = "k", p
         writer.enqueue(Vec::new(), Vec::new());
         assert!(writer.flush_snapshot(Vec::new(), Vec::new()).is_err());
         assert_eq!(std::fs::read(path).expect("read original state"), contents);
-        assert!(writer
-            .alarm()
-            .expect("disabled persistence must retain its first failure")
-            .contains("unsupported provider cooldown state schema 4"));
+        assert_eq!(
+            writer
+                .alarm()
+                .expect("disabled persistence must retain its first failure"),
+            alarm
+        );
     }
 
     #[test]

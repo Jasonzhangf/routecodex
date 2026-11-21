@@ -64,7 +64,7 @@ async fn managed_probe_stale_cancellation_preserves_newer_cooldown() {
 }
 
 #[tokio::test]
-async fn managed_probe_status_only_success_restores_exact_identity() {
+async fn managed_probe_status_only_success_does_not_bypass_committed_minimum() {
     managed_probe_lifecycle_witness(Some(204), false).await;
 }
 
@@ -112,7 +112,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
             Some("gpt-test"),
             "held probe",
             now_ms,
-            60_000,
+            60 * 60_000,
         )
         .unwrap();
     let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -280,9 +280,10 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
         );
     } else if status.is_some() {
         assert!(
-            health
+            !health
                 .availability(&provider_id, Some("key1"), Some("gpt-test"), now_ms + 1)
-                .available
+                .available,
+            "an early probe success must not bypass the committed one-hour minimum"
         );
     } else {
         let entries = health.store.cooldown_entries(now_ms);
@@ -305,7 +306,7 @@ async fn managed_probe_lifecycle_witness(status: Option<u16>, newer_generation: 
 }
 
 #[test]
-fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
+fn post_commit_sse_failure_enters_provider_cooldown_after_ten_same_errors() {
     let manifest = target_resolution_manifest("post_commit_sse_single_retryable");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -321,7 +322,7 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
         "Responses SSE event must be a JSON object",
     );
 
-    for _attempt in 0..1 {
+    for _attempt in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -343,18 +344,23 @@ fn post_commit_sse_failure_enters_provider_cooldown_after_one_same_error() {
                 v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
             );
         assert_eq!(
-            projection.available, false,
-            "one typed recoverable post-commit SSE failure must cool the exact identity"
+            projection.available,
+            _attempt != 9,
+            "the tenth typed recoverable post-commit SSE failure must cool the exact identity"
         );
-        assert!(projection
-            .blocked_scopes
-            .iter()
-            .any(|scope| scope == "provider_cooldown_probe_pending"));
+        assert_eq!(
+            projection
+                .blocked_scopes
+                .iter()
+                .any(|scope| scope == "provider_cooldown_probe_pending"),
+            _attempt == 9,
+            "only the committed tenth failure owns a recovery probe"
+        );
     }
 }
 
 #[test]
-fn business_success_releases_matching_post_commit_sse_cooldown() {
+fn business_success_resets_post_commit_streak_and_preserves_committed_cooldown() {
     let manifest = target_resolution_manifest("post_commit_sse_success_reset");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -370,7 +376,7 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         "Responses SSE event must be a JSON object",
     );
 
-    for _ in 0..1 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -395,8 +401,8 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         "a matching business success resets the post-commit SSE failure streak"
     );
     assert!(
-        success.available,
-        "a matching business success clears the exact non-429 cooldown"
+        !success.available,
+        "a matching business success must preserve the committed one-hour cooldown"
     );
 
     let projection =
@@ -410,21 +416,8 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
     assert!(
-        projection.available,
-        "a real matching business success must release this exact recoverable identity"
-    );
-    assert!(
-        !health
-            .store()
-            .provider_cooldown_probe_keys_due(u64::MAX)
-            .expect("provider cooldown probe query")
-            .iter()
-            .any(|(provider, key, model)| {
-                provider == "primary"
-                    && key.as_deref() == Some("key1")
-                    && model.as_deref() == Some("gpt-test")
-            }),
-        "a matching business success must remove the exact cooldown instead of keeping its probe"
+        !projection.available,
+        "the exact identity must remain blocked until qualified post-minimum recovery"
     );
 
     for _ in 0..1 {
@@ -450,30 +443,12 @@ fn business_success_releases_matching_post_commit_sse_cooldown() {
         );
     assert!(
         !after_post_success_failures.available,
-        "after the business-success release, one non-429 provider failure must cool again"
-    );
-
-    let permit = health
-        .store()
-        .acquire_provider_cooldown_probe("primary", Some("key1"), Some("gpt-test"))
-        .unwrap()
-        .expect("matching semantic recovery permit");
-    health
-        .store()
-        .complete_provider_cooldown_probe_success_with_permit(
-            &permit,
-            v3_relay_provider_policy_now_epoch_ms().unwrap(),
-        )
-        .unwrap();
-    assert!(
-        health
-            .availability("primary", Some("key1"), Some("gpt-test"), u64::MAX)
-            .available
+        "the reset streak is below threshold, but the previously committed cooldown remains active"
     );
 }
 
 #[test]
-fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
+fn ten_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
     let manifest = target_resolution_manifest("post_commit_sse_probe_due");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -490,7 +465,7 @@ fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
     );
     let before_failures_ms = v3_relay_provider_policy_now_epoch_ms().expect("current epoch");
 
-    for _ in 0..3 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -522,7 +497,7 @@ fn three_post_commit_sse_failures_start_recovery_probe_after_five_seconds() {
             Some("key1".to_string()),
             Some("gpt-test".to_string()),
         )],
-        "three post-commit SSE failures must enter the 429-equivalent recovery ladder at 5s"
+        "ten post-commit SSE failures must enter the recovery probe cadence at 5s"
     );
 }
 

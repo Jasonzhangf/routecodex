@@ -1,13 +1,13 @@
-//! Spec contract: provider cooldown and recovery probes use the same aggressive,
-//! observable ladder capped at 30m. The first probe after a key enters cooldown
-//! is due 5s later.
-//! Restart semantics (probe history reset) are owned by the persistence
-//! module and start the same ladder from 5s.
+//! A committed business cooldown lasts one hour. Independent recovery probes
+//! start after five seconds and failed probes use the declared cadence.
 use routecodex_v3_error::{
-    V3ProviderFailureAction, V3ProviderFailureSessionScope, V3ProviderHealthScope,
-    V3ProviderRecoveryKind,
+    V3ProviderFailureAction, V3ProviderFailureSessionScope, V3_PROVIDER_HEALTH_COOLDOWN_MS,
+    V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
 };
-use routecodex_v3_provider_responses::{V3ProviderFailureCooldownScope, V3ProviderHealthStore};
+use routecodex_v3_provider_responses::{V3ProviderAvailabilityReader, V3ProviderHealthStore};
+
+const THRESHOLD: u64 = V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD as u64;
+const MINIMUM: u64 = V3_PROVIDER_HEALTH_COOLDOWN_MS;
 
 const LADDER_MS: [u64; 7] = [
     5_000,     // first probe after block (probe failure count 0)
@@ -25,26 +25,33 @@ fn scope() -> V3ProviderFailureSessionScope {
     V3ProviderFailureSessionScope::new("server-a", "group-a", "session-a").unwrap()
 }
 
-fn fail(store: &V3ProviderHealthStore, now_ms: u64) {
-    store
-        .record_provider_failure_in_session(
-            &scope(),
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            Some("provider_error"),
-            now_ms,
-        )
-        .unwrap();
+fn reach_threshold(
+    store: &V3ProviderHealthStore,
+    identity: (&str, &str, &str),
+    started_at: u64,
+    action: &V3ProviderFailureAction,
+) -> u64 {
+    let (provider, key, model) = identity;
+    let blocked_at = started_at + THRESHOLD - 1;
+    for now_ms in started_at..=blocked_at {
+        let health = store
+            .record_provider_failure_action(provider, key, model, action, now_ms)
+            .unwrap();
+        assert_eq!(health.cooldown, now_ms == blocked_at);
+    }
+    blocked_at
 }
 
 #[test]
-fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
+fn first_probe_is_due_at_five_seconds_and_success_restores_at_expiry() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, 1);
-    fail(&store, 2);
-    // The second consecutive failure admits cooldown and starts the ladder.
-    let first_due = 2 + 5_000;
+    let blocked_at = reach_threshold(
+        &store,
+        ("provider-a", "key-a", "model-a"),
+        1,
+        &V3ProviderFailureAction::recoverable("provider_http_500"),
+    );
+    let first_due = blocked_at + 5_000;
     assert!(
         store
             .provider_cooldown_probe_keys_due(first_due - 1)
@@ -81,13 +88,31 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
         .complete_provider_cooldown_probe_success_with_permit(&permit, first_due)
         .unwrap();
     assert!(
+        !store
+            .availability("provider-a", Some("key-a"), Some("model-a"), first_due)
+            .available
+    );
+    let expiry = blocked_at + MINIMUM;
+    let permit = store
+        .acquire_provider_cooldown_probe_if_due(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            expiry,
+        )
+        .unwrap()
+        .expect("a fresh probe is due at expiry");
+    store
+        .complete_provider_cooldown_probe_success_with_permit(&permit, expiry)
+        .unwrap();
+    assert!(
         store
             .availability_for_session(
                 &scope(),
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                first_due + 1,
+                expiry,
             )
             .available,
         "probe success must resurrect a globally cooled exact identity"
@@ -95,27 +120,12 @@ fn first_probe_is_due_exactly_5s_after_block_and_probe_success_resurrects() {
 }
 
 #[test]
-fn continuous_failure_ladder_is_isolated_per_provider_key() {
+fn consecutive_failures_commit_independent_provider_key_deadlines() {
     let store = V3ProviderHealthStore::default();
-    let mut action = V3ProviderFailureAction::recoverable("transport");
-    action.failure_threshold = 1;
-
-    let fast = store
-        .record_provider_failure_action("provider-fast", "key", "model", &action, 100)
-        .expect("first provider failure");
-    let mut slow = None;
-    for now_ms in 100..=102 {
-        slow = Some(
-            store
-                .record_provider_failure_action("provider-slow", "key", "model", &action, now_ms)
-                .expect("continuous provider failure"),
-        );
-    }
-
-    let slow = slow.expect("slow provider projection");
-    assert!(fast.cooldown);
-    assert!(slow.cooldown);
-    let entries = store.cooldown_entries(102);
+    let action = V3ProviderFailureAction::recoverable("provider_http_500");
+    let fast = reach_threshold(&store, ("provider-fast", "key", "model"), 100, &action);
+    let slow = reach_threshold(&store, ("provider-slow", "key", "model"), 102, &action);
+    let entries = store.cooldown_entries(slow);
     let fast_until = entries
         .iter()
         .find(|entry| entry.provider_id == "provider-fast")
@@ -124,59 +134,38 @@ fn continuous_failure_ladder_is_isolated_per_provider_key() {
         .iter()
         .find(|entry| entry.provider_id == "provider-slow")
         .and_then(|entry| entry.until_ms);
-    assert_eq!(fast_until, Some(5_100));
-    assert_eq!(slow_until, Some(900_102));
+    assert_eq!(fast_until, Some(fast + MINIMUM));
+    assert_eq!(slow_until, Some(slow + MINIMUM));
 }
 
 #[test]
-fn successful_recovery_restarts_repeat_admission_and_five_second_probe() {
+fn successful_recovery_restarts_the_business_streak_and_probe_cadence() {
     let store = V3ProviderHealthStore::default();
-    let action = V3ProviderFailureAction::recoverable("transport");
-
-    for now_ms in 100..=101 {
-        store
-            .record_provider_failure_action("provider-a", "key", "model", &action, now_ms)
-            .expect("continuous failure");
-    }
-    store
-        .record_provider_failure_action("provider-a", "key", "model", &action, 102)
-        .expect("third continuous failure");
+    let action = V3ProviderFailureAction::recoverable("provider_http_502");
+    let blocked_at = reach_threshold(&store, ("provider-a", "key", "model"), 100, &action);
+    let expiry = blocked_at + MINIMUM;
     assert_eq!(
         store
-            .cooldown_entries(102)
+            .cooldown_entries(blocked_at)
             .iter()
             .find(|entry| entry.provider_id == "provider-a")
             .and_then(|entry| entry.until_ms),
-        Some(900_102),
-        "the sustained failure sample must advance the business cooldown ladder"
+        Some(expiry)
     );
-
-    store
-        .complete_probe_success("provider-a", "key", "model", 103)
-        .expect("successful recovery");
-    let after_recovery = store
-        .record_provider_failure_action("provider-a", "key", "model", &action, 104)
-        .expect("failure after recovery");
-    assert!(!after_recovery.available);
-    assert!(after_recovery.cooldown);
-    assert_eq!(after_recovery.cooldown_until_ms, Some(5_104));
-    let after_repeat = store
-        .record_provider_failure_action("provider-a", "key", "model", &action, 105)
-        .expect("repeated failure after recovery");
-    assert_eq!(
-        after_repeat.cooldown_until_ms,
-        Some(5_105),
-        "the first recovery probe remains due after five seconds"
-    );
-    // A real success resets the streak and its failure-rate window.
+    let permit = store
+        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key"), Some("model"), expiry)
+        .unwrap()
+        .expect("recovery must be due after the minimum");
+    assert!(store
+        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, expiry)
+        .unwrap());
+    let next_block = reach_threshold(&store, ("provider-a", "key", "model"), expiry + 1, &action);
     assert_eq!(
         store
-            .cooldown_entries(105)
-            .iter()
-            .find(|entry| entry.provider_id == "provider-a")
-            .and_then(|entry| entry.until_ms),
-        Some(10_105),
-        "second consecutive failure uses its business ladder step after the reset"
+            .provider_cooldown_probe_next_deadline_ms("provider-a", Some("key"), Some("model"))
+            .unwrap(),
+        Some(next_block + 5_000),
+        "the new business streak starts a fresh probe cadence"
     );
 }
 
@@ -184,8 +173,12 @@ fn successful_recovery_restarts_repeat_admission_and_five_second_probe() {
 fn session_business_success_does_not_remove_pending_probe() {
     let store = V3ProviderHealthStore::default();
     let session = scope();
-    fail(&store, 1);
-    fail(&store, 2);
+    reach_threshold(
+        &store,
+        ("provider-a", "key-a", "model-a"),
+        1,
+        &V3ProviderFailureAction::recoverable("provider_http_500"),
+    );
     store
         .record_provider_success_in_session(
             &session,
@@ -210,25 +203,24 @@ fn session_business_success_does_not_remove_pending_probe() {
 }
 
 #[test]
-fn model_success_recovers_exact_model_without_clearing_sibling_probe() {
+fn qualifying_probe_recovers_exact_model_without_clearing_sibling_probe() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, 1);
-    fail(&store, 2);
-    for now in [1, 2] {
-        store
-            .record_provider_failure_in_session(
-                &scope(),
-                "provider-a",
-                Some("key-a"),
-                Some("model-c"),
-                Some("provider_error"),
-                now,
-            )
-            .unwrap();
-    }
+    let action = V3ProviderFailureAction::recoverable("provider_http_500");
+    let blocked_at = reach_threshold(&store, ("provider-a", "key-a", "model-a"), 1, &action);
+    reach_threshold(&store, ("provider-a", "key-a", "model-c"), 1, &action);
+    let expiry = blocked_at + MINIMUM;
+    let permit = store
+        .acquire_provider_cooldown_probe_if_due(
+            "provider-a",
+            Some("key-a"),
+            Some("model-a"),
+            expiry,
+        )
+        .unwrap()
+        .expect("first model probe due");
     store
-        .record_provider_key_success("provider-a", "key-a", "model-a", 30_003)
-        .expect("model success");
+        .complete_provider_cooldown_probe_success_with_permit(&permit, expiry)
+        .unwrap();
     assert!(
         store
             .availability_for_session(
@@ -236,23 +228,23 @@ fn model_success_recovers_exact_model_without_clearing_sibling_probe() {
                 "provider-a",
                 Some("key-a"),
                 Some("model-b"),
-                30_004,
+                expiry,
             )
             .available,
         "a failed model cannot block a sibling model"
     );
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(5_003).unwrap(),
+        store.provider_cooldown_probe_keys_due(expiry).unwrap(),
         vec![(
             "provider-a".into(),
             Some("key-a".into()),
             Some("model-c".into())
         )],
-        "matching business success clears only model-a, not the sibling probe"
+        "the qualifying probe clears exactly its model"
     );
     assert!(
         store
-            .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, 30004)
+            .scheduling_projection("provider-a", "key-a", "model-a", 1, 1, expiry)
             .unwrap()
             .available
     );
@@ -261,59 +253,31 @@ fn model_success_recovers_exact_model_without_clearing_sibling_probe() {
 #[test]
 fn model_success_resets_exact_identity_consecutive_failures() {
     let store = V3ProviderHealthStore::default();
-    let policy = routecodex_v3_provider_responses::V3ProviderFailurePolicy {
-        failure_threshold: 3,
-        cooldown_ms: 900_000,
-        probe_interval_ms: 5_000,
-        max_probe_interval_ms: None,
-        long_probe_backoff: false,
-        until_restart: false,
-        advisory_probe: false,
-        cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
-    };
-    for now_ms in [1, 2] {
+    let action = V3ProviderFailureAction::recoverable("provider_http_500");
+    for now_ms in 1..THRESHOLD {
         store
-            .record_provider_failure_in_session_with_policy(
-                &scope(),
-                "provider-a",
-                Some("key-a"),
-                Some("model-a"),
-                Some("provider_error"),
-                None,
-                now_ms,
-                Some(policy),
-            )
+            .record_provider_failure_action("provider-a", "key-a", "model-a", &action, now_ms)
             .unwrap();
     }
     store
-        .record_provider_key_success("provider-a", "key-a", "model-a", 3)
+        .record_provider_key_success("provider-a", "key-a", "model-a", THRESHOLD)
         .expect("model success");
-    store
-        .record_provider_failure_in_session_with_policy(
-            &scope(),
-            "provider-a",
-            Some("key-a"),
-            Some("model-a"),
-            Some("provider_error"),
-            None,
-            4,
-            Some(policy),
-        )
+    let next = store
+        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, THRESHOLD + 1)
         .unwrap();
-    assert!(
-        store
-            .availability_for_session(&scope(), "provider-a", Some("key-a"), Some("model-a"), 5,)
-            .available,
-        "a success between failures must reset the exact identity failure streak"
-    );
+    assert!(next.available);
+    assert_eq!(next.failure_streak, 1);
 }
 
 #[test]
 fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, 1);
-    fail(&store, 2);
-    let mut now_ms = 2;
+    let mut now_ms = reach_threshold(
+        &store,
+        ("provider-a", "key-a", "model-a"),
+        1,
+        &V3ProviderFailureAction::recoverable("provider_http_500"),
+    );
     for (index, delta) in LADDER_MS.iter().enumerate() {
         let due_at = now_ms + delta;
         assert!(
@@ -357,21 +321,9 @@ fn probe_failures_cap_all_provider_errors_at_thirty_minutes() {
 #[test]
 fn long_policy_probe_is_capped_at_thirty_minutes() {
     let store = V3ProviderHealthStore::default();
-    let action = V3ProviderFailureAction {
-        class_code: "provider_http_503".to_string(),
-        failure_fingerprint: None,
-        recovery: V3ProviderRecoveryKind::RecoverableCounted,
-        scope: V3ProviderHealthScope::GlobalProviderKey,
-        score_delta_milli: -5,
-        failure_threshold: 1,
-        cooldown_ms: 60 * 60_000,
-        long_probe_backoff: true,
-        advisory_probe: false,
-    };
-    store
-        .record_provider_failure_action("provider-a", "key-a", "model-a", &action, 1)
-        .unwrap();
-    let mut now_ms = 1;
+    let mut action = V3ProviderFailureAction::recoverable("provider_http_503");
+    action.long_probe_backoff = true;
+    let mut now_ms = reach_threshold(&store, ("provider-a", "key-a", "model-a"), 1, &action);
     for delta in LONG_LADDER_MS {
         let due_at = now_ms + delta;
         assert_eq!(
@@ -417,19 +369,12 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "a", pr
     )
     .expect("compile fast-recovery manifest");
     let store = V3ProviderHealthStore::from_manifest_without_persistence(&manifest);
-    for now_ms in 1..=3 {
-        store
-            .record_provider_failure_in_session(
-                &scope(),
-                "p",
-                Some("a"),
-                Some("m"),
-                Some("provider_error"),
-                now_ms,
-            )
-            .unwrap();
-    }
-    let mut now_ms = 3;
+    let mut now_ms = reach_threshold(
+        &store,
+        ("p", "a", "m"),
+        1,
+        &V3ProviderFailureAction::recoverable("provider_http_500"),
+    );
     for (step, delta) in [5_000, 10_000, 30_000, 60_000, 120_000, 120_000, 120_000]
         .into_iter()
         .enumerate()

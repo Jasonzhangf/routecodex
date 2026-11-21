@@ -1595,9 +1595,9 @@ path = [
                 response_failure,
                 providers: Mutex::new(Vec::new()),
             };
-            // The declared wait_retry/cooldown policy steps must not delay or
-            // cool the request. The healthy alternative still proves that the
-            // failed provider is skipped immediately during reselection.
+            // Declared delay and auth-wide cooldown steps must not intercept
+            // the request. Real non-final HTTP errors are observed against
+            // the exact identity while incomplete response failures are held.
             {
                 let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
                     &manifest,
@@ -1634,12 +1634,13 @@ path = [
                     "a declared provider policy may not wait the request: scoped={scoped}, group={group}, response={response_failure}"
                 );
                 assert_eq!(
-                    event.failure_count, 0,
-                    "a request-path failure must stay request-local: scoped={scoped}, group={group}, response={response_failure}"
+                    event.failure_count, u32::from(!response_failure),
+                    "only the actual HTTP 503 counts here: scoped={scoped}, group={group}, response={response_failure}"
                 );
                 assert_eq!(
-                    event.health_state, "pre_cool_observation",
-                    "a request-path failure must stay health-neutral: scoped={scoped}, group={group}, response={response_failure}"
+                    event.health_state,
+                    if response_failure { "pre_cool_observation" } else { "provider_failure_observed" },
+                    "retain the exact observation owner: scoped={scoped}, group={group}, response={response_failure}"
                 );
                 assert!(
                     event.cooldown_until_ms.is_none(),
@@ -2328,7 +2329,7 @@ async fn responses_relay_provider_duplicate_tool_identity_preserves_single_candi
 }
 
 #[tokio::test]
-async fn responses_relay_shared_health_skips_pre_cool_provider_on_subsequent_requests() {
+async fn responses_relay_shared_health_keeps_subthreshold_provider_routable() {
     let server_id = "responses_shared_health";
     let manifest = responses_reselect_manifest_for_scope(server_id);
     let provider_health =
@@ -2377,18 +2378,33 @@ async fn responses_relay_shared_health_skips_pre_cool_provider_on_subsequent_req
     let first_event = &observability.provider_failure_events[0];
     assert_eq!(first_event.wait_ms, None);
     assert_eq!(
-        first_event.failure_count, 0,
-        "a shared health handle must not count a request-local failure: {first_event:#?}"
+        first_event.failure_count, 1,
+        "the non-final Provider HTTP error must count exactly once: {first_event:#?}"
     );
     assert!(
         provider_health
             .store()
             .availability("limited", Some("key1"), Some("gpt-5.5"), u64::MAX)
             .available,
-        "a request-local failure must leave the exact identity routable"
+        "the first recoverable failure must leave the exact identity routable"
     );
-    assert_eq!(first_event.health_state, "pre_cool_observation");
+    assert_eq!(first_event.health_state, "provider_failure_observed");
     assert!(first_event.cooldown_until_ms.is_none());
+
+    let observation = provider_health
+        .store()
+        .acquire_provider_precool_probe_for_interface(
+            "limited",
+            "default",
+            Some("key1"),
+            Some("gpt-5.5"),
+        )
+        .unwrap()
+        .expect("a routable identity can have a background reachability probe");
+    provider_health
+        .store()
+        .complete_provider_precool_observation_with_permit(&observation)
+        .unwrap();
 
     for turn in 1..=3 {
         let output = execute_v3_responses_relay_runtime_with_health_and_retry_policy(
@@ -2416,26 +2432,20 @@ async fn responses_relay_shared_health_skips_pre_cool_provider_on_subsequent_req
             .observability
             .as_ref()
             .expect("later request run must keep route observability");
-        // The first failure creates a pre-cool observation, not a cooldown. It
-        // still changes candidate visibility, so later requests skip that exact
-        // identity without a network failure or request-path wait.
-        assert!(!output.node_trace.contains(&"V3TargetLocalReselected"));
+        assert!(output.node_trace.contains(&"V3TargetLocalReselected"));
         assert_eq!(
             observability.provider_key.as_deref(),
             Some("minimax:default:key1:MiniMax-M3")
         );
-        assert_eq!(observability.attempts, Some(1));
-        assert!(observability
-            .unavailable_candidates
-            .iter()
-            .any(|candidate| candidate.starts_with(
-                "limited:default:key1:gpt-5.5:availability(provider_pre_cool_observation"
-            )));
-        assert!(
-            observability.provider_failure_events.is_empty(),
-            "the pre-cool identity must be skipped before network send; observed events: {:?}",
-            observability.provider_failure_events
+        let events = &observability.provider_failure_events;
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].failure_count,
+            turn + 1,
+            "reachability alone must preserve the business failure streak"
         );
+        assert_eq!(events[0].wait_ms, None);
+        assert!(events[0].cooldown_until_ms.is_none());
     }
 
     let captures = transport.captures.lock().unwrap();
@@ -2443,10 +2453,7 @@ async fn responses_relay_shared_health_skips_pre_cool_provider_on_subsequent_req
         .iter()
         .map(|(provider_id, _)| provider_id.as_str())
         .collect();
-    assert_eq!(
-        provider_sequence,
-        vec!["limited", "minimax", "minimax", "minimax", "minimax"]
-    );
+    assert_eq!(provider_sequence, ["limited", "minimax"].repeat(4));
 }
 
 #[tokio::test]

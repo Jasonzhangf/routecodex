@@ -19,7 +19,7 @@ fn unavailable_protocol_admission_fixture(
     let now =
         crate::provider_failure_runtime_policy::v3_relay_provider_policy_now_epoch_ms().unwrap();
     for provider in ["first", "second"] {
-        for offset in 0..3 {
+        for _ in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
             health
                 .record_provider_failure_record(
                     &session,
@@ -27,7 +27,7 @@ fn unavailable_protocol_admission_fixture(
                     Some("key"),
                     Some("test"),
                     Some("controlled unavailable identity"),
-                    now + offset,
+                    now,
                 )
                 .unwrap();
         }
@@ -65,7 +65,10 @@ async fn protocol_admission_returns_immediately_when_all_candidates_unavailable(
         result.is_ok(),
         "protocol admission must return before waiting for recovery"
     );
-    assert!(result.unwrap().is_err(), "selection must expose typed unavailability without a Deferred wait");
+    assert!(
+        result.unwrap().is_err(),
+        "selection must expose typed unavailability without a Deferred wait"
+    );
 }
 
 #[async_trait]
@@ -118,7 +121,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
     .expect("initial protocol plan");
     assert_eq!(plan.decision.target.candidate.provider_id, "first");
 
-    for offset in 0..3 {
+    for _ in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
         provider_health
             .record_provider_failure_record(
                 &session,
@@ -126,7 +129,7 @@ async fn direct_kernel_revalidates_preplanned_target_against_session_alternative
                 Some("key"),
                 Some("test"),
                 Some("controlled pre-send session cooldown"),
-                now + offset + 1,
+                now + 1,
             )
             .expect("pre-send session failure");
     }

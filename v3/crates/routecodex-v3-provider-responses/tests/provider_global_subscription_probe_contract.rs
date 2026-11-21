@@ -18,10 +18,22 @@ fn fail(store: &V3ProviderHealthStore, session_id: &str, model_id: &str, now_ms:
         .unwrap();
 }
 
+fn fail_n(
+    store: &V3ProviderHealthStore,
+    session_id: &str,
+    model_id: &str,
+    start_ms: u64,
+    count: usize,
+) {
+    for offset in 0..count {
+        fail(store, session_id, model_id, start_ms + offset as u64);
+    }
+}
+
 #[test]
 fn default_failure_blocks_exact_key_model_across_sessions() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 10);
+    fail_n(&store, "session-a", "model-a", 10, 10);
     assert!(
         !store
             .availability_for_session(
@@ -33,7 +45,7 @@ fn default_failure_blocks_exact_key_model_across_sessions() {
             )
             .available
     );
-    fail(&store, "session-b", "model-a", 11);
+    fail_n(&store, "session-b", "model-a", 30, 10);
     assert!(
         !store
             .availability_for_session(
@@ -79,9 +91,8 @@ fn different_keys_and_models_do_not_combine() {
 #[test]
 fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
-    let first_due = 5_002;
+    fail_n(&store, "session-a", "model-a", 1, 10);
+    let first_due = 5_010;
     assert!(store
         .provider_cooldown_probe_keys_due(first_due - 1)
         .unwrap()
@@ -109,7 +120,7 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
         .unwrap()
         .unwrap();
     store
-        .complete_provider_cooldown_probe_success_with_permit(&permit, first_due + 1)
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 3_600_010)
         .unwrap();
     assert!(
         store
@@ -118,7 +129,7 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
                 "provider-a",
                 Some("key-a"),
                 Some("model-a"),
-                first_due + 2,
+                3_600_010,
             )
             .available
     );
@@ -127,8 +138,7 @@ fn cooldown_expiry_only_makes_probe_due_and_success_probe_restores() {
 #[test]
 fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
+    fail_n(&store, "session-a", "model-a", 1, 10);
     let due = store
         .cooldown_entries(2)
         .into_iter()
@@ -177,15 +187,15 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
         }
     }
     store
-        .complete_provider_cooldown_probe_success_with_permit(&permit.unwrap(), due + 60_001)
+        .complete_provider_cooldown_probe_success_with_permit(&permit.unwrap(), 3_600_010)
         .unwrap();
     assert!(store
-        .cooldown_entries(due + 60_002)
+        .cooldown_entries(3_600_011)
         .iter()
         .all(|entry| entry.kind != "probe"));
     assert!(
         store
-            .scheduling_projection_for_key("provider-a", "key-a", "model-a", 1, 1, due + 60_002)
+            .scheduling_projection_for_key("provider-a", "key-a", "model-a", 1, 1, 3_600_011)
             .unwrap()
             .available
     );
@@ -194,9 +204,8 @@ fn due_and_inflight_probes_stay_in_pool_until_exact_success() {
 #[test]
 fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
-    let first_due = 5_002;
+    fail_n(&store, "session-a", "model-a", 1, 10);
+    let first_due = 5_010;
     let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()
@@ -227,18 +236,23 @@ fn failed_probe_keeps_blocked_and_stretches_next_deadline() {
         1
     );
     let blocked = store
-        .cooldown_entries(first_due + 10_000 - 1)
+        .cooldown_entries(3_600_009)
         .into_iter()
         .find(|entry| entry.provider_id == "provider-a")
         .expect("provider-a cooldown entry");
-    assert_eq!(blocked.until_ms, None);
+    assert_eq!(blocked.until_ms, Some(3_600_010));
+    let waiting = store
+        .cooldown_entries(3_600_020)
+        .into_iter()
+        .find(|entry| entry.provider_id == "provider-a")
+        .expect("provider-a cooldown entry");
+    assert_eq!(waiting.until_ms, None);
 }
 
 #[test]
 fn probe_acquisition_is_single_flight() {
     let store = V3ProviderHealthStore::default();
-    fail(&store, "session-a", "model-a", 1);
-    fail(&store, "session-a", "model-a", 2);
+    fail_n(&store, "session-a", "model-a", 1, 10);
     assert!(store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("model-a"))
         .unwrap()

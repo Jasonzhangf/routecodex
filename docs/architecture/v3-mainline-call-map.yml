@@ -3534,7 +3534,8 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
     semantic_contract:
-    - Completed refill rounds contribute ordered return-only trace and typed failure observations, including normal, terminal, replacement-failure and Direct-to-Relay exits. The outer Server remains the sole final publisher; these vectors never seed later-round accounting, recovery policy, failure sinks or provider health.
+    - Completed Direct refill rounds contribute ordered return-only trace and typed failure observations, including normal, terminal, replacement-failure and Direct-to-Relay exits. The outer Server remains the sole final publisher; these vectors never seed later-round accounting, recovery policy, failure sinks or provider health.
+    - The opaque request execution control carries failed Provider identities into the next refill's Target plan, independently of returned diagnostics.
     status: anchored
   - step_id: v3-responses-observation-closeout-01
     from_node: V3RuntimeProviderFailureObservation
@@ -5623,6 +5624,9 @@ chains:
     status: anchored
     edge_kind: aggregate_entry_edge
     owner_feature_id: v3.hub_relay_runtime_closeout
+    semantic_contract:
+    - The Relay refill executor carries failed Provider identities into the next Target plan through opaque request execution control.
+    - The Relay refill executor returns all completed rounds' traces and typed failure observations in order through normal, terminal and Relay-to-Direct exits. Server publishes those observations once at closeout.
     resource_flow:
       consumes:
       - v3.request.normal_payload
@@ -7641,13 +7645,13 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
 
-  - step_id: v3-provider-global-probe-429-status
-    from_node: V3ProviderGlobalProbeExecution
+  - step_id: v3-provider-real-http-failure-observed
+    from_node: V3Error03TargetLocalAction
     to_node: V3ProviderHealthStore
-    caller_symbol: complete_v3_provider_health_probe
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_probe_lifecycle.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
+    caller_symbol: V3ProviderFailureRuntimeHealth::defer_provider_health_action
+    caller_file: v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
+    callee_symbol: V3ProviderHealthStore::record_provider_failure_action_for_interface
+    callee_file: v3/crates/routecodex-v3-provider-responses/src/health.rs
     status: anchored
     owner_feature_id: v3.provider_global_subscription_probe
     resource_flow:
@@ -7656,8 +7660,8 @@ chains:
       side_channel_reads: [v3.provider.global_subscription_health]
       side_channel_writes: [v3.provider.global_subscription_health]
     semantic_contract:
-      - Real probe HTTP failures pass Error01 and Error02 before the exact current acquisition updates the existing429 episode; transport without an HTTP head cannot qualify as non429.
-      - Non429 HTTP failure atomically releases only429 restriction while retaining failure exclusion; no intermediate healthy projection is published.
+      - A genuine Provider HTTP failure with a typed health action updates its complete identity once through the listener health owner.
+      - Health observation does not decide request exhaustion or authorize projection of an earlier Provider error.
 
   - step_id: v3-provider-precool-join-existing-cooldown
     from_node: V3ProviderGlobalProbeExecution
@@ -7675,23 +7679,6 @@ chains:
       side_channel_writes: [v3.provider.global_subscription_health]
     semantic_contract:
       - A late in-flight business failure retains its independent typed Error event and is counted once under the existing exact cooldown owner in the same Store lock; it never creates a second unacquirable precool lane or races a completed recovery into a new cooldown.
-
-  - step_id: v3-provider-precool-probe-429-status
-    from_node: V3ProviderGlobalProbeExecution
-    to_node: V3ProviderHealthStore
-    caller_symbol: V3ProviderFailureRuntimeHealth::complete_precool_observation
-    caller_file: v3/crates/routecodex-v3-runtime/src/provider_precool_hold.rs
-    callee_symbol: V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit
-    callee_file: v3/crates/routecodex-v3-provider-responses/src/health/rate_limit.rs
-    status: anchored
-    owner_feature_id: v3.provider_global_subscription_probe
-    resource_flow:
-      consumes: [v3.error.source, v3.provider.global_subscription_health]
-      produces: [v3.provider.global_subscription_health]
-      side_channel_reads: [v3.provider.global_subscription_health]
-      side_channel_writes: [v3.provider.global_subscription_health]
-    semantic_contract:
-      - A real429 observation does not commit the pending non429 business failures; when its quota window cools the identity, the existing cooldown owner takes over the same physical identity.
 
   - step_id: v3-provider-global-probe-02-failure
     from_node: V3ProviderGlobalProbeExecution
@@ -9440,6 +9427,9 @@ chains:
       produces: []
       side_channel_reads: []
       side_channel_writes: []
+    semantic_contract:
+    - A Direct refill keeps the failed provider identities in the same request execution control and supplies them to the next round before Target selection.
+    - A successful prior-round identity can still serve a refill. A failed identity remains excluded for the request.
   execution_disposition:
     resource: v3.operation_runner.execution_disposition
     producer: V3OperationRunnerGovernResponse

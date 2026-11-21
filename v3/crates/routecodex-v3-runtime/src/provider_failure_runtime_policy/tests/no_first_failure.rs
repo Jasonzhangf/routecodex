@@ -46,10 +46,10 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
             100,
         )
         .unwrap();
-    // The early 429 window is capacity backpressure. The returned record must
-    // stay neutral with streak 0 instead of counting a provider failure.
-    assert_eq!(first_failure.failure_count, 0);
-    assert_eq!(first_failure.state, "rate_limit_capacity_wait");
+    // A real 429 contributes to the shared recoverable streak, but the first
+    // observation remains below the ten-failure cooldown threshold.
+    assert_eq!(first_failure.failure_count, 1);
+    assert_eq!(first_failure.state, "provider_failure_observed");
     assert_eq!(first_failure.cooldown_until_ms, None);
     let recovered_by_business = health
         .store()
@@ -57,7 +57,7 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
         .unwrap();
     assert_eq!(
         recovered_by_business.failure_streak, 0,
-        "429 backpressure must not leave a provider failure streak"
+        "business success must reset the recoverable provider failure streak"
     );
     health
         .store()
@@ -81,10 +81,11 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
             )
             .unwrap();
         assert_eq!(
-            record.failure_count, 0,
-            "repeated 429s inside the early window must keep streak 0"
+            record.failure_count,
+            (now_ms - 101) as u32,
+            "business success must restart the recoverable streak at one"
         );
-        assert_eq!(record.state, "rate_limit_capacity_wait");
+        assert_eq!(record.state, "provider_failure_observed");
         assert_eq!(
             health
                 .availability("first", Some("key1"), Some("gpt-test"), now_ms)
@@ -118,7 +119,7 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
             .provider_cooldown_probe_keys_due(u64::MAX)
             .unwrap()
             .is_empty(),
-        "429 backpressure must not create a cooldown probe"
+        "sub-threshold 429s must not create a cooldown probe"
     );
     assert!(
         health
@@ -140,10 +141,10 @@ fn early_429_retains_diagnostics_without_health_cooldown() {
             5_106,
         )
         .unwrap();
-    // This source wrapper retains request/session error bookkeeping even though
-    // provider health stays routable and never needs a recovery probe.
-    assert_eq!(after_recovery.failure_count, 0);
-    assert_eq!(after_recovery.state, "rate_limit_capacity_wait");
+    // This source wrapper retains request/session error bookkeeping while the
+    // shared recoverable streak remains below the cooldown threshold.
+    assert_eq!(after_recovery.failure_count, 4);
+    assert_eq!(after_recovery.state, "provider_failure_observed");
     assert!(
         health
             .availability("first", Some("key1"), Some("gpt-test"), 5_106)
@@ -245,7 +246,7 @@ fn no_first_failure_irrecoverable_quota_and_auth_keep_immediate_boundary() {
 }
 
 #[test]
-fn early_quota_429_stays_health_neutral_before_and_after_business_success() {
+fn typed_quota_failure_cools_immediately_and_success_cannot_reopen_it() {
     let store = V3ProviderHealthStore::default();
     let failure = source(
         V3ErrorSourceKind::ProviderFailure,
@@ -261,22 +262,20 @@ fn early_quota_429_stays_health_neutral_before_and_after_business_success() {
     );
     assert_eq!(
         action.recovery,
-        V3ProviderRecoveryKind::HealthNeutralTransient
+        V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
     );
-    assert_eq!(action.failure_threshold, 0);
-    for time in 100..103 {
-        assert_eq!(
-            store
-                .record_provider_failure_action("p", "k", "m", &action, time)
-                .unwrap()
-                .cooldown,
-            false
-        );
-    }
+    assert_eq!(action.failure_threshold, 1);
+    let failure = store
+        .record_provider_failure_action("p", "k", "m", &action, 100)
+        .unwrap();
+    assert!(failure.cooldown);
+    assert_eq!(failure.cooldown_until_ms, Some(3_600_100));
+    let success = store
+        .record_provider_key_success("p", "k", "m", 106)
+        .unwrap();
+    assert_eq!(success.failure_streak, 0);
     assert!(
-        store
-            .record_provider_key_success("p", "k", "m", 106)
-            .unwrap()
-            .available
+        !success.available,
+        "matching success must not shorten the committed one-hour minimum"
     );
 }

@@ -1,14 +1,26 @@
 //! Real public-entry regression: transport-busy early identities cannot starve a free fifth.
 #[path = "support/fa22072_probe_fairness_fixture.rs"]
 mod fixture;
+#[path = "support/fa22072_test_home.rs"]
+mod test_home;
 
-use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use tokio::{
     net::TcpListener,
     time::{timeout, Duration},
 };
+
+#[derive(Debug)]
+struct ObservationClock(std::sync::atomic::AtomicU64);
+
+static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
+
+impl routecodex_v3_runtime::V3ProviderHealthObservationClock for ObservationClock {
+    fn now_epoch_ms(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
 
 async fn pool(client: &reqwest::Client, base: &str) -> Value {
     client
@@ -63,15 +75,24 @@ async fn fail(port: u16, id: &str, index: usize) {
 
 #[tokio::test]
 async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held() {
-    // The canonical parent runner isolates runtime HOME. No private health or
-    // concurrency controller mutation is used by this fixture.
+    let (_home, _lock) = TEST_LOCK.lock().await;
     std::env::set_var("FA22072_FAIRNESS_KEY", "fairness-fixture-key");
     let (peer, upstream_base, upstream) = fixture::peer().await;
     let reserved = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = reserved.local_addr().unwrap().port();
     drop(reserved);
     let (manifest, ids) = fixture::manifest(&upstream_base, port);
-    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = std::sync::Arc::new(ObservationClock(std::sync::atomic::AtomicU64::new(now)));
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        manifest,
+        clock.clone(),
+    )
+    .await
+    .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::new();
     timeout(
@@ -107,6 +128,7 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     // Each identity commits its threshold-one cooldown only after its precool
     // observation completes. Wait for its first failed recovery probe so the
     // probe-lane counter is settled before the four sibling transports start.
+    clock.0.store(now + 60_000, Ordering::SeqCst);
     let mut observed = Value::Null;
     let mut settled = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -156,6 +178,7 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
         .forget();
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     peer.ready.store(true, Ordering::SeqCst);
+    clock.0.store(now + 120_000, Ordering::SeqCst);
     // The request path carries no capacity permit, so the four cooled siblings
     // are admitted on the probe lane itself instead of being denied by a held
     // business transport. Wait until they really occupy the lane.
@@ -216,46 +239,29 @@ async fn fifth_due_identity_recovers_while_four_sibling_transports_remain_held()
     peer.fifth_release.add_permits(1);
     timeout(Duration::from_secs(2), async {
         loop {
-            if exact(&pool(&client, &base).await, &ids[4]).is_none() {
+            if exact(&pool(&client, &base).await, &ids[4])
+                .is_some_and(|entry| entry["state"] == "blocked")
+            {
                 break;
             }
             tokio::task::yield_now().await;
         }
     })
     .await
-    .expect("actual 2xx restores exact fifth identity");
-    let response = client.post(format!("{base}/v1/chat/completions")).json(&json!({"model":format!("{}.recovery", ids[4]),"messages":[{"role":"user","content":"fifth complete"}],"stream":false})).send().await.unwrap();
-    assert_eq!(response.status(), 200);
-    assert_eq!(
-        response.json::<Value>().await.unwrap(),
-        fixture::business("recovery")
-    );
+    .expect("an early 2xx probe must preserve the one-hour exact-identity cooldown");
+    let early_pool = pool(&client, &base).await;
+    let early =
+        exact(&early_pool, &ids[4]).expect("the fifth identity remains cooled before expiry");
+    let deadline = early["until_ms"]
+        .as_u64()
+        .expect("the fifth identity must expose its committed deadline");
+    assert_eq!(deadline, now + 3_600_000);
+
+    // Post-expiry matching-probe recovery is covered by the managed manual
+    // public fixture. This fairness case ends after proving that the early
+    // successful fifth probe cannot bypass the committed one-hour minimum.
     assert!(holders.iter().all(|holder| !holder.is_finished()));
     assert_eq!(peer.holders_release.available_permits(), 0);
-    let after = pool(&client, &base).await;
-    // Exactly one sibling probe was released to free a lane slot. Its own
-    // probe-lane counter may advance; the other three stay unchanged.
-    let mut advanced = 0;
-    for id in &ids[..4] {
-        let held = exact(&during, id).unwrap()["failure_count"]
-            .as_u64()
-            .unwrap();
-        let now = exact(&after, id).unwrap()["failure_count"]
-            .as_u64()
-            .unwrap();
-        if now == held + 1 {
-            advanced += 1;
-        } else {
-            assert_eq!(
-                now, held,
-                "only the released sibling probe's own probe-lane counter may advance"
-            );
-        }
-    }
-    assert_eq!(
-        advanced, 1,
-        "one released sibling probe, one probe-lane step"
-    );
     peer.holders_release.add_permits(4);
     peer.sibling_probes_release.add_permits(4);
     for holder in holders {

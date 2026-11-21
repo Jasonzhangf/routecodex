@@ -23,7 +23,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -46,6 +46,41 @@ const KEY_ENV: &str = "V3_D9FD985_KEY";
 const SIBLING_ENV: &str = "V3_D9FD985_SIBLING";
 const KEY_SECRET: &str = "d9fd985-key-secret";
 const SIBLING_SECRET: &str = "d9fd985-sibling-secret";
+
+#[derive(Debug)]
+struct ObservationClock(AtomicU64);
+
+impl routecodex_v3_runtime::V3ProviderHealthObservationClock for ObservationClock {
+    fn now_epoch_ms(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+fn observation_clock() -> (Arc<ObservationClock>, u64) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time")
+        .as_millis() as u64;
+    (Arc::new(ObservationClock(AtomicU64::new(now_ms))), now_ms)
+}
+
+fn advance_clock_after_manual_probe(clock: &ObservationClock) {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time")
+        .as_millis() as u64
+        + 1_000;
+    let mut current = clock.0.load(Ordering::SeqCst);
+    while current < now_ms {
+        match clock
+            .0
+            .compare_exchange(current, now_ms, Ordering::SeqCst, Ordering::SeqCst)
+        {
+            Ok(_) => break,
+            Err(observed) => current = observed,
+        }
+    }
+}
 
 struct TestHomeGuard {
     previous: Option<OsString>,
@@ -313,7 +348,7 @@ endpoints = ["responses"]
 [providers.primary]
 default_model = "main"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{KEY_ENV}" }}, {{ alias = "sibling", env = "{SIBLING_ENV}" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 60000, probe_interval_ms = 60000 }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 3600000, probe_interval_ms = 5000 }}
 [providers.primary.models.main]
 wire_name = "main"
 [providers.primary.models.other]
@@ -507,12 +542,11 @@ async fn id9_failure_cooldown_is_port_local() {
     let _sibling = EnvGuard::set(SIBLING_ENV, SIBLING_SECRET);
     let (primary_base, primary, primary_shutdown) = start_upstream(true, false).await;
     let (spare_base, spare, spare_shutdown) = start_upstream(false, true).await;
-    let handle = spawn_v3_server_aggregate(port_manifest(
-        free_port(),
-        free_port(),
-        &primary_base,
-        &spare_base,
-    ))
+    let (clock, now_ms) = observation_clock();
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        port_manifest(free_port(), free_port(), &primary_base, &spare_base),
+        clock,
+    )
     .await
     .expect("spawn two-listener aggregate");
     let base_a = listener_base(&handle, "a");
@@ -525,19 +559,25 @@ async fn id9_failure_cooldown_is_port_local() {
         .build()
         .expect("build isolation client");
 
-    for index in 0..3 {
+    for index in 0..10 {
         let (status, body) =
             business_request(&client, &base_a, "client-test", &format!("port-a-{index}")).await;
         assert_eq!(status, 200, "spare candidate must answer: {body}");
         assert!(body.contains("upstream-ok"), "{body}");
+        let entries = cooldown_entries(&client, &base_a).await;
+        assert_eq!(
+            exact_primary_entry(&entries).is_some(),
+            index == 9,
+            "only the tenth non-final failure cools the exact identity: {entries:?}"
+        );
     }
     assert!(
-        primary.business_count() > 0,
-        "the primary candidate must receive the failed attempts"
+        primary.business_count() == 10,
+        "the primary candidate must receive all ten pre-cool failures"
     );
     assert!(
-        spare.business_count() > 0,
-        "the spare candidate must answer the switched attempts"
+        spare.business_count() == 10,
+        "the spare candidate must answer each switched request"
     );
 
     wait_until("port A exact cooldown", || async {
@@ -546,6 +586,11 @@ async fn id9_failure_cooldown_is_port_local() {
     .await;
     let entries_a = cooldown_entries(&client, &base_a).await;
     let exact = exact_primary_entry(&entries_a).expect("port A exact cooldown must exist");
+    assert_eq!(
+        exact["until_ms"],
+        now_ms + 3_600_000,
+        "the tenth non-final failure starts the one-hour cooldown"
+    );
     assert!(
         matches!(
             exact["state"].as_str(),
@@ -614,27 +659,41 @@ async fn id9_probe_outcomes_are_port_local() {
     let _sibling = EnvGuard::set(SIBLING_ENV, SIBLING_SECRET);
     let (primary_base, primary, primary_shutdown) = start_upstream(true, false).await;
     let (spare_base, _spare, spare_shutdown) = start_upstream(false, true).await;
-    let handle = spawn_v3_server_aggregate(port_manifest(
-        free_port(),
-        free_port(),
-        &primary_base,
-        &spare_base,
-    ))
+    let (clock, _) = observation_clock();
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        port_manifest(free_port(), free_port(), &primary_base, &spare_base),
+        clock.clone(),
+    )
     .await
     .expect("spawn two-listener aggregate");
     let base_a = listener_base(&handle, "a");
     let base_b = listener_base(&handle, "b");
     let client = reqwest::Client::new();
 
-    // Drive one real primary failure on port A. The spare candidate answers,
-    // so this failure is allowed to cool the exact primary identity on port A.
-    let (status, body) = business_request(&client, &base_a, "client-test", "probe-a-failure").await;
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("upstream-ok"), "{body}");
+    // Ten real non-final failures cool only this exact primary identity.
+    for index in 0..10 {
+        let (status, body) = business_request(
+            &client,
+            &base_a,
+            "client-test",
+            &format!("probe-a-failure-{index}"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("upstream-ok"), "{body}");
+        assert_eq!(
+            exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some(),
+            index == 9,
+            "port A commits only at the tenth non-final failure"
+        );
+    }
     wait_until("port A exact cooldown", || async {
         exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some()
     })
     .await;
+    let cooldown_until = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
+        .and_then(|entry| entry["until_ms"].as_u64())
+        .expect("port A one-hour deadline");
     assert!(
         exact_primary_entry(&cooldown_entries(&client, &base_b).await).is_none(),
         "port B must not inherit port A failure state: {:?}",
@@ -643,6 +702,7 @@ async fn id9_probe_outcomes_are_port_local() {
 
     let probes_before_manual = primary.probe_count();
     trigger_probe(&client, &base_a).await;
+    advance_clock_after_manual_probe(&clock);
     wait_until("port A failed probe", || async {
         primary.probe_count() > probes_before_manual
     })
@@ -665,6 +725,24 @@ async fn id9_probe_outcomes_are_port_local() {
         primary.probe_count() > probes_before_recovery
     })
     .await;
+    wait_until("early successful probe settles", || async {
+        exact_primary_entry(&cooldown_entries(&client, &base_a).await)
+            .is_some_and(|entry| entry["state"] != "probing")
+    })
+    .await;
+    let early_entries = cooldown_entries(&client, &base_a).await;
+    let early_entry = exact_primary_entry(&early_entries)
+        .expect("an early successful probe cannot clear the committed cooldown");
+    assert_eq!(early_entry["until_ms"], cooldown_until);
+
+    clock.0.store(cooldown_until, Ordering::SeqCst);
+    let probes_before_expired_recovery = primary.probe_count();
+    trigger_probe(&client, &base_a).await;
+    advance_clock_after_manual_probe(&clock);
+    wait_until("expired port A recovery probe", || async {
+        primary.probe_count() > probes_before_expired_recovery
+    })
+    .await;
     wait_until("port A recovery", || async {
         exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none()
     })
@@ -676,8 +754,8 @@ async fn id9_probe_outcomes_are_port_local() {
     );
     assert_eq!(
         primary.probe_count(),
-        probes_before_manual + 2,
-        "each manual trigger must create exactly one probe on its own port"
+        probes_before_manual + 3,
+        "each manual trigger must create one exact-identity probe"
     );
 
     handle.shutdown().await;
@@ -693,28 +771,44 @@ async fn id9_exact_identity_isolation() {
     let _sibling = EnvGuard::set(SIBLING_ENV, SIBLING_SECRET);
     let (primary_base, primary, primary_shutdown) = start_upstream(true, false).await;
     let (spare_base, _spare, spare_shutdown) = start_upstream(false, true).await;
-    let handle = spawn_v3_server_aggregate(port_manifest(
-        free_port(),
-        free_port(),
-        &primary_base,
-        &spare_base,
-    ))
+    let (clock, now_ms) = observation_clock();
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        port_manifest(free_port(), free_port(), &primary_base, &spare_base),
+        clock,
+    )
     .await
     .expect("spawn two-listener aggregate");
     let base_a = listener_base(&handle, "a");
     let base_b = listener_base(&handle, "b");
     let client = reqwest::Client::new();
 
-    let (status, body) =
-        business_request(&client, &base_a, "client-test", "exact-primary-failure").await;
-    assert_eq!(status, 200, "{body}");
-    assert!(body.contains("upstream-ok"), "{body}");
+    for index in 0..10 {
+        let (status, body) = business_request(
+            &client,
+            &base_a,
+            "client-test",
+            &format!("exact-primary-failure-{index}"),
+        )
+        .await;
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("upstream-ok"), "{body}");
+        assert_eq!(
+            exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some(),
+            index == 9,
+            "only ten non-final failures cool the complete identity"
+        );
+    }
     wait_until("exact primary cooldown", || async {
         exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_some()
     })
     .await;
     let entries_a = cooldown_entries(&client, &base_a).await;
     assert_eq!(entries_a.len(), 1, "{entries_a:?}");
+    assert_eq!(
+        entries_a[0]["until_ms"],
+        now_ms + 3_600_000,
+        "only the tenth non-final failure starts the one-hour cooldown"
+    );
     assert!(
         matches!(
             entries_a[0]["state"].as_str(),
@@ -913,10 +1007,14 @@ async fn persistence_rebuild(explicit_override: bool) {
     let port_a = free_port();
     let port_b = free_port();
     let manifest = port_manifest(port_a, port_b, &primary_base, &spare_base);
+    let (clock, _) = observation_clock();
 
-    let first = spawn_v3_server_aggregate(manifest.clone())
-        .await
-        .expect("spawn first two-listener aggregate");
+    let first = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        manifest.clone(),
+        clock.clone(),
+    )
+    .await
+    .expect("spawn first two-listener aggregate");
     let base_a = listener_base(&first, "a");
     let base_b = listener_base(&first, "b");
     let client = reqwest::Client::builder()
@@ -938,7 +1036,7 @@ async fn persistence_rebuild(explicit_override: bool) {
         "the unowned legacy file must be preserved unchanged"
     );
 
-    add_probe_cooldown(&client, &base_a, 600_000).await;
+    add_probe_cooldown(&client, &base_a, 3_600_000).await;
     assert!(
         cooldown_entries(&client, &base_b).await.is_empty(),
         "port A operator cooldown must not appear in port B"
@@ -953,9 +1051,12 @@ async fn persistence_rebuild(explicit_override: bool) {
         "multi-listener persistence must create per-port state files: {scoped_files:?}"
     );
 
-    let second = spawn_v3_server_aggregate(manifest.clone())
-        .await
-        .expect("rebuild two-listener aggregate");
+    let second = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        manifest.clone(),
+        clock.clone(),
+    )
+    .await
+    .expect("rebuild two-listener aggregate");
     let base_a = listener_base(&second, "a");
     let base_b = listener_base(&second, "b");
     let entries_a = cooldown_entries(&client, &base_a).await;
@@ -985,9 +1086,15 @@ async fn persistence_rebuild(explicit_override: bool) {
     // The next rebuild lets port A run its own recovery probe. Only port A
     // owns the restored record, so only port A may clear it.
     primary.probe_success.store(true, Ordering::SeqCst);
-    let third = spawn_v3_server_aggregate(manifest)
-        .await
-        .expect("rebuild two-listener aggregate for recovery");
+    let recovery_deadline = exact_primary_entry(&entries_a)
+        .and_then(|entry| entry["until_ms"].as_u64())
+        .expect("restored cooldown deadline");
+    clock.0.store(recovery_deadline, Ordering::SeqCst);
+    let third = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        manifest, clock,
+    )
+    .await
+    .expect("rebuild two-listener aggregate for recovery");
     let base_a = listener_base(&third, "a");
     let base_b = listener_base(&third, "b");
     let probes_before_recovery = primary.probe_count();
@@ -1028,20 +1135,19 @@ async fn id9_lifecycle_releases_all_port_owners() {
     let (primary_base, primary, primary_shutdown) = start_upstream(false, true).await;
     let (spare_base, _spare, spare_shutdown) = start_upstream(false, true).await;
     primary.hold_probe.store(true, Ordering::SeqCst);
-    let handle = spawn_v3_server_aggregate(port_manifest(
-        free_port(),
-        free_port(),
-        &primary_base,
-        &spare_base,
-    ))
+    let (clock, _) = observation_clock();
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        port_manifest(free_port(), free_port(), &primary_base, &spare_base),
+        clock.clone(),
+    )
     .await
     .expect("spawn two-listener aggregate");
     let base_a = listener_base(&handle, "a");
     let base_b = listener_base(&handle, "b");
     let client = reqwest::Client::new();
 
-    add_probe_cooldown(&client, &base_a, 600_000).await;
-    add_probe_cooldown(&client, &base_b, 600_000).await;
+    add_probe_cooldown(&client, &base_a, 3_600_000).await;
+    add_probe_cooldown(&client, &base_b, 3_600_000).await;
     let original_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
         .expect("port A original cooldown")
         .clone();
@@ -1051,6 +1157,7 @@ async fn id9_lifecycle_releases_all_port_owners() {
 
     trigger_probe(&client, &base_a).await;
     trigger_probe(&client, &base_b).await;
+    advance_clock_after_manual_probe(&clock);
     timeout(
         Duration::from_secs(4),
         primary.probe_entered.acquire_many(2),
@@ -1109,6 +1216,12 @@ async fn id9_lifecycle_releases_all_port_owners() {
         4,
         "rollback must resume exactly one probe per port, not duplicate owners"
     );
+    let deadline_a = exact_primary_entry(&cooldown_entries(&client, &base_a).await)
+        .and_then(|entry| entry["until_ms"].as_u64())
+        .expect("port A cooldown deadline");
+    let deadline_b = exact_primary_entry(&cooldown_entries(&client, &base_b).await)
+        .and_then(|entry| entry["until_ms"].as_u64())
+        .expect("port B cooldown deadline");
 
     for base in [&base_a, &base_b] {
         let (status, body) =
@@ -1117,6 +1230,7 @@ async fn id9_lifecycle_releases_all_port_owners() {
         assert!(body.contains("upstream-ok"), "{body}");
     }
 
+    clock.0.store(deadline_a.max(deadline_b), Ordering::SeqCst);
     primary.probe_release.add_permits(64);
     wait_until("both restored probes recover", || async {
         exact_primary_entry(&cooldown_entries(&client, &base_a).await).is_none()

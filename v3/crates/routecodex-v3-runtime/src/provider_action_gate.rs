@@ -273,13 +273,6 @@ pub(crate) struct V3ProviderActionPermit {
     armed: bool,
 }
 
-#[derive(Debug)]
-pub(crate) enum V3ExactRateLimitAdmission {
-    Unrestricted,
-    Admitted(V3ProviderActionPermit),
-    Blocked(V3Error05RecoveryAdmissionWitness),
-}
-
 impl Drop for V3ProviderActionPermit {
     fn drop(&mut self) {
         if !self.armed {
@@ -311,50 +304,6 @@ impl V3ProviderActionGate {
             generation: state.generation,
             armed: true,
         }))
-    }
-
-    /// Read and reserve this identity in one transaction. Other identities and
-    /// healthy traffic never enter this lane's waiter queue.
-    pub(crate) fn try_admit_exact_rate_limit(
-        &self,
-        scope: &V3ProviderActionProviderScope,
-    ) -> Result<V3ExactRateLimitAdmission, String> {
-        let mut states = self.lock_states()?;
-        let Some((key, state)) = states.iter_mut().find(|(key, _)| {
-            key.provider_scope == *scope && key.normalized_error_family == "provider_http_429"
-        }) else {
-            return Ok(V3ExactRateLimitAdmission::Unrestricted);
-        };
-        let now = Instant::now();
-        if now < state.next_admission_at || state.admitted_generation.is_some() {
-            return Ok(V3ExactRateLimitAdmission::Blocked(
-                key.recovery_witness(state.generation)?,
-            ));
-        }
-        state.admitted_generation = Some(state.generation);
-        state.updated_at = now;
-        Ok(V3ExactRateLimitAdmission::Admitted(
-            V3ProviderActionPermit {
-                gate: self.clone(),
-                key: key.clone(),
-                generation: state.generation,
-                armed: true,
-            },
-        ))
-    }
-
-    pub(crate) fn exact_rate_limit_is_blocked(
-        &self,
-        scope: &V3ProviderActionProviderScope,
-    ) -> Result<bool, String> {
-        let states = self.lock_states()?;
-        let Some((_key, state)) = states.iter().find(|(key, _)| {
-            key.provider_scope == *scope && key.normalized_error_family == "provider_http_429"
-        }) else {
-            return Ok(false);
-        };
-        let now = Instant::now();
-        Ok(now < state.next_admission_at || state.admitted_generation.is_some())
     }
 
     pub fn process_shared() -> Self {
@@ -1004,58 +953,6 @@ fn required_scope_part(value: String, field: &str) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn issue44cc3af_exact_due_admission_is_atomic_and_other_identity_is_free() {
-        let session = V3ProviderFailureSessionScope::new("server", "route", "session").unwrap();
-        let key = V3ProviderActionGateKey::new(&session, "provider:key:model", "provider_http_429")
-            .unwrap();
-        let other =
-            V3ProviderActionGateKey::new(&session, "provider:other:model", "provider_http_429")
-                .unwrap();
-        let gate = V3ProviderActionGate::default();
-        gate.record_failure(&key).unwrap();
-        assert!(matches!(
-            gate.try_admit_exact_rate_limit(&key.provider_scope)
-                .unwrap(),
-            V3ExactRateLimitAdmission::Blocked(_)
-        ));
-        assert!(matches!(
-            gate.try_admit_exact_rate_limit(&other.provider_scope)
-                .unwrap(),
-            V3ExactRateLimitAdmission::Unrestricted
-        ));
-        gate.lock_states()
-            .unwrap()
-            .get_mut(&key)
-            .unwrap()
-            .next_admission_at = Instant::now();
-        let V3ExactRateLimitAdmission::Admitted(permit) = gate
-            .try_admit_exact_rate_limit(&key.provider_scope)
-            .unwrap()
-        else {
-            panic!("due identity must admit one attempt")
-        };
-        assert!(matches!(
-            gate.try_admit_exact_rate_limit(&key.provider_scope)
-                .unwrap(),
-            V3ExactRateLimitAdmission::Blocked(_)
-        ));
-        drop(permit);
-        let V3ExactRateLimitAdmission::Admitted(permit) = gate
-            .try_admit_exact_rate_limit(&key.provider_scope)
-            .unwrap()
-        else {
-            panic!("cancellation must release the due identity without new backoff")
-        };
-        gate.record_provider_success(&key.provider_scope).unwrap();
-        assert!(matches!(
-            gate.try_admit_exact_rate_limit(&key.provider_scope)
-                .unwrap(),
-            V3ExactRateLimitAdmission::Unrestricted
-        ));
-        drop(permit);
-    }
-
     #[tokio::test]
     async fn issue44cc3af_matching_success_releases_429_waiters_without_sustained_delay() {
         let session = V3ProviderFailureSessionScope::new("server", "route", "session").unwrap();
@@ -1076,11 +973,6 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             V3ProviderActionRecoveryTransition::Consumed(_)
-        ));
-        assert!(matches!(
-            gate.try_admit_exact_rate_limit(&key.provider_scope)
-                .unwrap(),
-            V3ExactRateLimitAdmission::Unrestricted
         ));
     }
 

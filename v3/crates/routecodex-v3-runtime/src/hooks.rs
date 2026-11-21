@@ -1211,7 +1211,15 @@ pub(crate) fn build_v3_provider_error_source(
 
 pub(crate) fn source_code_for_external_provider_error(error: &V3ProviderError) -> String {
     match error {
-        V3ProviderError::HttpStatus { response } => format!("provider_http_{}", response.status),
+        V3ProviderError::HttpStatus { response } => {
+            serde_json::from_slice::<serde_json::Value>(&response.body)
+                .ok()
+                .and_then(|body| {
+                    routecodex_v3_error::v3_irrecoverable_provider_http_body_code(&body)
+                        .map(str::to_owned)
+                })
+                .unwrap_or_else(|| format!("provider_http_{}", response.status))
+        }
         V3ProviderError::Transport { .. }
         | V3ProviderError::WebSocketTransport { .. }
         | V3ProviderError::ResponseBodyUnreadable { .. } => "provider_transport_error".to_string(),

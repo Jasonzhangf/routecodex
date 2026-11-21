@@ -9,7 +9,7 @@ use axum::{
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_server::spawn_v3_server_aggregate;
 use serde_json::{json, Value};
-use std::{net::TcpListener, sync::Arc, time::Duration};
+use std::{ffi::OsString, fs, net::TcpListener, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
@@ -17,6 +17,60 @@ mod hub_v1_fixture;
 use hub_v1_fixture::{hub_v1_server_execution, hub_v1_test_declaration};
 
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
+
+struct TestHomeGuard {
+    previous: Option<OsString>,
+    path: PathBuf,
+}
+
+impl TestHomeGuard {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "rcc-provider-multi-interface-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&path).expect("create isolated test home");
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &path);
+        Self { previous, path }
+    }
+}
+
+impl Drop for TestHomeGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(previous) => std::env::set_var("HOME", previous),
+            None => std::env::remove_var("HOME"),
+        }
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+struct EnvGuard {
+    name: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvGuard {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(name);
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(previous) => std::env::set_var(self.name, previous),
+            None => std::env::remove_var(self.name),
+        }
+    }
+}
 
 #[derive(Debug)]
 struct ProviderCapture {
@@ -242,7 +296,8 @@ async fn next_provider_capture(
 #[tokio::test]
 async fn responses_entry_routes_pinned_interfaces_to_independent_endpoints() {
     let _guard = TEST_LOCK.lock().await;
-    std::env::set_var("V3_MULTI_INTERFACE_KEY", "controlled-multi-secret");
+    let _home = TestHomeGuard::new();
+    let _key = EnvGuard::set("V3_MULTI_INTERFACE_KEY", "controlled-multi-secret");
 
     let responses_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let responses_addr = responses_listener.local_addr().unwrap();
@@ -388,13 +443,13 @@ async fn responses_entry_routes_pinned_interfaces_to_independent_endpoints() {
     handle.shutdown().await;
     responses_shutdown_tx.send(()).unwrap();
     chat_shutdown_tx.send(()).unwrap();
-    std::env::remove_var("V3_MULTI_INTERFACE_KEY");
 }
 
 #[tokio::test]
 async fn responses_entry_reselects_sibling_interface_and_preserves_sibling_health() {
     let _guard = TEST_LOCK.lock().await;
-    std::env::set_var(
+    let _home = TestHomeGuard::new();
+    let _key = EnvGuard::set(
         "V3_MULTI_INTERFACE_FAILURE_KEY",
         "controlled-multi-failure-secret",
     );
@@ -472,9 +527,73 @@ async fn responses_entry_reselects_sibling_interface_and_preserves_sibling_healt
         .unwrap();
     assert_eq!(success_capture.path, "/v1/responses");
 
-    let pool_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    let pool: Value = loop {
-        let pool: Value = client
+    let pool: Value = client
+        .get(format!(
+            "http://{}/_routecodex/health/cooldown-pool",
+            handle.listeners[0].addr
+        ))
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let entries = pool["entries"].as_array().expect("cooldown entries");
+    assert!(
+        entries.is_empty(),
+        "one recoverable failure stays below the ten-failure threshold: {entries:?}"
+    );
+
+    for index in 1..10 {
+        let stream = index == 1;
+        let response = client
+            .post(&endpoint)
+            .json(&json!({
+                "model": "direct-client",
+                "input": format!("controlled failure {index}"),
+                "stream": stream
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        if stream {
+            assert!(
+                response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| value.starts_with("text/event-stream")),
+                "streaming requests must keep the SSE client boundary"
+            );
+        }
+        let body = response.text().await.unwrap();
+        assert!(
+            body.contains("direct-interface"),
+            "the sibling interface must preserve business output: {body}"
+        );
+
+        let failure_capture = tokio::time::timeout(Duration::from_secs(2), failure_rx.recv())
+            .await
+            .expect("a separate request may retry a still-eligible interface")
+            .unwrap();
+        assert_eq!(failure_capture.path, "/v1/responses");
+        assert_eq!(
+            failure_capture.body["input"][0]["content"][0]["text"],
+            format!("controlled failure {index}")
+        );
+        let success_capture = tokio::time::timeout(Duration::from_secs(2), success_rx.recv())
+            .await
+            .expect("the healthy sibling must serve each request")
+            .unwrap();
+        assert_eq!(success_capture.path, "/v1/responses");
+        assert!(
+            failure_rx.try_recv().is_err(),
+            "each request sends to the failed interface only once"
+        );
+
+        let pool = client
             .get(format!(
                 "http://{}/_routecodex/health/cooldown-pool",
                 handle.listeners[0].addr
@@ -482,83 +601,39 @@ async fn responses_entry_reselects_sibling_interface_and_preserves_sibling_healt
             .send()
             .await
             .unwrap()
-            .json()
+            .json::<Value>()
             .await
             .unwrap();
         let entries = pool["entries"].as_array().expect("cooldown entries");
-        if entries
-            .iter()
-            .any(|entry| entry["provider_id"] == "multi" && entry["interface_id"] == "failure")
-        {
-            break pool;
-        }
-        assert!(
-            tokio::time::Instant::now() < pool_deadline,
-            "the failed interface must be committed to the cooldown pool: {pool}"
+        assert_eq!(
+            entries
+                .iter()
+                .any(|entry| entry["provider_id"] == "multi" && entry["interface_id"] == "failure"),
+            index == 9,
+            "only the tenth non-final failure cools the exact interface: {pool}"
         );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    };
-    let entries = pool["entries"].as_array().expect("cooldown entries");
-    assert!(
-        entries
-            .iter()
-            .any(|entry| { entry["provider_id"] == "multi" && entry["interface_id"] == "failure" }),
-        "the failed interface must remain cooled: {entries:?}"
-    );
-    assert!(
-        entries.iter().all(|entry| {
-            !(entry["provider_id"] == "multi" && entry["interface_id"] == "success")
-        }),
-        "the successful sibling interface must not inherit the failure cooldown: {entries:?}"
-    );
-
-    let second_response = client
-        .post(&endpoint)
-        .json(&json!({
-            "model": "direct-client",
-            "input": "stay on healthy sibling",
-            "stream": true
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(second_response.status(), StatusCode::OK);
-    assert!(
-        second_response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("text/event-stream")),
-        "streaming requests must keep the SSE client boundary"
-    );
-    let second_body = second_response.text().await.unwrap();
-    assert!(
-        second_body.contains("direct-interface"),
-        "the SSE response must preserve sibling business output: {second_body}"
-    );
-    let second_success = tokio::time::timeout(Duration::from_secs(2), success_rx.recv())
-        .await
-        .expect("the healthy sibling must serve the second request")
-        .unwrap();
-    assert_eq!(second_success.path, "/v1/responses");
+        assert!(
+            entries.iter().all(|entry| {
+                !(entry["provider_id"] == "multi" && entry["interface_id"] == "success")
+            }),
+            "the successful sibling interface must not inherit failure health: {pool}"
+        );
+    }
     while let Ok(capture) = failure_rx.try_recv() {
         let is_probe = capture.body["input"][0]["content"][0]["text"] == "ping; reply pong";
-        assert!(
-            is_probe,
-            "the cooled sibling interface must not receive a second business request: {capture:?}"
-        );
+        assert!(is_probe, "unexpected business resend: {capture:?}");
     }
 
     handle.shutdown().await;
     failure_shutdown_tx.send(()).unwrap();
     success_shutdown_tx.send(()).unwrap();
-    std::env::remove_var("V3_MULTI_INTERFACE_FAILURE_KEY");
 }
 
 #[tokio::test]
 async fn responses_relay_keeps_business_output_under_http_200_provider_error_policy() {
     let _guard = TEST_LOCK.lock().await;
-    std::env::set_var("V3_MULTI_INTERFACE_POLICY_KEY", "controlled-policy-secret");
+    let _home = TestHomeGuard::new();
+    let _key = EnvGuard::set("V3_MULTI_INTERFACE_POLICY_KEY", "controlled-policy-secret");
 
     let chat_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let chat_addr = chat_listener.local_addr().unwrap();
@@ -657,13 +732,13 @@ async fn responses_relay_keeps_business_output_under_http_200_provider_error_pol
     handle.shutdown().await;
     chat_shutdown_tx.send(()).unwrap();
     sibling_shutdown_tx.send(()).unwrap();
-    std::env::remove_var("V3_MULTI_INTERFACE_POLICY_KEY");
 }
 
 #[tokio::test]
 async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse() {
     let _guard = TEST_LOCK.lock().await;
-    std::env::set_var("V3_MULTI_INTERFACE_KEY", "controlled-multi-secret");
+    let _home = TestHomeGuard::new();
+    let _key = EnvGuard::set("V3_MULTI_INTERFACE_KEY", "controlled-multi-secret");
 
     let responses_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let responses_addr = responses_listener.local_addr().unwrap();
@@ -982,7 +1057,6 @@ async fn responses_entry_preserves_interface_selected_tool_dispatch_json_and_sse
     handle.shutdown().await;
     responses_shutdown_tx.send(()).unwrap();
     chat_shutdown_tx.send(()).unwrap();
-    std::env::remove_var("V3_MULTI_INTERFACE_KEY");
 }
 
 fn free_port() -> u16 {
@@ -1086,7 +1160,7 @@ endpoints = ["responses"]
 [providers.multi]
 default_model = "wire-model"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_MULTI_INTERFACE_FAILURE_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 3600000 }}
 
 [providers.multi.models.wire-model]
 wire_name = "wire-model"
@@ -1148,7 +1222,7 @@ endpoints = ["responses"]
 [providers.multi]
 default_model = "wire-model"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_MULTI_INTERFACE_POLICY_KEY" }}] }}
-health = {{ enabled = true, failure_threshold = 1, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 3600000 }}
 
 [providers.multi.models.wire-model]
 wire_name = "wire-model"

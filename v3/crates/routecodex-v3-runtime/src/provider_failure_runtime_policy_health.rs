@@ -117,13 +117,16 @@ impl V3ProviderFailureRuntimeHealth {
         action: &V3ProviderFailureAction,
         now_ms: u64,
     ) -> Result<Option<V3ProviderKeyHealthProjection>, String> {
-        let rate_limit_observation = action.failure_fingerprint.as_ref()
+        let rate_limit_observation = action
+            .failure_fingerprint
+            .as_ref()
             .is_some_and(|fingerprint| fingerprint.http_status == 429);
         if matches!(
             action.recovery,
             V3ProviderRecoveryKind::NotProviderHealth
                 | V3ProviderRecoveryKind::HealthNeutralTransient
-        ) && !rate_limit_observation {
+        ) && !rate_limit_observation
+        {
             return Ok(None);
         }
         let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
@@ -321,11 +324,12 @@ impl V3ProviderFailureRuntimeHealth {
             None,
         )
         .map_err(|error| error.to_string())?;
-        let status = source
+        let provider_http_status = source
             .external_error
             .as_ref()
-            .and_then(|error| error.status)
-            .unwrap_or(0);
+            .filter(|error| error.kind == V3ExternalErrorKind::Provider)
+            .and_then(|error| error.status);
+        let status = provider_http_status.unwrap_or(0);
         let action = apply_v3_internal_provider_failure_policy(
             build_v3_provider_failure_action_from_v3_error_02(&classified),
             source.source_stage,
@@ -341,6 +345,7 @@ impl V3ProviderFailureRuntimeHealth {
             Some(&source.message),
             now_ms,
             &action,
+            (400..=599).contains(&status),
             None,
             0,
         )
@@ -544,15 +549,14 @@ impl V3ProviderFailureRuntimeHealth {
                     reason,
                     now_ms,
                     &failure_action,
+                    false,
                     Some(policy),
                     configured_retry_backoff_ms(matched_policy_directive, 0),
                 )
                 .map_err(Ok);
         }
-        // 统一错误模型：任何 provider 失败（含 400/invalid_request）都按
-        // internal 全局策略表盖章阈值后计入全局健康；连续达到阈值即进入
-        // 全局冷却，由后台探活或真实成功恢复。早期429只做精确身份容量回压；
-        // 持续429的minimum和probe-required由health Store唯一episode owner处理。
+        // This path handles policy input without a captured HTTP witness.
+        // Genuine wire failures use the original typed source.
         let action = apply_v3_internal_provider_failure_policy(
             build_v3_provider_failure_action_from_v3_error_02(&classified),
             source_stage,
@@ -568,6 +572,7 @@ impl V3ProviderFailureRuntimeHealth {
             reason,
             now_ms,
             &action,
+            false,
             None,
             configured_retry_backoff_ms(matched_policy_directive, 0),
         )
@@ -659,8 +664,7 @@ impl V3ProviderFailureRuntimeHealth {
         )?;
         self.action_gate
             .record_provider_success(&provider_scope.clone().rate_limit_global())?;
-        self.action_gate
-            .record_provider_success(&provider_scope)
+        self.action_gate.record_provider_success(&provider_scope)
     }
 
     /// 瞬态失败（SSE 流内/挂起）耗尽 3 次尝试后的 session 级短期绕行：
@@ -965,59 +969,6 @@ impl V3ProviderFailureRuntimeHealth {
             &source.code,
         )?;
         Ok(())
-    }
-
-    pub(crate) fn try_admit_candidate_rate_limit(
-        &self,
-        failure_session_scope: &V3ProviderFailureSessionScope,
-        candidate: &V3TargetCandidate,
-    ) -> Result<crate::provider_action_gate::V3ExactRateLimitAdmission, String> {
-        if let Some(action) =
-            self.precool
-                .lock()
-                .map_err(|error| error.to_string())?
-                .get(&precool_identity(
-                    &candidate.provider_id,
-                    &candidate.interface_id,
-                    Some(&candidate.auth_alias),
-                    Some(&candidate.model_id),
-                ))
-        {
-            return Ok(
-                crate::provider_action_gate::V3ExactRateLimitAdmission::Blocked(
-                    action.ticket.recovery_witness()?,
-                ),
-            );
-        }
-        let scope = V3ProviderActionProviderScope::new(
-            failure_session_scope,
-            v3_relay_provider_candidate_key_parts(
-                &candidate.provider_id,
-                Some(&candidate.interface_id),
-                Some(&candidate.auth_alias),
-                Some(&candidate.model_id),
-            ),
-        )?;
-        self.action_gate
-            .try_admit_exact_rate_limit(&scope.rate_limit_global())
-    }
-
-    pub(crate) fn rate_limit_visibility_blocked(
-        &self,
-        provider_id: &str,
-        interface_id: &str,
-        auth_alias: Option<&str>,
-        model_id: Option<&str>,
-    ) -> Result<bool, String> {
-        let scope = V3ProviderActionProviderScope::rate_limit_identity(
-            v3_relay_provider_candidate_key_parts(
-                provider_id,
-                Some(interface_id),
-                auth_alias,
-                model_id,
-            ),
-        );
-        self.action_gate.exact_rate_limit_is_blocked(&scope)
     }
 
     pub(crate) fn store(&self) -> V3ProviderHealthStore {

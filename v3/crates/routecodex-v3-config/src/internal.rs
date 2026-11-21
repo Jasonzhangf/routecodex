@@ -32,7 +32,6 @@ struct InternalConfig {
     debug_samples: DebugSamples,
     #[serde(default)]
     error_handling: ErrorHandling,
-    rate_limit_recovery: V3InternalRateLimitRecoveryPolicy,
     #[serde(default)]
     observability: Observability,
     #[serde(default)]
@@ -102,18 +101,6 @@ pub struct V3InternalErrorHandlingPolicy {
     pub unrecoverable_failure_threshold: u32,
     pub unrecoverable_cooldown_ms: u64,
     pub unrecoverable_probe_interval_ms: u64,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct V3InternalRateLimitRecoveryPolicy {
-    pub observation_window_ms: u64,
-    pub cooldown_ms: u64,
-    pub probe_required_after_ms: u64,
-}
-
-pub fn v3_internal_rate_limit_recovery() -> &'static V3InternalRateLimitRecoveryPolicy {
-    &INTERNAL_CONFIG.rate_limit_recovery
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -561,8 +548,7 @@ mod tests {
     #[test]
     fn invalid_internal_assets_fail_fast() {
         fn parse(raw: &str) -> InternalConfig {
-            let required_control_tables = "\n[rate_limit_recovery]\nobservation_window_ms = 120000\ncooldown_ms = 1800000\nprobe_required_after_ms = 3600000\n";
-            toml::from_str(&format!("{raw}{required_control_tables}")).expect("syntactically valid")
+            toml::from_str(raw).expect("syntactically valid")
         }
         let missing_family = parse("[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");
         let missing_builtin_defaults = parse("[model_families.gpt]\nprefix = \"gpt-\"\n[builtin_catalog_models]\nids = [\"gpt-5.5\"]\n[hidden_models]\nexact = [\"gpt-5.6\"]\n");

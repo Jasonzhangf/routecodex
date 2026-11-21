@@ -41,14 +41,42 @@ fn finish_owned_probe(
     }
 }
 
+fn record_shared_failure(
+    store: &V3ProviderHealthStore,
+    session_id: &str,
+    now_ms: u64,
+) -> V3ProviderFailureRecord {
+    store
+        .record_provider_failure_in_session(
+            &session(session_id),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("controlled failure"),
+            now_ms,
+        )
+        .unwrap()
+}
+
 #[test]
 fn old_probe_outcomes_release_only_their_owner_and_preserve_stored_health() {
     for outcome in ["cancel", "success", "failure"] {
         let store = V3ProviderHealthStore::default();
-        let mut action = V3ProviderFailureAction::recoverable("transport");
-        action.failure_threshold = 1;
+        let action = V3ProviderFailureAction::recoverable("transport");
+        for now_ms in 100..109 {
+            store
+                .record_provider_failure_action_for_interface(
+                    "p",
+                    "alternate",
+                    "k",
+                    "m",
+                    &action,
+                    now_ms,
+                )
+                .unwrap();
+        }
         store
-            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 100)
+            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 109)
             .unwrap();
         let a = store
             .acquire_provider_cooldown_rescue_probe_for_interface(
@@ -282,29 +310,26 @@ targets = [{ kind = "provider_model", provider = "enabled", model = "m", key = "
 }
 
 #[test]
-fn three_failures_cool_the_same_provider_key_across_sessions() {
+fn ten_failures_cool_the_same_provider_key_across_sessions() {
     let store = V3ProviderHealthStore::default();
-    store
-        .record_provider_failure_in_session(
-            &session("session-a"),
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            Some("controlled failure"),
-            100,
-        )
-        .unwrap();
-    for now_ms in 101..103 {
-        store
-            .record_provider_failure_in_session(
-                &session("session-b"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                Some("controlled failure"),
-                now_ms,
-            )
-            .unwrap();
+    for index in 0..10 {
+        let record = record_shared_failure(
+            &store,
+            if index % 2 == 0 {
+                "session-a"
+            } else {
+                "session-b"
+            },
+            100 + index,
+        );
+        assert_eq!(record.failure_count, index as u32 + 1);
+        assert_eq!(
+            record.state,
+            if index == 9 { "cooldown" } else { "healthy" }
+        );
+        if index == 9 {
+            assert_eq!(record.cooldown_until_ms, Some(3_600_109));
+        }
     }
     assert!(
         !store
@@ -333,27 +358,16 @@ fn three_failures_cool_the_same_provider_key_across_sessions() {
 #[test]
 fn operator_can_remove_exact_identity_cooldown_and_probe_state() {
     let store = V3ProviderHealthStore::default();
-    store
-        .record_provider_failure_in_session(
-            &session("session-a"),
-            "provider-a",
-            Some("key-a"),
-            Some("gpt-5.5"),
-            Some("controlled failure"),
-            100,
-        )
-        .unwrap();
-    for now_ms in 101..103 {
-        store
-            .record_provider_failure_in_session(
-                &session("session-b"),
-                "provider-a",
-                Some("key-a"),
-                Some("gpt-5.5"),
-                Some("controlled failure"),
-                now_ms,
-            )
-            .unwrap();
+    for index in 0..10 {
+        record_shared_failure(
+            &store,
+            if index % 2 == 0 {
+                "session-a"
+            } else {
+                "session-b"
+            },
+            100 + index,
+        );
     }
     assert!(store
         .cooldown_entries(103)
@@ -371,6 +385,10 @@ fn operator_can_remove_exact_identity_cooldown_and_probe_state() {
             .availability("provider-a", Some("key-a"), Some("gpt-5.5"), 103)
             .available
     );
+    let next = record_shared_failure(&store, "session-a", 104);
+    assert_eq!(next.failure_count, 1);
+    assert_eq!(next.state, "healthy");
+    assert_eq!(next.cooldown_until_ms, None);
 }
 
 #[test]
@@ -424,7 +442,7 @@ fn failures_in_other_session_share_provider_key_cooldown() {
             100,
         )
         .unwrap();
-    assert_eq!(first.state, "cooldown");
+    assert_eq!(first.state, "healthy");
     assert_eq!(first.failure_count, 1);
     let repeated = store
         .record_provider_failure_in_session(
@@ -436,9 +454,9 @@ fn failures_in_other_session_share_provider_key_cooldown() {
             101,
         )
         .unwrap();
-    assert_eq!(repeated.state, "cooldown");
+    assert_eq!(repeated.state, "healthy");
     assert_eq!(repeated.failure_count, 2);
-    for (key, available) in [("key-a", false), ("key-b", true)] {
+    for (key, available) in [("key-a", true), ("key-b", true)] {
         assert_eq!(
             store
                 .availability_for_session(
@@ -458,14 +476,8 @@ fn failures_in_other_session_share_provider_key_cooldown() {
 fn provider_key_model_policy_isolates_models_across_sessions() {
     let store = V3ProviderHealthStore::default();
     let policy = V3ProviderFailurePolicy {
-        failure_threshold: 2,
-        cooldown_ms: 3_600_000,
-        probe_interval_ms: 5_000,
-        max_probe_interval_ms: None,
-        long_probe_backoff: false,
-        until_restart: false,
-        advisory_probe: false,
         cooldown_scope: V3ProviderFailureCooldownScope::ProviderKeyModel,
+        ..Default::default()
     };
     let first = store
         .record_provider_failure_in_session_with_policy(
@@ -492,10 +504,42 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
             Some(policy),
         )
         .unwrap();
-    assert_eq!(second.state, "cooldown");
-    assert_eq!(second.cooldown_until_ms, Some(5_101));
+    assert_eq!(second.state, "healthy");
+    assert_eq!(second.cooldown_until_ms, None);
+    for now_ms in 102..109 {
+        store
+            .record_provider_failure_in_session_with_policy(
+                &session(if now_ms % 2 == 0 {
+                    "session-a"
+                } else {
+                    "session-b"
+                }),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                Some("HTTP_401"),
+                None,
+                now_ms,
+                Some(policy),
+            )
+            .unwrap();
+    }
+    let tenth = store
+        .record_provider_failure_in_session_with_policy(
+            &session("session-b"),
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            Some("HTTP_401"),
+            None,
+            109,
+            Some(policy),
+        )
+        .unwrap();
+    assert_eq!(tenth.state, "cooldown");
+    assert_eq!(tenth.cooldown_until_ms, Some(3_600_109));
     assert_eq!(
-        store.provider_cooldown_probe_keys_due(5_101).unwrap(),
+        store.provider_cooldown_probe_keys_due(5_109).unwrap(),
         vec![(
             "provider-a".to_string(),
             Some("key-a".to_string()),
@@ -506,11 +550,11 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         store
             .provider_cooldown_probe_next_deadline_ms("provider-a", Some("key-a"), Some("gpt-5.5"),)
             .unwrap(),
-        Some(5_101),
+        Some(5_109),
         "a model candidate must resolve the auth-key probe deadline"
     );
     let permit = store
-        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("gpt-5.5"), 5_101)
+        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("gpt-5.5"), 5_109)
         .unwrap()
         .expect("a model candidate must acquire the due exact identity probe");
     assert_eq!(permit.auth_alias(), Some("key-a"));
@@ -527,7 +571,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
         "an in-flight probe must not expose its expired due time as a retry deadline"
     );
     store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 5_101)
+        .complete_provider_cooldown_probe_failure_with_permit(&permit, 5_109)
         .unwrap();
     assert!(
         !store
@@ -578,8 +622,17 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
             .available,
         "a sibling success must not reset the exact identity cooldown"
     );
+    let permit = store
+        .acquire_provider_cooldown_probe_if_due(
+            "provider-a",
+            Some("key-a"),
+            Some("gpt-5.5"),
+            3_610_109,
+        )
+        .unwrap()
+        .expect("a failed probe schedules the next exact-identity attempt");
     store
-        .complete_provider_cooldown_probe_success("provider-a", Some("key-a"), Some("gpt-5.5"))
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 3_610_109)
         .unwrap();
     assert!(
         store
@@ -588,7 +641,7 @@ fn provider_key_model_policy_isolates_models_across_sessions() {
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
-                180_102,
+                3_610_109,
             )
             .available
     );
@@ -738,6 +791,12 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
         "a real success must not recover provider cooldown without probe success"
     );
 
+    assert_eq!(
+        store
+            .provider_cooldown_probe_next_deadline_ms("provider-a", Some("key-a"), Some("gpt-5.5"),)
+            .unwrap(),
+        Some(5_100)
+    );
     let permit = store
         .acquire_provider_cooldown_probe("provider-a", Some("key-a"), Some("gpt-5.5"))
         .unwrap()
@@ -746,13 +805,32 @@ fn success_in_any_session_does_not_recover_provider_cooldown_without_probe() {
         .complete_provider_cooldown_probe_success_with_permit(&permit, 106)
         .unwrap();
     assert!(
+        !store
+            .availability_for_session(
+                &session("session-a"),
+                "provider-a",
+                Some("key-a"),
+                Some("gpt-5.5"),
+                106,
+            )
+            .available,
+        "a successful probe before the minimum cannot recover the identity"
+    );
+    let permit = store
+        .acquire_provider_cooldown_probe_if_due("provider-a", Some("key-a"), Some("gpt-5.5"), 5_100)
+        .unwrap()
+        .expect("minimum expiry must leave the current probe due");
+    store
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 5_100)
+        .unwrap();
+    assert!(
         store
             .availability_for_session(
                 &session("session-a"),
                 "provider-a",
                 Some("key-a"),
                 Some("gpt-5.5"),
-                107,
+                5_101,
             )
             .available,
         "successful probe must recover the exact provider key/model"
@@ -961,10 +1039,12 @@ fn cooldown_reupsert_preserves_in_flight_probe_single_flight() {
 #[test]
 fn failure_count_is_provider_key_scoped_for_default_policy() {
     let store = V3ProviderHealthStore::default();
-    for (index, session_id) in ["session-a", "session-b", "session-b"]
-        .into_iter()
-        .enumerate()
-    {
+    for index in 0..10 {
+        let session_id = if index % 2 == 0 {
+            "session-a"
+        } else {
+            "session-b"
+        };
         let record = store
             .record_provider_failure_in_session(
                 &session(session_id),
@@ -975,7 +1055,10 @@ fn failure_count_is_provider_key_scoped_for_default_policy() {
                 100,
             )
             .unwrap();
-        assert_eq!(record.state, "cooldown");
+        assert_eq!(
+            record.state,
+            if index == 9 { "cooldown" } else { "healthy" }
+        );
         assert_eq!(record.failure_count, index as u32 + 1);
     }
     for (key, available) in [("key-a", false), ("key-b", true)] {
@@ -1040,7 +1123,6 @@ fn real_success_resets_pre_cooldown_failure_window_for_declared_policy() {
         let store = V3ProviderHealthStore::default();
         let scope = session("success-reset");
         let policy = V3ProviderFailurePolicy {
-            failure_threshold: 3,
             cooldown_scope,
             ..Default::default()
         };
@@ -1076,11 +1158,13 @@ fn real_success_resets_pre_cooldown_failure_window_for_declared_policy() {
         );
         assert_eq!(after_success.state, "healthy");
         assert_eq!(record(104).state, "healthy");
-        assert_eq!(
-            record(105).state,
-            "cooldown",
-            "explicit threshold 3 must remain effective"
-        );
+        for now in 105..113 {
+            let record = record(now);
+            assert_eq!(
+                record.state,
+                if now == 112 { "cooldown" } else { "healthy" }
+            );
+        }
     }
 }
 

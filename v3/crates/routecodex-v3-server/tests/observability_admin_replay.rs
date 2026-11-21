@@ -174,7 +174,7 @@ type = "responses"
 base_url = "{upstream_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
-health = {{ enabled = true, failure_threshold = 2, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 3600000 }}
 responses = {{ process = "chat", streaming = "always" }}
 
 [providers.mock.models.test]
@@ -190,7 +190,7 @@ type = "responses"
 base_url = "{fallback_base_url}"
 default_model = "test"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
-health = {{ enabled = true, failure_threshold = 2, cooldown_ms = 5000 }}
+health = {{ enabled = true, failure_threshold = 10, cooldown_ms = 3600000 }}
 responses = {{ process = "chat", streaming = "always" }}
 [providers.fallback.models.test]
 wire_name = "wire-test"
@@ -294,60 +294,78 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     let client = reqwest::Client::new();
     let request_started_ms = now_epoch_ms();
-    let response = client
-        .post(format!("http://{server_addr}/v1/responses"))
-        .json(&json!({
-            "model": "client-test",
-            "input": "observability replay probe",
-            "stream": false
-        }))
-        .send()
-        .await;
+    let mut captured_first_record: Option<(String, Value)> = None;
+    for index in 0..10 {
+        let response = client
+            .post(format!("http://{server_addr}/v1/responses"))
+            .json(&json!({
+                "model": "client-test",
+                "input": format!("observability replay probe {index}"),
+                "stream": false
+            }))
+            .send()
+            .await
+            .expect("the final actual provider HTTP error must be delivered");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers()["openai-request-id"],
+            "upstream-obs-replay-1"
+        );
+        assert_eq!(
+            response.text().await.unwrap(),
+            r#"{"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}}"#
+        );
+        assert_eq!(
+            upstream_calls.load(Ordering::SeqCst),
+            index + 1,
+            "the non-final identity receives one request per independent client request"
+        );
+        assert_eq!(
+            fallback_calls.load(Ordering::SeqCst),
+            index + 1,
+            "the declared fallback is tried once after each non-final failure"
+        );
 
-    // 1. Each provider is contacted exactly once. The second provider supplies
-    //    the final actual status, headers, and body.
-    assert_eq!(upstream_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        fallback_calls.load(Ordering::SeqCst),
-        1,
-        "the eligible fallback really failed before exhaustion"
-    );
-    let response = response.expect("the final actual provider HTTP error must be delivered");
-    let client_status = response.status();
-    assert_eq!(client_status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(
-        response.headers()["openai-request-id"],
-        "upstream-obs-replay-1"
-    );
-    assert_eq!(
-        response.text().await.unwrap(),
-        r#"{"error":{"message":"controlled upstream unavailable","type":"server_error","code":"controlled_unavailable"}}"#
-    );
+        if index == 0 {
+            let list_url =
+                format!("http://{admin_addr}/api/observability/records?range=all&page_size=50");
+            let deadline = Instant::now() + Duration::from_secs(20);
+            loop {
+                let (status, body) = get_json(&client, &list_url).await;
+                assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
+                let records = body["records"].as_array().expect("records is an array");
+                let error_rows = records
+                    .iter()
+                    .filter(|row| row["result"] == "error")
+                    .count();
+                if let Some(row) = records.iter().find(|row| row["result"] == "error") {
+                    assert_eq!(
+                        error_rows,
+                        1,
+                        "capture the first request while it has the only top-level error row: {body}"
+                    );
+                    captured_first_record = Some((
+                        row["request_key"]
+                            .as_str()
+                            .expect("request_key")
+                            .to_string(),
+                        row.clone(),
+                    ));
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "no observability row appeared within 20s"
+                );
+                sleep(Duration::from_millis(50)).await;
+            }
+        }
+    }
+    let client_status = StatusCode::SERVICE_UNAVAILABLE;
 
     // 2. The runtime wrote a row for this request; read it back over HTTP.
-    let list_url = format!("http://{admin_addr}/api/observability/records?range=all&page_size=50");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let (request_key, list_row) = loop {
-        let (status, body) = get_json(&client, &list_url).await;
-        assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
-        if let Some(row) = body["records"]
-            .as_array()
-            .and_then(|rows| rows.iter().find(|row| row["result"] == "error"))
-        {
-            break (
-                row["request_key"]
-                    .as_str()
-                    .expect("request_key")
-                    .to_string(),
-                row.clone(),
-            );
-        }
-        assert!(
-            Instant::now() < deadline,
-            "no observability row appeared within 20s"
-        );
-        sleep(Duration::from_millis(50)).await;
-    };
+    let (request_key, list_row) = captured_first_record
+        .expect("the first replay request must produce the captured observability row");
     assert_eq!(list_row["result"], "error");
     assert_eq!(list_row["failed_attempts"], 2);
     // The merged row preserves the real provider status. The internal 502 stays
@@ -416,12 +434,16 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "provider_attempt_failure"
     );
     assert_eq!(
-        attempts[0]["meta"]["observed_error"]["health_state"], "pre_cool_observation",
-        "the first recoverable failure must be held before cooldown"
+        attempts[0]["meta"]["observed_error"]["health_state"], "provider_failure_observed",
+        "the first non-final failure is recorded without an early cooldown"
+    );
+    assert_eq!(
+        attempts[0]["meta"]["observed_error"]["failure_count"], 1,
+        "the first recoverable failure starts the exact identity streak"
     );
     assert!(
         attempts[0]["meta"]["observed_error"]["cooldown_until_ms"].is_null(),
-        "pre-cool observation must not write cooldown before the observation completes"
+        "one recoverable failure must not start the ten-failure cooldown"
     );
     assert_eq!(
         attempts[0]["meta"]["observed_error"]["chain"],
@@ -570,10 +592,10 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         "the failure evidence must include error.json"
     );
 
-    // 7. The failed pre-cool observation must commit the exact identity into
-    //    the real health owner after the asynchronous observation completes.
+    // 7. Ten counted non-final failures commit the primary. Final fallback
+    //    errors remain health-neutral.
     let pool_deadline = Instant::now() + Duration::from_secs(20);
-    let (_, pool, entries) = loop {
+    let (_, pool) = loop {
         let (pool_status, pool) = get_json(
             &client,
             &format!("http://{admin_addr}/api/observability/cooldown-pool"),
@@ -582,33 +604,37 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
         assert_eq!(pool_status, reqwest::StatusCode::OK);
         let entries = pool["listeners"][0]["entries"]
             .as_array()
-            .expect("cooldown pool entries")
-            .clone();
+            .expect("cooldown pool entries");
         if entries
             .iter()
             .any(|entry| entry["provider_id"] == "mock" && entry["state"] == "blocked")
         {
-            break (pool_status, pool, entries);
+            break (pool_status, pool);
         }
         assert!(
+            entries
+                .iter()
+                .all(|entry| entry["provider_id"] != "fallback"),
+            "the final identity must not enter cooldown while the primary settles: {pool}"
+        );
+        assert!(
             Instant::now() < pool_deadline,
-            "the failed observation must commit cooldown within 20s: {pool}"
+            "the primary must commit cooldown without cooling fallback: {pool}"
         );
         sleep(Duration::from_millis(50)).await;
     };
-    let first_cooled = entries
-        .iter()
-        .find(|entry| entry["provider_id"] == "mock")
-        .unwrap_or_else(|| panic!("the failed observation must cool its exact identity: {pool}"));
-    assert_eq!(first_cooled["auth_alias"], "key");
-    assert_eq!(first_cooled["model_id"], "test");
-    assert_eq!(first_cooled["state"], "blocked");
-    assert!(entries
-        .iter()
-        .all(|entry| entry["provider_id"] != "fallback"));
+    let entries = pool["listeners"][0]["entries"]
+        .as_array()
+        .expect("cooldown pool entries");
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["provider_id"] != "fallback"),
+        "the final identity must remain health-neutral after primary cooldown: {pool}"
+    );
 
-    // 8. A later business request cannot send another attempt to the cooled key.
-    let upstream_calls_after_observation = upstream_calls.load(Ordering::SeqCst);
+    // 8. A later request skips the cooled primary and reaches the final fallback.
+    let upstream_calls_after_cooldown = upstream_calls.load(Ordering::SeqCst);
     let response = client
         .post(format!("http://{server_addr}/v1/responses"))
         .json(&json!({
@@ -626,13 +652,13 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     );
     assert_eq!(
         upstream_calls.load(Ordering::SeqCst),
-        upstream_calls_after_observation,
-        "the cooled identity must receive no additional business attempt"
+        upstream_calls_after_cooldown,
+        "the cooled primary must receive no further business attempt"
     );
     assert_eq!(
         fallback_calls.load(Ordering::SeqCst),
-        2,
-        "the last candidate remains routable on the next request"
+        11,
+        "the final identity remains routable after its genuine error"
     );
 
     let (pool_status, pool) = get_json(
@@ -647,18 +673,22 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
     let cooled = entries
         .iter()
         .find(|entry| entry["provider_id"] == "mock")
-        .unwrap_or_else(|| {
-            panic!("provider mock must remain cooled after the blocked request: {pool}")
-        });
+        .unwrap_or_else(|| panic!("the tenth non-final failure must cool mock: {pool}"));
     assert_eq!(cooled["auth_alias"], "key");
     assert_eq!(cooled["model_id"], "test");
     assert_eq!(cooled["state"], "blocked");
     let pool_until_ms = cooled["until_ms"].as_u64().expect("until_ms");
     assert!(
         pool_until_ms > request_started_ms,
-        "the pool must still be cooling: {pool_until_ms} vs {request_started_ms}"
+        "the mock identity must still be cooling: {pool_until_ms} vs {request_started_ms}"
     );
     assert!(cooled["remaining_ms"].as_i64().unwrap() > 0);
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["provider_id"] != "fallback"),
+        "the final identity must never enter cooldown from its terminal errors: {pool}"
+    );
 
     // 9. Negative control: an unrelated request key is honestly absent.
     let (missing_status, missing) = get_json(
@@ -671,7 +701,7 @@ async fn failing_provider_request_leaves_real_typed_truth_cooldown_and_artifacts
 
     // Real captured values, so the evidence is inspectable without a debugger.
     eprintln!("[replay] request_key={request_key}");
-    eprintln!("[replay] client_status={client_status} primary_calls=1 fallback_calls=2");
+    eprintln!("[replay] client_status={client_status} primary_calls=10 fallback_calls=11");
     eprintln!("[replay] error_chain={chain}");
     eprintln!(
         "[replay] observed_error_source={} health_action={} error_class={}",
