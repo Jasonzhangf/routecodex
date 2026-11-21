@@ -49,8 +49,8 @@ flowchart LR
 - Per request: `required`
 - Process global: `required`
 - Residence/deadline: `required`
-- Provider stream deadline guard: `first_frame_only_then_rolling_idle`
-- Residence expiry: `typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty`
+- Provider stream deadline guard: `first_frame_then_rolling_idle_with_per_provider_timeout_on_responses_relay_reselection`
+- Residence expiry: `responses_relay_reselection_preserves_declared_untried_candidates`
 - Reserve before append/copy: `true`
 - Initial storage: `bounded_memory_only`
 - Disk spill: `forbidden`

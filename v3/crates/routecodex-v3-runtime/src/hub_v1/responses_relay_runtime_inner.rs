@@ -1110,13 +1110,17 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                             &selected_target_provider_id,
                         )
                         .map_err(V3ResponsesRelayRuntimeError::Target)?;
-                    let stream =
+                    // A successor owns a fresh Provider timeout even after local residence expires.
+                    let stream = if provider_send_attempts == 1 {
                         crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_attempt_deadline(
                             &input.request_id,
                             &selected_target_provider_id,
                             stream,
                             attempt_budget.residence_deadline(),
-                        );
+                        )
+                    } else {
+                        stream
+                    };
                     let stream_observation = V3RuntimeStreamObservation::default();
                     let stream = crate::hub_v1::relay_runtime_core::guard_v3_provider_sse_idle(
                         &input.request_id,
@@ -1163,14 +1167,11 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                     Some(selected_observability.clone()),
                                 )
                             );
-                            let residence_deadline_error = failure.policy_error_message.contains(
-                                "provider SSE attempt exceeded the request residence deadline",
-                            );
                             let terminal_failure = handle_error_before_resp03!(
                                 handle_v3_responses_relay_provider_failure(
                                     &failure_context,
                                     selected,
-                                    failure.clone(),
+                                    failure,
                                     &mut V3ResponsesRelayProviderRetryState {
                                         failed_candidates: &mut failed_candidates,
                                         same_candidate_retries: &mut same_candidate_retries,
@@ -1185,24 +1186,9 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                                 )
                                 .await
                             );
-                            let deadline_expired =
-                                attempt_budget.residence_deadline() <= std::time::Instant::now();
                             if let Some(failure) = terminal_failure {
                                 return Ok(provider_failure_output_with_observation(
                                     failure,
-                                    trace,
-                                    Some(stream_observation),
-                                ));
-                            }
-                            if residence_deadline_error || deadline_expired {
-                                return Ok(provider_failure_output_with_observation(
-                                    attach_v3_provider_failure_events_to_failure(
-                                        terminalize_v3_responses_relay_provider_failure(
-                                            failure,
-                                            last_external_http.clone(),
-                                        ),
-                                        &provider_failure_events,
-                                    ),
                                     trace,
                                     Some(stream_observation),
                                 ));

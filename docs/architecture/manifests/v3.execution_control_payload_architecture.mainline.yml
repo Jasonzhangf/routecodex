@@ -58,8 +58,8 @@ budget_contract:
   per_request: required
   process_global: required
   residence_or_deadline: required
-  provider_stream_deadline_guard: first_frame_only_then_rolling_idle
-  residence_expiry: typed_error_terminal_without_new_attempt_or_unstarted_provider_penalty
+  provider_stream_deadline_guard: first_frame_then_rolling_idle_with_per_provider_timeout_on_responses_relay_reselection
+  residence_expiry: responses_relay_reselection_preserves_declared_untried_candidates
   reserve_before_append_or_copy: true
   provider_attempt_and_client_replay_share_request_budget: true
   server_budget_construction: forbidden
@@ -81,7 +81,8 @@ failure_kinds:
 failure_attribution_contract:
   residence_deadline:
     waiting_for_first_frame: typed_provider_timeout_enters_Error_chain_before_client_commit
-    exhausted_request: typed_NoResponse_terminal_without_reselection
+    exhausted_request: typed_Error_disposition_after_declared_candidates_are_exhausted
+    eligible_untried_candidate: immediate_dispatch_with_its_own_provider_timeouts
     unstarted_candidate_health_mutation: forbidden
     local_resource_exhaustion_classification: forbidden
   responses_client_replay:

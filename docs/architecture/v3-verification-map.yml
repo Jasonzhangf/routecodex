@@ -3737,11 +3737,13 @@ features:
   - A failed pre-commit attempt is discarded before any replacement attempt is exposed.
   - A client cancellation while an attempt is pending aborts only the owned runtime work and releases the attempt reservation.
   - A provider SSE timeout recovers to a completed candidate while request residence remains.
-  - Residence expiry terminates through the typed Error chain without a store598 or client error commit; client cancellation releases activity without provider cooldown.
+  - issue0026412_relay_reselects_after_progressing_attempt_fails_past_residence proves that a real malformed Relay SSE attempt stays private and the next eligible candidate completes even after the original residence deadline. Both upstream attempt counts and the complete client terminal are checked.
+  - issue0026412_relay_successor_timeouts_keep_exact_error_and_recovery proves the successor's own first-frame and rolling idle timeouts, followed by one send to a declared remaining candidate or detectable transport failure on actual exhaustion.
+  - Genuine internal request exhaustion terminates through the typed Error chain without projecting a Provider error. Client cancellation releases activity without provider cooldown.
   required_negative:
   - OpenAI Chat [DONE] before terminal finish_reason enters the typed provider response error chain.
   - Semantic frames after [DONE] do not become a successful client stream.
-  - An expired request never dispatches or cools an unattempted backup candidate.
+  - A residence timeout or failed attempt never applies a cooldown to an unattempted backup candidate.
   required_gates:
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test strict_attempt_buffer_public -- --nocapture --test-threads=1
   - node v3/scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test client_cancel_terminal_public -- --nocapture --test-threads=1
@@ -3971,6 +3973,7 @@ features:
   required_positive:
   - Generic Direct registers the selected plan candidate count before transport admission or protocol handoff; cumulative attempts and the configured hard ceiling remain unchanged.
   - fa22072_direct_to_relay_business_continuation_public_entry requires JSON/SSE A1/B1; removing only Direct plan-budget registration reproduces A1/B0.
+  - A Responses Relay attempt failure preserves untried eligible candidates after the original residence deadline. The successor uses its own provider transport and stream timeouts.
   required_gates:
   - npm run verify:v3-execution-control-payload-architecture
   - npm run test:v3-execution-control-payload-architecture-red-fixtures
