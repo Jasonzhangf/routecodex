@@ -1157,7 +1157,11 @@ async fn complete_final_provider_http_502_preserves_status_and_body() {
             .await,
     )
     .await;
-    assert_eq!(consumed.status, Some(StatusCode::BAD_GATEWAY), "{consumed:?}");
+    assert_eq!(
+        consumed.status,
+        Some(StatusCode::BAD_GATEWAY),
+        "{consumed:?}"
+    );
     assert!(consumed.transport_error.is_none(), "{consumed:?}");
     assert_eq!(consumed.body, ERROR_BODY);
     let health: Value = client()
