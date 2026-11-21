@@ -294,20 +294,10 @@ impl V3AttemptBudget {
         )
     }
 
-    fn ensure_resident(&self) -> Result<(), V3AttemptStoreError> {
-        if Instant::now() >= self.inner.deadline {
-            return Err(V3AttemptStoreError::ResidenceDeadlineExceeded(
-                "provider SSE attempt exceeded the request residence deadline".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
     pub(crate) fn residence_deadline(&self) -> Instant {
         self.inner.deadline
     }
     pub(crate) fn admit_transport_attempt(&self) -> Result<usize, V3AttemptStoreError> {
-        self.ensure_resident()?;
         let previous = self
             .inner
             .transport_attempts

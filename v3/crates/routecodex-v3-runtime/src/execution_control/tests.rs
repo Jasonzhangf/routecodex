@@ -240,16 +240,13 @@ fn execution_control_payload_architecture_anthropic_replay_reuses_request_reserv
 }
 
 #[test]
-fn expired_residence_rejects_transport_admission() {
+fn expired_residence_keeps_transport_attempt_accounting_available() {
     let process_bytes = Arc::new(AtomicUsize::new(0));
     let mut limits = test_limits(8, 8, 8);
     limits.residence_timeout = Duration::ZERO;
     let budget = V3AttemptBudget::new_isolated(limits, Arc::clone(&process_bytes));
-    let error = budget.admit_transport_attempt().unwrap_err();
-    assert!(matches!(
-        error,
-        V3AttemptStoreError::ResidenceDeadlineExceeded(_)
-    ));
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 1);
+    assert_eq!(budget.admit_transport_attempt().unwrap(), 2);
     assert_eq!(process_bytes.load(Ordering::Acquire), 0);
 }
 

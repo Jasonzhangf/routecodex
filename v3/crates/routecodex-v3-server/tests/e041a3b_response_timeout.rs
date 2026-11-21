@@ -31,6 +31,7 @@ mod test_home;
 mod test_ports;
 
 static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
+const RESIDENCE_RESELECT_MS: u64 = 1_500;
 
 fn completed() -> Value {
     json!({
@@ -58,6 +59,112 @@ async fn upstream(
 ) -> Response<Body> {
     let _ = captures.send(body.clone());
     let input = body["input"].as_str().unwrap_or_default();
+    let residence_case = body["input"]
+        .as_str()
+        .or_else(|| body["input"][0]["content"][0]["text"].as_str());
+    if let Some(
+        case @ ("recovery-before-residence"
+        | "recovery-after-residence"
+        | "successor-first-frame-timeout"
+        | "successor-idle-timeout"),
+    ) = residence_case
+    {
+        let after_deadline = case == "recovery-after-residence";
+        let model = body["model"].as_str().unwrap();
+        if model == "wire-recover"
+            && matches!(
+                case,
+                "successor-first-frame-timeout" | "successor-idle-timeout"
+            )
+        {
+            let body = if case == "successor-first-frame-timeout" {
+                Body::from_stream(stream::pending::<Result<Bytes, Infallible>>())
+            } else {
+                let event = json!({
+                    "type":"response.output_text.delta",
+                    "delta":"unsuccessful-successor-prefix",
+                    "item_id":"msg_failed_successor",
+                    "output_index":0,
+                    "content_index":0,
+                    "sequence_number":0
+                });
+                let frame = format!("event: response.output_text.delta\ndata: {event}\n\n");
+                Body::from_stream(
+                    stream::iter([Ok::<_, Infallible>(Bytes::from(frame))])
+                        .chain(stream::pending()),
+                )
+            };
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .body(body)
+                .unwrap();
+        }
+        let frames = if matches!(model, "wire-recover" | "wire-third") {
+            let mut response = completed();
+            response["model"] = json!(model);
+            let terminal = json!({"type":"response.completed","response":response});
+            let delta = json!({
+                "type":"response.output_text.delta",
+                "delta":"sibling-success",
+                "item_id":"msg_e041a3b_sibling",
+                "output_index":0,
+                "content_index":0,
+                "sequence_number":0
+            });
+            stream::once(async move {
+                if after_deadline {
+                    tokio::time::sleep(Duration::from_millis(80)).await;
+                }
+                Ok::<_, Infallible>(Bytes::from(format!(
+                    "event: response.output_text.delta\ndata: {delta}\n\nevent: response.completed\ndata: {terminal}\n\n"
+                )))
+            })
+            .boxed()
+        } else {
+            let progress_count = if case == "recovery-before-residence" {
+                2
+            } else {
+                21
+            };
+            let upstream_started = Instant::now();
+            stream::iter(0..=progress_count)
+                .then(move |index| {
+                    let captures = captures.clone();
+                    async move {
+                        if index > 0 {
+                            tokio::time::sleep(Duration::from_millis(90)).await;
+                        }
+                        if index == progress_count {
+                            let _ = captures.send(json!({
+                                "fixture": "malformed_terminal_after_progress",
+                                "elapsed_ms": upstream_started.elapsed().as_millis()
+                            }));
+                            return Ok(Bytes::from_static(
+                                b"event: response.completed\ndata: invalid\n\n",
+                            ));
+                        }
+                        let event = json!({
+                            "type": "response.output_text.delta",
+                            "delta": "unsuccessful-provider-prefix",
+                            "item_id": "msg_failed_residence",
+                            "output_index": 0,
+                            "content_index": 0,
+                            "sequence_number": index
+                        });
+                        Ok(Bytes::from(format!(
+                            "event: response.output_text.delta\ndata: {event}\n\n"
+                        )))
+                    }
+                })
+                .boxed()
+        };
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from_stream(frames))
+            .unwrap();
+    }
     if input == "continuous-provider-stream" {
         let mut frames: Vec<_> = ["sibling", "-", "success"]
             .into_iter()
@@ -188,6 +295,25 @@ async fn start_with_budgets(
     health: bool,
     process: &str,
 ) -> Entry {
+    start_with_targets(
+        residence_ms,
+        timeout_ms,
+        first_byte_ms,
+        if recovery { 2 } else { 1 },
+        health,
+        process,
+    )
+    .await
+}
+
+async fn start_with_targets(
+    residence_ms: u64,
+    timeout_ms: u64,
+    first_byte_ms: u64,
+    candidate_count: usize,
+    health: bool,
+    process: &str,
+) -> Entry {
     std::env::set_var("E041A3B_DEADLINE_KEY", "owned-fixture-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let upstream_addr = listener.local_addr().unwrap();
@@ -219,10 +345,21 @@ attempt_store = {{ residence_timeout_ms = {residence_ms} }}
 "#
     );
     let port = test_ports::free_port();
-    let backup_target = if recovery {
+    let backup_target = if candidate_count >= 2 {
         ",{kind=\"provider_model\",provider=\"test\",model=\"recover\",key=\"key\",priority=1}"
     } else {
         ""
+    };
+    let (third_model, third_target) = if candidate_count == 3 {
+        (
+            r#"[providers.test.models.third]
+wire_name = "wire-third"
+capabilities = ["text"]
+supports_streaming = true"#,
+            ",{kind=\"provider_model\",provider=\"test\",model=\"third\",key=\"key\",priority=0}",
+        )
+    } else {
+        ("", "")
     };
     let source = format!(
         r#"
@@ -251,9 +388,10 @@ supports_streaming = true
 wire_name = "wire-recover"
 capabilities = ["text"]
 supports_streaming = true
+{third_model}
 [route_groups.default.pools.default]
 selection = {{strategy="priority"}}
-targets = [{{kind="provider_model",provider="test",model="test",key="key",priority=2}}{backup_target}]
+targets = [{{kind="provider_model",provider="test",model="test",key="key",priority=2}}{backup_target}{third_target}]
 [debug]
 log_console = false
 snapshots = true
@@ -563,6 +701,152 @@ async fn json_responses_request_accepts_progressing_upstream_sse_past_both_deadl
     assert_ne!(dispatched["stream"], true, "{dispatched}");
     assert!(entry.captures.try_recv().is_err());
     entry.stop().await;
+}
+
+#[tokio::test]
+async fn issue0026412_relay_reselects_after_progressing_attempt_fails_past_residence() {
+    let _guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    for (input, after_deadline) in [
+        ("recovery-before-residence", false),
+        ("recovery-after-residence", true),
+    ] {
+        let mut entry =
+            start_with_budgets(RESIDENCE_RESELECT_MS, 5_000, 600, true, false, "relay").await;
+        let response = client
+            .post(format!("{}/v1/responses", entry.base()))
+            .json(&json!({"input":input,"stream":true}))
+            .send()
+            .await;
+        let result = match response {
+            Ok(response) => response.text().await,
+            Err(error) => Err(error),
+        };
+        let mut ledger = Vec::new();
+        while let Ok(event) = entry.captures.try_recv() {
+            ledger.push(event);
+        }
+        entry.stop().await;
+
+        assert_eq!(ledger[0]["model"], "wire-e041a3b", "{ledger:?}");
+        assert_eq!(ledger[1]["fixture"], "malformed_terminal_after_progress");
+        assert_eq!(
+            ledger[1]["elapsed_ms"].as_u64().unwrap() >= RESIDENCE_RESELECT_MS,
+            after_deadline,
+            "{ledger:?}"
+        );
+        let attempts: Vec<_> = ledger
+            .iter()
+            .filter_map(|event| event["model"].as_str())
+            .collect();
+        assert_eq!(
+            attempts,
+            ["wire-e041a3b", "wire-recover"],
+            "eligible fallback must run exactly once after {input}; client result: {result:?}"
+        );
+        let wire = result.unwrap_or_else(|error| {
+            panic!("client did not complete for {input}; attempt ledger: {ledger:?}: {error}")
+        });
+        assert!(wire.contains("sibling-success"), "{wire}");
+        assert_eq!(wire.matches("event: response.completed").count(), 1);
+        assert!(!wire.contains("unsuccessful-provider-prefix"));
+    }
+}
+
+#[tokio::test]
+async fn issue0026412_relay_successor_timeouts_keep_exact_error_and_recovery() {
+    let _guard = TEST_LOCK.lock().await;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    for (input, candidate_count) in [
+        ("successor-first-frame-timeout", 3),
+        ("successor-idle-timeout", 2),
+    ] {
+        let mut entry = start_with_targets(
+            RESIDENCE_RESELECT_MS,
+            5_000,
+            600,
+            candidate_count,
+            false,
+            "relay",
+        )
+        .await;
+        let port = entry.handle.listeners[0].addr.port();
+        let mut response = client
+            .post(format!("{}/v1/responses", entry.base()))
+            .json(&json!({"input":input,"stream":true}))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let mut wire = Vec::new();
+        let transport_failed = loop {
+            match response.chunk().await {
+                Ok(Some(bytes)) => wire.extend_from_slice(&bytes),
+                Ok(None) => break false,
+                Err(_) => break true,
+            }
+        };
+        let attempts: Vec<String> = std::iter::from_fn(|| entry.captures.try_recv().ok())
+            .filter_map(|event| event["model"].as_str().map(str::to_owned))
+            .collect();
+        entry.stop().await;
+
+        let path = std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+            .join(".rcc/logs")
+            .join(format!("server-v3-{port}.request-records.jsonl"));
+        let rows: Vec<_> = std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap()["row"].clone())
+            .collect();
+        let failed_successor = rows
+            .iter()
+            .find(|row| {
+                row["event_type"] == "request.provider_attempt_failed"
+                    && row["meta"]["wire_model"] == "wire-recover"
+            })
+            .unwrap_or_else(|| panic!("missing failed successor attempt for {input}: {rows:?}"));
+        let meta = &failed_successor["meta"];
+        assert_eq!(meta["error_category"], "provider_transport_error");
+        assert_eq!(meta["observed_error"]["external_error_kind"], "provider");
+        assert_eq!(
+            meta["observed_error"]["external_error_code"],
+            "provider_transport_error"
+        );
+        assert!(meta["observed_error"]["external_error_status"].is_null());
+        assert!(
+            meta["error_detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("idle timeout (no frame within 600ms)")),
+            "the successor must apply its own declared stream timeout: {failed_successor}"
+        );
+
+        let wire = String::from_utf8(wire).unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert!(!wire.contains("unsuccessful-provider-prefix"), "{wire}");
+        assert!(!wire.contains("unsuccessful-successor-prefix"), "{wire}");
+        assert!(!wire.contains("event: error"), "{wire}");
+        if candidate_count == 3 {
+            assert_eq!(attempts, ["wire-e041a3b", "wire-recover", "wire-third"]);
+            assert!(!transport_failed, "{wire}");
+            assert!(wire.contains("sibling-success"), "{wire}");
+            assert_eq!(wire.matches("event: response.completed").count(), 1);
+        } else {
+            assert_eq!(attempts, ["wire-e041a3b", "wire-recover"]);
+            assert!(transport_failed, "{wire}");
+            assert!(!wire.contains("event: response.completed"), "{wire}");
+        }
+    }
 }
 
 #[tokio::test]
