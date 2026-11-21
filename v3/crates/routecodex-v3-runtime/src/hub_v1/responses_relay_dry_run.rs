@@ -5,7 +5,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None)
+    execute_v3_responses_relay_dry_run_orchestration_outcome(manifest, input)
         .await
         .into_foundation()
 }
@@ -21,6 +21,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_with_initial_targ
         input,
         Some(initial_selected_target),
         Some(initial_expanded),
+        V3ResponsesRelayRuntimeSeeds::default(),
     )
     .await
     .into_foundation()
@@ -30,7 +31,30 @@ pub async fn execute_v3_responses_relay_dry_run_orchestration_outcome(
     manifest: &V3Config05ManifestPublished,
     input: V3ResponsesRelayRuntimeInput,
 ) -> V3ResponsesRelayDryRunOutcome {
-    execute_v3_responses_relay_dry_run_runtime_inner(manifest, input, None, None).await
+    execute_v3_responses_relay_dry_run_orchestration_with_client_identity(
+        manifest,
+        input,
+        Vec::new(),
+    )
+    .await
+}
+
+pub async fn execute_v3_responses_relay_dry_run_orchestration_with_client_identity(
+    manifest: &V3Config05ManifestPublished,
+    input: V3ResponsesRelayRuntimeInput,
+    client_identity_headers: Vec<(String, String)>,
+) -> V3ResponsesRelayDryRunOutcome {
+    execute_v3_responses_relay_dry_run_runtime_inner(
+        manifest,
+        input,
+        None,
+        None,
+        V3ResponsesRelayRuntimeSeeds {
+            client_identity_headers,
+            ..Default::default()
+        },
+    )
+    .await
 }
 
 pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
@@ -38,6 +62,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
     input: V3ResponsesRelayRuntimeInput,
     initial_selected_target: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected>,
     initial_expanded: Option<routecodex_v3_target::V3Target09CandidateSetExpanded>,
+    seeds: V3ResponsesRelayRuntimeSeeds,
 ) -> V3ResponsesRelayDryRunOutcome {
     let captured_provider_request = Arc::new(Mutex::new(None));
     let transport = V3ProviderRequestDryRunNoNetworkTransport::new(
@@ -63,7 +88,7 @@ pub(crate) async fn execute_v3_responses_relay_dry_run_runtime_inner(
         initial_selected_target.clone(),
         initial_expanded,
         BTreeSet::new(),
-        V3ResponsesRelayRuntimeSeeds::default(),
+        seeds,
     )
     .await
     {

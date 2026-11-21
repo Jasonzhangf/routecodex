@@ -119,6 +119,7 @@ use responses_openai_chat_conversion::*;
 use responses_relay_dry_run::*;
 pub use responses_relay_dry_run::{
     execute_v3_responses_relay_dry_run_orchestration_outcome,
+    execute_v3_responses_relay_dry_run_orchestration_with_client_identity,
     project_v3_responses_relay_runtime_failure,
 };
 pub(crate) use responses_relay_failures::provider_response_stream_relay_failure;

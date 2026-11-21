@@ -142,6 +142,7 @@ struct Upstream {
     addr: SocketAddr,
     captures: mpsc::UnboundedReceiver<ProviderCapture>,
     shutdown: oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
 }
 
 async fn start_upstream() -> Upstream {
@@ -155,7 +156,7 @@ async fn start_upstream() -> Upstream {
             captures: captures_tx,
         }));
 
-    tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
@@ -168,6 +169,7 @@ async fn start_upstream() -> Upstream {
         addr,
         captures,
         shutdown,
+        task,
     }
 }
 
@@ -401,4 +403,131 @@ async fn responses_reselection_preserves_identity_across_direct_to_relay_handoff
         "success must be observed on the Relay candidate"
     );
     let _ = upstream.shutdown.send(());
+}
+
+#[tokio::test]
+async fn issue1f60200_direct_dry_run_captures_client_identity_without_send() {
+    verify_dry_run_client_identity(false).await;
+}
+
+#[tokio::test]
+async fn issue1f60200_relay_dry_run_captures_client_identity_without_send() {
+    verify_dry_run_client_identity(true).await;
+}
+
+async fn verify_dry_run_client_identity(relay: bool) {
+    let _guard = TEST_LOCK.lock().await;
+    let _home = TestHomeGuard::new();
+    std::env::set_var(PROVIDER_KEY_ENV, "provider-secret");
+    let mut upstream = start_upstream().await;
+    let mut manifest = manifest(upstream.addr, relay, false);
+    manifest.debug.dry_run = true;
+    manifest.debug.snapshots = true;
+    if relay {
+        let options = serde_json::from_value(json!({"process":"chat","streaming":"client"}))
+            .expect("valid fixture Responses options");
+        let provider = manifest.providers.get_mut("controlled").unwrap();
+        provider.responses = Some(options);
+        provider.interfaces.get_mut("default").unwrap().responses = provider.responses.clone();
+        provider
+            .headers
+            .insert("originator".to_string(), CONFIGURED_ORIGINATOR.to_string());
+    }
+    let handle = spawn_v3_server_aggregate(manifest).await.unwrap();
+    let endpoint = format!("http://{}/v1/responses", handle.listeners[0].addr);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap();
+    let payload = json!({"model": CLIENT_MODEL, "stream": false, "input": "identity preview"});
+    let mut captures = Vec::new();
+    for exclude_client_headers in [false, true] {
+        let mut request = client
+            .post(&endpoint)
+            .header("x-routecodex-dry-run", "provider-request")
+            .header("User-Agent", USER_AGENT)
+            .header("Originator", ORIGINATOR)
+            .header("Authorization", CLIENT_AUTHORIZATION)
+            .header("Cookie", "client_cookie=fixture-value")
+            .json(&payload);
+        if exclude_client_headers {
+            request = request.header("Connection", "oRiGiNaToR, uSeR-aGeNt");
+        }
+        let response = request.send().await.unwrap();
+        let status = response.status();
+        let preview: Value = response.json().await.unwrap();
+        captures.push((exclude_client_headers, status, preview));
+    }
+    let upstream_dry_run_capture =
+        tokio::time::timeout(Duration::from_millis(150), upstream.captures.recv()).await;
+    let live = client
+        .post(&endpoint)
+        .header("User-Agent", USER_AGENT)
+        .header("Originator", ORIGINATOR)
+        .header("Authorization", CLIENT_AUTHORIZATION)
+        .json(&payload)
+        .send()
+        .await
+        .unwrap();
+    let live_status = live.status();
+    let live_body: Value = live.json().await.unwrap();
+    let live_capture = tokio::time::timeout(Duration::from_secs(3), upstream.captures.recv()).await;
+
+    handle.shutdown().await;
+    let _ = upstream.shutdown.send(());
+    upstream.task.await.unwrap();
+    std::env::remove_var(PROVIDER_KEY_ENV);
+
+    assert!(
+        upstream_dry_run_capture.is_err() && upstream.captures.try_recv().is_err(),
+        "dry-run must send zero Provider requests"
+    );
+    for (exclude_client_headers, status, preview) in captures {
+        assert_eq!(status, reqwest::StatusCode::OK, "{preview}");
+        assert_eq!(preview["kind"], "provider_request");
+        assert_eq!(preview["evidence"]["providerNetworkSend"], false);
+        assert_eq!(preview["providerRequest"]["body"]["model"], WIRE_MODEL);
+        let nodes = preview["dry_run"]["node_ids"].as_array().unwrap();
+        assert_eq!(
+            nodes.contains(&json!("V3HubReqChatProcess04Governed")),
+            relay,
+            "{nodes:?}"
+        );
+        assert_eq!(nodes.contains(&json!("V3ResponsesDirect11Policy")), !relay);
+        let headers = &preview["providerRequest"]["headers"];
+        if exclude_client_headers {
+            assert!(headers.get("user-agent").is_none(), "{headers}");
+        } else {
+            assert_eq!(headers["user-agent"], "[REDACTED]", "{headers}");
+        }
+        if exclude_client_headers && !relay {
+            assert!(headers.get("originator").is_none(), "{headers}");
+        } else {
+            assert_eq!(headers["originator"], "[REDACTED]", "{headers}");
+        }
+        assert!(headers.get("authorization").is_none(), "{headers}");
+        assert!(headers.get("cookie").is_none(), "{headers}");
+        let preview = preview.to_string();
+        assert!(!preview.contains("fixture-value"));
+        assert!(!preview.contains(CLIENT_AUTHORIZATION));
+        assert!(!preview.contains(ORIGINATOR));
+        assert!(!preview.contains(CONFIGURED_ORIGINATOR));
+    }
+    assert_eq!(live_status, reqwest::StatusCode::OK, "{live_body}");
+    assert_eq!(live_body["status"], "completed");
+    let live_capture = live_capture.unwrap().unwrap();
+    assert_eq!(live_capture.user_agent.as_deref(), Some(USER_AGENT));
+    assert_eq!(
+        live_capture.originator.as_deref(),
+        Some(if relay {
+            CONFIGURED_ORIGINATOR
+        } else {
+            ORIGINATOR
+        })
+    );
+    assert_eq!(
+        live_capture.authorization.as_deref(),
+        Some(PROVIDER_AUTHORIZATION)
+    );
 }

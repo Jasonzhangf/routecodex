@@ -437,7 +437,14 @@ pub async fn execute_v3_responses_direct_dry_run_runtime(
     manifest: &V3Config05ManifestPublished,
     debug: &V3DebugRuntime,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_direct_dry_run_runtime_inner(fixture, manifest, debug, None).await
+    execute_v3_responses_direct_dry_run_runtime_with_client_identity(
+        fixture,
+        manifest,
+        debug,
+        None,
+        Vec::new(),
+    )
+    .await
 }
 
 pub async fn execute_v3_responses_direct_dry_run_runtime_with_initial_target(
@@ -446,15 +453,22 @@ pub async fn execute_v3_responses_direct_dry_run_runtime_with_initial_target(
     debug: &V3DebugRuntime,
     initial_plan: &V3ResponsesProtocolExecutionPlan,
 ) -> crate::V3FoundationRuntimeOutput {
-    execute_v3_responses_direct_dry_run_runtime_inner(fixture, manifest, debug, Some(initial_plan))
-        .await
+    execute_v3_responses_direct_dry_run_runtime_with_client_identity(
+        fixture,
+        manifest,
+        debug,
+        Some(initial_plan),
+        Vec::new(),
+    )
+    .await
 }
 
-async fn execute_v3_responses_direct_dry_run_runtime_inner(
+pub async fn execute_v3_responses_direct_dry_run_runtime_with_client_identity(
     fixture: V3DryRunFixture,
     manifest: &V3Config05ManifestPublished,
     debug: &V3DebugRuntime,
     initial_plan: Option<&V3ResponsesProtocolExecutionPlan>,
+    client_identity_headers: Vec<(String, String)>,
 ) -> crate::V3FoundationRuntimeOutput {
     let response_replay =
         crate::hub_v1::is_captured_provider_response_for_dry_run(&fixture.response_payload);
@@ -490,6 +504,7 @@ async fn execute_v3_responses_direct_dry_run_runtime_inner(
         Some(plan) => V3ResponsesDirectRuntimeCoreState::new().with_initial_plan(plan),
         None => V3ResponsesDirectRuntimeCoreState::new(),
     }
+    .with_client_identity_headers(client_identity_headers)
     .with_provider_health_neutral()
     .with_exhaustion_rescue_probe_disabled();
     let mut output = execute_v3_responses_direct_runtime_kernel_with_transport_debug_core(

@@ -1065,6 +1065,43 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
     }
 }
 
+pub(super) async fn execute_v3_responses_relay_provider_request_dry_run(
+    manifest: &V3Config05ManifestPublished,
+    debug: &V3DebugRuntime,
+    mut fixture: V3DryRunFixture,
+    failure_session_scope: V3ProviderFailureSessionScope,
+    request_headers: &HeaderMap,
+) -> V3FoundationRuntimeOutput {
+    let client_identity_headers = responses_client_identity_headers(request_headers);
+    let outcome = execute_v3_responses_relay_dry_run_orchestration_with_client_identity(
+        manifest,
+        V3ResponsesRelayRuntimeInput {
+            server_id: fixture.server_id.clone(),
+            failure_session_scope,
+            request_id: fixture.fixture_id.clone(),
+            payload: std::mem::take(&mut fixture.request_payload),
+        },
+        client_identity_headers.clone(),
+    )
+    .await;
+    match outcome {
+        V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
+        V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
+            fixture.request_payload = handoff.request_payload;
+            let mut output = execute_v3_responses_direct_dry_run_runtime_with_client_identity(
+                fixture,
+                manifest,
+                debug,
+                Some(&handoff.plan),
+                client_identity_headers,
+            )
+            .await;
+            prepend_v3_protocol_plan_trace_to_foundation_output(&mut output, &handoff.node_trace);
+            output
+        }
+    }
+}
+
 #[inline(never)]
 fn execute_v3_provider_request_dry_run_branch<'a>(
     state: &'a Arc<V3ListenerState>,
@@ -1098,25 +1135,14 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
                     "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
                 }),
             };
-            let output = match responses_protocol_plan {
-                Some(plan) => {
-                    execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                        fixture,
-                        &state.manifest,
-                        &state.debug,
-                        plan,
-                    )
-                    .await
-                }
-                None => {
-                    execute_v3_responses_direct_dry_run_runtime(
-                        fixture,
-                        &state.manifest,
-                        &state.debug,
-                    )
-                    .await
-                }
-            };
+            let output = execute_v3_responses_direct_dry_run_runtime_with_client_identity(
+                fixture,
+                &state.manifest,
+                &state.debug,
+                responses_protocol_plan.map(std::ops::Deref::deref),
+                responses_client_identity_headers(request_headers),
+            )
+            .await;
             let raw_input_items = payload
                 .get("input")
                 .and_then(Value::as_array)
@@ -1198,47 +1224,26 @@ fn execute_v3_provider_request_dry_run_branch<'a>(
             return foundation_output_response(output);
         }
         if entry_protocol == "responses" && execution_mode == V3EntryProtocolExecutionMode::Relay {
-            let output = match execute_v3_responses_relay_dry_run_orchestration_outcome(
+            let output = execute_v3_responses_relay_provider_request_dry_run(
                 &state.manifest,
-                V3ResponsesRelayRuntimeInput {
+                &state.debug,
+                V3DryRunFixture {
+                    fixture_id: request_id.clone(),
                     server_id: state.server.id.clone(),
-                    failure_session_scope: provider_failure_session_scope,
-                    request_id: request_id.clone(),
-                    payload: payload.clone(),
+                    method: method.clone(),
+                    path: path.clone(),
+                    request_payload: payload.clone(),
+                    response_payload: json!({
+                        "object": "response",
+                        "status": "completed",
+                        "output_text": "routecodex provider-request dry-run stopped before provider send",
+                        "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
+                    }),
                 },
+                provider_failure_session_scope,
+                request_headers,
             )
-            .await
-            {
-                V3ResponsesRelayDryRunOutcome::Foundation(output) => output,
-                V3ResponsesRelayDryRunOutcome::DirectHandoff(handoff) => {
-                    let fixture = V3DryRunFixture {
-                        fixture_id: request_id.clone(),
-                        server_id: state.server.id.clone(),
-                        method: method.clone(),
-                        path: path.clone(),
-                        request_payload: handoff.request_payload,
-                        response_payload: json!({
-                            "object": "response",
-                            "status": "completed",
-                            "output_text": "routecodex provider-request dry-run stopped before provider send",
-                            "output": [{"type":"output_text","text":"routecodex provider-request dry-run stopped before provider send"}]
-                        }),
-                    };
-                    let mut output =
-                        execute_v3_responses_direct_dry_run_runtime_with_initial_target(
-                            fixture,
-                            &state.manifest,
-                            &state.debug,
-                            &handoff.plan,
-                        )
-                        .await;
-                    prepend_v3_protocol_plan_trace_to_foundation_output(
-                        &mut output,
-                        &handoff.node_trace,
-                    );
-                    output
-                }
-            };
+            .await;
             let raw_input_items = payload
                 .get("input")
                 .and_then(Value::as_array)
