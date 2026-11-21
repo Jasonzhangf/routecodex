@@ -6263,14 +6263,20 @@ features:
   - v3/crates/routecodex-v3-server/src/webui_observability.rs
   - v3/crates/routecodex-v3-debug/src/observability_store.rs
   - docs/architecture/dagpipe/graphs/v3.provider_usage_persistence.graph.json
+  - docs/architecture/dagpipe/graphs/v3.provider_usage_persistence_closeout.graph.json
+  - v3/crates/routecodex-v3-server/src/lib.rs
   resource_bindings:
   - v3.observability.request_ledger_queue
   - v3.observability.webui_store
   - v3.observability.provider_usage_facts
+  - v3.observability.provider_usage_closeout_receipt
   entry_symbols:
   - V3WebuiObservability::record_observed
   - V3WebuiObservabilityPersistenceWriter::enqueue
   - V3WebuiObservabilityPersistenceWriter::flush
+  - V3WebuiObservabilityPersistenceWriter::close
+  - V3ServerAggregateHandle::shutdown
+  - V3ServerAggregateHandle::prepare_for_exec
   - V3ProviderUsagePersistenceStore::append_fact
   - v3_webui_observability_read_provider_usage
   allowed_paths:
@@ -6291,7 +6297,10 @@ features:
   - config publishes path/policy but does not own runtime append execution
   - provider usage facts survive detail rotation and restart with stable event identity and explicit coverage gaps
   - provider usage journal replay, compaction, startup and query obey the fact and companion-state limits; rejected contributions leave sticky coverage
+  - consuming aggregate terminal APIs close each listener writer and join its thread before returning; production prepare_exec_attempt remains flush-only and recoverable
+  - terminal close atomically seals enqueue, preserves queued work, persists pending gaps and write errors, closes generation, then joins the writer
   - npm run verify:v3-execution-control-payload-architecture
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --lib terminal_usage_writer_closes_before_aggregate_returns -- --test-threads=1 --nocapture
   - git diff --check
   ownership_note: The admin reader surface (v3/crates/routecodex-v3-admin/**) is owned by v3.admin_observability_aggregation; this feature owns the store, its writer, and the server-side row struct only.
 

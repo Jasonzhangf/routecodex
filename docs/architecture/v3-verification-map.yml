@@ -4054,6 +4054,8 @@ features:
   - npm run verify:v3-execution-control-payload-architecture
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib
   - CARGO_NET_OFFLINE=true cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-server webui_observability::tests --lib
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --lib id9_terminal_join_releases_both_listener_probe_permits -- --test-threads=1 --nocapture
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --lib terminal_usage_writer_closes_before_aggregate_returns -- --test-threads=1 --nocapture
   completion_boundary: {source_controlled: true, live_cutover: required}
 
 - feature_id: v3.execution_control_payload_architecture

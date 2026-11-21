@@ -29,6 +29,11 @@
       "graph": "docs/architecture/dagpipe/graphs/v3.provider_usage_persistence.graph.json"
     },
     {
+      "id": "provider-usage-persistence-closeout",
+      "status": "graph",
+      "graph": "docs/architecture/dagpipe/graphs/v3.provider_usage_persistence_closeout.graph.json"
+    },
+    {
       "id": "provider-usage-query",
       "status": "graph",
       "graph": "docs/architecture/dagpipe/graphs/v3.provider_usage_query.graph.json"

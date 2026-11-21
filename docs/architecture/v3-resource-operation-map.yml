@@ -3172,10 +3172,30 @@ resources:
     semantic_contract:
       current_binding: record_observed updates a bounded active/recent cache, releases the listener mutex, and then performs bounded non-blocking enqueue to a dedicated writer; startup folding is capped.
       target_contract: Active requests and bounded recent terminals remain in memory; a bounded single-writer queue owns append, rotation, and retention outside the request mutex.
+      terminal_close: Consuming aggregate terminal APIs atomically seal enqueue, process accepted work, close generation, receive the Shutdown receipt, and join the writer before returning.
+      production_prepare_boundary: prepare_exec_attempt keeps the existing recoverable flush and never seals enqueue or closes generation.
       config_boundary: Config compiles path and policy only; runtime observability I/O is owned by observability storage.
     allowed_writers: [V3WebuiObservability::record_observed]
     allowed_readers: [observability_single_writer, admin_paginated_history_reader]
     forbidden_writers: [routecodex-v3-config_runtime_io, provider_health, resident_request_controller, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.observability.provider_usage_closeout_receipt
+    resource_kind: diagnostic_persistence
+    lifecycle: v3.server.aggregate_terminal_close
+    owner_feature_id: v3.observability_persistence_isolation
+    owner_crate: routecodex-v3-server
+    owner_node: V3WebuiObservabilityPersistenceWriterLifecycle
+    identity: [listenerId]
+    semantic_contract:
+      target_contract: Terminal close returns only after accepted work is processed, pending coverage is persisted, generation is closed, and the writer thread exits. Failures remain explicit diagnostics and do not alter business results.
+      post_return_boundary: The writer performs no file writes after terminal close returns; a retained clone must not reopen the store.
+    allowed_writers: [V3WebuiObservabilityPersistenceWriter::close]
+    allowed_readers: [aggregate terminal closeout]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider_health]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false

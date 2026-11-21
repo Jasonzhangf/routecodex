@@ -275,7 +275,7 @@
         <span>Canonical Markdown source: <code>docs/architecture/wiki/v3-mainline-caller-flow.md</code></span>
         <span>Edge source: <code>docs/architecture/v3-mainline-call-map.yml</code></span>
         <span>94 functional paths</span>
-        <span>550 caller edges</span>
+        <span>553 caller edges</span>
       </div>
     </header>
 
@@ -468,7 +468,7 @@ flowchart TD
 <tr><td>Missing caller/callee fields</td><td><strong>none</strong></td></tr>
 <tr><td>Binding-pending edges</td><td><strong>15</strong></td></tr>
 <tr><td>typed-test-only edges</td><td><strong>15</strong></td></tr>
-<tr><td>live-bound source edges</td><td><strong>445</strong></td></tr>
+<tr><td>live-bound source edges</td><td><strong>448</strong></td></tr>
 <tr><td>aggregate-only wrapper edges</td><td><strong>2</strong></td></tr>
 </tbody>
 </table>
@@ -813,9 +813,9 @@ flowchart TD
           </a>
 <a class="branch-card" href="#chain-v3_execution_control_payload_architecture">
             <span class="chain-id">v 3.execution_control_payload_architecture</span>
-            <span>V3ExecutionControl01RequestAccepted → V3ProviderUsagePersistenceDisposition</span>
+            <span>V3ExecutionControl01RequestAccepted → V3ObservabilityGenerationClosed</span>
             <span><code>v3.execution_control_payload_architecture</code></span>
-            <span>8 edges · 12 resources · v3-debug, v3-error, v3-provider-responses, v3-runtime, v3-runtime::hub_v1, v3-server</span>
+            <span>11 edges · 13 resources · v3-debug, v3-error, v3-provider-responses, v3-runtime, v3-runtime::hub_v1, v3-server</span>
           </a>
 <a class="branch-card" href="#chain-v3_memory_raw_capture">
             <span class="chain-id">v 3.memory_raw_capture</span>
@@ -5208,15 +5208,15 @@ flowchart TD
     <details class="branch-detail" id="chain-v3_execution_control_payload_architecture" >
       <summary>
         <span class="summary-main">v 3.execution_control_payload_architecture</span>
-        <span class="summary-sub">V3ExecutionControl01RequestAccepted → V3ProviderUsagePersistenceDisposition</span>
-        <span class="summary-sub">8 edges · <code>v3.execution_control_payload_architecture</code> · V3ExecutionControl01RequestAccepted → V3ProviderUsagePersistenceDisposition</span>
+        <span class="summary-sub">V3ExecutionControl01RequestAccepted → V3ObservabilityGenerationClosed</span>
+        <span class="summary-sub">11 edges · <code>v3.execution_control_payload_architecture</code> · V3ExecutionControl01RequestAccepted → V3ObservabilityGenerationClosed</span>
       </summary>
       <div class="branch-body">
         <p class="chain-summary">Active adjacent edges for one resident request lifecycle, bounded attempt storage, sealed success, constant-cost terminal control, and lock-isolated persistence.</p>
         <div class="branch-meta">
           <span>owner: <code>v3.execution_request_lifecycle</code></span>
           <span>modules: <code>v3-debug · v3-error · v3-provider-responses · v3-runtime · v3-runtime::hub_v1 · v3-server</code></span>
-          <span>resources: <code>12</code></span>
+          <span>resources: <code>13</code></span>
           <span>manifest: <code>docs/architecture/manifests/v3.execution_control_payload_architecture.mainline.yml</code></span>
 
         </div>
@@ -5231,6 +5231,9 @@ flowchart TD
   n_v3_execution_control_payload_architecture_5[&quot;&lt;b&gt;Execution Control 06 Success Committed&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ExecutionControl06SuccessCommitted&lt;/small&gt;&quot;]
   n_v3_execution_control_payload_architecture_6[&quot;&lt;b&gt;Execution Control 07 Persistence Queued&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ExecutionControl07PersistenceQueued&lt;/small&gt;&quot;]
   n_v3_execution_control_payload_architecture_7[&quot;&lt;b&gt;Provider Usage Persistence Disposition&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ProviderUsagePersistenceDisposition&lt;/small&gt;&quot;]
+  n_v3_execution_control_payload_architecture_8[&quot;&lt;b&gt;Observability Writer Terminal Owned&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ObservabilityWriterTerminalOwned&lt;/small&gt;&quot;]
+  n_v3_execution_control_payload_architecture_9[&quot;&lt;b&gt;Observability Writer Shutdown Received&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ObservabilityWriterShutdownReceived&lt;/small&gt;&quot;]
+  n_v3_execution_control_payload_architecture_10[&quot;&lt;b&gt;Observability Generation Closed&lt;/b&gt;&lt;br/&gt;未写专用注释：按 contract 名称审计&lt;br/&gt;&lt;small&gt;V3ObservabilityGenerationClosed&lt;/small&gt;&quot;]
   n_v3_execution_control_payload_architecture_0 --&gt;|v3-execution-control-target-plan&lt;br/&gt;v3-runtime → v3-error| n_v3_execution_control_payload_architecture_1
   n_v3_execution_control_payload_architecture_1 --&gt;|v3-execution-control-attempt-admission&lt;br/&gt;v3-runtime → v3-runtime| n_v3_execution_control_payload_architecture_2
   n_v3_execution_control_payload_architecture_2 --&gt;|v3-execution-control-attempt-stream&lt;br/&gt;v3-runtime → v3-runtime| n_v3_execution_control_payload_architecture_3
@@ -5239,9 +5242,12 @@ flowchart TD
   n_v3_execution_control_payload_architecture_5 --&gt;|v3-execution-control-health-persistence&lt;br/&gt;v3-provider-responses → v3-provider-responses| n_v3_execution_control_payload_architecture_6
   n_v3_execution_control_payload_architecture_5 --&gt;|v3-execution-control-observability-persistence&lt;br/&gt;v3-server → v3-server| n_v3_execution_control_payload_architecture_6
   n_v3_execution_control_payload_architecture_6 --&gt;|v3-observability-provider-usage-persist&lt;br/&gt;v3-server → v3-debug| n_v3_execution_control_payload_architecture_7
+  n_v3_execution_control_payload_architecture_7 --&gt;|v3-observability-provider-usage-terminal-close&lt;br/&gt;v3-server → v3-server| n_v3_execution_control_payload_architecture_8
+  n_v3_execution_control_payload_architecture_8 --&gt;|v3-observability-provider-usage-writer-shutdown&lt;br/&gt;v3-server → v3-server| n_v3_execution_control_payload_architecture_9
+  n_v3_execution_control_payload_architecture_9 --&gt;|v3-observability-provider-usage-generation-close&lt;br/&gt;v3-server → v3-debug| n_v3_execution_control_payload_architecture_10
   classDef node fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a;
   classDef pending fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12;
-  class n_v3_execution_control_payload_architecture_0,n_v3_execution_control_payload_architecture_1,n_v3_execution_control_payload_architecture_2,n_v3_execution_control_payload_architecture_3,n_v3_execution_control_payload_architecture_4,n_v3_execution_control_payload_architecture_5,n_v3_execution_control_payload_architecture_6,n_v3_execution_control_payload_architecture_7 node;</pre>
+  class n_v3_execution_control_payload_architecture_0,n_v3_execution_control_payload_architecture_1,n_v3_execution_control_payload_architecture_2,n_v3_execution_control_payload_architecture_3,n_v3_execution_control_payload_architecture_4,n_v3_execution_control_payload_architecture_5,n_v3_execution_control_payload_architecture_6,n_v3_execution_control_payload_architecture_7,n_v3_execution_control_payload_architecture_8,n_v3_execution_control_payload_architecture_9,n_v3_execution_control_payload_architecture_10 node;</pre>
         </div>
         <table>
 <thead><tr><th>Step</th><th>Node edge</th><th>Status</th><th>Review class</th><th>Resources</th><th>Caller</th><th>Callee</th></tr></thead>
@@ -5254,6 +5260,9 @@ flowchart TD
 <tr><td><code>v3-execution-control-health-persistence</code></td><td><code>V3ExecutionControl06SuccessCommitted</code><br/>→ <code>V3ExecutionControl07PersistenceQueued</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.execution.attempt_success_receipt</code> <code>v3.provider.health_state</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.provider.health_persistence_queue</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.execution.attempt_success_receipt</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.provider.health_persistence_queue</code></div></td><td><code>persist_cooldown_state</code><br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small></td><td><code>V3ProviderHealthPersistenceTicket::enqueue</code><br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small></td></tr>
 <tr><td><code>v3-execution-control-observability-persistence</code></td><td><code>V3ExecutionControl06SuccessCommitted</code><br/>→ <code>V3ExecutionControl07PersistenceQueued</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.observability.stream_diagnostics</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.observability.request_ledger_queue</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.observability.stream_diagnostics</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.observability.request_ledger_queue</code></div></td><td><code>V3WebuiObservability::record_observed</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td><td><code>V3WebuiObservabilityPersistenceWriter::enqueue</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td></tr>
 <tr><td><code>v3-observability-provider-usage-persist</code></td><td><code>V3ExecutionControl07PersistenceQueued</code><br/>→ <code>V3ProviderUsagePersistenceDisposition</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.observability.request_ledger_queue</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.observability.provider_usage_facts</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.observability.provider_usage_facts</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.observability.provider_usage_facts</code></div></td><td><code>V3WebuiObservability::persist_usage_then_detail</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td><td><code>V3ProviderUsagePersistenceStore::persist_row_before_detail</code><br/><small>routecodex-v3-debug/src/observability_store.rs</small></td></tr>
+<tr><td><code>v3-observability-provider-usage-terminal-close</code></td><td><code>V3ProviderUsagePersistenceDisposition</code><br/>→ <code>V3ObservabilityWriterTerminalOwned</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.observability.request_ledger_queue</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.observability.provider_usage_closeout_receipt</code></div></td><td><code>V3ServerAggregateHandle::close_runtime_persistence</code><br/><small>routecodex-v3-server/src/lib.rs</small></td><td><code>V3WebuiObservability::close_persistence</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td></tr>
+<tr><td><code>v3-observability-provider-usage-writer-shutdown</code></td><td><code>V3ObservabilityWriterTerminalOwned</code><br/>→ <code>V3ObservabilityWriterShutdownReceived</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.observability.request_ledger_queue</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.observability.provider_usage_closeout_receipt</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.observability.request_ledger_queue</code></div></td><td><code>V3WebuiObservabilityPersistenceWriter::close</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td><td><code>run_v3_webui_observability_persistence_writer</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td></tr>
+<tr><td><code>v3-observability-provider-usage-generation-close</code></td><td><code>V3ObservabilityWriterShutdownReceived</code><br/>→ <code>V3ObservabilityGenerationClosed</code></td><td><span class="status anchored">anchored</span></td><td><span class="status live-bound" title="real runtime/source symbols are bound; live replay is still separate evidence">live-bound source</span></td><td><div class="resource-row"><strong>consumes:</strong> <code>v3.observability.request_ledger_queue</code> <code>v3.observability.provider_usage_facts</code></div><div class="resource-row"><strong>produces:</strong> <code>v3.observability.provider_usage_facts</code> <code>v3.observability.provider_usage_closeout_receipt</code></div><div class="resource-row"><strong>control reads:</strong> <code>v3.observability.provider_usage_facts</code></div><div class="resource-row"><strong>control writes:</strong> <code>v3.observability.provider_usage_facts</code></div></td><td><code>run_v3_webui_observability_persistence_writer</code><br/><small>routecodex-v3-server/src/webui_observability.rs</small></td><td><code>V3ProviderUsagePersistenceStore::close_generation</code><br/><small>routecodex-v3-debug/src/observability_store.rs</small></td></tr>
 </tbody>
 </table>
       </div>

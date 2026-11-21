@@ -4,7 +4,7 @@
 
 Source: `docs/architecture/v3-mainline-call-map.yml`
 
-Generated view: 94 functional paths, 550 caller edges.
+Generated view: 94 functional paths, 553 caller edges.
 
 This page renders the V3 mainline edge truth as top-down caller graphs. Each functional path is grouped by implementation module and each edge shows both the function call and the contract-node transition.
 
@@ -79,11 +79,11 @@ flowchart TD
   module_v3_runtime -->|6 edges / 2 paths| module_v3_virtual_router
   module_v3_server -->|1 edges / 1 paths| module_routecodex_v3_sse
   module_v3_server -->|2 edges / 2 paths| module_v3_config
-  module_v3_server -->|10 edges / 6 paths| module_v3_debug
+  module_v3_server -->|11 edges / 6 paths| module_v3_debug
   module_v3_server -->|2 edges / 2 paths| module_v3_error
   module_v3_server -->|8 edges / 6 paths| module_v3_runtime
   module_v3_server -->|7 edges / 5 paths| module_v3_runtime__hub_v1
-  module_v3_server -->|48 edges / 20 paths| module_v3_server
+  module_v3_server -->|50 edges / 20 paths| module_v3_server
   module_v3_server -->|1 edges / 1 paths| module_v3_vendor
   module_v3_target -->|1 edges / 1 paths| module_v3_provider_responses
   module_v3_target -->|1 edges / 1 paths| module_v3_target
@@ -137,11 +137,11 @@ flowchart TD
 | v3-runtime | v3-virtual-router | 6 | `v3.responses_direct.required_mainline`<br/>`v3.route_policy.condition_evaluation` |
 | v3-server | routecodex-v3-sse | 1 | `v3.sse.http_keepalive_boundary` |
 | v3-server | v3-config | 2 | `v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.models.capability_catalog` |
-| v3-server | v3-debug | 10 | `v3.codex_sample_retention_snap_scope`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
+| v3-server | v3-debug | 11 | `v3.codex_sample_retention_snap_scope`<br/>`v3.debug_error_foundation.mainline`<br/>`v3.execution_control_payload_architecture`<br/>`v3.managed_restart_attempt`<br/>`v3.server.internal_observability_projection`<br/>`v3.server.startup` |
 | v3-server | v3-error | 2 | `v3.debug_error_foundation.mainline`<br/>`v3.server.startup` |
 | v3-server | v3-runtime | 8 | `v3.provider_global_cooldown_persistence`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.server.startup`<br/>`v3.target.session_global_selection` |
 | v3-server | v3-runtime::hub_v1 | 7 | `v3.anthropic_relay.controlled_runtime`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.runtime_timing_observability.mainline` |
-| v3-server | v3-server | 48 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
+| v3-server | v3-server | 50 | `v3.client_sse_head_commit`<br/>`v3.console_human_readable_layering.mainline`<br/>`v3.console_request_count_visibility.mainline`<br/>`v3.direct_sse_accept_skeleton`<br/>`v3.entry_protocol_endpoint_binding.mainline`<br/>`v3.error.raw_wire_evidence`<br/>`v3.execution_control_payload_architecture`<br/>`v3.gemini_relay.controlled_runtime`<br/>`v3.managed_restart_attempt`<br/>`v3.models.capability_catalog`<br/>`v3.openai_chat_relay.controlled_runtime`<br/>`v3.provider_global_subscription_probe`<br/>`v3.responses.inbound_websocket_proxy`<br/>`v3.responses_direct.required_mainline`<br/>`v3.responses_relay.source_server_entry`<br/>`v3.responses_session_admission`<br/>`v3.runtime_restart_handoff_skeleton`<br/>`v3.runtime_timing_observability.mainline`<br/>`v3.server.startup`<br/>`v3.sse.transport_boundary` |
 | v3-server | v3/vendor | 1 | `v3.server.startup` |
 | v3-target | v3-provider-responses | 1 | `v3.provider_key_health_model_granularity` |
 | v3-target | v3-target | 1 | `v3.provider_oauth_credentials.mainline` |
@@ -3384,6 +3384,7 @@ Manifest: `docs/architecture/manifests/v3.execution_control_payload_architecture
 flowchart TD
   subgraph c_82_v3_execution_control_payload_architecture_m_v3_debug["v3-debug"]
     c_82_v3_execution_control_payload_architecture_13["v3-debug<br/>V3ProviderUsagePersistenceStore::persist_row_before_detail<br/><small>routecodex-v3-debug/src/observability_store.rs</small>"]
+    c_82_v3_execution_control_payload_architecture_18["v3-debug<br/>V3ProviderUsagePersistenceStore::close_generation<br/><small>routecodex-v3-debug/src/observability_store.rs</small>"]
   end
   subgraph c_82_v3_execution_control_payload_architecture_m_v3_error["v3-error"]
     c_82_v3_execution_control_payload_architecture_1["v3-error<br/>build_v3_error_05_execution_decision_from_v3_error_04<br/><small>routecodex-v3-error/src/lib.rs</small>"]
@@ -3407,6 +3408,10 @@ flowchart TD
     c_82_v3_execution_control_payload_architecture_10["v3-server<br/>V3WebuiObservability::record_observed<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
     c_82_v3_execution_control_payload_architecture_11["v3-server<br/>V3WebuiObservabilityPersistenceWriter::enqueue<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
     c_82_v3_execution_control_payload_architecture_12["v3-server<br/>V3WebuiObservability::persist_usage_then_detail<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
+    c_82_v3_execution_control_payload_architecture_14["v3-server<br/>V3ServerAggregateHandle::close_runtime_persistence<br/><small>routecodex-v3-server/src/lib.rs</small>"]
+    c_82_v3_execution_control_payload_architecture_15["v3-server<br/>V3WebuiObservability::close_persistence<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
+    c_82_v3_execution_control_payload_architecture_16["v3-server<br/>V3WebuiObservabilityPersistenceWriter::close<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
+    c_82_v3_execution_control_payload_architecture_17["v3-server<br/>run_v3_webui_observability_persistence_writer<br/><small>routecodex-v3-server/src/webui_observability.rs</small>"]
   end
   c_82_v3_execution_control_payload_architecture_0 -->|v3-execution-control-target-plan<br/>V3ExecutionControl01RequestAccepted → V3ExecutionControl02RecoveryDecision| c_82_v3_execution_control_payload_architecture_1
   c_82_v3_execution_control_payload_architecture_0 -->|v3-execution-control-attempt-admission<br/>V3ExecutionControl02RecoveryDecision → V3ExecutionControl03AttemptReserved| c_82_v3_execution_control_payload_architecture_2
@@ -3416,6 +3421,9 @@ flowchart TD
   c_82_v3_execution_control_payload_architecture_8 -->|v3-execution-control-health-persistence<br/>V3ExecutionControl06SuccessCommitted → V3ExecutionControl07PersistenceQueued| c_82_v3_execution_control_payload_architecture_9
   c_82_v3_execution_control_payload_architecture_10 -->|v3-execution-control-observability-persistence<br/>V3ExecutionControl06SuccessCommitted → V3ExecutionControl07PersistenceQueued| c_82_v3_execution_control_payload_architecture_11
   c_82_v3_execution_control_payload_architecture_12 -->|v3-observability-provider-usage-persist<br/>V3ExecutionControl07PersistenceQueued → V3ProviderUsagePersistenceDisposition| c_82_v3_execution_control_payload_architecture_13
+  c_82_v3_execution_control_payload_architecture_14 -->|v3-observability-provider-usage-terminal-close<br/>V3ProviderUsagePersistenceDisposition → V3ObservabilityWriterTerminalOwned| c_82_v3_execution_control_payload_architecture_15
+  c_82_v3_execution_control_payload_architecture_16 -->|v3-observability-provider-usage-writer-shutdown<br/>V3ObservabilityWriterTerminalOwned → V3ObservabilityWriterShutdownReceived| c_82_v3_execution_control_payload_architecture_17
+  c_82_v3_execution_control_payload_architecture_17 -->|v3-observability-provider-usage-generation-close<br/>V3ObservabilityWriterShutdownReceived → V3ObservabilityGenerationClosed| c_82_v3_execution_control_payload_architecture_18
 ```
 
 | Step | Node edge | Status | Caller | Callee | Owner |
@@ -3428,6 +3436,9 @@ flowchart TD
 | `v3-execution-control-health-persistence` | `V3ExecutionControl06SuccessCommitted` → `V3ExecutionControl07PersistenceQueued` | anchored | persist_cooldown_state<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small> | V3ProviderHealthPersistenceTicket::enqueue<br/><small>routecodex-v3-provider-responses/src/health/persistence.rs</small> | `v3.provider_health_persistence_isolation` |
 | `v3-execution-control-observability-persistence` | `V3ExecutionControl06SuccessCommitted` → `V3ExecutionControl07PersistenceQueued` | anchored | V3WebuiObservability::record_observed<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | V3WebuiObservabilityPersistenceWriter::enqueue<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | `v3.observability_persistence_isolation` |
 | `v3-observability-provider-usage-persist` | `V3ExecutionControl07PersistenceQueued` → `V3ProviderUsagePersistenceDisposition` | anchored | V3WebuiObservability::persist_usage_then_detail<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | V3ProviderUsagePersistenceStore::persist_row_before_detail<br/><small>routecodex-v3-debug/src/observability_store.rs</small> | `v3.observability_persistence_isolation` |
+| `v3-observability-provider-usage-terminal-close` | `V3ProviderUsagePersistenceDisposition` → `V3ObservabilityWriterTerminalOwned` | anchored | V3ServerAggregateHandle::close_runtime_persistence<br/><small>routecodex-v3-server/src/lib.rs</small> | V3WebuiObservability::close_persistence<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | `v3.observability_persistence_isolation` |
+| `v3-observability-provider-usage-writer-shutdown` | `V3ObservabilityWriterTerminalOwned` → `V3ObservabilityWriterShutdownReceived` | anchored | V3WebuiObservabilityPersistenceWriter::close<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | run_v3_webui_observability_persistence_writer<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | `v3.observability_persistence_isolation` |
+| `v3-observability-provider-usage-generation-close` | `V3ObservabilityWriterShutdownReceived` → `V3ObservabilityGenerationClosed` | anchored | run_v3_webui_observability_persistence_writer<br/><small>routecodex-v3-server/src/webui_observability.rs</small> | V3ProviderUsagePersistenceStore::close_generation<br/><small>routecodex-v3-debug/src/observability_store.rs</small> | `v3.observability_persistence_isolation` |
 
 ## v3.memory_raw_capture
 

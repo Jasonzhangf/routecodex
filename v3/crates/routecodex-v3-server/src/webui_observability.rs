@@ -808,7 +808,6 @@ impl V3WebuiObservabilityGapQueue {
 
 #[derive(Debug, Clone)]
 struct V3WebuiObservabilityPersistenceWriter {
-    sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
     gaps: V3WebuiObservabilityGapQueue,
     alarm: Arc<RwLock<Option<String>>>,
     pending_write_error: Arc<std::sync::Mutex<Option<String>>>,
@@ -818,8 +817,15 @@ struct V3WebuiObservabilityPersistenceWriter {
 
 #[derive(Debug)]
 struct V3WebuiObservabilityPersistenceWriterLifecycle {
-    sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
+    state: std::sync::Mutex<V3WebuiObservabilityPersistenceWriterLifecycleState>,
     wait_for_completion: bool,
+}
+
+#[derive(Debug)]
+struct V3WebuiObservabilityPersistenceWriterLifecycleState {
+    sender: Option<mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    close_result: Option<Result<(), String>>,
 }
 
 impl V3WebuiObservabilityPersistenceWriterLifecycle {
@@ -828,24 +834,47 @@ impl V3WebuiObservabilityPersistenceWriterLifecycle {
         wait_for_completion: bool,
     ) -> Self {
         Self {
-            sender,
+            state: std::sync::Mutex::new(V3WebuiObservabilityPersistenceWriterLifecycleState {
+                sender: Some(sender),
+                thread: None,
+                close_result: None,
+            }),
             wait_for_completion,
+        }
+    }
+
+    fn attach_thread(&self, thread: std::thread::JoinHandle<()>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.thread = Some(thread);
         }
     }
 }
 
 impl Drop for V3WebuiObservabilityPersistenceWriterLifecycle {
     fn drop(&mut self) {
-        let (receipt_sender, receipt_receiver) = mpsc::channel();
-        if self
-            .sender
-            .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
-                receipt_sender,
-            ))
-            .is_ok()
-            && self.wait_for_completion
-        {
-            let _ = receipt_receiver.recv();
+        let completion = self.state.lock().ok().and_then(|mut state| {
+            if state.close_result.is_some() {
+                return None;
+            }
+            let sender = state.sender.take()?;
+            let thread = state.thread.take();
+            Some((sender, thread))
+        });
+        if let Some((sender, thread)) = completion {
+            let (receipt_sender, receipt_receiver) = mpsc::channel();
+            if sender
+                .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
+                    receipt_sender,
+                ))
+                .is_ok()
+                && self.wait_for_completion
+            {
+                let _ = receipt_receiver.recv();
+            }
+            drop(sender);
+            if let Some(thread) = thread {
+                let _ = thread.join();
+            }
         }
     }
 }
@@ -876,10 +905,10 @@ impl V3WebuiObservabilityPersistenceWriter {
             routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits::default(),
         );
         Self::after_spawn(
-            sender,
             gaps,
             alarm,
             pending_write_error,
+            sender,
             spawned,
             history_max_bytes,
         )
@@ -934,30 +963,33 @@ impl V3WebuiObservabilityPersistenceWriter {
     }
 
     fn after_spawn(
-        sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
         gaps: V3WebuiObservabilityGapQueue,
         alarm: Arc<RwLock<Option<String>>>,
         pending_write_error: Arc<std::sync::Mutex<Option<String>>>,
+        sender: mpsc::SyncSender<V3WebuiObservabilityPersistenceCommand>,
         spawned: std::io::Result<std::thread::JoinHandle<()>>,
         history_max_bytes: u64,
     ) -> Self {
-        if let Err(error) = spawned {
-            // The writer thread is the only owner of the receive side. If it
-            // cannot start, every append/flush fails the channel and is surfaced
-            // through the persistence alarm instead of crashing the listener at
-            // startup. Persisted observability is advisory, not business truth.
-            eprintln!("[RouteCodexV3] webui observability persistence disabled: {error}");
-            set_v3_webui_observability_alarm(
-                &alarm,
-                format!("observability persistence writer start failed: {error}"),
-            );
-        }
         let lifecycle = Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
             sender.clone(),
             true,
         ));
+        match spawned {
+            Ok(thread) => lifecycle.attach_thread(thread),
+            Err(error) => {
+                // The writer thread is the only owner of the receive side. If
+                // it cannot start, every append/flush fails the channel and is
+                // surfaced through the persistence alarm instead of crashing
+                // the listener at startup. Persisted observability is advisory,
+                // not business truth.
+                eprintln!("[RouteCodexV3] webui observability persistence disabled: {error}");
+                set_v3_webui_observability_alarm(
+                    &alarm,
+                    format!("observability persistence writer start failed: {error}"),
+                );
+            }
+        }
         Self {
-            sender,
             gaps,
             alarm,
             pending_write_error,
@@ -970,31 +1002,59 @@ impl V3WebuiObservabilityPersistenceWriter {
         let listener_id = row.scope.port;
         let request_key = row.request_key.clone();
         let started_epoch_ms = row.started_epoch_ms;
-        if let Err(error) = self
-            .sender
-            .try_send(V3WebuiObservabilityPersistenceCommand::Append {
-                row,
-                attempt_ordinal,
-            })
-        {
+        let error = {
+            let state = match self.lifecycle.state.lock() {
+                Ok(state) => state,
+                Err(error) => {
+                    set_v3_webui_observability_alarm(
+                        &self.alarm,
+                        format!("observability persistence lifecycle poisoned: {error}"),
+                    );
+                    return;
+                }
+            };
+            let Some(sender) = state.sender.as_ref() else {
+                return;
+            };
+            let error = sender
+                .try_send(V3WebuiObservabilityPersistenceCommand::Append {
+                    row,
+                    attempt_ordinal,
+                })
+                .err();
+            if error.is_some() {
+                // Seal admission and rejected-work coverage under the same lock.
+                self.gaps.push(
+                    V3WebuiObservabilityQueueGap {
+                        listener_id,
+                        request_key,
+                        started_epoch_ms,
+                    },
+                    &self.alarm,
+                );
+            }
+            error
+        };
+        if let Some(error) = error {
             set_v3_webui_observability_alarm(
                 &self.alarm,
                 format!("observability persistence queue rejected row: {error}"),
-            );
-            self.gaps.push(
-                V3WebuiObservabilityQueueGap {
-                    listener_id,
-                    request_key,
-                    started_epoch_ms,
-                },
-                &self.alarm,
             );
         }
     }
 
     fn flush(&self) -> Result<(), String> {
         let (receipt_sender, receipt_receiver) = mpsc::channel();
-        self.sender
+        let sender = self
+            .lifecycle
+            .state
+            .lock()
+            .map_err(|error| format!("observability persistence lifecycle poisoned: {error}"))?
+            .sender
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "observability persistence writer is closed".to_string())?;
+        sender
             .send(V3WebuiObservabilityPersistenceCommand::Flush(
                 receipt_sender,
             ))
@@ -1002,6 +1062,59 @@ impl V3WebuiObservabilityPersistenceWriter {
         receipt_receiver
             .recv()
             .map_err(|error| format!("observability persistence flush receipt missing: {error}"))?
+    }
+
+    fn close(&self) -> Result<(), String> {
+        let (sender, thread) = {
+            let mut state = self.lifecycle.state.lock().map_err(|error| {
+                format!("observability persistence lifecycle poisoned: {error}")
+            })?;
+            if let Some(result) = state.close_result.clone() {
+                return result;
+            }
+            let sender = state
+                .sender
+                .take()
+                .ok_or_else(|| "observability persistence writer was not started".to_string())?;
+            let thread = state.thread.take();
+            (sender, thread)
+        };
+        let (receipt_sender, receipt_receiver) = mpsc::channel();
+        let send_result = sender
+            .send(V3WebuiObservabilityPersistenceCommand::Shutdown(
+                receipt_sender,
+            ))
+            .map_err(|error| format!("observability persistence writer unavailable: {error}"));
+        let shutdown_result = send_result.and_then(|()| {
+            receipt_receiver.recv().unwrap_or_else(|error| {
+                Err(format!(
+                    "observability persistence shutdown receipt missing: {error}"
+                ))
+            })
+        });
+        drop(sender);
+        let join_result = match thread {
+            Some(thread) => thread
+                .join()
+                .map_err(|_| "observability persistence writer thread panicked".to_string()),
+            None => Err("observability persistence writer thread unavailable".to_string()),
+        };
+        let result = match (shutdown_result, join_result) {
+            (Err(error), Err(join_error)) => Err(format!("{error}; {join_error}")),
+            (Err(error), _) | (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        };
+        self.set_close_result(result.clone())?;
+        result
+    }
+
+    fn set_close_result(&self, result: Result<(), String>) -> Result<(), String> {
+        self.lifecycle
+            .state
+            .lock()
+            .map_err(|error| format!("observability persistence lifecycle poisoned: {error}"))?
+            .close_result = Some(result);
+        Ok(())
     }
 }
 
@@ -1065,16 +1178,25 @@ fn run_v3_webui_observability_persistence_writer(
                 let _ = receipt.send(result);
             }
             V3WebuiObservabilityPersistenceCommand::Shutdown(receipt) => {
+                let pending_result = pending_write_error
+                    .lock()
+                    .map_err(|error| {
+                        format!("observability persistence write error state poisoned: {error}")
+                    })
+                    .map(|mut pending| pending.take());
                 let gap_result = persist_queue_gaps(&mut store, &gaps);
                 let close_result = store
                     .close_generation()
                     .map_err(|error| format!("observability persistence close failed: {error}"));
-                let result = match (gap_result, close_result) {
-                    (Err(gap_error), Err(close_error)) => {
-                        Err(format!("{close_error}; {gap_error}"))
-                    }
-                    (Err(error), _) | (Ok(()), Err(error)) => Err(error),
-                    (Ok(()), Ok(())) => Ok(()),
+                let pending_error = pending_result.unwrap_or_else(Some);
+                let errors: Vec<_> = [pending_error, gap_result.err(), close_result.err()]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                let result = if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors.join("; "))
                 };
                 if let Err(ref error) = result {
                     set_v3_webui_observability_alarm(&writer_alarm, error.clone());
@@ -1235,6 +1357,13 @@ impl V3WebuiObservability {
     pub(crate) fn flush_persistence(&self) -> Result<(), String> {
         match self.persistence_writer.as_ref() {
             Some(writer) => writer.flush(),
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) fn close_persistence(&self) -> Result<(), String> {
+        match self.persistence_writer.as_ref() {
+            Some(writer) => writer.close(),
             None => Ok(()),
         }
     }
@@ -1613,7 +1742,7 @@ fn resolve_v3_obs_raw_artifact_ref_in(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     include!("webui_observability_tests.rs");
 
     use routecodex_v3_debug::observability_store::{
@@ -1769,7 +1898,7 @@ mod tests {
         )
         .unwrap();
         first.flush_persistence().unwrap();
-        let inode_before_backfill = std::fs::metadata(&records).unwrap().ino();
+        let before_backfill = std::fs::File::open(&records).unwrap();
         record_observed(
             &first,
             V3ObsEventType::Completed,
@@ -1782,9 +1911,11 @@ mod tests {
         first.flush_persistence().unwrap();
         assert_ne!(
             std::fs::metadata(&records).unwrap().ino(),
-            inode_before_backfill,
+            before_backfill.metadata().unwrap().ino(),
             "backfill must exercise a detail compaction round"
         );
+        drop(before_backfill);
+        let before_first_attempt = std::fs::File::open(&records).unwrap();
         record(
             &first,
             V3ObsEventType::ProviderAttemptStarted,
@@ -1802,11 +1933,12 @@ mod tests {
         )
         .unwrap();
         first.flush_persistence().unwrap();
-        let inode_after_first_attempt = std::fs::metadata(&records).unwrap().ino();
         assert_ne!(
-            inode_after_first_attempt, inode_before_backfill,
+            std::fs::metadata(&records).unwrap().ino(),
+            before_first_attempt.metadata().unwrap().ino(),
             "attempt detail must exercise the second compaction round"
         );
+        drop(before_first_attempt);
         assert!(
             std::fs::metadata(&records).unwrap().len() <= 2_000,
             "each compaction round must enforce the configured retention threshold"
@@ -2093,7 +2225,6 @@ mod tests {
         let gaps = V3WebuiObservabilityGapQueue::new();
         let pending_write_error = Arc::new(std::sync::Mutex::new(None));
         let writer = V3WebuiObservabilityPersistenceWriter {
-            sender: sender.clone(),
             gaps: gaps.clone(),
             alarm: Arc::clone(&alarm),
             pending_write_error: Arc::clone(&pending_write_error),
@@ -2176,13 +2307,61 @@ mod tests {
     }
 
     #[test]
+    pub(crate) fn terminal_close_returns_pending_write_failure_after_joining_the_writer() {
+        let limits = routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits {
+            latest_encoded_fact_bytes: 8_192,
+            max_facts: 1,
+            physical_fact_log_bytes: 8_192,
+            complete_fact_bytes: 8_192,
+            companion_state_bytes: 64 * 1024,
+        };
+        let (writer, dir, records) =
+            terminal_close_test_writer("terminal-close-write-failure", limits);
+        writer.enqueue(terminal_close_test_row(4444, "terminal-first", 10), None);
+        writer.flush().expect("first accepted fact");
+        writer.enqueue(terminal_close_test_row(4444, "terminal-capacity", 20), None);
+        let error = writer
+            .close()
+            .expect_err("terminal close must retain an accepted capacity failure");
+        assert!(
+            error.contains("capacity"),
+            "unexpected close error: {error}"
+        );
+        assert!(
+            !v3_provider_usage_read_generation(&records).unwrap().open,
+            "failed terminal close must still close generation before returning"
+        );
+        assert!(writer.close().is_err(), "terminal close must remain sticky");
+        drop(writer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    pub(crate) fn terminal_close_waits_for_queued_work_before_closing_generation() {
+        let (writer, dir, records) = terminal_close_test_writer(
+            "terminal-close-accepted-work",
+            routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits::default(),
+        );
+        writer.enqueue(terminal_close_test_row(4444, "queued-terminal", 10), None);
+        writer.close().expect("terminal close");
+        let read = v3_webui_observability_read_provider_usage(&records).unwrap();
+        assert_eq!(
+            read.facts.len(),
+            1,
+            "accepted work must be processed before close"
+        );
+        assert!(!v3_provider_usage_read_generation(&records).unwrap().open);
+        drop(writer);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn provider_usage_queue_gap_write_failure_is_retried_before_later_success() {
         let (sender, receiver) = mpsc::sync_channel(1);
         let alarm = Arc::new(RwLock::new(None));
         let gaps = V3WebuiObservabilityGapQueue::new();
         let pending_write_error = Arc::new(std::sync::Mutex::new(None));
         let writer = V3WebuiObservabilityPersistenceWriter {
-            sender: sender.clone(),
             gaps: gaps.clone(),
             alarm: Arc::clone(&alarm),
             pending_write_error: Arc::clone(&pending_write_error),
@@ -2312,7 +2491,6 @@ mod tests {
         let gaps = V3WebuiObservabilityGapQueue::new();
         let pending_write_error = Arc::new(std::sync::Mutex::new(None));
         let writer = V3WebuiObservabilityPersistenceWriter {
-            sender: sender.clone(),
             gaps: gaps.clone(),
             alarm: Arc::clone(&alarm),
             pending_write_error: Arc::clone(&pending_write_error),
@@ -2356,8 +2534,8 @@ mod tests {
         )
         .expect("real persistence writer");
 
-        drop(writer);
-        spawned.join().expect("normal writer shutdown");
+        writer.lifecycle.attach_thread(spawned);
+        writer.close().expect("normal writer shutdown");
 
         let read = v3_webui_observability_read_provider_usage(&records).unwrap();
         assert!(read
@@ -2367,6 +2545,7 @@ mod tests {
             .iter()
             .any(|gap| gap == "persistence_queue_rejected"));
         assert!(!v3_provider_usage_read_generation(&records).unwrap().open);
+        drop(writer);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2490,7 +2669,6 @@ mod tests {
         let gaps = V3WebuiObservabilityGapQueue::new();
         let pending_write_error = Arc::new(std::sync::Mutex::new(None));
         let writer = V3WebuiObservabilityPersistenceWriter {
-            sender: sender.clone(),
             gaps: gaps.clone(),
             alarm: Arc::clone(&alarm),
             pending_write_error: Arc::clone(&pending_write_error),
