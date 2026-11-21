@@ -5,16 +5,15 @@
 //! Command:
 //! `node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --test issue5dfae83_provider_switch_ledger_dedup -- --nocapture`
 //!
-//! A real request enters the listener. Provider `a` answers HTTP 503 and
-//! provider `b` answers business 200, so the runtime records one failed
-//! attempt, switches once, and completes. The raw request-records lifecycle
-//! stream must contain exactly one `request.provider_attempt_failed` line; the
-//! `request.provider_switched` line must not repeat the failed attempt's
-//! `provider_status`, `error_category`, `error_detail`, or `observed_error`.
-//! The admin HTTP surface must see the same request as one failed attempt that
-//! ends completed. A second request then succeeds on provider `a`'s first
-//! attempt and must add no failure or switch row and count zero failed
-//! attempts, giving the dedup a same-listener success control.
+//! Real requests enter the listener. Provider `a` answers HTTP 503 and provider
+//! `b` answers one of three legal business terminals: completed without a
+//! finish reason, `requires_action` with a tool call, or streamed
+//! `incomplete/content_filter`. Each switched request must retain exactly one
+//! failed-attempt row, one switch, and one successful completion whose final
+//! provider status and real finish reason replace the failed attempt metadata.
+//! The same records must be visible through the Admin HTTP consumer. A final
+//! request succeeds on provider `a`'s first attempt and must add no failure or
+//! switch row, giving the same listener a zero-failure control.
 
 use axum::{
     body::Body, extract::State, http::StatusCode, response::Response, routing::post, Json, Router,
@@ -23,6 +22,7 @@ use routecodex_v3_config::V3ConfigStore;
 use routecodex_v3_server::spawn_v3_server_aggregate_with_admin;
 use serde_json::{json, Value};
 use std::{
+    collections::BTreeSet,
     env, fs,
     path::{Path, PathBuf},
     sync::{
@@ -46,7 +46,79 @@ struct Upstream {
     fail: AtomicBool,
 }
 
-async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) -> Response<Body> {
+fn success_response(request: &Value) -> Value {
+    match request["input"].as_str().unwrap_or_default() {
+        "case:tool_calls" => json!({
+            "id": "resp-5dfae83-tool-calls",
+            "object": "response",
+            "status": "requires_action",
+            "model": "wire-b",
+            "output": [{
+                "id": "fc-5dfae83",
+                "type": "function_call",
+                "call_id": "call-5dfae83",
+                "name": "SWITCHED_TOOL_CALL_OK",
+                "arguments": "{}",
+                "status": "completed"
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+        }),
+        _ => json!({
+            "id": "resp-5dfae83",
+            "object": "response",
+            "status": "completed",
+            "model": "wire-b",
+            "output": [{
+                "id": "msg-5dfae83",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": "SWITCHED_BUSINESS_OK",
+                    "annotations": []
+                }]
+            }],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+        }),
+    }
+}
+
+fn content_filter_response() -> Response<Body> {
+    let response = json!({
+        "id": "resp-5dfae83-content-filter",
+        "object": "response",
+        "status": "incomplete",
+        "model": "wire-b",
+        "incomplete_details": {"reason": "content_filter"},
+        "output": [{
+            "id": "msg-5dfae83-filtered",
+            "type": "message",
+            "role": "assistant",
+            "status": "incomplete",
+            "content": [{
+                "type": "output_text",
+                "text": "SWITCHED_CONTENT_FILTER_OK",
+                "annotations": []
+            }]
+        }],
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+    });
+    let frame = format!(
+        "event: response.incomplete\ndata: {}\n\n",
+        json!({
+            "type": "response.incomplete",
+            "response": response
+        })
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(frame))
+        .unwrap()
+}
+
+async fn upstream(State(state): State<Arc<Upstream>>, Json(body): Json<Value>) -> Response<Body> {
     state.calls.fetch_add(1, Ordering::SeqCst);
     if state.fail.load(Ordering::SeqCst) {
         Response::builder()
@@ -56,31 +128,13 @@ async fn upstream(State(state): State<Arc<Upstream>>, Json(_body): Json<Value>) 
                 r#"{"error":{"message":"controlled provider failure","type":"server_error","code":"controlled_unavailable"}}"#,
             ))
             .unwrap()
+    } else if body["input"].as_str() == Some("case:content_filter") {
+        content_filter_response()
     } else {
         Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "application/json")
-            .body(Body::from(
-                json!({
-                    "id": "resp-5dfae83",
-                    "object": "response",
-                    "status": "completed",
-                    "model": "wire-b",
-                    "output": [{
-                        "id": "msg-5dfae83",
-                        "type": "message",
-                        "role": "assistant",
-                        "status": "completed",
-                        "content": [{
-                            "type": "output_text",
-                            "text": "SWITCHED_BUSINESS_OK",
-                            "annotations": []
-                        }]
-                    }],
-                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-                })
-                .to_string(),
-            ))
+            .body(Body::from(success_response(&body).to_string()))
             .unwrap()
     }
 }
@@ -145,10 +199,11 @@ base_url = "http://127.0.0.1:{a_port}/v1"
 default_model = "wire-a"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "direct", streaming = "never" }}
+responses = {{ process = "direct", streaming = "client" }}
 [providers.a.models.wire-a]
 wire_name = "wire-a"
 capabilities = ["text", "tools"]
+supports_streaming = true
 max_context_tokens = 128000
 
 [providers.b]
@@ -157,10 +212,11 @@ base_url = "http://127.0.0.1:{b_port}/v1"
 default_model = "wire-b"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "{PROVIDER_KEY_ENV}" }}] }}
 health = {{ enabled = false, failure_threshold = 1, cooldown_ms = 5000 }}
-responses = {{ process = "direct", streaming = "never" }}
+responses = {{ process = "direct", streaming = "client" }}
 [providers.b.models.wire-b]
 wire_name = "wire-b"
 capabilities = ["text", "tools"]
+supports_streaming = true
 max_context_tokens = 128000
 
 [debug]
@@ -190,15 +246,6 @@ fn read_raw_rows(path: &Path) -> Vec<Value> {
         .collect()
 }
 
-fn has_terminal(rows: &[Value]) -> bool {
-    rows.iter().any(|row| {
-        matches!(
-            row["event_type"].as_str(),
-            Some("request.completed" | "request.failed" | "request.cancelled")
-        )
-    })
-}
-
 async fn get_json(client: &reqwest::Client, url: &str) -> (reqwest::StatusCode, Value) {
     let response = client.get(url).send().await.unwrap();
     let status = response.status();
@@ -206,6 +253,196 @@ async fn get_json(client: &reqwest::Client, url: &str) -> (reqwest::StatusCode, 
     let value = serde_json::from_str(&body)
         .unwrap_or_else(|error| panic!("{url} did not return JSON ({status}): {error}\n{body}"));
     (status, value)
+}
+
+fn completed_request_keys(rows: &[Value]) -> BTreeSet<String> {
+    rows.iter()
+        .filter(|row| row["event_type"] == "request.completed")
+        .filter_map(|row| row["request_key"].as_str().map(str::to_string))
+        .collect()
+}
+
+async fn wait_for_completed_count(path: &Path, expected: usize) -> Vec<Value> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let rows = read_raw_rows(path);
+        if completed_request_keys(&rows).len() >= expected || Instant::now() >= deadline {
+            assert!(
+                completed_request_keys(&rows).len() >= expected,
+                "expected {expected} completed requests, got: {rows:#?}"
+            );
+            return rows;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn completed_request_key_added(rows: &[Value], previous_keys: &BTreeSet<String>) -> String {
+    let current = completed_request_keys(rows);
+    let added: Vec<String> = current.difference(previous_keys).cloned().collect();
+    assert_eq!(
+        added.len(),
+        1,
+        "the request must add exactly one completed key, got {added:?}: {rows:#?}"
+    );
+    added[0].clone()
+}
+
+fn event_rows<'a>(rows: &'a [Value], request_key: &str, event_type: &str) -> Vec<&'a Value> {
+    rows.iter()
+        .filter(|row| row["request_key"] == request_key)
+        .filter(|row| row["event_type"] == event_type)
+        .collect()
+}
+
+fn sse_events(body: &str) -> Vec<Value> {
+    body.lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .collect()
+}
+
+async fn wait_for_admin_record(
+    client: &reqwest::Client,
+    list_url: &str,
+    request_key: &str,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let (status, body) = get_json(client, list_url).await;
+        assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
+        if let Some(row) = body["records"]
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["request_key"] == request_key))
+        {
+            return row.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no completed record in admin list: {body}"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn assert_recovered_switch_ledger(
+    client: &reqwest::Client,
+    records_path: &Path,
+    list_url: &str,
+    previous_keys: &BTreeSet<String>,
+    expected_response_status: &str,
+    expected_finish_reason: Option<&str>,
+) -> String {
+    let rows = wait_for_completed_count(records_path, previous_keys.len() + 1).await;
+    let request_key = completed_request_key_added(&rows, previous_keys);
+
+    let failed_rows = event_rows(&rows, &request_key, "request.provider_attempt_failed");
+    assert_eq!(
+        failed_rows.len(),
+        1,
+        "one failed attempt must write exactly one failure row: {rows:#?}"
+    );
+    assert_eq!(failed_rows[0]["meta"]["provider_status"], 503);
+    assert_eq!(failed_rows[0]["meta"]["provider_id"], "a");
+    assert_eq!(failed_rows[0]["meta"]["provider"], "a:default:key:wire-a");
+    assert_eq!(
+        failed_rows[0]["meta"]["error_category"],
+        "provider_http_503"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["error_detail"],
+        "provider returned HTTP 503"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["source"],
+        "provider_attempt_failure"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["external_error_kind"],
+        "provider"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["external_error_code"],
+        "HTTP_503"
+    );
+    assert_eq!(
+        failed_rows[0]["meta"]["observed_error"]["external_error_status"],
+        503
+    );
+
+    let switch_rows = event_rows(&rows, &request_key, "request.provider_switched");
+    assert_eq!(
+        switch_rows.len(),
+        1,
+        "one switch must write exactly one switch row: {rows:#?}"
+    );
+    for field in [
+        "provider_status",
+        "error_category",
+        "error_detail",
+        "observed_error",
+    ] {
+        assert!(
+            switch_rows[0]["meta"][field].is_null(),
+            "the switch row must not repeat {field}: {switch_rows:?}"
+        );
+    }
+
+    let completed_rows = event_rows(&rows, &request_key, "request.completed");
+    assert_eq!(
+        completed_rows.len(),
+        1,
+        "the switched request must complete exactly once"
+    );
+    assert_eq!(completed_rows[0]["result"], "success");
+    let completed_meta = &completed_rows[0]["meta"];
+    assert_eq!(completed_meta["provider_status"], 200);
+    assert_eq!(completed_meta["provider_id"], "b");
+    assert_eq!(completed_meta["provider"], "b:default:key:wire-b");
+    assert_eq!(completed_meta["response_status"], expected_response_status);
+    match expected_finish_reason {
+        Some(reason) => assert_eq!(
+            completed_meta["finish_reason"], reason,
+            "the completed row must preserve the real final finish reason: {completed_rows:?}"
+        ),
+        None => assert!(
+            completed_meta["finish_reason"].is_null(),
+            "a completion without a final reason must not inherit the failed attempt: {completed_rows:?}"
+        ),
+    }
+    for field in ["error_category", "error_detail", "observed_error"] {
+        assert!(
+            completed_meta[field].is_null(),
+            "the completed row must not inherit {field}: {completed_rows:?}"
+        );
+    }
+
+    let admin_row = wait_for_admin_record(client, list_url, &request_key).await;
+    assert_eq!(admin_row["failed_attempts"], 1);
+    assert_eq!(admin_row["meta"]["provider_status"], 200);
+    assert_eq!(admin_row["meta"]["provider_id"], "b");
+    assert_eq!(
+        admin_row["meta"]["response_status"],
+        expected_response_status
+    );
+    match expected_finish_reason {
+        Some(reason) => assert_eq!(
+            admin_row["meta"]["finish_reason"], reason,
+            "admin must expose the real final finish reason: {admin_row}"
+        ),
+        None => assert!(
+            admin_row["meta"]["finish_reason"].is_null(),
+            "admin must not inherit the failed attempt finish reason: {admin_row}"
+        ),
+    }
+    for field in ["error_category", "error_detail", "observed_error"] {
+        assert!(
+            admin_row["meta"][field].is_null(),
+            "admin must not inherit {field}: {admin_row}"
+        );
+    }
+    request_key
 }
 
 #[tokio::test]
@@ -255,136 +492,95 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         .timeout(Duration::from_secs(20))
         .build()
         .unwrap();
-    let response = client
-        .post(format!("http://{server_addr}/v1/responses"))
-        .json(&json!({
-            "model": "client",
-            "input": "controlled request",
-            "stream": false
-        }))
-        .send()
-        .await
-        .expect("the switched request must reach the real listener");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
-    let client_body = response.text().await.unwrap();
-    assert!(
-        client_body.contains("SWITCHED_BUSINESS_OK"),
-        "the switched provider's business body must reach the client: {client_body}"
-    );
-    assert_eq!(
-        a.calls.load(Ordering::SeqCst),
-        1,
-        "provider a must be attempted exactly once"
-    );
-    assert_eq!(
-        b.calls.load(Ordering::SeqCst),
-        1,
-        "provider b must be attempted exactly once after the switch"
-    );
-
-    // Public request-records store: one failed attempt, one switch, one
-    // completed lifecycle line. The switch line must not repeat failure fields.
     let records_path = home
         .join("logs")
         .join(format!("server-v3-{server_port}.request-records.jsonl"));
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let rows = loop {
-        let rows = read_raw_rows(&records_path);
-        if has_terminal(&rows) || Instant::now() >= deadline {
-            break rows;
-        }
-        sleep(Duration::from_millis(50)).await;
-    };
-    assert!(
-        !rows.is_empty(),
-        "the request must leave request-records rows: {}",
-        records_path.display()
-    );
-
-    let failed_rows: Vec<&Value> = rows
-        .iter()
-        .filter(|row| row["event_type"] == "request.provider_attempt_failed")
-        .collect();
-    assert_eq!(
-        failed_rows.len(),
-        1,
-        "one failed attempt must write exactly one failure row: {rows:#?}"
-    );
-    assert!(
-        failed_rows[0]["meta"]["provider_status"].is_number(),
-        "the failed row must carry the upstream status: {failed_rows:?}"
-    );
-    assert!(
-        failed_rows[0]["meta"]["error_category"].is_string(),
-        "the failed row must carry the error category"
-    );
-    assert!(
-        failed_rows[0]["meta"]["error_detail"].is_string(),
-        "the failed row must carry the error detail"
-    );
-    assert!(
-        failed_rows[0]["meta"]["observed_error"].is_object(),
-        "the failed row must carry the typed observed error"
-    );
-
-    let switch_rows: Vec<&Value> = rows
-        .iter()
-        .filter(|row| row["event_type"] == "request.provider_switched")
-        .collect();
-    assert_eq!(
-        switch_rows.len(),
-        1,
-        "one switch must write exactly one switch row: {rows:#?}"
-    );
-    assert!(
-        switch_rows[0]["meta"]["provider_status"].is_null(),
-        "the switch row must not repeat provider_status: {switch_rows:?}"
-    );
-    assert!(
-        switch_rows[0]["meta"]["error_category"].is_null(),
-        "the switch row must not repeat error_category"
-    );
-    assert!(
-        switch_rows[0]["meta"]["error_detail"].is_null(),
-        "the switch row must not repeat error_detail"
-    );
-    assert!(
-        switch_rows[0]["meta"]["observed_error"].is_null(),
-        "the switch row must not repeat observed_error"
-    );
-
-    let completed_rows: Vec<&Value> = rows
-        .iter()
-        .filter(|row| row["event_type"] == "request.completed")
-        .collect();
-    assert_eq!(
-        completed_rows.len(),
-        1,
-        "the switched request must complete exactly once"
-    );
-
-    // Admin HTTP surface: the same request is one failed attempt that ends
-    // completed. This is the public consumer comparison the handoff requires.
     let list_url = format!("http://{admin_addr}/api/observability/records?range=all&page_size=50");
-    let admin_deadline = Instant::now() + Duration::from_secs(20);
-    let row = loop {
-        let (status, body) = get_json(&client, &list_url).await;
-        assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
-        if let Some(row) = body["records"].as_array().and_then(|rows| {
-            rows.iter()
-                .find(|row| row["result"] == "success" || row["status"] == "completed")
-        }) {
-            break row.clone();
+    let mut completed_keys = BTreeSet::new();
+    for (input, marker, stream, expected_status, expected_finish_reason) in [
+        (
+            "case:missing_reason",
+            "SWITCHED_BUSINESS_OK",
+            false,
+            "completed",
+            None,
+        ),
+        (
+            "case:tool_calls",
+            "SWITCHED_TOOL_CALL_OK",
+            false,
+            "requires_action",
+            Some("tool_calls"),
+        ),
+        (
+            "case:content_filter",
+            "SWITCHED_CONTENT_FILTER_OK",
+            true,
+            "incomplete",
+            Some("content_filter"),
+        ),
+    ] {
+        let response = client
+            .post(format!("http://{server_addr}/v1/responses"))
+            .json(&json!({
+                "model": "client",
+                "input": input,
+                "stream": stream
+            }))
+            .send()
+            .await
+            .expect("the switched request must reach the real listener");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let client_body = response.text().await.unwrap();
+        if stream {
+            let events = sse_events(&client_body);
+            let terminal = events
+                .iter()
+                .find(|event| event["type"] == "response.incomplete")
+                .unwrap_or_else(|| panic!("missing SSE terminal: {client_body}"));
+            assert_eq!(terminal["response"]["status"], expected_status);
+            assert_eq!(
+                terminal["response"]["incomplete_details"]["reason"],
+                expected_finish_reason.unwrap()
+            );
+        } else {
+            let client_json: Value = serde_json::from_str(&client_body).unwrap_or_else(|error| {
+                panic!("switched response was not JSON: {error}\n{client_body}")
+            });
+            assert_eq!(client_json["status"], expected_status, "{client_body}");
         }
         assert!(
-            Instant::now() < admin_deadline,
-            "no completed record in admin list: {body}"
+            client_body.contains(marker),
+            "the switched provider's business body must reach the client: {client_body}"
         );
-        sleep(Duration::from_millis(50)).await;
-    };
+        assert!(
+            !client_body.contains("controlled provider failure"),
+            "the failed provider's error message must not reach the client: {client_body}"
+        );
+        assert!(
+            !client_body.contains("controlled_unavailable"),
+            "the failed provider's error code must not reach the client: {client_body}"
+        );
+        let request_key = assert_recovered_switch_ledger(
+            &client,
+            &records_path,
+            &list_url,
+            &completed_keys,
+            expected_status,
+            expected_finish_reason,
+        )
+        .await;
+        completed_keys.insert(request_key);
+    }
     assert_eq!(
-        row["failed_attempts"], 1,
-        "admin consumption must count one failed attempt: {row}"
+        a.calls.load(Ordering::SeqCst),
+        3,
+        "provider a must be attempted exactly once per switched request"
+    );
+    assert_eq!(
+        b.calls.load(Ordering::SeqCst),
+        3,
+        "provider b must be attempted exactly once after each switch"
     );
 
     // Success control: the second request succeeds on provider a's first
@@ -409,47 +605,17 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
     );
     assert_eq!(
         a.calls.load(Ordering::SeqCst),
-        2,
+        4,
         "provider a must be attempted once per request"
     );
     assert_eq!(
         b.calls.load(Ordering::SeqCst),
-        1,
+        3,
         "the success control must not reach provider b"
     );
 
-    let first_request_key = failed_rows[0]["request_key"]
-        .as_str()
-        .expect("the failed row carries a request_key")
-        .to_string();
-    let control_deadline = Instant::now() + Duration::from_secs(20);
-    let rows_after_control = loop {
-        let rows = read_raw_rows(&records_path);
-        let completed = rows
-            .iter()
-            .filter(|row| row["event_type"] == "request.completed")
-            .count();
-        if completed >= 2 || Instant::now() >= control_deadline {
-            break rows;
-        }
-        sleep(Duration::from_millis(50)).await;
-    };
-    let mut request_keys: Vec<String> = rows_after_control
-        .iter()
-        .filter_map(|row| row["request_key"].as_str().map(str::to_string))
-        .collect();
-    request_keys.sort();
-    request_keys.dedup();
-    assert_eq!(
-        request_keys.len(),
-        2,
-        "the listener must record exactly two independent requests: {rows_after_control:#?}"
-    );
-    let control_key = request_keys
-        .iter()
-        .find(|key| **key != first_request_key)
-        .expect("the control request has its own request_key")
-        .clone();
+    let rows_after_control = wait_for_completed_count(&records_path, 4).await;
+    let control_key = completed_request_key_added(&rows_after_control, &completed_keys);
     let control_rows: Vec<&Value> = rows_after_control
         .iter()
         .filter(|row| row["request_key"] == control_key.as_str())
@@ -475,23 +641,7 @@ async fn issue5dfae83_provider_switch_ledger_dedup() {
         "the success control must complete exactly once"
     );
 
-    let control_admin_deadline = Instant::now() + Duration::from_secs(20);
-    let control_row = loop {
-        let (status, body) = get_json(&client, &list_url).await;
-        assert_eq!(status, reqwest::StatusCode::OK, "records list: {body}");
-        if let Some(row) = body["records"].as_array().and_then(|records| {
-            records
-                .iter()
-                .find(|row| row["request_key"] == control_key.as_str())
-        }) {
-            break row.clone();
-        }
-        assert!(
-            Instant::now() < control_admin_deadline,
-            "no success-control record in admin list: {body}"
-        );
-        sleep(Duration::from_millis(50)).await;
-    };
+    let control_row = wait_for_admin_record(&client, &list_url, &control_key).await;
     assert_eq!(
         control_row["failed_attempts"], 0,
         "admin consumption must count zero failed attempts for a first-attempt success: {control_row}"
