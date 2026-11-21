@@ -203,9 +203,19 @@ async fn issue245_witness(stream: bool) {
     let reserved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = reserved.local_addr().unwrap().port();
     drop(reserved);
-    let handle = spawn_v3_server_aggregate(manifest(port, &base_a, &base_b, &base_hosted))
-        .await
-        .unwrap();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = Arc::new(super::sustained_429_window_blackbox::ObservationClock(
+        std::sync::atomic::AtomicU64::new(now_ms),
+    ));
+    let handle = routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+        manifest(port, &base_a, &base_b, &base_hosted),
+        clock.clone(),
+    )
+    .await
+    .unwrap();
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -265,25 +275,18 @@ async fn issue245_witness(stream: bool) {
         && message["tool_call_id"] == "call_issue245_continuation"
         && message["content"] == result));
 
-    let entry = tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let pool = cooldown_pool(&client, &base).await;
-            if let Some(entry) = find_entry(&pool, PROVIDER_A) {
-                break entry.clone();
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("A's exact identity must cool after pre-cool observation");
     let pool = cooldown_pool(&client, &base).await;
+    let entry = find_entry(&pool, PROVIDER_A)
+        .expect("a confirmed permission failure must cool A immediately");
     assert_eq!(entry["state"], "blocked");
     assert_eq!(entry["kind"], "probe");
     assert_eq!(entry["interface_id"], "default");
     let initial_deadline = entry["until_ms"].as_u64().unwrap();
+    assert_eq!(initial_deadline, now_ms + 3_600_000);
     assert!(find_entry(&pool, PROVIDER_B).is_none());
     assert!(find_entry(&pool, "hosted").is_none());
     force_probe(&client, &base).await;
+    clock.0.store(now_ms + 10_000, Ordering::SeqCst);
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             let pool = cooldown_pool(&client, &base).await;
@@ -299,14 +302,7 @@ async fn issue245_witness(stream: bool) {
     .expect("failed probe must settle without restoring A");
 
     // The original deadline has passed, but failed probes must preserve exclusion.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-    tokio::time::sleep(std::time::Duration::from_millis(
-        initial_deadline.saturating_sub(now) + 100,
-    ))
-    .await;
+    clock.0.store(initial_deadline, Ordering::SeqCst);
     let independent = search_request("ISSUE245_PERMISSION_DENIED_INDEPENDENT", stream);
     let response = successful_response(&client, &base, &independent).await;
     assert!(response["output"]

@@ -1,10 +1,10 @@
 use super::*;
 
 // 匹配到的 policy 分支会把失败写入 session 策略账本。它必须沿用 failure_action
-// 的完整身份指纹（带 source.code 兜底），而不是只认 HTTP 状态码的全局指纹：
-// 缺状态码时两类不同的 provider 本地错误会塌进同一个 None 桶，累加到三次冷却。
+// 的完整身份指纹（带 source.code 兜底），而不是只认 HTTP 状态码。指纹保留
+// typed 证据；同一个完整身份的 recoverable 连续计数仍然共享。
 #[tokio::test]
-async fn matched_policy_bridge_does_not_merge_distinct_no_status_classes() {
+async fn matched_policy_bridge_shares_identity_streak_across_distinct_no_status_classes() {
     let scope = "matched_policy_fingerprint";
     let source = r#"
 version = 3
@@ -54,9 +54,10 @@ public_code = "E_MATCHED_CLASS"
         .find(|policy| policy.policy_id == "no_status_match")
         .expect("matched-policy fixture must expose its directive");
     // 400 无全局分类指纹：两类不同的 provider 本地错误都只能靠 source.code
-    // 区分。若桥接只传状态码指纹，两者会塌进同一个桶并累加到三次冷却。
+    // 区分。指纹必须保留 typed 证据，但不得把同一身份的连续计数拆开。
     let classes = ["invalid_request_a", "invalid_request_b"];
-    for (index, class) in classes.iter().enumerate() {
+    for index in 0..10 {
+        let class = classes[index % classes.len()];
         let record = health
             .record_provider_failure_record_with_policy(
                 Some(policy),
@@ -69,7 +70,7 @@ public_code = "E_MATCHED_CLASS"
                 Some("matched policy failure"),
                 "V3ProviderRespInbound01Raw",
                 400,
-                Some(*class),
+                Some(class),
                 "matched class failure",
                 100 + index as u64,
             )
@@ -82,48 +83,31 @@ public_code = "E_MATCHED_CLASS"
         assert_eq!(record.cooldown_until_ms, None);
     }
     complete_due_precool_failures(&health, 101).await;
-    let cooldown_until_ms = health
-        .store()
-        .cooldown_entries(5_100)
-        .into_iter()
-        .find(|entry| {
-            entry.provider_id == "first"
-                && entry.interface_id == "default"
-                && entry.auth_alias.as_deref() == Some("key1")
-                && entry.model_id.as_deref() == Some("gpt-test")
-        })
-        .and_then(|entry| entry.until_ms);
-    assert_eq!(
-        cooldown_until_ms,
-        Some(5_101),
-        "both no-status classes must keep the threshold-one cooldown step"
-    );
-    for class in classes {
-        let available = health
+    assert!(
+        !health
             .store()
             .availability_for_session(&scope_handle, "first", Some("key1"), Some("gpt-test"), 101)
-            .available;
-        assert!(
-            !available,
-            "threshold one blocks only this complete identity"
-        );
-        assert_eq!(
-            health
-                .store()
-                .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"),)
-                .expect("matched-policy probe deadline"),
-            Some(5_101),
-            "class {class} must start its own threshold-one streak"
-        );
-        assert!(
-            health
-                .availability("first", Some("key1"), Some("other-model"), 101)
-                .available
-        );
-        assert!(
-            health
-                .availability("first", Some("key2"), Some("gpt-test"), 101)
-                .available
-        );
-    }
+            .available,
+        "ten mixed no-status observations on one identity must commit cooldown"
+    );
+    assert_eq!(
+        health
+            .store()
+            .provider_cooldown_probe_next_deadline_ms("first", Some("key1"), Some("gpt-test"))
+            .expect("matched-policy probe deadline"),
+        Some(5_101),
+        "cooldown owns the first five-second probe cadence"
+    );
+    assert!(
+        health
+            .availability("first", Some("key1"), Some("other-model"), 101)
+            .available,
+        "the cooldown must not leak to another model"
+    );
+    assert!(
+        health
+            .availability("first", Some("key2"), Some("gpt-test"), 101)
+            .available,
+        "the cooldown must not leak to another key"
+    );
 }

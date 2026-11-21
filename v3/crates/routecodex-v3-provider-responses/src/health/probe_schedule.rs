@@ -421,8 +421,8 @@ impl V3ProviderHealthStore {
     /// Close one owned pre-cool observation and report the typed fact.
     ///
     /// This is probe recovery only, gated by the same acquisition ID and health
-    /// generation the slot was acquired against. It resets the adaptive failure
-    /// window because a successful probe is real reachability evidence, but it
+    /// generation the slot was acquired against. A successful probe records
+    /// reachability and preserves committed business failure observations. It
     /// writes no cooldown entry, no `blocked_until_ms`, no business score (+1),
     /// no business success streak and it never clears an auth hold. A failed
     /// observation is closed through the release API instead: the failure
@@ -548,13 +548,18 @@ fn close_precool_observation(
     if history.score_generation != permit.expected_generation() {
         return V3ProviderPrecoolObservationOutcome::Superseded;
     }
-    // Real probe recovery: close the failure window proven healthy by the
-    // probe. Score, business success streak and generation stay untouched, so
-    // no business receipt is fabricated and no cooldown is created or cleared.
-    history.attempts = 0;
-    history.failures = 0;
-    history.failure_streak = 0;
-    history.failure_fingerprint = None;
+    // A reachability probe can close its observation window. A counted
+    // business failure streak remains until matching business success.
+    if history
+        .rate_limit_episode
+        .as_ref()
+        .is_none_or(|episode| episode.failure_count == 0)
+    {
+        history.attempts = 0;
+        history.failures = 0;
+        history.failure_streak = 0;
+        history.failure_fingerprint = None;
+    }
     history.probe_failure_count = 0;
     V3ProviderPrecoolObservationOutcome::Completed
 }

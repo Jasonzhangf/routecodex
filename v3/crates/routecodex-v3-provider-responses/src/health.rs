@@ -11,8 +11,7 @@ use crate::key_health::{
     V3ProviderSchedulingProjection, V3ProviderSchedulingReader,
 };
 use crate::probe_backoff::{
-    adaptive_probe_interval_ms, long_probe_backoff_ms, probe_backoff_ms,
-    provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
+    long_probe_backoff_ms, probe_backoff_ms, provider_failure_cooldown_ms, MAX_PROBE_INTERVAL_MS,
 };
 use crate::provider_cooldown_probe::{
     provider_cooldown_probe_key_for_interface, resolve_provider_cooldown_probe_key_for_interface,
@@ -30,7 +29,7 @@ use routecodex_v3_config::{V3Config05ManifestPublished, V3ProviderDispositionSte
 use routecodex_v3_error::{
     V3ErrorActionScope, V3ProviderErrorFingerprint, V3ProviderFailureAction,
     V3ProviderFailureSessionScope, V3ProviderHealthScope, V3ProviderRecoveryKind,
-    V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
+    V3_PROVIDER_HEALTH_COOLDOWN_MS, V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
 };
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -335,9 +334,8 @@ struct V3ProviderAdaptiveHistory {
     probe_failure_count: u8,
     score_milli: u32,
     failure_streak: u32,
-    /// Typed identity of the current `failure_streak`. Only consecutive
-    /// failures with the same fingerprint extend the streak; a different
-    /// fingerprint starts a new streak of 1.
+    /// The last failure fingerprint is diagnostic evidence only. The shared
+    /// failure streak is keyed by the complete provider identity.
     failure_fingerprint: Option<V3ProviderErrorFingerprint>,
     success_streak: u32,
     last_success_at_ms: Option<u64>,
@@ -633,11 +631,9 @@ impl V3ProviderHealthStore {
                     key.auth_alias.as_deref(),
                     key.model_id.as_deref(),
                 );
-                state
-                    .adaptive_history
-                    .entry(key)
-                    .or_default()
-                    .rate_limit_episode = Some(episode);
+                let history = state.adaptive_history.entry(key).or_default();
+                history.failure_streak = episode.failure_count;
+                history.rate_limit_episode = Some(episode);
             }
             state.persistence = Some(writer);
         }
@@ -1554,18 +1550,6 @@ impl V3ProviderHealthStore {
         {
             return Ok(None);
         }
-        if action
-            .failure_fingerprint
-            .as_ref()
-            .is_some_and(|fingerprint| fingerprint.http_status == 429)
-            && !state.health_disabled.contains(provider_id)
-        {
-            rate_limit::observe_rate_limit(&mut state, &key, now_ms, true);
-            let projection = key_health_projection(&state, &key, now_ms);
-            persist_cooldown_state(state);
-            self.publish_availability_change();
-            return Ok(Some(projection));
-        }
         if matches!(
             action.recovery,
             V3ProviderRecoveryKind::NotProviderHealth
@@ -1589,13 +1573,10 @@ impl V3ProviderHealthStore {
                 .failure_policies
                 .get(provider_id)
                 .is_some_and(|policy| policy.advisory_probe);
-        // Consume nonzero typed thresholds unchanged; their numeric value is
-        // not evidence that a policy was implicit or explicit.
         let failure_threshold = match action.recovery {
-            V3ProviderRecoveryKind::RecoverableCounted if action.failure_threshold == 0 => {
-                V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD
-            }
-            _ => action.failure_threshold.max(1),
+            V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => 1,
+            V3ProviderRecoveryKind::RecoverableCounted => V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
+            _ => 0,
         };
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
@@ -1610,21 +1591,13 @@ impl V3ProviderHealthStore {
             V3ProviderRecoveryKind::RecoverableCounted
                 if action.scope == V3ProviderHealthScope::GlobalProviderKey =>
             {
-                // 连续失败必须同源：只有同一个 typed fingerprint 的失败才累计
-                // streak，500/502 这类不同错误不会凑够阈值而误冷却 provider。
-                // 没有上游状态的失败已由分类器落到失败类别身份，不比较 class_code
-                // 之外的隐式状态。HTTP 429 走同一个有界 hold：指纹相同的连续 429
-                // 累计 streak，但阈值已由分类器置为 1，所以首个 429 立刻触发。
-                history.failure_streak =
-                    if history.failure_fingerprint == action.failure_fingerprint {
-                        history.failure_streak.saturating_add(1)
-                    } else {
-                        1
-                    };
+                // Preserve the fingerprint as evidence only. The complete
+                // provider identity owns one shared recoverable streak.
+                history.failure_streak = history.failure_streak.saturating_add(1);
                 history.failure_fingerprint = action.failure_fingerprint.clone();
             }
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown => {
-                history.failure_streak = history.failure_streak.saturating_add(1);
+                history.failure_streak = 1;
                 history.failure_fingerprint = action.failure_fingerprint.clone();
             }
             _ => {}
@@ -1638,45 +1611,61 @@ impl V3ProviderHealthStore {
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
             let failure_streak = history.failure_streak;
-            let observed_attempts = history.attempts;
-            let observed_failures = history.failures;
-            // A configured fast-recovery provider caps the first ladder step;
-            // otherwise the first probe is the fixed 5s ladder step.
+            let episode = history
+                .rate_limit_episode
+                .get_or_insert_with(Default::default);
+            episode.failure_count = failure_streak;
+            episode.last_failure_at_ms = Some(now_ms);
             let interval = configured_max_probe_interval_ms
                 .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
                 .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
-            // The exact key/model failure streak admits cooldown. The default
-            // threshold is one; explicit policies may still declare a higher
-            // threshold. A globally scored identity that reaches zero is an
-            // additional, independent cooldown trigger.
             let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
                 && match action.recovery {
                     V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
                     | V3ProviderRecoveryKind::RecoverableCounted => {
-                        history.score_milli == 0 || history.failure_streak >= failure_threshold
+                        history.failure_streak >= failure_threshold
                     }
                     _ => false,
                 };
             if should_block {
-                // Real 429 observations already returned through the episode
-                // owner. Ordinary failures retain their business ladder.
-                let blocked_until_ms = now_ms.saturating_add(provider_failure_cooldown_ms(
-                    failure_streak,
-                    observed_attempts,
-                    observed_failures,
-                ));
-                upsert_provider_cooldown_probe_with_interval(
-                    &mut state,
-                    provider_id,
-                    interface_id,
-                    Some(auth_alias),
-                    Some(model_id),
-                    now_ms,
-                    blocked_until_ms,
-                    interval,
-                    action.long_probe_backoff,
-                    advisory_probe,
-                );
+                let committed = state
+                    .provider_cooldown_probes
+                    .get(&key)
+                    .is_some_and(|probe| {
+                        probe.blocked_until_ms.is_some()
+                            || probe.next_probe_at_ms.is_some()
+                            || probe.active_probe.is_some()
+                    });
+                if !committed {
+                    let candidate_until_ms = now_ms.saturating_add(V3_PROVIDER_HEALTH_COOLDOWN_MS);
+                    let blocked_until_ms = state
+                        .adaptive_history
+                        .get(&key)
+                        .and_then(|history| history.rate_limit_episode.as_ref())
+                        .and_then(|episode| episode.not_before_ms)
+                        .unwrap_or(0)
+                        .max(candidate_until_ms);
+                    if let Some(episode) = state
+                        .adaptive_history
+                        .get_mut(&key)
+                        .and_then(|history| history.rate_limit_episode.as_mut())
+                    {
+                        episode.not_before_ms = Some(blocked_until_ms);
+                        episode.probe_required = true;
+                    }
+                    upsert_provider_cooldown_probe_with_interval(
+                        &mut state,
+                        provider_id,
+                        interface_id,
+                        Some(auth_alias),
+                        Some(model_id),
+                        now_ms,
+                        blocked_until_ms,
+                        interval,
+                        action.long_probe_backoff,
+                        advisory_probe,
+                    );
+                }
             }
         }
         let projection = key_health_projection(&state, &key, now_ms);
@@ -1719,38 +1708,30 @@ impl V3ProviderHealthStore {
             .state
             .write()
             .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        // 全局复活（bug 61863a0）：冷却中的 key 收到真实成功调用时立即解除
-        // 全局冷却并清理探针状态，其余 session 不必等探针周期；探针成功
-        // （complete_probe_success）仍是无人成功调用时的恢复路径。
-        let business_may_restore = rate_limit::reset_on_business_success(&mut state, &key, now_ms);
-        if business_may_restore
-            && state
-                .provider_cooldown_probes
-                .get(&key)
-                .is_some_and(|probe| {
-                    probe.cooldown_cause == Some(V3ProviderCooldownFailureClass::RateLimit)
-                })
-            && !state.auth_key_cooldowns.contains_key(&key)
-        {
-            complete_provider_probe_success_at_generation(&mut state, &key, now_ms, None)
-                .map_err(|error| format!("provider health state poisoned: {error}"))?;
-        } else {
-            // Matching business success releases this exact recoverable identity.
-            // Preserve the normal +1 score accounting and explicit auth holds.
-            if business_may_restore && !state.auth_key_cooldowns.contains_key(&key) {
-                state.provider_cooldown_probes.remove(&key);
-            }
-            // Healthy identities retain their normal score increment. Explicit
-            // auth holds stay owned by the operator/probe control path.
-            let history = state.adaptive_history.entry(key.clone()).or_default();
-            history.attempts = 0;
-            history.failures = 0;
-            record_health_delta(history, 1);
-            history.failure_streak = 0;
-            history.failure_fingerprint = None;
-            history.success_streak = history.success_streak.saturating_add(1);
-            history.last_success_at_ms = Some(now_ms);
-            history.score_generation = history.score_generation.saturating_add(1);
+        let committed_lock = state
+            .adaptive_history
+            .get(&key)
+            .and_then(|history| history.rate_limit_episode.as_ref())
+            .is_some_and(|episode| {
+                episode.probe_required
+                    || episode
+                        .not_before_ms
+                        .is_some_and(|not_before| now_ms < not_before)
+            });
+        let history = state.adaptive_history.entry(key.clone()).or_default();
+        history.attempts = 0;
+        history.failures = 0;
+        record_health_delta(history, 1);
+        history.failure_streak = 0;
+        history.failure_fingerprint = None;
+        history.success_streak = history.success_streak.saturating_add(1);
+        history.last_success_at_ms = Some(now_ms);
+        history.score_generation = history.score_generation.saturating_add(1);
+        if !committed_lock {
+            history.rate_limit_episode = None;
+        } else if let Some(episode) = history.rate_limit_episode.as_mut() {
+            episode.failure_count = 0;
+            episode.last_failure_at_ms = None;
         }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);

@@ -1729,6 +1729,15 @@ targets = [{ kind = "provider_model", provider = "final", model = "model", key =
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn final_provider_final_key_projects_429_and_stays_health_neutral() {
+    assert_final_429_is_health_neutral(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn relay_final_provider_final_key_projects_429_and_stays_health_neutral() {
+    assert_final_429_is_health_neutral(true).await;
+}
+
+async fn assert_final_429_is_health_neutral(relay: bool) {
     let (home, _guard) = TEST_LOCK.lock().await;
     std::env::set_var(AUTH_ENV, AUTH_SECRET);
     let peer = spawn_peer("final429").await;
@@ -1736,9 +1745,14 @@ async fn final_provider_final_key_projects_429_and_stays_health_neutral() {
         .lock()
         .await
         .insert(format!("Bearer {AUTH_SECRET}"), 429);
-    let provider_blocks = direct_provider_block("final429", peer.base.as_str(), "wire-final429");
-    let handle = spawn_v3_server_aggregate(manifest_with_provider_blocks(
+    let provider_blocks = if relay {
+        provider_block("final429", peer.base.as_str(), "wire-final429")
+    } else {
+        direct_provider_block("final429", peer.base.as_str(), "wire-final429")
+    };
+    let handle = spawn_v3_server_aggregate(manifest_with_declaration(
         free_port(),
+        &test_declaration(relay),
         &provider_blocks,
         r#"
 [route_groups.owned.pools.default]
@@ -1753,7 +1767,11 @@ targets = [{ kind = "provider_model", provider = "final429", model = "model", ke
     let port = handle.listeners[0].addr.port();
 
     let client = client();
-    let outcome = send_request(&client, &endpoint, "target").await;
+    let mut outcomes = Vec::new();
+    for index in 0..11 {
+        let input = format!("final-429-{index}");
+        outcomes.push(send_request(&client, &endpoint, &input).await);
+    }
     let captures = peer.captures.lock().await.clone();
     let terminal = wait_for_terminal_evidence(&home.codex_samples_root(port)).await;
     let failed_attempts = wait_for_failed_attempt_evidence(&home.codex_samples_root(port)).await;
@@ -1769,15 +1787,18 @@ targets = [{ kind = "provider_model", provider = "final429", model = "model", ke
     stop_peer(peer).await;
     std::env::remove_var(AUTH_ENV);
 
-    assert_eq!(
-        captures
-            .iter()
-            .filter(|capture| capture.input == "target")
-            .count(),
-        1,
-        "the only declared key must be attempted exactly once: {captures:?}"
-    );
-    assert_final_http_error(&outcome, &terminal, 429);
+    for (index, outcome) in outcomes.iter().enumerate() {
+        let input = format!("final-429-{index}");
+        assert_eq!(
+            captures
+                .iter()
+                .filter(|capture| capture.input == input)
+                .count(),
+            1,
+            "the final key must receive one attempt for each new request: {input}"
+        );
+        assert_final_http_error(outcome, &terminal, 429);
+    }
     let attempts = failed_attempts["attempts"]
         .as_array()
         .expect("failed attempts must be an array");

@@ -85,6 +85,23 @@ fn observed_cooldown_until_ms(
         .and_then(|entry| entry.until_ms)
 }
 
+fn account_http_source(status: u16) -> V3Error01SourceRaised {
+    routecodex_v3_error::build_v3_error_01_source_raised_external(
+        V3ErrorSourceKind::ProviderFailure,
+        "V3ProviderRespInbound01Raw",
+        format!("provider_http_{status}"),
+        "account failure",
+        V3ExternalErrorLink {
+            kind: V3ExternalErrorKind::Provider,
+            status: Some(status),
+            code: Some(format!("HTTP_{status}")),
+            provider_id: Some("primary".into()),
+            upstream_request_id: None,
+            message: Some("account failure".into()),
+        },
+    )
+}
+
 #[tokio::test]
 async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_threshold() {
     let _guard = PRECOOL_OBSERVATION_TEST_LOCK.lock().await;
@@ -146,7 +163,7 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
         .store()
         .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 199)
         .expect("initial health projection");
-    for index in 0..3 {
+    for index in 0..10 {
         let record = other_health
             .record_provider_failure_record_with_policy(
                 None,
@@ -161,7 +178,7 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
                 500,
                 Some("provider_http_error"),
                 "ordinary failure",
-                200 + index,
+                200 + index as u64,
             )
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         assert_eq!(record.state, "pre_cool_observation");
@@ -174,7 +191,8 @@ async fn runtime_policy_blocks_account_errors_immediately_and_recoverable_after_
             .store()
             .scheduling_projection("primary", "key1", "gpt-test", 100, 1, 300)
             .expect("health projection")
-            .available
+            .available,
+        "ten committed observations must start the one-hour cooldown"
     );
 }
 
@@ -186,10 +204,10 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     let session = test_provider_failure_scope(
         "account_threshold",
         "account_threshold",
-        "401-two-strike-runtime-bridge",
+        "401-observed-http-runtime-bridge",
     )
     .expect("failure session scope");
-    let policy = find_matching_provider_error_policy(
+    find_matching_provider_error_policy(
         &manifest,
         session.routing_group(),
         "primary",
@@ -202,64 +220,35 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     .expect("matched 401 policy");
 
     let first = health
-        .record_provider_failure_record_with_policy(
-            Some(policy),
-            &manifest,
+        .record_provider_failure_record_from_source(
             &session,
             "primary",
-            Some("responses"),
             Some("key1"),
             Some("gpt-test"),
-            Some("account failure"),
-            "V3ProviderRespInbound01Raw",
-            401,
-            Some("provider_http_error"),
-            "account failure",
+            &account_http_source(401),
             100,
         )
-        .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
-    assert_eq!(first.state, "pre_cool_observation");
-    assert_eq!(first.failure_count, 0);
-    assert_eq!(first.cooldown_until_ms, None);
-
-    let second = health
-        .record_provider_failure_record_with_policy(
-            Some(policy),
-            &manifest,
-            &session,
-            "primary",
-            Some("responses"),
-            Some("key1"),
-            Some("gpt-test"),
-            Some("account failure"),
-            "V3ProviderRespInbound01Raw",
-            401,
-            Some("provider_http_error"),
-            "account failure",
-            101,
-        )
-        .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
-    assert_eq!(second.state, "pre_cool_observation");
-    assert_eq!(second.failure_count, 0);
-    assert_eq!(second.cooldown_until_ms, None);
-    complete_due_precool_failures(&health, 101).await;
+        .expect("the bridge must accept the captured HTTP 401 source");
+    assert_eq!(first.state, "cooldown");
+    assert_eq!(first.failure_count, 1);
+    assert_eq!(first.cooldown_until_ms, Some(3_600_100));
     assert!(
         !health
             .store()
             .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 102)
             .expect("observed 401 scheduling projection")
             .available,
-        "observed 401 failures must block the key"
+        "the policy bridge must expose the confirmed 401 block after observation"
     );
     assert_eq!(
         health
             .store()
             .provider_cooldown_probe_next_deadline_ms("primary", Some("key1"), Some("gpt-test"),)
-            .expect("second-401 probe deadline"),
-        Some(5_101),
-        "business failures must not count as failed cooldown recovery probes"
+            .expect("401 probe deadline"),
+        Some(5_100),
+        "the first probe remains scheduled five seconds after observation"
     );
-    assert_eq!(
+    assert!(
         observed_cooldown_until_ms(
             &health,
             "primary",
@@ -267,48 +256,19 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
             Some("key1"),
             Some("gpt-test"),
             10_100,
-        ),
-        Some(10_101),
-        "two observed account failures must keep the exact identity blocked"
-    );
-    let projection = health
-        .store()
-        .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 102)
-        .expect("observed business failure accounting");
-    assert_eq!(
-        projection.score_generation, 2,
-        "each original failure is counted once"
-    );
-    assert_eq!(
-        projection.score_milli, 90,
-        "the negative observation is not a third business failure"
-    );
-    let entry = health
-        .store()
-        .cooldown_entries(102)
-        .into_iter()
-        .find(|entry| {
-            entry.provider_id == "primary"
-                && entry.interface_id == "default"
-                && entry.auth_alias.as_deref() == Some("key1")
-                && entry.model_id.as_deref() == Some("gpt-test")
-                && entry.kind == "probe"
-        })
-        .expect("qualified observation committed the exact cooldown owner");
-    assert_eq!(
-        entry.failure_count,
-        Some(0),
-        "no cooldown recovery probe has failed yet"
+        )
+        .is_some(),
+        "the policy bridge must retain a committed cooldown for the exact identity"
     );
     assert!(health
         .store()
-        .provider_cooldown_probe_keys_due(5_100)
+        .provider_cooldown_probe_keys_due(5_099)
         .expect("probe not due before initial five seconds")
         .is_empty());
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_101)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("probe interval query"),
         vec![(
             "primary".to_string(),
@@ -322,7 +282,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
             .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 102)
             .expect("second-401 scheduling projection")
             .available,
-        "the exact identity stays unavailable after both observed failures"
+        "the exact identity stays unavailable after the observed failure"
     );
     assert!(
         health
@@ -345,7 +305,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
             .scheduling_projection("primary", "key1", "gpt-test", 1, 1, 5_100)
             .expect("before-first-auth-probe scheduling projection")
             .available,
-        "401 auth key must remain blocked until the first configured probe is due"
+        "401 auth key must remain blocked while its recovery owner is pending"
     );
 
     let availability = health.store().availability_for_session(
@@ -366,7 +326,7 @@ async fn account_http_401_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_101)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("provider cooldown probe query"),
         vec![(
             "primary".to_string(),
@@ -384,10 +344,10 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     let session = test_provider_failure_scope(
         "account_threshold",
         "account_threshold",
-        "403-two-strike-runtime-bridge",
+        "403-observed-http-runtime-bridge",
     )
     .expect("failure session scope");
-    let policy = find_matching_provider_error_policy(
+    find_matching_provider_error_policy(
         &manifest,
         session.routing_group(),
         "primary",
@@ -399,29 +359,19 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     )
     .expect("matched 403 policy");
 
-    for now_ms in [100, 101] {
-        let record = health
-            .record_provider_failure_record_with_policy(
-                Some(policy),
-                &manifest,
-                &session,
-                "primary",
-                Some("responses"),
-                Some("key1"),
-                Some("gpt-test"),
-                Some("account failure"),
-                "V3ProviderRespInbound01Raw",
-                403,
-                Some("provider_http_error"),
-                "account failure",
-                now_ms,
-            )
-            .expect("403 should be recorded by the runtime policy bridge");
-        assert_eq!(record.state, "pre_cool_observation");
-        assert_eq!(record.failure_count, 0);
-        assert_eq!(record.cooldown_until_ms, None);
-    }
-    complete_due_precool_failures(&health, 101).await;
+    let record = health
+        .record_provider_failure_record_from_source(
+            &session,
+            "primary",
+            Some("key1"),
+            Some("gpt-test"),
+            &account_http_source(403),
+            100,
+        )
+        .expect("the bridge must accept the captured HTTP 403 source");
+    assert_eq!(record.state, "cooldown");
+    assert_eq!(record.failure_count, 1);
+    assert_eq!(record.cooldown_until_ms, Some(3_600_100));
     assert_eq!(
         observed_cooldown_until_ms(
             &health,
@@ -431,8 +381,8 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
             Some("gpt-test"),
             10_100,
         ),
-        Some(10_101),
-        "two observed account failures must advance the cooldown ladder"
+        Some(3_600_100),
+        "confirmed 403 must retain the exact one-hour cooldown"
     );
     assert_eq!(
         health
@@ -445,7 +395,7 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
     assert_eq!(
         health
             .store()
-            .provider_cooldown_probe_keys_due(5_101)
+            .provider_cooldown_probe_keys_due(5_100)
             .expect("403 probe due query"),
         vec![(
             "primary".to_string(),
@@ -456,7 +406,7 @@ async fn account_http_403_policy_blocks_auth_key_on_first_failure_in_runtime_bri
 }
 
 #[tokio::test]
-async fn anthropic_response_body_decode_failure_cools_only_failed_model_after_repeat() {
+async fn anthropic_response_body_decode_failure_cools_only_failed_model_after_ten() {
     let _guard = PRECOOL_OBSERVATION_TEST_LOCK.lock().await;
     let mut authoring = parse_v3_config_02_authoring(
         r#"
@@ -508,7 +458,7 @@ targets = [
     )
     .expect("failure session scope");
 
-    for attempt in 0..2 {
+    for attempt in 0..10 {
         let now_ms = 100 + attempt as u64;
         let record = health
             .record_provider_failure_record_with_policy(
@@ -541,7 +491,7 @@ targets = [
         assert_eq!(
             model_available,
             false,
-            "an observed response-body decode failure cools only the failed identity; attempt={attempt}"
+            "ten observed response-body decode failures cool only the failed identity; attempt={attempt}"
         );
         assert!(
             health

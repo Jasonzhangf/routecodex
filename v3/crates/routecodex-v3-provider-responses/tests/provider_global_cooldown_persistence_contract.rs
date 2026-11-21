@@ -450,16 +450,16 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
 }
 
 #[test]
-fn persisted_429_minimum_requires_current_probe_and_stays_removed() {
+fn persisted_shared_minimum_requires_current_probe_and_stays_removed() {
     assert_persisted_429_recovery(false);
 }
 
 #[test]
-fn persisted_429_hour_lock_requires_current_probe_after_reconstruction() {
+fn persisted_advisory_probe_cannot_bypass_the_shared_minimum() {
     assert_persisted_429_recovery(true);
 }
 
-fn assert_persisted_429_recovery(hour: bool) {
+fn assert_persisted_429_recovery(advisory: bool) {
     let mut manifest = health_disabled_manifest();
     manifest
         .providers
@@ -477,9 +477,9 @@ fn assert_persisted_429_recovery(hour: bool) {
         .health
         .as_mut()
         .unwrap()
-        .advisory_probe = hour;
+        .advisory_probe = advisory;
     let path = std::env::temp_dir().join(format!(
-        "routecodex-429-window-{}-{hour}.json",
+        "routecodex-shared-health-{}-{advisory}.json",
         std::process::id()
     ));
     let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
@@ -501,16 +501,15 @@ fn assert_persisted_429_recovery(hour: bool) {
     );
     let action =
         routecodex_v3_error::build_v3_provider_failure_action_from_v3_error_02(&classified);
-    for time in [100, 120100] {
+    for time in 100..109 {
         store
             .record_provider_failure_action("p", "k", "m", &action, time)
             .unwrap();
     }
-    if hour {
-        store
-            .record_provider_failure_action("p", "k", "m", &action, 3600100)
-            .unwrap();
-    }
+    let committed = store
+        .record_provider_failure_action("p", "k", "m", &action, 109)
+        .unwrap();
+    assert!(committed.cooldown);
     // An active physical acquisition is deliberately abandoned across restart.
     let abandoned = store
         .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
@@ -523,12 +522,12 @@ fn assert_persisted_429_recovery(hour: bool) {
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         !restored
-            .scheduling_projection("p", "k", "m", 1, 1, 120101)
+            .scheduling_projection("p", "k", "m", 1, 1, 110)
             .unwrap()
             .available,
         "a persisted 429 hold must block during its window"
     );
-    let now = if hour { 3600101 } else { 120101 };
+    let now = 3_600_109;
     assert!(
         !restored
             .record_provider_key_success("p", "k", "m", now)
@@ -540,8 +539,10 @@ fn assert_persisted_429_recovery(hour: bool) {
         .unwrap()
         .persisted_rate_limit_episodes();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].1.probe_required, hour);
-    assert_eq!(entries[0].1.not_before_ms, Some(1920100));
+    assert_eq!(entries[0].1.failure_count, 10);
+    assert_eq!(entries[0].1.last_failure_at_ms, Some(109));
+    assert!(entries[0].1.probe_required);
+    assert_eq!(entries[0].1.not_before_ms, Some(now));
     assert!(
         restored
             .cooldown_entries(now)
@@ -553,23 +554,8 @@ fn assert_persisted_429_recovery(hour: bool) {
         .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
         .unwrap()
         .unwrap();
-    if !hour {
-        assert!(
-            !restored
-                .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now)
-                .unwrap(),
-            "even a current probe cannot shorten the minimum"
-        );
-    } else {
-        // Keep the hourly qualification for the final completion below.
-        restored.cancel_provider_cooldown_probe(&permit).unwrap();
-    }
-    let permit = restored
-        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
-        .unwrap()
-        .unwrap();
     assert!(restored
-        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now.max(1920100))
+        .complete_provider_cooldown_probe_success_if_current_with_permit(&permit, now)
         .unwrap());
     restored.flush_persistence().unwrap();
     drop(restored);
@@ -577,7 +563,7 @@ fn assert_persisted_429_recovery(hour: bool) {
         V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         restored
-            .scheduling_projection("p", "k", "m", 1, 1, now.max(1920100))
+            .scheduling_projection("p", "k", "m", 1, 1, now)
             .unwrap()
             .available
     );

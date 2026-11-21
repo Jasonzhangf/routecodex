@@ -276,18 +276,12 @@ async fn relay_generic_provider_http_400_excludes_only_failed_identity_and_recor
             .available,
         "the observation must not cool the identity before its declared gate"
     );
-    complete_due_precool_failures(&health, 20_000).await;
     assert!(
-        !health
-            .availability("first", Some("key"), Some("test"), u64::MAX)
-            .available
-    );
-    assert!(
-        !health
+        health
             .store()
             .availability("first", Some("key"), Some("test"), u64::MAX)
             .available,
-        "the failed observation must commit the typed cooldown for the exact identity"
+        "one generic 400 observation must remain below the recoverable threshold"
     );
     assert_eq!(result.event.action, "switch_provider");
     let retry = result

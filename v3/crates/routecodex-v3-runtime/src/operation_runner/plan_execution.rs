@@ -889,7 +889,7 @@ targets = [
         let failure =
             routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
         for id in provider_ids {
-            for _ in 0..3 {
+            for _ in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
                 health
                     .record_provider_key_failure_action(
                         id,
@@ -961,7 +961,7 @@ targets = [
                 .unwrap();
         let failure =
             routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
-        for _ in 0..3 {
+        for _ in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
             health
                 .record_provider_key_failure_action(
                     "r05_held_cooled",

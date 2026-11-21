@@ -209,6 +209,8 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
     let mut accumulated_items: Vec<Value> = Vec::new();
     let mut accumulated_usage: Option<V3RuntimeUsageSummary> = None;
     let mut accumulated_attempts: Option<usize> = None;
+    let mut accumulated_trace = Vec::new();
+    let mut accumulated_failures = Vec::new();
     let mut rounds = 0usize;
     loop {
         let mut seeds = relay_seeds.clone();
@@ -280,6 +282,10 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                             &mut accumulated_usage,
                             extract_v3_runtime_usage_summary(finalized),
                         );
+                        accumulated_trace.append(&mut output.node_trace);
+                        if let Some(observability) = output.observability.as_mut() {
+                            accumulated_failures.append(&mut observability.provider_failure_events);
+                        }
                         payload = next_payload;
                         rounds += 1;
                         continue;
@@ -318,6 +324,23 @@ pub async fn execute_v3_responses_relay_runtime_with_default_transport_health(
                 if accumulated_attempts.is_some() {
                     observability.attempts = accumulated_attempts;
                 }
+            }
+            // Prior rounds contribute closeout evidence only. Their failures
+            // have already been handled by the Error chain and health owner.
+            accumulated_trace.append(&mut output.node_trace);
+            output.node_trace = accumulated_trace;
+            if !accumulated_failures.is_empty() {
+                let events = match output.protocol_direct_handoff.as_mut() {
+                    Some(handoff) => &mut handoff.provider_failure_events,
+                    None => {
+                        &mut output
+                            .observability
+                            .get_or_insert_with(V3RuntimeObservability::default)
+                            .provider_failure_events
+                    }
+                };
+                accumulated_failures.append(events);
+                *events = accumulated_failures;
             }
         }
         output.provider_snapshots = Some(snapshots.into_payload(
@@ -468,9 +491,9 @@ fn v3_responses_relay_provider_failure_reason(
 }
 
 fn v3_provider_failure_error_type_from_body(body: &Value) -> String {
-    body.pointer("/error/type")
-        .or_else(|| body.pointer("/error/code"))
-        .and_then(Value::as_str)
+    routecodex_v3_error::v3_irrecoverable_provider_http_body_code(body)
+        .or_else(|| body.pointer("/error/type").and_then(Value::as_str))
+        .or_else(|| body.pointer("/error/code").and_then(Value::as_str))
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("provider_error")
         .to_string()

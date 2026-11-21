@@ -81,7 +81,7 @@ fn key_health_projection(
             state
                 .provider_cooldown_probes
                 .get(key)
-                .and_then(|probe| probe.next_probe_at_ms)
+                .and_then(|probe| probe.blocked_until_ms.or(probe.next_probe_at_ms))
         });
     let cooldown = key_blocks_availability(state, key, now_ms);
     V3ProviderKeyHealthProjection {
@@ -110,24 +110,22 @@ fn key_blocks_availability(
     key: &V3ProviderCooldownProbeKey,
     now_ms: u64,
 ) -> bool {
-    if state.adaptive_history.get(key)
+    if state
+        .adaptive_history
+        .get(key)
         .and_then(|history| history.rate_limit_episode.as_ref())
-        .is_some_and(|episode| episode.probe_required
-            || episode.not_before_ms.is_some_and(|until| now_ms < until))
+        .is_some_and(|episode| {
+            episode.probe_required || episode.not_before_ms.is_some_and(|until| now_ms < until)
+        })
     {
         return true;
     }
     let Some(probe) = state.provider_cooldown_probes.get(key) else {
         return false;
     };
-    if probe.advisory_probe {
-        return probe.blocked_until_ms.is_some_and(|until| now_ms < until);
-    }
     probe.active_probe.is_some()
         || probe.next_probe_at_ms.is_some()
-        || probe
-            .blocked_until_ms
-            .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
+        || probe.blocked_until_ms.is_some()
 }
 
 fn provider_failure_session_scope_label(key: &V3ProviderFailureSessionKey) -> String {
@@ -152,8 +150,7 @@ fn remove_expired_session_state(state: &mut V3ProviderHealthState, now_ms: u64) 
                 .is_some_and(|blocked_until_ms| blocked_until_ms > now_ms)
     });
     // provider 级冷却：冷却期（until 未过期）与待探期（next_probe_at 已设）
-    // 都保留——冷却到期不自动恢复，必须后台 probe 通过；无探针的过期条目
-    // 视为异常态清理。
+    // 都保留——冷却到期不自动恢复，必须后台 probe 通过。
     state.consecutive_failures.retain(|_, failure| {
         failure
             .last_failure_at_ms
@@ -292,21 +289,6 @@ fn upsert_provider_cooldown_probe(
     );
 }
 
-fn record_adaptive_failure(
-    state: &mut V3ProviderHealthState,
-    key: &V3ProviderCooldownProbeKey,
-) -> u64 {
-    let history = state.adaptive_history.entry(key.clone()).or_default();
-    history.attempts = history.attempts.saturating_add(1);
-    history.failures = history.failures.saturating_add(1);
-    adaptive_probe_interval_ms(
-        history.attempts,
-        history.failures,
-        history.recovery_ewma_ms,
-        history.probe_failure_count,
-    )
-}
-
 fn record_adaptive_success(
     state: &mut V3ProviderHealthState,
     key: &V3ProviderCooldownProbeKey,
@@ -346,6 +328,33 @@ fn complete_provider_probe_success_at_generation(
         if expected_generation != current_generation {
             return Ok(false);
         }
+    }
+
+    if let Some(blocked_until_ms) = state
+        .provider_cooldown_probes
+        .get(key)
+        .and_then(|probe| probe.blocked_until_ms)
+        .filter(|blocked_until_ms| now_ms < *blocked_until_ms)
+    {
+        if let Some(probe) = state.provider_cooldown_probes.get_mut(key) {
+            probe.next_probe_at_ms = Some(
+                probe
+                    .next_probe_at_ms
+                    .unwrap_or(blocked_until_ms)
+                    .max(blocked_until_ms),
+            );
+        }
+        return Ok(false);
+    }
+
+    if state
+        .adaptive_history
+        .get(key)
+        .and_then(|history| history.rate_limit_episode.as_ref())
+        .and_then(|episode| episode.not_before_ms)
+        .is_some_and(|not_before_ms| now_ms < not_before_ms)
+    {
+        return Ok(false);
     }
 
     if !rate_limit::accept_qualified_probe_success(

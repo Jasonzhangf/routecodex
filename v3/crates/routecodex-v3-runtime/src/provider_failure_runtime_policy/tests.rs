@@ -1,7 +1,8 @@
 use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 use routecodex_v3_error::{
-    build_v3_error_01_source_raised, V3Error05ExecutionAction, V3ErrorSourceKind,
+    build_v3_error_01_source_raised, build_v3_error_01_source_raised_external,
+    V3Error05ExecutionAction, V3ErrorSourceKind, V3ExternalErrorKind, V3ExternalErrorLink,
     V3ProviderHealthScope,
 };
 use serde_json::json;
@@ -441,7 +442,7 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
     };
     assert_eq!(selected.candidate.provider_id, "second");
 
-    for now_ms in 101..104 {
+    for now_ms in 101..111 {
         health
             .store
             .record_provider_failure_action("second", "key1", "gpt-test", &failure, now_ms)
@@ -466,10 +467,22 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
         .expect("blocked primary probe permit");
     health
         .store
-        .complete_provider_cooldown_probe_success_with_permit(&permit, 155)
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 3_600_111)
         .expect("semantic probe recovery");
 
-    let selected = resolve_target(&manifest, "failback_liveness", &BTreeSet::new(), &health);
+    let selected = resolve_target_for_scope(
+        &manifest,
+        "failback_liveness",
+        &BTreeSet::new(),
+        &health,
+        &test_provider_failure_scope(
+            "failback_liveness",
+            "failback_liveness",
+            "target-resolution-session",
+        )
+        .expect("target resolution session scope"),
+        3_600_112,
+    );
     let V3RelayProviderTargetResolution::Selected(selected) = selected else {
         panic!("recovered primary must be selected");
     };
@@ -480,12 +493,17 @@ fn recovered_primary_failback_is_not_starved_by_backup_successes() {
 async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_health() {
     let mut manifest = global_pool_alive_manifest("global_status_policy");
     normalize_global_pool_priorities(&mut manifest);
-    // Account/billing classes (401/403) are typed irrecoverable and keep their
-    // first-failure boundary. 429 stays health-neutral with streak 0 in its
-    // early window. Every ordinary non-429 class must first complete the
-    // declared pre-cool observation, then commit its typed threshold.
-    let cases = [(401, 1), (403, 1), (429, 3), (500, 1), (502, 1), (599, 1)];
-    for (status, threshold) in cases {
+    // Confirmed account/permission classes cool immediately. Real
+    // recoverable HTTP observations share the ten-failure identity threshold.
+    let cases = [
+        (401, "invalid_api_key", 1),
+        (403, "permission_error", 1),
+        (429, "provider_http_error", 10),
+        (500, "provider_http_error", 10),
+        (502, "provider_http_error", 10),
+        (599, "provider_http_error", 10),
+    ];
+    for (status, code, threshold) in cases {
         let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
         let scope = test_provider_failure_scope(
             "global_status_policy",
@@ -493,174 +511,63 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             "runtime-policy-status",
         )
         .expect("failure session scope");
-        for attempt in 0..threshold {
+        for attempt in 1..=threshold {
             let now_ms = 10_000 + attempt as u64;
+            let source = build_v3_error_01_source_raised_external(
+                V3ErrorSourceKind::ProviderFailure,
+                "V3ProviderRespInbound01Raw",
+                code,
+                "upstream status",
+                V3ExternalErrorLink {
+                    kind: V3ExternalErrorKind::Provider,
+                    status: Some(status),
+                    code: Some(code.to_string()),
+                    provider_id: Some("first".to_string()),
+                    upstream_request_id: None,
+                    message: Some("upstream status".to_string()),
+                },
+            );
             let record = health
-                .record_provider_failure_record_with_policy(
-                    None,
-                    &manifest,
+                .record_provider_failure_record_from_source(
                     &scope,
                     "first",
-                    Some("responses"),
                     Some("key1"),
                     Some("gpt-test"),
-                    Some("provider status failure"),
-                    "V3ProviderRespInbound01Raw",
-                    status,
-                    Some("provider_http_error"),
-                    "upstream status",
+                    &source,
                     now_ms,
                 )
-                .expect(
-                    "ordinary provider policy failure must remain distinct from a Source01 fault",
-                );
-            if status == 429 {
-                // The early 429 window is capacity backpressure: the returned
-                // record must not count a provider failure streak.
-                assert_eq!(
-                    record.failure_count, 0,
-                    "early 429 must keep streak 0 instead of counting a failure"
-                );
-                assert_eq!(record.state, "rate_limit_capacity_wait");
-                assert_eq!(record.cooldown_until_ms, None);
-                assert!(
-                    health
-                        .availability("first", Some("key1"), Some("gpt-test"), now_ms)
-                        .available,
-                    "early 429 must stay capacity-neutral"
-                );
-                assert!(
-                    health
-                        .store()
-                        .availability_for_session(
-                            &scope,
-                            "first",
-                            Some("key1"),
-                            Some("gpt-test"),
-                            now_ms
-                        )
-                        .available
-                );
-            } else {
-                // The pre-observation record truthfully reports the held action:
-                // no counted failure and no cooldown yet.
-                assert_eq!(
-                    record.failure_count, 0,
-                    "status {status} must not count a failure before its observation"
-                );
-                assert_eq!(record.state, "pre_cool_observation");
-                assert_eq!(record.cooldown_until_ms, None);
-                let observed = health.availability("first", Some("key1"), Some("gpt-test"), now_ms);
-                assert!(
-                    !observed.available,
-                    "status {status} must hold the exact identity for its observation"
-                );
-                assert!(observed
-                    .blocked_scopes
-                    .iter()
-                    .any(|blocked| blocked == "provider_pre_cool_observation"));
-                assert!(
-                    health
-                        .store()
-                        .availability_for_session(
-                            &scope,
-                            "first",
-                            Some("key1"),
-                            Some("gpt-test"),
-                            now_ms
-                        )
-                        .available,
-                    "status {status} must not cool before its declared observation gate"
-                );
-            }
-        }
-        if status == 429 {
-            assert!(
-                health
-                    .store()
-                    .availability_for_session(
-                        &scope,
-                        "first",
-                        Some("key1"),
-                        Some("gpt-test"),
-                        10_000
-                    )
-                    .available,
-                "only the observed 429 case stays health-neutral in this failure matrix"
+                .expect("real typed provider failure must record");
+            assert_eq!(record.failure_count, attempt as u32);
+            assert_eq!(
+                record.state,
+                if threshold == 1 || attempt == threshold {
+                    "cooldown"
+                } else {
+                    "provider_failure_observed"
+                }
             );
-        } else {
-            complete_due_precool_failures(&health, 10_010).await;
-            assert!(
-                !health
-                    .store()
-                    .availability_for_session(
-                        &scope,
-                        "first",
-                        Some("key1"),
-                        Some("gpt-test"),
-                        10_010
-                    )
-                    .available,
-                "status {status} must commit its declared cooldown after a failed observation"
-            );
-            assert!(
-                health
-                    .store()
-                    .availability_for_session(
-                        &scope,
-                        "second",
-                        Some("key1"),
-                        Some("gpt-test"),
-                        10_010
-                    )
-                    .available,
-                "status {status} cooldown must remain exact to the failed identity"
+            assert_eq!(
+                record.cooldown_until_ms.is_some(),
+                threshold == 1 || attempt == threshold,
+                "status {status} must use its declared threshold"
             );
         }
-    }
-
-    // Early429 stays capacity-only, including through the Runtime source path.
-    let rate_limited = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
-    let rate_limited_scope = test_provider_failure_scope(
-        "global_status_policy",
-        "global_status_policy",
-        "runtime-policy-429",
-    )
-    .expect("failure session scope");
-    for attempt in 0..6 {
-        let now_ms = 10_000 + attempt as u64;
-        let record = rate_limited
-            .record_provider_failure_record_with_policy(
-                None,
-                &manifest,
-                &rate_limited_scope,
-                "first",
-                Some("responses"),
-                Some("key1"),
-                Some("gpt-test"),
-                Some("provider status failure"),
-                "V3ProviderRespInbound01Raw",
-                429,
-                Some("provider_http_error"),
-                "upstream status",
-                now_ms,
-            )
-            .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
-        assert_eq!(record.state, "rate_limit_capacity_wait");
-        assert_eq!(record.failure_count, 0);
-        assert!(
-            rate_limited
-                .availability("first", Some("key1"), Some("gpt-test"), now_ms)
+        assert_eq!(
+            health
+                .store()
+                .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 10_010)
                 .available,
-            "early429 must remain health-neutral; attempt={attempt}"
+            false,
+            "status {status} must leave the exact identity unavailable at threshold"
+        );
+        assert!(
+            health
+                .store()
+                .availability_for_session(&scope, "second", Some("key1"), Some("gpt-test"), 10_010)
+                .available,
+            "status {status} cooldown must remain exact to the failed identity"
         );
     }
-    assert!(
-        rate_limited
-            .availability("first", Some("key1"), Some("gpt-test"), 10_000 + 5 + 60_001)
-            .available,
-        "time alone cannot create a health restriction"
-    );
 
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let scope = test_provider_failure_scope(
@@ -693,7 +600,7 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             .expect("ordinary provider policy failure must remain distinct from a Source01 fault");
         assert_eq!(
             record.failure_count, 0,
-            "generic rejection must not count a failure before its observation; attempt={attempt}"
+            "generic rejection remains an uncommitted policy fixture; attempt={attempt}"
         );
         assert_eq!(record.state, "pre_cool_observation");
         let available = health
@@ -702,16 +609,16 @@ async fn runtime_policy_maps_account_and_recoverable_http_classes_to_global_heal
             .available;
         assert!(
             available,
-            "generic rejection must stay health-neutral before its observation; attempt={attempt}"
+            "generic rejection must stay available before its observation; attempt={attempt}"
         );
     }
     complete_due_precool_failures(&health, 20_010).await;
     assert!(
-        !health
+        health
             .store()
             .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 20_010)
             .available,
-        "a failed observation must cool the generic rejection under the current typed threshold"
+        "one generic 400 observation must remain below the recoverable threshold"
     );
 }
 
@@ -724,18 +631,17 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
         .expect("failure session scope");
     let now = 2_000_000;
     for provider_id in ["first", "second"] {
-        for offset in 0..3 {
-            health
-                .record_provider_failure_record(
-                    &session,
-                    provider_id,
-                    Some("key1"),
-                    Some("gpt-test"),
-                    Some("controlled session-only failure"),
-                    now + offset,
-                )
-                .expect("session failure should be recorded");
-        }
+        health
+            .store
+            .record_provider_cooldown_failure(
+                provider_id,
+                Some("key1"),
+                Some("gpt-test"),
+                "seed exact global cooldown for target selection",
+                now,
+                now + 60 * 60_000,
+            )
+            .expect("target selection must use the real global cooldown owner");
     }
 
     let resolution = resolve_target_for_scope(
@@ -755,7 +661,7 @@ fn target_resolution_does_not_expose_default_floor_error_while_global_pool_is_al
     assert_eq!(attempted_candidates.len(), 2);
     assert!(attempted_candidates
         .iter()
-        .all(|candidate| candidate.contains("provider_cooldown_probe_pending")));
+        .all(|candidate| candidate.contains("provider_key_health_cooldown")));
 }
 
 #[test]
@@ -891,7 +797,7 @@ fn unavailable_candidate_is_exhaustion_not_runtime_failure() {
 }
 
 #[test]
-fn post_commit_response_stream_failure_updates_global_key_health() {
+fn post_commit_response_stream_failure_updates_global_key_health_after_ten() {
     let manifest = target_resolution_manifest("post_commit_sse_counted");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -907,7 +813,7 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
         "Responses SSE event must be a JSON object",
     );
 
-    for _ in 0..3 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -929,14 +835,14 @@ fn post_commit_response_stream_failure_updates_global_key_health() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert_eq!(projection.score_milli, 85);
+    assert_eq!(projection.score_milli, 50);
     assert!(!projection.available);
 }
 
 #[test]
 fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
     // 统一错误模型回归：瞬态型 post-commit 流失败（无状态码）不允许
-    // health-neutral 旁路——3 次连续失败必须进入全局冷却，新 session 不可用。
+    // health-neutral 旁路；同一身份连续十次进入全局冷却。
     let manifest = target_resolution_manifest("post_commit_transient_counted");
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
     let session = test_provider_failure_scope(
@@ -952,7 +858,7 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
         "Responses SSE event was not decodable JSON",
     );
 
-    for _ in 0..3 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure_from_source(
                 &session,
@@ -980,10 +886,10 @@ fn post_commit_transient_stream_failures_count_toward_global_cooldown() {
             1,
             v3_relay_provider_policy_now_epoch_ms().expect("current epoch"),
         );
-    assert_eq!(projection.score_milli, 85);
+    assert_eq!(projection.score_milli, 50);
     assert!(
         !projection.available,
-        "three transient post-commit failures must cool the key down globally"
+        "ten transient post-commit failures must cool the key down globally"
     );
     let fresh_projection = health.store().availability_for_session(
         &fresh_session,
@@ -1057,7 +963,7 @@ fn post_commit_sse_failures_cool_provider_and_block_fresh_session() {
             &health, "primary", "key1", "gpt-test", 1, 1, 2_000_000,
         );
 
-    for _ in 0..3 {
+    for _ in 0..10 {
         health
             .record_post_commit_provider_stream_failure(
                 &failed_session,
@@ -1446,9 +1352,8 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
             .available,
         "another provider must stay eligible"
     );
-    complete_due_precool_failures(&health, 10_000).await;
     assert!(
-        !health
+        health
             .store()
             .availability_for_session(
                 &context.failure_session_scope,
@@ -1458,7 +1363,7 @@ async fn transport_error_selects_untried_same_provider_sibling_key() {
                 10_000,
             )
             .available,
-        "the failed observation must commit the cooldown for the exact failed key"
+        "one policy-only transport observation must remain below the recoverable threshold"
     );
     assert!(
         health

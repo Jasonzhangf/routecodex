@@ -21,12 +21,10 @@ pub enum V3ProviderHealthScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct V3ProviderFailureAction {
     pub class_code: String,
-    /// Typed identity of this failure. Provider health counts a consecutive
-    /// failure streak only for repeated failures of the same fingerprint, so
-    /// three *different* recoverable errors never add up to a cooldown.
-    /// A typed fingerprint carries the upstream status/semantics; failures
-    /// without an upstream status fall back to their failure class code, so a
-    /// missing identity never merges two different classes into one streak.
+    /// Typed evidence for this failure. The shared provider health counter is
+    /// keyed by the complete provider identity, not by this fingerprint.
+    /// Different recoverable statuses can therefore share one streak while
+    /// the original status and semantic cause remain available to diagnostics.
     pub failure_fingerprint: Option<V3ProviderErrorFingerprint>,
     pub recovery: V3ProviderRecoveryKind,
     pub scope: V3ProviderHealthScope,
@@ -50,7 +48,7 @@ impl V3ProviderFailureAction {
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -5,
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
-            cooldown_ms: 5_000,
+            cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             long_probe_backoff: false,
             advisory_probe: false,
         }
@@ -85,35 +83,21 @@ pub fn build_v3_provider_failure_action_from_v3_error_02(
         .as_ref()
         .and_then(|error| error.status);
     let failure_fingerprint = build_v3_provider_failure_identity_from_classified(classified);
-    if status == Some(429) {
-        return V3ProviderFailureAction {
-            class_code: classified.source.code.clone(),
-            failure_fingerprint,
-            recovery: V3ProviderRecoveryKind::HealthNeutralTransient,
-            scope: V3ProviderHealthScope::None,
-            score_delta_milli: 0,
-            failure_threshold: 0,
-            cooldown_ms: 0,
-            long_probe_backoff: false,
-            advisory_probe: false,
-        };
-    }
-    // Real recoverable failures count toward the shared repeat threshold.
-    // Authentication/account failures retain their immediate typed boundary.
-    if status != Some(429)
-        && (matches!(status, Some(401..=403))
-            || is_irrecoverable_provider_failure_code(&classified.source.code))
+    // A confirmed typed account/auth/billing failure wins over the HTTP
+    // status. For example, a quota failure may arrive as HTTP 429 or 503.
+    if matches!(status, Some(401..=403))
+        || is_irrecoverable_provider_failure_code(&classified.source.code)
     {
-        let cooldown_ms = 5_000;
+        let cooldown_ms = crate::V3_PROVIDER_HEALTH_COOLDOWN_MS;
         return V3ProviderFailureAction {
             class_code: classified.source.code.clone(),
             failure_fingerprint,
             recovery: V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
             scope: V3ProviderHealthScope::GlobalProviderKey,
             score_delta_milli: -20,
-            failure_threshold: 0,
+            failure_threshold: 1,
             cooldown_ms,
-            long_probe_backoff: matches!(status, Some(401..=403)),
+            long_probe_backoff: true,
             advisory_probe: false,
         };
     }
@@ -137,11 +121,19 @@ fn is_irrecoverable_provider_failure_code(code: &str) -> bool {
         "billing_disabled",
         "insufficient_quota",
         "invalid_api_key",
+        "permission_error",
         "quota_exceeded",
         "unauthorized",
     ]
     .iter()
     .any(|marker| normalized == *marker || normalized.contains(marker))
+}
+
+pub fn v3_irrecoverable_provider_http_body_code(body: &serde_json::Value) -> Option<&str> {
+    ["/error/code", "/error/type"]
+        .into_iter()
+        .filter_map(|path| body.pointer(path).and_then(serde_json::Value::as_str))
+        .find(|code| is_irrecoverable_provider_failure_code(code))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -201,20 +193,20 @@ pub fn build_v3_provider_global_error_fingerprint(
 ///
 /// Account/billing classes (`401..=403`) are the typed irrecoverable group and
 /// still cool on their first occurrence. Classification alone does not cool
-/// HTTP 429: the health Store owns its sustained rate-limit episode. Other
-/// recoverable classes use the shared threshold for the exact identity.
+/// HTTP 429 and other recoverable classes use the shared threshold for the
+/// exact identity. The Store owns the counter and recovery state.
 pub fn build_v3_provider_global_failure_policy(
     status: u16,
 ) -> Option<V3ProviderGlobalFailurePolicy> {
     match status {
         401..=403 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: 1,
-            cooldown_ms: 5_000,
+            cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,
         }),
-        500..=599 => Some(V3ProviderGlobalFailurePolicy {
+        429 | 500..=599 => Some(V3ProviderGlobalFailurePolicy {
             failure_threshold: crate::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
-            cooldown_ms: 5_000,
+            cooldown_ms: crate::V3_PROVIDER_HEALTH_COOLDOWN_MS,
             probe_interval_ms: 5_000,
         }),
         _ => None,
@@ -305,10 +297,8 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        // 503 is a recoverable class: the first same-identity failure cools,
-        // while the probe ladder still backs off.
-        assert_eq!(action.failure_threshold, 1);
-        assert_eq!(action.cooldown_ms, 5_000);
+        assert_eq!(action.failure_threshold, 10);
+        assert_eq!(action.cooldown_ms, 60 * 60_000);
         assert!(action.long_probe_backoff);
 
         let ordinary = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -316,8 +306,8 @@ mod tests {
             "provider_connect_failed",
             500,
         ));
-        assert_eq!(ordinary.failure_threshold, 1);
-        assert_eq!(ordinary.cooldown_ms, 5_000);
+        assert_eq!(ordinary.failure_threshold, 10);
+        assert_eq!(ordinary.cooldown_ms, 60 * 60_000);
         assert!(!ordinary.long_probe_backoff);
 
         let payment_required = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -329,8 +319,8 @@ mod tests {
             payment_required.recovery,
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
-        assert_eq!(payment_required.failure_threshold, 0);
-        assert_eq!(payment_required.cooldown_ms, 5_000);
+        assert_eq!(payment_required.failure_threshold, 1);
+        assert_eq!(payment_required.cooldown_ms, 60 * 60_000);
         assert!(payment_required.long_probe_backoff);
         let fingerprint = build_v3_provider_global_error_fingerprint(402)
             .expect("402 fingerprint classification must not fail")
@@ -347,7 +337,7 @@ mod tests {
             V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
         );
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 0);
+        assert_eq!(action.failure_threshold, 1);
 
         for code in ["insufficient_quota", "rate_limit_error"] {
             let rate_limited = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -355,17 +345,30 @@ mod tests {
                 code,
                 429,
             ));
-            assert_eq!(
-                rate_limited.recovery,
-                V3ProviderRecoveryKind::HealthNeutralTransient,
-                "{code}: early 429 is capacity backpressure"
-            );
-            assert_eq!(rate_limited.scope, V3ProviderHealthScope::None);
-            assert_eq!(rate_limited.failure_threshold, 0);
-            assert_eq!(rate_limited.cooldown_ms, 0);
-            assert_eq!(rate_limited.score_delta_milli, 0);
+            if code == "insufficient_quota" {
+                assert_eq!(
+                    rate_limited.recovery,
+                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
+                    "{code}: typed unrecoverable classification wins"
+                );
+                assert_eq!(rate_limited.failure_threshold, 1);
+            } else {
+                assert_eq!(
+                    rate_limited.recovery,
+                    V3ProviderRecoveryKind::RecoverableCounted,
+                    "{code}: real 429 is counted"
+                );
+                assert_eq!(rate_limited.scope, V3ProviderHealthScope::GlobalProviderKey);
+                assert_eq!(rate_limited.failure_threshold, 10);
+            }
+            assert_eq!(rate_limited.cooldown_ms, 60 * 60_000);
         }
-        assert!(build_v3_provider_global_failure_policy(429).is_none());
+        assert_eq!(
+            build_v3_provider_global_failure_policy(429)
+                .expect("429 shares the recoverable policy")
+                .failure_threshold,
+            10
+        );
 
         for (code, status) in [("account_disabled", 403)] {
             let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -377,7 +380,7 @@ mod tests {
                 action.recovery,
                 V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
             );
-            assert_eq!(action.failure_threshold, 0);
+            assert_eq!(action.failure_threshold, 1);
         }
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -387,7 +390,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 10);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -397,7 +400,7 @@ mod tests {
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
         assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 10);
         assert_eq!(action.score_delta_milli, -5);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
@@ -405,13 +408,10 @@ mod tests {
             "rate_limit_error",
             429,
         ));
-        assert_eq!(
-            action.recovery,
-            V3ProviderRecoveryKind::HealthNeutralTransient
-        );
-        assert_eq!(action.scope, V3ProviderHealthScope::None);
-        assert_eq!(action.failure_threshold, 0);
-        assert_eq!(action.score_delta_milli, 0);
+        assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
+        assert_eq!(action.scope, V3ProviderHealthScope::GlobalProviderKey);
+        assert_eq!(action.failure_threshold, 10);
+        assert_eq!(action.cooldown_ms, 60 * 60_000);
 
         let action = build_v3_provider_failure_action_from_v3_error_02(&classified(
             "V3ProviderReqOutbound09TransportRequest",
@@ -419,7 +419,7 @@ mod tests {
             502,
         ));
         assert_eq!(action.recovery, V3ProviderRecoveryKind::RecoverableCounted);
-        assert_eq!(action.failure_threshold, 1);
+        assert_eq!(action.failure_threshold, 10);
     }
 
     #[test]
@@ -446,8 +446,7 @@ mod tests {
 
     #[test]
     fn recoverable_failure_identity_keeps_distinct_status_and_class() {
-        // 5xx 保留真实上游状态：500 与 502 是两种可恢复错误，不能共用一条
-        // 连续失败序列。
+        // 5xx 保留真实上游状态作为证据；共享健康计数不按该指纹分区。
         let server_error = build_v3_provider_global_error_fingerprint(500)
             .expect("500 fingerprint classification must not fail")
             .expect("500 must reach global health");
@@ -512,7 +511,7 @@ mod tests {
                 V3ProviderRecoveryKind::IrrecoverableGlobalCooldown,
                 "code={code} status={status}"
             );
-            assert_eq!(action.failure_threshold, 0, "code={code} status={status}");
+            assert_eq!(action.failure_threshold, 1, "code={code} status={status}");
         }
     }
 }

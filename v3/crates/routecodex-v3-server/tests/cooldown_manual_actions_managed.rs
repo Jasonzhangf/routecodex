@@ -23,13 +23,30 @@ use axum::{
 use routecodex_v3_config::V3ConfigStore;
 use routecodex_v3_server::spawn_v3_server_aggregate_with_admin;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, env, fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 use tokio::{
     sync::{oneshot, Mutex},
     time::{sleep, timeout, Duration},
 };
 
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[derive(Debug)]
+struct ObservationClock(AtomicU64);
+
+impl routecodex_v3_runtime::V3ProviderHealthObservationClock for ObservationClock {
+    fn now_epoch_ms(&self) -> u64 {
+        self.0.load(Ordering::SeqCst)
+    }
+}
 
 fn temp_home(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -117,6 +134,15 @@ impl Managed {
         with_admin: bool,
         source: impl FnOnce(u16) -> String,
     ) -> Self {
+        Self::start_source_with_clock(label, with_admin, source, None).await
+    }
+
+    async fn start_source_with_clock(
+        label: &str,
+        with_admin: bool,
+        source: impl FnOnce(u16) -> String,
+        observation_clock: Option<Arc<dyn routecodex_v3_runtime::V3ProviderHealthObservationClock>>,
+    ) -> Self {
         std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
         std::env::remove_var("ROUTECODEX_V3_ADMIN_BIND");
         // These cases count upstream attempts and health probes, so the Chat
@@ -141,13 +167,26 @@ impl Managed {
         let snapshot = V3ConfigStore::new(&config_path)
             .load_snapshot_with_source_identity()
             .unwrap();
-        let handle = spawn_v3_server_aggregate_with_admin(
-            snapshot.manifest,
-            snapshot.admin_webui,
-            Some(config_path),
-        )
-        .await
-        .unwrap();
+        let handle = if let Some(clock) = observation_clock {
+            assert!(
+                !with_admin,
+                "the controlled observation clock is only needed by the business listener"
+            );
+            routecodex_v3_server::spawn_v3_server_aggregate_with_health_observation_clock(
+                snapshot.manifest,
+                clock,
+            )
+            .await
+            .unwrap()
+        } else {
+            spawn_v3_server_aggregate_with_admin(
+                snapshot.manifest,
+                snapshot.admin_webui,
+                Some(config_path),
+            )
+            .await
+            .unwrap()
+        };
         let listener = handle
             .listeners
             .iter()
@@ -273,13 +312,11 @@ async fn manual_add_is_visible_in_the_listener_cooldown_pool() {
     managed.finish().await;
 }
 
-/// A real non-429 failure first observes, then cools only its exact identity
-/// after the matching observation fails. Healthy fallback and
-/// sibling traffic remain usable; only a matching successful probe restores it.
-/// The independent score-zero trigger is covered by the public typed consumer
-/// `hs03_zero_score_cools_exact_key_and_valid_probe_restores_100`.
+/// Ten real recoverable failures commit the one-hour cooldown for only the
+/// exact identity. A failed early probe changes cadence but does not shorten
+/// the committed minimum; only a matching 2xx probe after expiry restores it.
 #[tokio::test]
-async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
+async fn recoverable_failure_reaches_tenth_before_cooling_and_valid_probe_restores_it() {
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var("V3_COOLDOWN_MANUAL_TEST_KEY", "controlled-secret");
     std::env::set_var(
@@ -311,8 +348,18 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
             .unwrap();
     });
 
-    let managed =
-        Managed::start_source("zero-score", false, |port| zero_config(port, upstream_port)).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let clock = Arc::new(ObservationClock(AtomicU64::new(now)));
+    let managed = Managed::start_source_with_clock(
+        "zero-score",
+        false,
+        |port| zero_config(port, upstream_port),
+        Some(clock.clone()),
+    )
+    .await;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .no_proxy()
@@ -320,35 +367,51 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
         .unwrap();
     let base = managed.base.clone();
 
-    let observation_probes_before = *upstream.probes.lock().await;
-    zero_success(&client, &base, "test", "zero:fail-first").await;
-    zero_receipt(
-        &upstream,
-        "zero:fail-first",
-        Some("test"),
-        Some("Bearer controlled-secret"),
-    )
-    .await;
-    assert!(
-        !zero_is_cooled(&client, &base).await,
-        "a business failure must not cool before observation"
-    );
+    for index in 0..10 {
+        let marker = format!("zero:fail-{index}");
+        zero_success(&client, &base, "test", &marker).await;
+        zero_receipt(
+            &upstream,
+            &marker,
+            Some("test"),
+            Some("Bearer controlled-secret"),
+        )
+        .await;
+        if index < 9 {
+            assert!(
+                !zero_is_cooled(&client, &base).await,
+                "recoverable failure {} must remain below the tenth-failure threshold",
+                index + 1
+            );
+        }
+    }
     timeout(Duration::from_secs(4), async {
         loop {
-            if *upstream.probes.lock().await > observation_probes_before
-                && zero_is_cooled(&client, &base).await
-            {
+            if zero_is_cooled(&client, &base).await {
                 break;
             }
             sleep(Duration::from_millis(20)).await;
         }
     })
     .await
-    .expect("failed observation must commit its exact declared cooldown");
+    .expect("the tenth recoverable failure must commit its exact declared cooldown");
     assert!(
         zero_is_cooled(&client, &base).await,
-        "real 503 must cool the exact identity while fallback succeeds"
+        "ten real 503 responses must cool the exact identity while fallback succeeds"
     );
+    let entries = pool_entries(&client, managed.pool_url()).await;
+    let exact = entries
+        .iter()
+        .find(|entry| {
+            entry["provider_id"] == json!("test")
+                && entry["auth_alias"] == json!("key")
+                && entry["model_id"] == json!("test")
+        })
+        .expect("the exact identity must be represented in the cooldown pool");
+    let initial_deadline = exact["until_ms"]
+        .as_u64()
+        .expect("the committed cooldown must have a deadline");
+    assert_eq!(initial_deadline, now + 3_600_000);
 
     // The cooldown is bound to the exact identity; siblings stay out of the pool.
     let entries = pool_entries(&client, format!("{base}/_routecodex/health/cooldown-pool")).await;
@@ -420,12 +483,11 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     assert_eq!(entries[0]["model_id"], json!("test"));
     assert_eq!(entries[0]["auth_alias"], json!("key"));
 
-    // A matching valid 2xx probe restores the exact identity. The operator probe
-    // only makes it due now; the runtime still runs it over the same provider wire.
+    // An early failed probe preserves the one-hour minimum.
     let probes_before = *upstream.probes.lock().await;
     upstream
         .probe_ready
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let (status, body) = post_json(
         &client,
         managed.probe_url(),
@@ -441,7 +503,62 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
     assert_eq!(
         body["scheduled"],
         json!(true),
-        "the non-429 cooldown must carry probe state: {body}"
+        "the committed cooldown must accept an operator probe request: {body}"
+    );
+
+    // The first probe cadence is five seconds. Move only the injected health
+    // clock past that cadence; request and transport time remain real.
+    clock.0.store(now + 60_000, Ordering::SeqCst);
+    timeout(Duration::from_secs(15), async {
+        loop {
+            if *upstream.probes.lock().await > probes_before {
+                break;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the early probe must reach the exact provider");
+    assert!(
+        zero_is_cooled(&client, &base).await,
+        "a failed probe before expiry must preserve the committed cooldown"
+    );
+    assert_eq!(
+        pool_entries(&client, managed.pool_url())
+            .await
+            .iter()
+            .find(|entry| entry["provider_id"] == json!("test"))
+            .and_then(|entry| entry["until_ms"].as_u64()),
+        Some(initial_deadline),
+        "a failed probe must not shorten the committed deadline"
+    );
+
+    // A matching valid 2xx probe restores the exact identity only after the
+    // controlled one-hour boundary.
+    clock.0.store(initial_deadline + 1, Ordering::SeqCst);
+    upstream
+        .probe_ready
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let probes_before = *upstream.probes.lock().await;
+    let (status, body) = post_json(
+        &client,
+        managed.probe_url(),
+        json!({
+            "provider_id": "test",
+            "interface_id": interface_id,
+            "auth_alias": "key",
+            "model_id": "test",
+        }),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "operator probe must be accepted after expiry: {body}"
+    );
+    assert_eq!(
+        body["scheduled"],
+        json!(true),
+        "the expired cooldown must carry probe state: {body}"
     );
 
     timeout(Duration::from_secs(15), async {
@@ -455,7 +572,7 @@ async fn non429_failure_cools_exact_key_and_valid_probe_restores_it() {
         }
     })
     .await
-    .expect("a valid 2xx probe must recover the exact identity");
+    .expect("a matching 2xx probe after expiry must recover the exact identity");
 
     // The recovered identity routes again, and the server plus siblings stay alive.
     zero_success(&client, &base, "test", "zero:recovered").await;
@@ -494,9 +611,8 @@ struct ZeroUpstream {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ZeroBusinessReceipt {
-    count: usize,
+    authorizations: Vec<String>,
     model: Option<String>,
-    authorization: Option<String>,
 }
 
 async fn zero_provider(
@@ -520,17 +636,19 @@ async fn zero_provider(
     let receipt = business
         .entry(marker.clone())
         .or_insert_with(|| ZeroBusinessReceipt {
-            count: 0,
+            authorizations: Vec::new(),
             model: body
                 .get("model")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            authorization: headers
-                .get(axum::http::header::AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
         });
-    receipt.count += 1;
+    receipt.authorizations.push(
+        headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default()
+            .to_string(),
+    );
     if marker.starts_with("zero:fail-") {
         return zero_rejection();
     }
@@ -663,12 +781,12 @@ async fn zero_receipt(
 ) {
     let receipt = upstream.business.lock().await.get(marker).cloned();
     let receipt = receipt.unwrap_or(ZeroBusinessReceipt {
-        count: 0,
+        authorizations: Vec::new(),
         model: None,
-        authorization: None,
     });
     assert_eq!(
-        receipt.count, 1,
+        receipt.authorizations.len(),
+        1,
         "{marker}: must reach the controlled upstream exactly once: {receipt:?}"
     );
     if let Some(expected_model) = expected_model {
@@ -680,8 +798,12 @@ async fn zero_receipt(
     }
     if let Some(expected_authorization) = expected_authorization {
         assert_eq!(
-            receipt.authorization.as_deref(),
-            Some(expected_authorization),
+            receipt
+                .authorizations
+                .iter()
+                .filter(|authorization| authorization.as_str() == expected_authorization)
+                .count(),
+            1,
             "{marker}: wrong provider auth key"
         );
     }

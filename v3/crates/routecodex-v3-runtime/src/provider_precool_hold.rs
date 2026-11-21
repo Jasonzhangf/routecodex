@@ -86,6 +86,7 @@ impl V3ProviderFailureRuntimeHealth {
         reason: Option<&str>,
         now_ms: u64,
         action: &V3ProviderFailureAction,
+        observed_http_failure: bool,
         policy: Option<V3ProviderFailurePolicy>,
         minimum_delay_ms: u64,
     ) -> Result<V3ProviderFailureRecord, String> {
@@ -103,14 +104,16 @@ impl V3ProviderFailureRuntimeHealth {
             cooldown_until_ms: None,
             reason: reason.map(str::to_owned),
         };
-        if action
-            .failure_fingerprint
-            .as_ref()
-            .is_some_and(|failure| failure.http_status == 429)
+        if observed_http_failure
+            && matches!(
+                action.recovery,
+                V3ProviderRecoveryKind::RecoverableCounted
+                    | V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
+            )
         {
             let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) else {
                 return Err(
-                    "429 observation requires a complete provider/interface/auth/model identity"
+                    "provider HTTP error observation requires a complete provider/interface/auth/model identity"
                         .into(),
                 );
             };
@@ -122,25 +125,21 @@ impl V3ProviderFailureRuntimeHealth {
                 action,
                 self.observation_now_ms(now_ms),
             )?;
-            self.record_provider_action_failure_in_scope_for_interface(
-                scope,
-                provider_id,
-                interface_id,
-                Some(auth_alias),
-                Some(model_id),
-                "provider_http_429",
-            )?;
-            record.state = if projection.available {
-                "rate_limit_capacity_wait"
+            record.state = if projection.cooldown {
+                "cooldown"
             } else {
-                "rate_limit_cooldown"
+                "provider_failure_observed"
             }
             .into();
+            record.failure_count = projection.failure_streak;
             record.cooldown_until_ms = projection.cooldown_until_ms;
             if projection.cooldown {
                 let mut pending = self.precool.lock().map_err(|error| error.to_string())?;
                 if let Some(previous) = pending.remove(&precool_identity(
-                    provider_id, interface_id, Some(auth_alias), Some(model_id),
+                    provider_id,
+                    interface_id,
+                    Some(auth_alias),
+                    Some(model_id),
                 )) {
                     self.action_gate.record_success(previous.ticket.key())?;
                 }
@@ -170,9 +169,17 @@ impl V3ProviderFailureRuntimeHealth {
             late_action.cooldown_ms = policy.cooldown_ms;
             late_action.long_probe_backoff = policy.long_probe_backoff;
         }
-        if let Some(cooled) = self.store.record_provider_failure_action_if_cooled_for_interface(
-            provider_id, interface_id, auth_alias.unwrap(), model_id.unwrap(), &late_action, now_ms,
-        )? {
+        if let Some(cooled) = self
+            .store
+            .record_provider_failure_action_if_cooled_for_interface(
+                provider_id,
+                interface_id,
+                auth_alias.unwrap(),
+                model_id.unwrap(),
+                &late_action,
+                now_ms,
+            )?
+        {
             // The failure is already retained by the typed Error event. Do
             // not shadow the active recovery owner; count it exactly once.
             if let Some(previous) = pending.remove(&identity) {
@@ -359,46 +366,14 @@ impl V3ProviderFailureRuntimeHealth {
             Err(V3ProviderHealthProbeFailure::Internal(error)) => Err(error),
             Err(V3ProviderHealthProbeFailure::Provider(error)) => {
                 let (status, action) = classify_provider_probe_failure(error)?;
-                if let Some(status) = status {
-                    let disposition = self
-                        .store
-                        .record_provider_rate_limit_probe_status_with_permit(
-                            &cancellation.permit,
-                            status,
-                            &action,
-                            now_ms,
-                        )?;
-                    if disposition == routecodex_v3_provider_responses::V3ProviderRateLimitProbeDisposition::Superseded {
-                        return Ok(V3ProbeCompletion::Superseded);
-                    }
-                    if status == 429 {
-                        let cooled = !self
-                            .store
-                            .scheduling_projection_for_key_with_interface(
-                                &identity.provider_id,
-                                &identity.interface_id,
-                                identity.auth_alias.as_deref().unwrap(),
-                                identity.model_id.as_deref().unwrap(),
-                                1,
-                                1,
-                                now_ms,
-                            )?
-                            .available;
-                        if cooled {
-                            // Hand the physical identity to the existing cooldown
-                            // owner. Retaining a precool entry would shadow it.
-                            self.action_gate.record_success(entry.ticket.key())?;
-                            pending.remove(identity);
-                        } else {
-                            entry.ticket = self
-                                .action_gate
-                                .record_failure(entry.ticket.key())?
-                                .recovery_ticket()
-                                .clone();
-                        }
-                        self.store.publish_availability_change();
-                        return Ok(V3ProbeCompletion::ProviderFailed);
-                    }
+                if status == Some(429) {
+                    entry.ticket = self
+                        .action_gate
+                        .record_failure(entry.ticket.key())?
+                        .recovery_ticket()
+                        .clone();
+                    self.store.publish_availability_change();
+                    return Ok(V3ProbeCompletion::ProviderFailed);
                 }
                 let mut committed = false;
                 while entry.applied < entry.failures.len() {

@@ -102,9 +102,8 @@ pub async fn probe_v3_provider_global_target(
     probe_v3_provider_global_target_impl(target).await
 }
 
-/// Error owns typed thresholds for the exact provider+interface+auth_alias+model
-/// identity; typed classification wins. Early429 is capacity backpressure;
-/// sustained429 escalation belongs to the health Store episode owner.
+/// Resolve the typed health action for the complete provider identity.
+/// Store owns consecutive observations and cooldown state.
 pub(crate) fn apply_v3_internal_provider_failure_policy(
     mut action: V3ProviderFailureAction,
     source_stage: &str,
@@ -583,26 +582,6 @@ impl V3ProviderSchedulingReader for V3SessionGlobalSchedulingReader<'_> {
                 .blocked_scopes
                 .push("request_local_provider_failure".to_string());
         }
-        match self.global.rate_limit_visibility_blocked(
-            provider_id,
-            interface_id,
-            Some(auth_alias),
-            Some(model_id),
-        ) {
-            Ok(true) => {
-                projection.available = false;
-                projection
-                    .blocked_scopes
-                    .push("provider_http_429_backpressure".to_string());
-            }
-            Ok(false) => {}
-            Err(_) => {
-                projection.available = false;
-                projection
-                    .blocked_scopes
-                    .push("provider_action_gate_unavailable".to_string());
-            }
-        }
         projection.available = projection.available && session.available && !excluded_candidate;
         projection
     }
@@ -953,7 +932,7 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
     // The external classification belongs to a real upstream HTTP status: the
     // source code is `provider_http_{status}` and the external link code is
     // `HTTP_{status}`. The body-derived `error_type` stays the policy/health
-    // input, so the cooldown ladder is unchanged.
+    // input for upstream account and quota classifications.
     let is_real_http_failure = provider_status == Some(status);
     let external_error_type = if is_real_http_failure {
         Some(format!("provider_http_{status}"))
@@ -1044,6 +1023,27 @@ pub(crate) async fn run_v3_relay_provider_failure_policy_with_response_source(
             cooldown_until_ms: None,
             reason: reason.map(str::to_string),
         }
+    } else if is_real_http_failure && (400..=599).contains(&status) {
+        let health_source = V3Error01SourceRaised {
+            code: error_type
+                .as_deref()
+                .unwrap_or(&attempt_source.code)
+                .to_owned(),
+            ..attempt_source.clone()
+        };
+        context
+            .provider_health
+            .record_provider_failure_record_from_source_for_interface(
+                &context.failure_session_scope,
+                &selected.candidate.provider_id,
+                &selected.candidate.interface_id,
+                Some(&selected.candidate.auth_alias),
+                Some(&selected.candidate.model_id),
+                &health_source,
+                v3_relay_provider_policy_now_epoch_ms()
+                    .map_err(v3_relay_provider_policy_ordinary_error)?,
+            )
+            .map_err(v3_relay_provider_policy_ordinary_error)?
     } else {
         context
             .provider_health

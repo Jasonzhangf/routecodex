@@ -27,11 +27,22 @@ fn real_http_failure_action(
 fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b() {
     for late in ["cancel", "success", "failure"] {
         let store = V3ProviderHealthStore::default();
-        let mut action =
+        let action =
             routecodex_v3_provider_responses::V3ProviderFailureAction::recoverable("transport");
-        action.failure_threshold = 1;
+        for now_ms in 100..109 {
+            store
+                .record_provider_failure_action_for_interface(
+                    "p",
+                    "alternate",
+                    "k",
+                    "m",
+                    &action,
+                    now_ms,
+                )
+                .unwrap();
+        }
         store
-            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 100)
+            .record_provider_failure_action_for_interface("p", "alternate", "k", "m", &action, 109)
             .unwrap();
         let a = store
             .acquire_provider_cooldown_probe_for_interface("p", "alternate", Some("k"), Some("m"))
@@ -51,7 +62,7 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
             )
             .unwrap()
             .unwrap();
-        assert_eq!(due, 5_200);
+        assert_eq!(due, 5_109);
         assert!(store
             .acquire_provider_cooldown_probe_if_due_for_interface(
                 "p",
@@ -125,7 +136,7 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
             .unwrap()
             .is_none());
         store
-            .complete_provider_cooldown_probe_success_with_permit(&c, due + 10_000)
+            .complete_provider_cooldown_probe_success_with_permit(&c, 3_600_109)
             .unwrap();
         assert!(
             store
@@ -136,7 +147,7 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
                     "m",
                     1,
                     1,
-                    due + 10_000
+                    3_600_109
                 )
                 .unwrap()
                 .available
@@ -145,7 +156,7 @@ fn acquired_owner_release_preserves_due_time_and_rejects_late_a_after_actual_b()
 }
 
 #[test]
-fn business_success_resets_early_429_window_without_count_based_cooling() {
+fn business_success_resets_a_subthreshold_shared_streak() {
     let store = V3ProviderHealthStore::default();
     let action = real_http_failure_action(429, "rate_limit_error");
     for time in [100, 101, 102, 60100] {
@@ -170,7 +181,7 @@ fn business_success_resets_early_429_window_without_count_based_cooling() {
         );
     }
     assert!(
-        store
+        !store
             .record_provider_failure_action("p", "a", "m", &action, 240100)
             .unwrap()
             .cooldown
@@ -198,11 +209,8 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
         let projection = store
             .record_provider_failure_action("p", "a", "m", &action, time)
             .unwrap();
-        assert_eq!(
-            projection.failure_streak, 0,
-            "429 does not penalize transport health"
-        );
-        assert_eq!(projection.cooldown, time == 120100);
+        assert_eq!(projection.failure_streak, (time / 60_000) as u32 + 1);
+        assert!(!projection.cooldown, "three 429 failures stay subthreshold");
         for (key, model) in [("a", "other-model"), ("sibling", "m")] {
             assert!(
                 store
@@ -212,18 +220,11 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
             );
         }
     }
-    let permit = store
-        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
-        .unwrap()
-        .unwrap();
     let availability_generation = store.availability_generation();
     store
         .record_provider_key_success("p", "a", "m", 1920101)
         .unwrap();
     assert_ne!(store.availability_generation(), availability_generation);
-    store
-        .complete_provider_cooldown_probe_failure_with_permit(&permit, 1920102)
-        .unwrap();
     assert!(
         store
             .scheduling_projection("p", "a", "m", 1, 1, 1920103)
@@ -245,17 +246,19 @@ fn consecutive_429_codes_share_window_and_post_minimum_success_invalidates_old_p
 }
 
 #[test]
-fn early_429_preserves_non429_cooldown_until_matching_business_success() {
+fn a_late_429_preserves_committed_cooldown_until_current_probe() {
     let store = V3ProviderHealthStore::default();
-    let mut action = real_http_failure_action(503, "provider_http_503");
-    action.failure_threshold = 1;
-    assert!(
+    let action = real_http_failure_action(503, "provider_http_503");
+    for now_ms in 100..109 {
         store
-            .record_provider_failure_action("p", "a", "m", &action, 100)
-            .unwrap()
-            .cooldown
-    );
-    action = real_http_failure_action(429, "rate_limit_error");
+            .record_provider_failure_action("p", "a", "m", &action, now_ms)
+            .unwrap();
+    }
+    let committed = store
+        .record_provider_failure_action("p", "a", "m", &action, 109)
+        .unwrap();
+    assert!(committed.cooldown);
+    let action = real_http_failure_action(429, "rate_limit_error");
     store
         .record_provider_failure_action("p", "a", "m", &action, 101)
         .unwrap();
@@ -267,8 +270,21 @@ fn early_429_preserves_non429_cooldown_until_matching_business_success() {
         "a429 diagnostic cannot release the existing503 exclusion"
     );
     assert!(
-        store
+        !store
             .record_provider_key_success("p", "a", "m", 102)
+            .unwrap()
+            .available
+    );
+    let permit = store
+        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
+        .unwrap()
+        .expect("current probe permit");
+    store
+        .complete_provider_cooldown_probe_success_with_permit(&permit, 3_600_109)
+        .unwrap();
+    assert!(
+        store
+            .scheduling_projection("p", "a", "m", 1, 1, 3_600_109)
             .unwrap()
             .available
     );

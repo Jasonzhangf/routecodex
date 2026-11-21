@@ -312,6 +312,17 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         }
     };
     let mut failed_candidates = initial_request_local_excluded_candidates;
+    match request_execution_control.take_refill_excluded_candidates() {
+        Ok(excluded) => failed_candidates.extend(excluded),
+        Err(error) => {
+            return direct_runtime_helpers_stream::source_failure_output(
+                runtime_source("V3ExecutionAttemptBudget", error.to_string()),
+                None,
+                trace,
+                &hook_registry,
+            );
+        }
+    }
     let mut request_local_busy_candidates = BTreeSet::new();
     let mut same_candidate_retries = BTreeMap::<String, usize>::new();
     let mut retry_selected: Option<routecodex_v3_target::V3Target10ConcreteProviderSelected> = None;
@@ -1611,6 +1622,16 @@ async fn execute_v3_responses_direct_runtime_kernel_core_resident<
         observability.attempts = Some(total_attempts(&accumulator, send_attempts));
         observability.timing = timing;
 
+        if let Err(error) =
+            request_execution_control.store_refill_excluded_candidates(failed_candidates)
+        {
+            return direct_runtime_helpers_stream::source_failure_output(
+                runtime_source("V3ExecutionAttemptBudget", error.to_string()),
+                None,
+                trace,
+                &hook_registry,
+            );
+        }
         return V3ResponsesDirectRuntimeOutput {
             observability: Some(observability),
             terminal_disposition: None,

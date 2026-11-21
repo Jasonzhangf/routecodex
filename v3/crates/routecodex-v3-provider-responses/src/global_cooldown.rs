@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static PERSIST_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum V3ProviderCooldownFailureClass {
@@ -35,6 +35,12 @@ pub struct V3ProviderRateLimitEpisode {
     pub last_429_at_ms: Option<u64>,
     pub not_before_ms: Option<u64>,
     pub probe_required: bool,
+    /// Shared-policy recoverable streak. Old elapsed-429 files omit these
+    /// fields and therefore load with a fresh count of zero.
+    #[serde(default)]
+    pub failure_count: u32,
+    #[serde(default)]
+    pub last_failure_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +84,7 @@ impl V3ProviderCooldownCoordinator {
         };
         let file: V3ProviderCooldownFile = serde_json::from_slice(&bytes)
             .map_err(|error| format!("decode provider cooldown state: {error}"))?;
-        if !matches!(file.schema_version, 1 | 2 | SCHEMA_VERSION) {
+        if !matches!(file.schema_version, 1 | 2 | 3 | SCHEMA_VERSION) {
             return Err(format!(
                 "unsupported provider cooldown state schema {}",
                 file.schema_version

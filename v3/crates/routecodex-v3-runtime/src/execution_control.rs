@@ -1,8 +1,9 @@
 use futures_util::Stream;
+use std::collections::BTreeSet;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -105,12 +106,13 @@ pub(crate) struct V3AttemptBudget {
     inner: Arc<V3AttemptBudgetInner>,
 }
 
-/// Opaque request-local execution control carried across protocol handoffs.
-/// The server may move this value but cannot inspect or reconstruct its
-/// attempt count, resident-byte reservations, or deadline from payload data.
+/// Opaque request execution control carried across handoffs and refills.
+/// The server moves this value without reading its attempt budget or failed
+/// Provider identities from protocol payloads.
 #[derive(Clone)]
 pub struct V3RequestExecutionControl {
     attempt_budget: V3AttemptBudget,
+    refill_excluded_candidates: Arc<Mutex<BTreeSet<String>>>,
 }
 
 impl fmt::Debug for V3RequestExecutionControl {
@@ -126,7 +128,27 @@ impl V3RequestExecutionControl {
     ) -> Result<Self, V3AttemptStoreError> {
         Ok(Self {
             attempt_budget: V3AttemptBudget::from_manifest(manifest, server_id)?,
+            refill_excluded_candidates: Arc::default(),
         })
+    }
+
+    pub(crate) fn take_refill_excluded_candidates(
+        &self,
+    ) -> Result<BTreeSet<String>, V3AttemptStoreError> {
+        let mut candidates = self.refill_excluded_candidates.lock().map_err(|_| {
+            V3AttemptStoreError::InvalidAttemptState("refill candidate state is unavailable".into())
+        })?;
+        Ok(std::mem::take(&mut *candidates))
+    }
+
+    pub(crate) fn store_refill_excluded_candidates(
+        &self,
+        candidates: BTreeSet<String>,
+    ) -> Result<(), V3AttemptStoreError> {
+        *self.refill_excluded_candidates.lock().map_err(|_| {
+            V3AttemptStoreError::InvalidAttemptState("refill candidate state is unavailable".into())
+        })? = candidates;
+        Ok(())
     }
 
     pub(crate) fn attempt_budget(&self) -> V3AttemptBudget {

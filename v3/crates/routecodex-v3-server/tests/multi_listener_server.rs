@@ -50,12 +50,17 @@ impl TestLock {
 
     async fn lock(&self) -> TestLockGuard<'_> {
         let inner = self.inner.lock().await;
+        let home = TestHomeGuard::new("multi-listener");
         routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(Some(0));
-        TestLockGuard { _inner: inner }
+        TestLockGuard {
+            _home: home,
+            _inner: inner,
+        }
     }
 }
 
 struct TestLockGuard<'lock> {
+    _home: TestHomeGuard,
     _inner: tokio::sync::MutexGuard<'lock, ()>,
 }
 
@@ -9652,15 +9657,25 @@ struct NestedHandoffCase {
 
 #[tokio::test]
 async fn issue4aeb668_refill_recovery_keeps_ordered_observations() {
-    assert_refill_round_observations(false).await;
+    assert_refill_round_observations(false, false).await;
 }
 
 #[tokio::test]
 async fn issue4aeb668_refill_exhaustion_keeps_prior_observations() {
-    assert_refill_round_observations(true).await;
+    assert_refill_round_observations(true, false).await;
 }
 
-async fn assert_refill_round_observations(exhausted: bool) {
+#[tokio::test]
+async fn responses_relay_refill_does_not_resend_a_failed_identity() {
+    assert_refill_round_observations(false, true).await;
+}
+
+#[tokio::test]
+async fn responses_relay_refill_projects_only_the_final_error_after_exhaustion() {
+    assert_refill_round_observations(true, true).await;
+}
+
+async fn assert_refill_round_observations(exhausted: bool, relay: bool) {
     let _guard = TEST_LOCK.lock().await;
     routecodex_v3_config::internal::v3_test_only_set_chat_process_refill_max_override(None);
     let home = TestHomeGuard::new("issue4aeb668-refill-observations");
@@ -9711,6 +9726,7 @@ async fn assert_refill_round_observations(exhausted: bool) {
             .unwrap();
     });
     std::env::set_var("V3_REFILL_OBSERVATIONS_KEY", "refill-observations-secret");
+    let process = if relay { "chat" } else { "direct" };
     let providers = ["first", "second", "last"]
         .map(|id| {
             format!(
@@ -9720,6 +9736,7 @@ type = "responses"
 base_url = "{base}"
 default_model = "{id}"
 auth = {{ type = "api_key", entries = [{{ alias = "key", env = "V3_REFILL_OBSERVATIONS_KEY" }}] }}
+responses = {{ process = "{process}", streaming = "client" }}
 [providers.{id}.models.{id}]
 wire_name = "wire-{id}"
 "#
@@ -9818,11 +9835,16 @@ targets = [
             "both real rounds must survive: {body}"
         );
     }
+    let transport = if relay {
+        "V3ProviderReqOutbound09TransportRequest"
+    } else {
+        "V3Transport13ResponsesHttpRequest"
+    };
     let sends = logs["logs"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|event| event["node_id"] == "V3Transport13ResponsesHttpRequest")
+        .filter(|event| event["node_id"] == transport)
         .count();
     assert_eq!(
         sends, 4,
@@ -9836,13 +9858,13 @@ targets = [
     assert_eq!(
         ids,
         if exhausted {
-            vec!["first", "first", "second", "last"]
+            vec!["first", "second", "last"]
         } else {
-            vec!["first", "first", "second"]
+            vec!["first", "second"]
         },
         "all real round failures must survive: {evidence}"
     );
-    for (index, attempt) in attempts.iter().enumerate() {
+    for attempt in attempts {
         let id = attempt["provider_id"].as_str().unwrap();
         assert_eq!(
             attempt["provider_key"],
@@ -9850,29 +9872,15 @@ targets = [
             "{attempt}"
         );
         assert_eq!(attempt["status"], 503, "{attempt}");
-        if index == 1 {
-            // The refill plan first observes the original identity's cooldown.
-            // This is a distinct local selection failure, not a second wire attempt.
-            assert!(attempt["provider_status"].is_null(), "{attempt}");
-            assert_eq!(
-                attempt["diagnostic_source"]["code"], "selected_provider_unavailable",
-                "{attempt}"
-            );
-            assert!(
-                attempt["failed_attempt_evidence"]["provider_response"].is_null(),
-                "{attempt}"
-            );
-        } else {
-            assert_eq!(attempt["provider_status"], 503, "{attempt}");
-            assert_eq!(
-                attempt["diagnostic_source"]["code"], "provider_http_503",
-                "{attempt}"
-            );
-            assert_eq!(
-                attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
-                "{attempt}"
-            );
-        }
+        assert_eq!(attempt["provider_status"], 503, "{attempt}");
+        assert_eq!(
+            attempt["diagnostic_source"]["code"], "provider_http_503",
+            "{attempt}"
+        );
+        assert_eq!(
+            attempt["failed_attempt_evidence"]["provider_response"]["status"], 503,
+            "{attempt}"
+        );
     }
 }
 
@@ -10028,18 +10036,18 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
             Some("Bearer secret-direct-final")
         );
         assert_eq!(capture.body["model"], "wire-direct-final");
-        if !final_relay && !committed_failure {
+        if !committed_failure {
             let refill = timeout(Duration::from_secs(1), captures.recv())
                 .await
                 .expect("the native completion must trigger the real default refill")
                 .expect("refill upstream capture must be retained");
             assert_eq!(refill.authorization, capture.authorization);
             assert_eq!(refill.body["model"], "wire-direct-final");
-            // The existing fixture has no canonical output items; the dedicated
-            // refill fixture above verifies pairing of real message items.
-            assert!(refill.body["input"].is_array(), "{}", refill.body);
+            let history_field = if final_relay { "messages" } else { "input" };
+            let history = &refill.body[history_field];
+            assert!(history.is_array(), "{}", refill.body);
             assert!(
-                refill.body["input"]
+                history
                     .to_string()
                     .contains("relay direct relay direct handoff drain"),
                 "refill must retain original history: {}",
@@ -10073,7 +10081,14 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
                 .filter(|node| **node == "V3TargetLocalReselected")
                 .count(),
             3,
-            "the four candidates have exactly three successful selection transitions: {nodes:?}"
+            "the four candidates have exactly three successful selection transitions: {nodes:?}; failure attempts: {}",
+            evidence["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|attempt| attempt["provider_id"].as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
         let sends: Vec<_> = nodes
             .iter()
@@ -10098,8 +10113,12 @@ async fn assert_nested_handoff_observations(case: NestedHandoffCase) {
         } else {
             "V3Transport13ResponsesHttpRequest"
         });
-        if !final_relay && !exhausted {
-            expected_sends.push("V3Transport13ResponsesHttpRequest");
+        if !exhausted {
+            expected_sends.push(if final_relay {
+                "V3ProviderReqOutbound09TransportRequest"
+            } else {
+                "V3Transport13ResponsesHttpRequest"
+            });
         }
         assert_eq!(
             sends, expected_sends,

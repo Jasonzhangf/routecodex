@@ -1,5 +1,5 @@
-//! Public regression: early429 is capacity-only; failed non429 observation
-//! cools only the attempted identity. Healthy fallback stays usable.
+//! Public regression: one recoverable failure leaves the exact identity
+//! routable, while confirmed authentication failure excludes it immediately.
 //! Command: CARGO_NET_OFFLINE=true cargo test --locked --manifest-path v3/Cargo.toml
 //! -p routecodex-v3-server --test no_first_failure_cooldown_blackbox -- --nocapture
 //! Run with an isolated test HOME, as server error sampling uses HOME/.rcc.
@@ -18,6 +18,11 @@ use tokio::{
 
 #[path = "../../../crates/routecodex-v3-runtime/tests/support/hub_v1_fixture.rs"]
 mod hub_v1_fixture;
+
+#[path = "support/fa22072_test_home.rs"]
+mod test_home;
+
+static TEST_LOCK: test_home::ServerTestLock = test_home::ServerTestLock::new();
 
 #[derive(Default)]
 struct Upstream {
@@ -352,28 +357,6 @@ async fn pool(client: &reqwest::Client, base: &str) -> Vec<Value> {
         .clone()
 }
 
-async fn wait_for_cooldown_count(
-    client: &reqwest::Client,
-    base: &str,
-    expected: usize,
-) -> Vec<Value> {
-    let mut last = Vec::new();
-    let outcome = timeout(Duration::from_secs(4), async {
-        loop {
-            let entries = pool(client, base).await;
-            if entries.len() == expected {
-                return entries;
-            }
-            last = entries;
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await;
-    outcome.unwrap_or_else(|error| {
-        panic!("expected {expected} exact cooldowns: {error}; last={last:?}")
-    })
-}
-
 async fn receipt(state: &Upstream, marker: &str) {
     assert_eq!(
         state.receipts.lock().await.get(marker),
@@ -434,6 +417,7 @@ async fn receipt_at(state: &Upstream, input: &str, model: &str) {
 
 #[tokio::test]
 async fn no_first_failure_cooldown_public_http() {
+    let (_home, _guard) = TEST_LOCK.lock().await;
     std::env::set_var("V3_NO_FIRST_FAILURE_TEST_KEY", "controlled-test-key");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -465,26 +449,21 @@ async fn no_first_failure_cooldown_public_http() {
     let base = format!("http://{}", handle.listeners[0].addr);
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
 
-    let began = tokio::time::Instant::now();
     request(&client, &base, "main", "health-test:fail-isolated").await;
     receipt(&state, "health-test:fail-isolated").await;
     fallback_receipt(&state, "health-test:fail-isolated").await;
     assert_identities(pool(&client, &base).await, &[]);
     request(&client, &base, "main", "health-test:fresh-after-429").await;
+    receipt(&state, "health-test:fresh-after-429").await;
     assert!(
         !state
-            .receipts
+            .fallback_receipts
             .lock()
             .await
             .contains_key("health-test:fresh-after-429"),
-        "fresh session must skip gated primary"
+        "the first 429 must not hide the healthy response from a new session"
     );
-    fallback_receipt(&state, "health-test:fresh-after-429").await;
     receipt(&state, "health-test:fail-isolated").await;
-    assert!(
-        began.elapsed() < Duration::from_millis(900),
-        "fresh proof must precede the earliest 1s backoff expiry"
-    );
     assert_identities(pool(&client, &base).await, &[]);
     request_with_input(
         &client,
@@ -558,10 +537,6 @@ async fn no_first_failure_cooldown_public_http() {
     receipt_at(&state, "health-test:server-terminal", "other").await;
     fallback_receipt(&state, "health-test:server-terminal").await;
     assert_identities(pool(&client, &base).await, &[]);
-    assert_identities(
-        wait_for_cooldown_count(&client, &base, 1).await,
-        &[("primary", "default", &alias, "other")],
-    );
     request_with_tool(
         &client,
         &base,
@@ -572,10 +547,7 @@ async fn no_first_failure_cooldown_public_http() {
     )
     .await;
     receipt(&state, "health-test:after-server-failure").await;
-    assert_identities(
-        pool(&client, &base).await,
-        &[("primary", "default", &alias, "other")],
-    );
+    assert_identities(pool(&client, &base).await, &[]);
 
     request_with_input(
         &client,
@@ -604,14 +576,7 @@ async fn no_first_failure_cooldown_public_http() {
     fallback_receipt(&state, "health-test:auth-terminal").await;
     assert_identities(
         pool(&client, &base).await,
-        &[("primary", "default", &alias, "other")],
-    );
-    assert_identities(
-        wait_for_cooldown_count(&client, &base, 2).await,
-        &[
-            ("primary", "default", &alias, "other"),
-            ("independent", "default", "independent", "main"),
-        ],
+        &[("independent", "default", "independent", "main")],
     );
 
     handle.shutdown().await;

@@ -1218,7 +1218,7 @@ fn direct_protocol_plan_uses_exact_identity_cooldown_across_sessions() {
     let session_b = test_failure_session_scope_for(routing_group, "session-b");
     let now = 1_000_000;
 
-    for offset in 0..3 {
+    for offset in 0..routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD {
         provider_health
             .store()
             .record_provider_failure_in_session_with_policy(
@@ -1228,10 +1228,11 @@ fn direct_protocol_plan_uses_exact_identity_cooldown_across_sessions() {
                 Some("test"),
                 Some("controlled protocol plan cooldown"),
                 None,
-                now + offset,
+                now + u64::from(offset),
                 Some(V3ProviderFailurePolicy {
-                    failure_threshold: 3,
-                    cooldown_ms: 900_000,
+                    failure_threshold:
+                        routecodex_v3_error::V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
+                    cooldown_ms: 3_600_000,
                     probe_interval_ms: 900_000,
                     max_probe_interval_ms: None,
                     long_probe_backoff: false,

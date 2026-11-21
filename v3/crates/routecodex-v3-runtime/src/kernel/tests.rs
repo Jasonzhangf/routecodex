@@ -579,7 +579,7 @@ async fn normal_direct_request_does_not_consume_unrelated_provider_failure_gate(
 }
 
 #[tokio::test]
-async fn direct_provider_failure_blocks_after_configured_threshold() {
+async fn direct_provider_failure_counts_until_matching_success_or_cooldown() {
     let mut manifest = test_manifest();
     manifest
         .forwarders
@@ -639,9 +639,9 @@ async fn direct_provider_failure_blocks_after_configured_threshold() {
         &source,
         100,
     )
-    .expect("direct failure must enter observation");
-    assert_eq!(record.state, "pre_cool_observation");
-    assert_eq!(record.failure_count, 0);
+    .expect("direct failure must be observed");
+    assert_eq!(record.state, "provider_failure_observed");
+    assert_eq!(record.failure_count, 1);
     assert_eq!(record.cooldown_until_ms, None);
     assert!(
         health
@@ -662,11 +662,17 @@ async fn direct_provider_failure_blocks_after_configured_threshold() {
             101,
         )
         .unwrap();
-    assert!(
-        !health
-            .availability("openai", Some("key1"), Some("gpt-test"), 101)
-            .available,
-        "another model's success cannot release this exact pending identity"
+    let second = record_v3_direct_provider_failure_record(
+        &health,
+        &session,
+        &plan.decision.target,
+        &source,
+        102,
+    )
+    .expect("second direct failure");
+    assert_eq!(
+        second.failure_count, 2,
+        "another model's success must not reset the streak"
     );
     health
         .record_provider_success_in_failure_scope(
@@ -675,41 +681,21 @@ async fn direct_provider_failure_blocks_after_configured_threshold() {
             "openai",
             Some("key1"),
             Some("gpt-test"),
-            102,
+            103,
         )
         .unwrap();
-    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 103)
-        .await;
-    assert!(
-        health
-            .availability("openai", Some("key1"), Some("gpt-test"), 103)
-            .available,
-        "matching success cancels pending; an old observation must not revive it"
-    );
-    let score_before_failure = health
-        .store()
-        .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 103)
-        .unwrap()
-        .score_milli;
-    record_v3_direct_provider_failure_record(
-        &health,
-        &session,
-        &plan.decision.target,
-        &source,
-        104,
-    )
-    .expect("a new failure opens its own observation");
-    crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 105)
-        .await;
-    let projection = health
-        .store()
-        .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 105)
-        .expect("direct health projection");
-    assert_eq!(projection.score_milli, score_before_failure - 5);
-    assert!(
-        !projection.available,
-        "threshold1 applies only after an effective negative observation"
-    );
+    for count in 1..=10 {
+        let record = record_v3_direct_provider_failure_record(
+            &health,
+            &session,
+            &plan.decision.target,
+            &source,
+            104,
+        )
+        .expect("new streak after matching success");
+        assert_eq!(record.failure_count, count);
+        assert_eq!(record.cooldown_until_ms, (count == 10).then_some(3_600_104));
+    }
 }
 
 #[tokio::test]
@@ -739,10 +725,8 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
         weight: Some(1),
     };
 
-    // Threshold1 remains a committed health policy. Pending observation is
-    // separate and may be canceled by matching success before any commitment.
     for (status, code, threshold) in [
-        (400u16, "provider_http_400", 1u32),
+        (400u16, "provider_http_400", 10u32),
         (401, "provider_http_401", 1),
     ] {
         let health = V3ProviderFailureRuntimeHealth::from_manifest_for_isolated_tests(&manifest);
@@ -782,26 +766,27 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
                 100 + u64::from(offset),
             )
             .expect("direct failure must be recorded");
-            assert_eq!(record.state, "pre_cool_observation");
-            assert_eq!(record.cooldown_until_ms, None);
+            let under_threshold = offset + 1 < threshold;
+            assert_eq!(
+                record.cooldown_until_ms,
+                (!under_threshold).then_some(3_600_100 + u64::from(offset))
+            );
             let projection = health
                 .store()
                 .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 300)
                 .expect("direct health projection");
-            assert!(
-                projection.available,
-                "status{status} must not commit cooldown before observation"
+            assert_eq!(
+                projection.available, under_threshold,
+                "wrong cooldown threshold for HTTP {status}"
             );
         }
-        crate::provider_failure_runtime_policy::tests::complete_due_precool_failures(&health, 101)
-            .await;
         assert!(
             !health
                 .store()
                 .scheduling_projection("openai", "key1", "gpt-test", 100, 100, 102)
                 .unwrap()
                 .available,
-            "status{status} commits the original failure after negative observation"
+            "HTTP {status} must cool the exact attempted identity"
         );
         assert!(
             health
@@ -820,9 +805,10 @@ async fn direct_provider_failure_thresholds_cover_400_and_401_classes() {
             )
             .unwrap();
         assert!(
-            health
+            !health
                 .availability("openai", Some("key1"), Some("gpt-test"), 103)
-                .available
+                .available,
+            "a matching in-flight success cannot shorten committed cooldown"
         );
     }
 }

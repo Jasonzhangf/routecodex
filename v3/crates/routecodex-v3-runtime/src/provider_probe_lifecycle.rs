@@ -90,22 +90,31 @@ mod probe_error_chain_tests {
             request_id: "probe-no-head".into(),
             provider_id: "p".into(),
             reason: "connection closed before response head".into(),
-        }).unwrap();
-        assert_eq!(status, None, "a transport classification is not an upstream HTTP status");
+        })
+        .unwrap();
+        assert_eq!(
+            status, None,
+            "a transport classification is not an upstream HTTP status"
+        );
     }
 
     #[test]
     fn probe_unreadable_error_body_retains_real429_head_in_error_chain() {
-        let (status, action) = classify_provider_probe_failure(V3ProviderError::ResponseBodyUnreadable {
-            request_id: "probe-unfinished-429".into(),
-            provider_id: "p".into(),
-            status: 429,
-            headers: Vec::new(),
-            reason: "body disconnected after real429 head".into(),
-        }).unwrap();
+        let (status, action) =
+            classify_provider_probe_failure(V3ProviderError::ResponseBodyUnreadable {
+                request_id: "probe-unfinished-429".into(),
+                provider_id: "p".into(),
+                status: 429,
+                headers: Vec::new(),
+                reason: "body disconnected after real429 head".into(),
+            })
+            .unwrap();
         assert_eq!(status, Some(429));
-        assert_eq!(action.failure_fingerprint.unwrap().http_status, 429,
-            "a real error head cannot be rewritten as transport502 or a non429 recovery");
+        assert_eq!(
+            action.failure_fingerprint.unwrap().http_status,
+            429,
+            "a real error head cannot be rewritten as transport502 or a non429 recovery"
+        );
     }
 }
 
@@ -140,7 +149,7 @@ fn complete_v3_provider_health_probe(
                     return Ok(V3ProbeCompletion::Recovered);
                 }
             }
-            // A real2xx can still be inside the committed quota minimum or
+            // A real 2xx can still be inside the committed cooldown minimum or
             // superseded by a newer failure. It must not reopen admission.
             Ok(V3ProbeCompletion::Superseded)
         }
@@ -149,20 +158,7 @@ fn complete_v3_provider_health_probe(
         }
         Err(error) => {
             if let V3ProviderHealthProbeFailure::Provider(error) = error {
-                let (status, action) = classify_provider_probe_failure(error)?;
-                if let Some(status) = status {
-                    let disposition = cancellation
-                        .store
-                        .record_provider_rate_limit_probe_status_with_permit(
-                            &cancellation.permit,
-                            status,
-                            &action,
-                            now_ms,
-                        )?;
-                    if disposition == routecodex_v3_provider_responses::V3ProviderRateLimitProbeDisposition::Superseded {
-                        return Ok(V3ProbeCompletion::Superseded);
-                    }
-                }
+                classify_provider_probe_failure(error)?;
                 cancellation
                     .store
                     .complete_provider_cooldown_probe_failure_with_permit(

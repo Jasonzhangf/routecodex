@@ -2493,7 +2493,8 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
     std::env::set_var("V3_OPENAI_CHAT_SECONDARY_KEY", "secondary-test-key");
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
-    let seed_now_ms = probe_now_ms();
+    let cooldown_ms = routecodex_v3_error::V3_PROVIDER_HEALTH_COOLDOWN_MS;
+    let seed_now_ms = probe_now_ms().saturating_sub(cooldown_ms);
     provider_health
         .store()
         .record_provider_cooldown_failure(
@@ -2502,7 +2503,7 @@ async fn openai_chat_provider_pool_exhaustion_is_request_local_after_failed_resc
             Some("chat-wire-model"),
             "controlled network outage",
             seed_now_ms,
-            900_000,
+            cooldown_ms,
         )
         .expect("test provider must enter cooldown");
     let seeded = provider_health.store().availability(
@@ -2798,6 +2799,8 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
     std::env::set_var("ROUTECODEX_V3_POOL_PROBE_TEST_KEY", "routecodex-test-key");
     let provider_health =
         V3ResponsesRelayProviderHealthHandle::from_manifest_without_persistence(&manifest);
+    let cooldown_ms = routecodex_v3_error::V3_PROVIDER_HEALTH_COOLDOWN_MS;
+    let seed_now_ms = probe_now_ms().saturating_sub(cooldown_ms);
     provider_health
         .store()
         .record_provider_cooldown_failure(
@@ -2805,8 +2808,8 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
             Some(scope),
             Some("chat-wire-model"),
             "controlled network outage",
-            u64::MAX / 2,
-            900_000,
+            seed_now_ms,
+            cooldown_ms,
         )
         .expect("test provider must enter cooldown");
     let probe_server = tokio::spawn(async move {
@@ -2827,7 +2830,7 @@ async fn openai_chat_provider_probe_success_reselects_and_connects_provider() {
     provider_health
         .runtime_health()
         .run_due_provider_health_probes(
-            u64::MAX,
+            probe_now_ms(),
             false,
             |provider_id, interface_id, auth_alias, model_id| {
                 let manifest = manifest.clone();

@@ -272,6 +272,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                 })?
             }
         };
+        failed_candidates.extend(
+            request_execution_control
+                .take_refill_excluded_candidates()
+                .map_err(|error| {
+                    V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                })?,
+        );
         let allowed_execution_modes = handle_error_before_resp03!(
             allowed_execution_modes_for_relay_server(manifest, &input.server_id,)
         );
@@ -1088,6 +1095,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         attempt_budget.clone(),
                     )?;
                     commit_route_policy_if_present!();
+                    if disposition == V3ChatProcessRefillDisposition::RequestRefill {
+                        request_execution_control
+                            .store_refill_excluded_candidates(failed_candidates)
+                            .map_err(|error| {
+                                V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                            })?;
+                    }
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,
                         terminal_disposition: None,
@@ -1361,6 +1375,13 @@ pub(crate) fn execute_v3_responses_relay_runtime_inner_with_refill<
                         attempt_budget.clone(),
                     )?;
                     commit_route_policy_if_present!();
+                    if disposition == V3ChatProcessRefillDisposition::RequestRefill {
+                        request_execution_control
+                            .store_refill_excluded_candidates(failed_candidates)
+                            .map_err(|error| {
+                                V3ResponsesRelayRuntimeError::ExecutionControl(error.to_string())
+                            })?;
+                    }
                     return Ok(V3ResponsesRelayRuntimeOutput {
                         status: 200,
                         terminal_disposition: None,

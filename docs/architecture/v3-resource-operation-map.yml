@@ -1365,10 +1365,10 @@ resources:
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
       score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
-      zero_cooldown_trigger: a globally scored identity reaching score 0 enters cooldown for the exact providerId+interfaceId+authAlias+modelId
+      score_effect: score remains diagnostic; consecutive typed failures determine automatic cooldown
       cross_session_same_model: shared
       cross_model_same_key: isolated
-      revival_rule: matching-model HTTP 2xx probe success restores score 100 and removes cooldown; business success also clears matching-model 429-owned cooldown
+      revival_rule: matching business success resets the consecutive count; a matching HTTP 2xx probe at or after expiry restores routing
     allowed_writers: [V3ProviderHealthStore::record_provider_failure_action, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::complete_probe_success, V3ProviderHealthStore::complete_probe_failure]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
@@ -1387,19 +1387,18 @@ resources:
     semantic_contract:
       score_baseline: every configured or unseen identity starts at score 100
       score_contract: clamp(score + delta, 0, 150) with no hidden credit above the cap
-      zero_cooldown_trigger: a globally scored identity reaching score 0 enters cooldown for the exact providerId+interfaceId+authAlias+modelId
+      score_effect: the diagnostic score cannot create an automatic cooldown
       deltas: { normal_http: 1, recoverable_including_502: -5, account_401_403: -20 }
-      cooldown_condition: Early HTTP429 is exact-identity capacity backpressure; a new real429 across the two-minute episode commits a30-minute minimum and a new429 across one hour requires a current matching non429 HTTP probe; other typed failures retain declared thresholds and observations
-      revival_rule: only a successful provider transport probe may remove cooldown state
-      exhaustion_rescue_rule: the complete candidate set may force one single-flight probe per continuous cooldown block; only a successful probe resets that generation
-      exhaustion_disposition: after rescue, wait with increasing backoff for due recovery inside the declared acquisition budget; perform a final health and eligibility check before internal exhaustion
+      cooldown_condition: genuine non-final recoverable failures count to ten for the exact identity; confirmed unrecoverable failures commit the cooldown immediately
+      revival_rule: after one hour, a matching HTTP 2xx recovery probe may remove cooldown state
+      exhaustion_disposition: the request immediately tries the eligible declared successor or reaches typed exhaustion; background recovery retains its independent owner
       healthy_rescue_initiation: aggregate recovery owns eligible guarded probes independently; healthy later-tier commitment never depends on probe initiation or completion
       aggregate_probe_lifetime: one aggregate supervisor retains a recovery owner per listener; each polls its own due and transferred probes; shutdown and exec cancel and join every owner, aggregate drop aborts all; cancellation releases matching ownership without recording a provider failure
-      generation_state: rescueProbeAttempted remains attached to the providerId+authAlias+modelId cooldown block until an HTTP 2xx probe or matching 429-owned business success removes the block
+      generation_state: recovery ownership follows the exact identity until a qualifying current HTTP 2xx probe removes the block
       in_flight_rule: if another request owns a cooldown probe, this request skips the cooled candidate and continues to the selected later tier without waiting
       acquisition_ownership: active_probe is an optional opaque store-lifetime acquisition identity carried by the existing permit; only its matching owner may release it, independently of health generation
       stale_outcome: matching stale success or failure releases only that acquisition; cancellation preserves health, stored backoff and deadline, failure counters and rescue state; late A never releases replacement B
-      persistence_ownership: acquisition identity and allocator are process-local only; durable cooldown schema is unchanged and load starts without an active owner
+      persistence_ownership: load restores stored identity health and cooldown without an active probe acquisition
       scheduled_progress: a Runtime-local complete-identity cursor rotates due snapshots after the last considered identity; capacity-neutral early rejection cannot starve an independent later identity and four aggregate manager slots remain the bound
       reversible_owner: Server retains probe task and maintenance custody through join; failed, cancelled or dropped exec preparation registers a due-only Runtime owner before reopening business admission, while terminal disposal suppresses restoration
       dry_run_rule: dry-run never acquires or sends a rescue probe
@@ -1416,8 +1415,8 @@ resources:
     owner_node: V3ProviderHealthStore
     listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
-    semantic_contract: The existing health owner retains the real429 episode, minimum recovery time and required-probe disposition. Only qualified current physical probe observations can release a required-probe disposition; HTTP failures still follow typed Error policy and never become healthy observations.
-    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface, V3ProviderHealthStore::record_provider_rate_limit_probe_status_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
+    semantic_contract: The existing health owner retains a consecutive error count and one-hour minimum for the complete identity. A matching HTTP 2xx probe at or after expiry can restore routing. A failed probe advances its cadence.
+    allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::record_provider_failure_action_for_interface, V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
     may_enter_provider_body: false
@@ -1435,9 +1434,9 @@ resources:
       cross_session: shared
       cross_model_same_key: isolated
       sibling_keys: isolated
-      cooldown_condition: Early HTTP429 is exact-identity backpressure; a new429 spanning two minutes without matching success commits30minute minimum, and a onehour unresolved episode requires a current non429 probe. Other typed failures retain declared thresholds and precool observation.
-      cooldown_deadline: provider-owned adaptive ladder 5s -> 10s -> 30s -> 60s -> 120s -> 900s -> 1800s
-      revival_rule: Exact HTTP2xx probe recovery obeys any429minimum and probe-required disposition; non429 HTTPprobe failure releases only429-specific restriction and retains its own typed failure. Early matching business success resets the unlocked429episode; it cannot bypass a committed minimum or requiredprobe. Zen probes use selected private profile.
+      cooldown_condition: ten consecutive real recoverable failures or one confirmed unrecoverable failure on a non-final Provider attempt
+      cooldown_deadline: one hour from the committing health observation
+      revival_rule: matching business success resets the count; after expiry, matching HTTP 2xx probe recovery restores routing using the selected private profile when required
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
@@ -1454,7 +1453,7 @@ resources:
     owner_node: V3ProviderGlobalCooldownPersistence
     listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
-    semantic_contract: The existing file and single persistence writer retain429 first/last observations, minimum cooldown and required-probe disposition. Restart restores no active acquisition and cannot turn an expired minimum into routing success.
+    semantic_contract: The listener health file retains consecutive failures and the committed cooldown minimum. Restart restores no active acquisition. Recovery remains required after expiry.
     allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::reset_probe_schedule_for_startup, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::replace_entries_and_rate_limit_episodes]
     allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
