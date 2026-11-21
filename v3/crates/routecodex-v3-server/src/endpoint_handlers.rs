@@ -896,14 +896,6 @@ pub(crate) async fn pending_endpoint_after_json_parse_inner(
                 ) {
                     return response;
                 }
-                let console_context = build_v3_console_emission_context(
-                    &state,
-                    &entry_protocol,
-                    &path,
-                    &request_identity,
-                    &request_headers,
-                    &console_payload,
-                );
                 let client_response_capture = V3LiveSnapFinalSseResponseCapture::from_direct_frame(
                     &state,
                     &entry_protocol,
