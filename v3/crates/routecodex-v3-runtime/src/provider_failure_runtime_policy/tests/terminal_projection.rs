@@ -2,7 +2,7 @@ use super::*;
 use routecodex_v3_config::{compile_v3_config_05_manifest, parse_v3_config_02_authoring};
 
 #[tokio::test]
-async fn transient_terminal_projection_releases_action_admission() {
+async fn normal_last_candidate_complete_http_error_is_the_constrained_terminal() {
     let scope = "transient_terminal_projection";
     let manifest = target_resolution_manifest(scope);
     let health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);
