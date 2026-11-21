@@ -275,7 +275,7 @@ fn scenario(input: &str, model: &str) -> Vec<String> {
         // the declared-tool probe extension must hold it until the owner
         // harvests the whole alternate invocation at the terminal.
         "tool-alternate-opener-markup" => {
-            let call = "Done.\n<|exec_command\">\n<cmd>printf 42</cmd>\n</exec_command>";
+            let call = "Done.\n<|exec_command\">\n<cmd>printf 502</cmd>\n</exec_command>";
             vec![
                 delta(0, 0, call),
                 text_done(0, 0, call),
@@ -617,15 +617,67 @@ fn projected_delta_text(wire: &[u8]) -> String {
     text
 }
 
-fn assert_no_client_error(text: &str) {
+fn contains_client_error(wire: &[u8]) -> bool {
+    if wire.is_empty() {
+        return false;
+    }
+    let status_line = wire.split(|byte| *byte == b'\n').next().unwrap();
+    let status = std::str::from_utf8(status_line)
+        .expect("HTTP status line")
+        .split_ascii_whitespace()
+        .nth(1)
+        .expect("HTTP status code")
+        .parse::<u16>()
+        .expect("numeric HTTP status code");
+    if !(200..300).contains(&status) {
+        return true;
+    }
+    let body = decoded_chunked_body(wire);
+    body.lines().any(|line| {
+        matches!(
+            line.strip_prefix("event:").map(str::trim),
+            Some("error" | "response.failed")
+        )
+    }) || response_sse_events(&body).iter().any(|event| {
+        matches!(event["type"].as_str(), Some("error" | "response.failed"))
+            || !event["error"].is_null()
+            || event["response"]["status"] == "failed"
+            || !event["response"]["error"].is_null()
+    })
+}
+
+fn assert_no_client_error(wire: &[u8]) {
     assert!(
-        !text.contains("\"error\"")
-            && !text.contains("network_error")
-            && !text.contains("598")
-            && !text.contains("599")
-            && !text.contains("502"),
-        "client received a provider/proxy error payload: {text}"
+        !contains_client_error(wire),
+        "client received a provider/proxy error: {}",
+        wire_text(wire)
     );
+}
+
+#[test]
+fn client_error_check_uses_http_status_and_sse_protocol_fields() {
+    let chunked = |body: &str| {
+        format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{:X}\r\n{body}\r\n0\r\n\r\n",
+            body.len()
+        )
+    };
+    assert!(contains_client_error(b"HTTP/1.1 502 Bad Gateway\r\n\r\n"));
+    for body in [
+        "event: error\ndata: malformed\n\n",
+        "data: {\"type\":\"error\",\"code\":\"network_error\"}\n\n",
+        "data: {\"error\":{\"code\":502}}\n\n",
+        "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n",
+        "data: {\"response\":{\"error\":{\"code\":599}}}\n\n",
+    ] {
+        assert!(contains_client_error(chunked(body).as_bytes()), "{body}");
+    }
+    let content_filter = concat!(
+        "event: response.incomplete\n",
+        "data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"response_598\",",
+        "\"status\":\"incomplete\",\"error\":null,\"incomplete_details\":{\"reason\":\"content_filter\"}}}\n\n"
+    );
+    assert!(!contains_client_error(chunked(content_filter).as_bytes()));
 }
 
 #[tokio::test]
@@ -660,7 +712,7 @@ async fn thinking_governance_projects_complete_reasoning_before_completion() {
             && text.contains("\"delta\":\"secret\""),
         "the governed thinking content must remain a reasoning item: {text}"
     );
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     assert!(
         ended.is_ok()
             || ended
@@ -686,7 +738,7 @@ async fn split_orphan_failure_does_not_leak_label_or_completion() {
         !text.ends_with("0\r\n\r\n"),
         "normal chunked completion leaked: {text}"
     );
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     entry.stop().await;
 }
 
@@ -720,7 +772,7 @@ async fn split_orphan_before_commit_recovers_without_leaking() {
         !text.contains("<thinking>") && !text.contains("</thinking>") && !text.contains("secret"),
         "the governed marker body must never reach the client: {text}"
     );
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     entry.stop().await;
 }
 
@@ -736,7 +788,7 @@ async fn bare_residue_newline_is_removed_before_projection() {
     assert!(text.contains("response.completed"), "{text}");
     assert!(!text.contains("DSML"), "{text}");
     assert_eq!(completed_output_texts(&wire), vec!["hello\n"]);
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     entry.stop().await;
 }
 
@@ -762,7 +814,7 @@ async fn snapshot_carrier_collision_keeps_split_marker_private_until_complete() 
         completed_output_texts(&wire),
         vec!["safe-prefix  tail".to_string(), "ordinary".to_string()]
     );
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     assert!(
         ended.is_ok()
             || ended
@@ -816,7 +868,7 @@ async fn snapshot_carrier_collision_keeps_bare_residue_private_until_complete() 
     let output = terminal["response"]["output"].as_array().unwrap();
     assert_eq!(output[0]["content"][0]["text"], "hello\n", "{terminal}");
     assert_eq!(output[1]["content"][0]["text"], "ordinary", "{terminal}");
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     assert!(ended.is_ok(), "unexpected transport ending: {ended:?}");
     entry.stop().await;
 }
@@ -839,7 +891,7 @@ async fn clean_probe_terminal_acceptance_failure_never_projects_completion() {
         !text.ends_with("0\r\n\r\n"),
         "normal chunked completion leaked: {text}"
     );
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     assert!(
         ended.is_ok()
             || ended
@@ -872,7 +924,7 @@ async fn interleaved_carriers_project_complete_governed_result_without_leaking()
         completed_output_texts(&wire),
         vec!["safe-prefix  tail".to_string(), "other".to_string()]
     );
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     assert!(
         ended.is_ok()
             || ended
@@ -910,7 +962,7 @@ async fn declared_tool_request_projects_complete_output_after_terminal() {
 
     assert!(text.contains("early-progressive-text"), "{text}");
     assert!(text.contains("response.completed"), "{text}");
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     entry.stop().await;
 }
 
@@ -950,7 +1002,7 @@ async fn declared_tool_text_markup_is_held_then_harvested_without_leak() {
             "harvested markup residue {residue:?} leaked to the client: {text}"
         );
     }
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     entry.stop().await;
 }
 
@@ -994,8 +1046,18 @@ async fn declared_tool_alternate_opener_is_held_then_harvested_without_leak() {
             "harvested alternate residue {residue:?} leaked to the client: {text}"
         );
     }
-    assert_no_client_error(&text);
     entry.stop().await;
+    let events = response_sse_events(&decoded_chunked_body(&wire));
+    let arguments = events
+        .iter()
+        .find(|event| event["type"] == "response.function_call_arguments.done")
+        .and_then(|event| event["arguments"].as_str())
+        .expect("complete tool call arguments");
+    assert_eq!(
+        serde_json::from_str::<Value>(arguments).unwrap(),
+        json!({"cmd": "printf 502"})
+    );
+    assert_no_client_error(&wire);
 }
 
 #[tokio::test]
@@ -1040,7 +1102,7 @@ async fn declared_tool_one_line_fullwidth_markup_is_held_then_harvested_without_
             "harvested fullwidth residue {residue:?} leaked to the client: {text}"
         );
     }
-    assert_no_client_error(&text);
+    assert_no_client_error(&wire);
     entry.stop().await;
 }
 
