@@ -1126,12 +1126,9 @@ async fn refill_direct_sse_keeps_item_identity_public() {
     std::env::remove_var(KEY_ENV);
 }
 
-/// db1f482 last-candidate regression at the real public HTTP entry: a
-/// completely received upstream HTTP 502 with an HTML error body is an
-/// ordinary provider error, not a typed transport failure. It must terminate
-/// the request transport without creating provider health cooldown.
 #[tokio::test]
-async fn db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral() {
+async fn complete_final_provider_http_502_preserves_status_and_body() {
+    const ERROR_BODY: &str = "<html><body>upstream gateway failure</body></html>";
     let _guard = TEST_LOCK.lock().await;
     std::env::set_var(KEY_ENV, "controlled-secret");
     let (endpoint, handle, mut captures, _headers, shutdown) = start_entry_configured(
@@ -1139,10 +1136,10 @@ async fn db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral(
         "relay",
         StatusCode::BAD_GATEWAY,
         "text/html",
-        "<html><body>upstream gateway failure</body></html>".to_string(),
+        ERROR_BODY.to_string(),
         EntryOptions {
             health_enabled: true,
-            attempt_statuses: vec![StatusCode::BAD_GATEWAY],
+            attempt_bodies: vec![ERROR_BODY.to_string()],
             ..EntryOptions::default()
         },
     )
@@ -1160,15 +1157,13 @@ async fn db1f482_complete_upstream_http_502_keeps_last_candidate_health_neutral(
             .await,
     )
     .await;
-    assert_no_error_payload(&consumed.body);
-    assert!(
-        consumed.transport_error.is_some(),
-        "a complete upstream HTTP error must terminate only the request transport: {consumed:?}"
+    assert_eq!(
+        consumed.status,
+        Some(StatusCode::BAD_GATEWAY),
+        "{consumed:?}"
     );
-    assert!(
-        !consumed.body.contains("response.completed"),
-        "no fabricated business completion is allowed: {consumed:?}"
-    );
+    assert!(consumed.transport_error.is_none(), "{consumed:?}");
+    assert_eq!(consumed.body, ERROR_BODY);
     let health: Value = client()
         .get(format!("{base}/_routecodex/health/cooldown-pool"))
         .send()
