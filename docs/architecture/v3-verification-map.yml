@@ -1470,6 +1470,7 @@ features:
   - Server model endpoints emit internal Debug/Error evidence and return complete success, a qualified final Provider error or a typed incomplete transport outcome.
   - Debug status/logs/snapshots endpoints expose shared runtime state without secrets
   - Debug dry-run endpoint reports stopped_before_provider_send and no_network_send
+  - issue1f60200 exercises public Responses provider-request dry-run through Direct and Relay. Both paths capture redacted client identity headers, exclude Connection-specified headers and credentials, and make zero Provider sends. The live counterpart proves the actual headers. The Server orchestration test exercises the typed Relay-to-Direct handoff and proves the same redacted identity projection with zero sends.
   - Debug response dry-run replays captured provider-response SSE through RespInbound and Resp03, exposes the client projection as a diagnostic artifact, and strips reason only when a valid toolreason was harvested
   - Debug response dry-run dispatches /v1/responses to Direct and /v1/messages to Anthropic Relay without adding response semantics to the Server handler
   - Provider health scoped action tests prove cross-provider/key/model isolation
@@ -1482,6 +1483,8 @@ features:
   - npm run test:v3-provider-health-contract
   - npm run test:v3-foundation-runtime-contract
   - npm run test:v3-server-debug-error-blackbox
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --test issue639a73f_client_identity_headers_public -- --test-threads=1
+  - node v3/scripts/run-v3-cargo-test.mjs --locked -p routecodex-v3-server --lib issue1f60200_relay_dry_run_handoff_preserves_client_identity
   - npm run verify:v3-architecture-docs
   - npm run verify:v3-module-boundaries
   - npm run verify:v3-resource-map
