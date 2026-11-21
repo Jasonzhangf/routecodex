@@ -229,9 +229,17 @@ fn extract_chat_signals(entries: &[ChatTurnEntry]) -> V3CurrentTurnSignals {
         has_current_turn_tool_execution_error,
         is_compaction: false,
         has_current_turn_web_search,
+        // 当前轮图片只计算 user 角色的图片附件；tool 函数输出携带的图片
+        // 不能把本轮变成多模态路由。
         has_current_turn_image: entries[current_user_start..]
             .iter()
-            .any(|entry| entry.parts.iter().any(|part| part.has_image)),
+            .filter(|entry| matches!(entry.role, ChatTurnRole::User))
+            .any(|entry| {
+                entry.parts.iter().any(|part| {
+                    part.has_image
+                        && !matches!(part.kind, TurnPartKind::ToolCall | TurnPartKind::ToolOutput)
+                })
+            }),
         last_assistant_tool,
         current_turn_tool_categories,
     }
@@ -319,8 +327,17 @@ fn extract_responses_signals(entries: &[ResponsesTurnEntry]) -> V3CurrentTurnSig
         has_current_turn_tool_execution_error,
         is_compaction,
         has_current_turn_web_search,
+        // 当前轮图片只计算 user 角色的图片附件；function_call_output /
+        // tool_result / tool_output 类型的图片载体不属于 user 图片附件。
         has_current_turn_image: entries[current_turn_start..]
             .iter()
+            .filter(|entry| {
+                matches!(entry.role, ResponsesTurnRole::User)
+                    && !matches!(
+                        entry.kind,
+                        ResponsesTurnKind::ToolCall | ResponsesTurnKind::ToolOutput
+                    )
+            })
             .any(|entry| entry.has_image),
         last_assistant_tool,
         current_turn_tool_categories,
@@ -345,7 +362,15 @@ fn extract_gemini_signals(entries: &[GeminiTurnEntry]) -> V3CurrentTurnSignals {
     let mut current_turn_tool_categories = Vec::new();
     for entry in entries.iter().skip(current_turn_start) {
         for part in &entry.parts {
-            has_current_turn_image |= part.has_image;
+            // Gemini tool continuation is carried in the user envelope. Count
+            // only non-tool parts, so an inline user image still counts while
+            // functionResponse/tool images do not.
+            if matches!(entry.role, GeminiTurnRole::User | GeminiTurnRole::Tool)
+                && !matches!(part.kind, TurnPartKind::ToolCall | TurnPartKind::ToolOutput)
+                && part.has_image
+            {
+                has_current_turn_image = true;
+            }
             if part.has_web_search {
                 has_current_turn_web_search = true;
             }
