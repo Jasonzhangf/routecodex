@@ -7,6 +7,73 @@
 <link rel="stylesheet" href="/vendor/ambient.css">
 <link rel="stylesheet" href="/styles.css">
 <style>
+  .usage-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+  }
+  .usage-nav button[aria-pressed="true"] {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .usage-toolbar {
+    display: flex;
+    align-items: end;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-bottom: 12px;
+  }
+  .usage-toolbar label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .usage-toolbar input, .usage-toolbar select { min-height: 34px; }
+  .usage-toolbar input { width: min(190px, 100%); }
+  .usage-toolbar input[type="text"], .usage-toolbar input[type="date"], .usage-toolbar input[type="datetime-local"] {
+    background: var(--surface-sunken);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    color: var(--label);
+    font: inherit;
+    padding: 7px 10px;
+  }
+  .usage-toolbar .filter-search { flex: 1 1 200px; margin: 0; }
+  .usage-toolbar .filter-search input { width: 100%; }
+  #usage-request-filters { display: contents; }
+  #usage-request-filters[hidden], .selection-summary[hidden] { display: none; }
+  .usage-calendar > summary { cursor: pointer; padding: 7px 0; font-size: 13px; color: var(--label); }
+  .usage-calendar-fields { display: flex; align-items: end; flex-wrap: wrap; gap: 8px 14px; }
+  .usage-calendar[open], #time-hint { order: 2; flex-basis: 100%; }
+  #time-hint { margin: 0; font-size: 12px; }
+  @media (max-width: 680px) {
+    #usage-header .page-header-inner { flex-direction: row; align-items: center; }
+    #usage-header .sub { display: none; }
+    .usage-toolbar .filter-search { order: 1; flex-basis: 100%; }
+    .usage-workspace .controls-row .spacer { display: none; }
+  }
+  .usage-filters > summary {
+    cursor: pointer;
+    color: var(--label);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .usage-filters[open] > summary { margin-bottom: 14px; }
+  .usage-notice { margin: 0 0 10px; min-width: 0; }
+  .usage-notice .btn { margin-left: 10px; }
+  .usage-notice:empty { display: none; }
+  .usage-workspace .pagination { flex-wrap: wrap; margin: 10px 0 0; }
+  .usage-workspace [hidden], .usage-toolbar[hidden] { display: none; }
+  .usage-workspace .requests-grid > * { min-width: 0; }
+  .usage-workspace .requests-grid .section { margin-top: 0; }
+  .usage-workspace .controls-row { flex-wrap: wrap; }
+  .usage-workspace tr[tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  #cooldown-panel { overflow-x: auto; }
   /* Page-scoped: live-mode toggle, row copy, cooldown panel, error-detail modal. */
   .live-toggle {
     display: inline-flex;
@@ -20,7 +87,6 @@
   .live-state.on { color: var(--accent); }
   .live-state.err { color: var(--danger); }
   .row-copy { padding: 1px 6px; font-size: 11px; }
-  .adv-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
   /* Errors table: one row per (status, origin). All three columns are narrow
      and the origin badge is text-first, so a row must stay on one line at 390px. */
   #errors-table { width: 100%; }
@@ -235,15 +301,14 @@
 <body class="ambient">
 <aside id="sidebar" class="sidebar" aria-label="Primary"></aside>
 <div class="shell">
-  <header class="page-header">
+  <header class="page-header" id="usage-header">
     <div class="page-header-inner">
       <div class="page-heading">
-        <p class="eyebrow">Monitor</p>
         <h1 id="page-title">Requests</h1>
-        <p id="page-sub" class="sub">Persistent request records — grouped by port, then by status code</p>
+        <p id="page-sub" class="sub">Inspect requests, provider usage and cooldowns</p>
       </div>
       <div class="page-actions">
-        <button class="btn primary" id="reload-btn" type="button">Reload</button>
+        <button class="btn" id="usage-refresh" type="button">Refresh</button>
       </div>
     </div>
   </header>
@@ -251,14 +316,36 @@
   <main>
     <div id="status-bar" class="status-bar" role="status" aria-live="polite" style="display:none"></div>
 
-    <div class="section">
-      <h2>Statistics</h2>
+    <nav class="usage-nav" aria-label="Usage views" id="usage-nav">
+      <button class="btn" id="usage-nav-requests" type="button" data-usage-view="requests" aria-controls="usage-requests" aria-pressed="true">Requests</button>
+      <button class="btn" id="usage-nav-statistics" type="button" data-usage-view="statistics" aria-controls="usage-statistics" aria-pressed="false">Statistics</button>
+      <button class="btn" id="usage-nav-cooldown" type="button" data-usage-view="cooldown" aria-controls="usage-cooldown" aria-pressed="false">Cooldown</button>
+    </nav>
+    <div class="usage-toolbar" id="usage-period">
+      <label>Period<select id="calendar-period"><option value="day">Today</option><option value="week">This week</option><option value="month">This month</option><option value="all">All retained</option><option value="custom">Custom</option></select></label>
+      <div id="usage-request-filters">
+        <label>Port<select id="port-filter"><option value="all">All ports</option></select></label>
+        <label class="filter-search">Search<input id="search-filter" type="search" placeholder="Request, model or error" autocomplete="off"></label>
+      </div>
+      <details class="usage-calendar" id="usage-calendar">
+        <summary>Calendar settings</summary>
+        <div class="usage-calendar-fields">
+          <label>Time zone<input id="timezone" type="text" value="" autocomplete="off" spellcheck="false" aria-label="IANA time zone"></label>
+          <label id="calendar-anchor-label">Calendar date<input id="calendar-anchor" type="date" aria-label="Calendar anchor date"></label>
+          <label>From<input id="time-from" type="datetime-local" aria-label="Absolute range start"></label>
+          <label>To<input id="time-to" type="datetime-local" aria-label="Absolute range end"></label>
+          <button class="btn" id="time-clear" type="button">Clear absolute dates</button>
+        </div>
+      </details>
+      <p class="muted" id="time-hint" hidden></p>
+    </div>
+
+    <section class="usage-workspace" id="usage-statistics" aria-labelledby="usage-nav-statistics" hidden>
+      <div class="usage-notice" id="statistics-notice" role="status"></div>
+      <div id="statistics-content" hidden>
       <div class="cards" id="summary-cards"></div>
       <div class="chart-controls">
-        <label>Period<select id="calendar-period"><option value="day">Today</option><option value="week">This week</option><option value="month">This month</option><option value="all">All retained</option><option value="custom">Custom</option></select></label>
-        <label>Time zone<input id="timezone" type="text" value="" autocomplete="off" spellcheck="false" aria-label="IANA time zone"></label>
         <label>Grain<select id="chart-grain"><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select></label>
-        <label id="calendar-anchor-label">Anchor<input id="calendar-anchor" type="date" aria-label="Calendar anchor date"></label>
         <label>Metric<select id="chart-metric"><option value="count">Requests</option><option value="total_tokens">Total tokens</option><option value="input_tokens">Input tokens</option><option value="output_tokens">Output tokens</option><option value="cached_tokens">Cached tokens</option><option value="cache_hit_rate_percent">Cache hit rate</option></select></label>
       </div>
       <div class="layout">
@@ -275,7 +362,7 @@
         <div class="provider-usage-head">
           <div>
             <h3>Provider usage</h3>
-            <p id="provider-usage-coverage" class="help">Loading retained-record coverage…</p>
+            <p id="provider-usage-coverage" class="help"></p>
           </div>
           <button class="filter-clear" id="provider-usage-clear" type="button">Clear provider</button>
         </div>
@@ -286,13 +373,13 @@
           </table>
         </div>
       </div>
-    </div>
+      </div>
+    </section>
 
-    <div class="section">
-      <h2>Provider cooldown</h2>
-      <p class="help">Current provider health/cooldown, read from <span class="mono">GET /api/observability/cooldown-pool</span>. This is the only source of current cooldown truth; per-request <span class="mono">health_action</span> fields are immutable attempt-time history.</p>
+    <section class="usage-workspace" id="usage-cooldown" aria-labelledby="usage-nav-cooldown" hidden>
       <div class="panel amb-surface amb-elevation-1" id="cooldown-panel">
-        <div id="cooldown-panel-head"><div class="loading">loading…</div></div>
+        <div id="cooldown-panel-head"></div>
+        <div class="usage-notice" id="cooldown-notice" role="status"></div>
         <div id="cooldown-panel-body"></div>
         <form class="cooldown-add" id="cooldown-add-form" hidden novalidate>
           <label>
@@ -343,23 +430,16 @@
           <div class="cooldown-add-actions">
             <button class="btn primary" id="cooldown-add-submit" type="submit">Add cooldown</button>
             <button class="btn" id="cooldown-add-cancel" type="button">Cancel</button>
-            <span class="muted tiny">kind <span class="mono">session</span> is not offered: it needs a session identity no operator input can supply.</span>
           </div>
         </form>
       </div>
-    </div>
+    </section>
 
-    <!-- Layer 1: the select fallback and tab bar share one port filter. -->
-    <div class="selection-summary" id="port-filter-row">
-      <label>Port<select id="port-filter"><option value="all">all ports</option></select></label>
-    </div>
-    <div class="selection-summary" id="selection-summary">
-      <span id="selected-port-label">All ports</span>
-      <span id="selected-provider-label">All providers</span>
-      <button class="filter-clear" id="clear-selected-port" type="button">Clear port</button>
+    <section class="usage-workspace" id="usage-requests" aria-labelledby="usage-nav-requests">
+    <div class="selection-summary" id="selection-summary" hidden>
+      <span id="selected-provider-label"></span>
       <button class="filter-clear" id="clear-selected-provider" type="button">Clear provider</button>
     </div>
-    <nav class="port-tab-bar" id="port-tabs" role="tablist" aria-label="Port"></nav>
 
     <div class="controls-row">
       <div class="segmented amb-surface amb-groove" role="group" aria-label="Sort mode" id="sort-mode">
@@ -371,68 +451,56 @@
       </label>
       <span class="live-state" id="live-state">polling</span>
       <span class="spacer"></span>
-      <button class="btn amb-button amb-button-cap" id="export-csv-top" type="button" disabled title="Export every row matching the current filter">Export CSV (filter)</button>
-      <button class="btn amb-button amb-button-cap" id="copy-tsv-top" type="button" disabled title="Copy every row matching the current filter">Copy to clipboard (filter)</button>
+      <button class="btn amb-button amb-button-cap" id="export-csv-top" type="button" disabled title="Export all matching rows">Export CSV</button>
+      <button class="btn amb-button amb-button-cap" id="copy-tsv-top" type="button" disabled title="Copy all matching rows">Copy TSV</button>
     </div>
 
     <div class="requests-grid">
       <aside class="filter-rail amb-surface amb-elevation-1" aria-label="Filters">
-        <div class="filter-search">
-          <input id="search-filter" type="search" placeholder="Search request / model / error…" aria-label="Search" autocomplete="off">
-        </div>
+        <details class="usage-filters" id="usage-filters" open>
+        <summary>Filters</summary>
         <div class="filter-group">
-          <h3><span class="layer">Layer 2</span> Status</h3>
+          <h3>Status</h3>
           <div class="filter-list" id="filter-status"></div>
         </div>
         <div class="filter-group">
-          <h3><span class="layer">Layer 3</span> Provider <button class="filter-clear" type="button" data-clear="providerSel">Clear</button></h3>
+          <h3>Provider <button class="filter-clear" type="button" data-clear="providerSel">Clear</button></h3>
           <div class="filter-list" id="filter-provider"></div>
-        </div>
-        <div class="filter-group">
-          <h3><span class="layer">Layer 4</span> Model <button class="filter-clear" type="button" data-clear="modelSel">Clear</button></h3>
-          <div class="filter-list" id="filter-model"></div>
         </div>
         <details class="adv-filters">
           <summary>More filters & sort</summary>
           <div class="adv-grid">
-            <label>Provider<select id="provider-filter"><option value="all">all providers</option></select></label>
             <label>Model<select id="model-filter"><option value="all">all models</option></select></label>
             <label>Endpoint<select id="endpoint-filter"><option value="all">all endpoints</option></select></label>
             <label>Route<input id="route-filter" type="search" placeholder="route"></label>
             <label>Protocol<select id="protocol-filter"><option value="all">all</option></select></label>
             <label>Mode<select id="mode-filter"><option value="all">all</option><option value="direct">direct</option><option value="relay">relay</option></select></label>
-            <label>From (absolute)<input id="time-from" type="datetime-local" aria-label="Absolute range start"></label>
-            <label>To (absolute)<input id="time-to" type="datetime-local" aria-label="Absolute range end"></label>
-            <div class="adv-actions">
-              <button class="btn" id="time-clear" type="button">Clear absolute range</button>
-              <span class="muted" id="time-hint">An absolute range overrides the Range selector and is sent as time_from_ms / time_to_ms.</span>
-            </div>
             <label>Sort by<select id="sort-field"><option value="started_epoch_ms">Started</option><option value="updated_epoch_ms">Updated</option><option value="finished_epoch_ms">Finished</option><option value="duration_ms">Duration</option><option value="attempts">Attempts</option><option value="failed_attempts">Failures</option><option value="switches">Switches</option><option value="usage_input_tokens">Input tokens</option><option value="usage_output_tokens">Output tokens</option><option value="usage_total_tokens">Total tokens</option><option value="usage_cached_tokens">Cached tokens</option><option value="result">Status</option><option value="scope.port">Port</option><option value="meta.entry_protocol">Protocol</option><option value="meta.endpoint">Endpoint</option><option value="meta.route_reason">Route reason</option><option value="meta.provider">Provider</option><option value="timing_internal_ms">Internal</option><option value="meta.finish_reason">Finish reason</option></select></label>
             <label>Order<select id="sort-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
           </div>
         </details>
+        </details>
       </aside>
 
       <div>
-        <div class="pagination">
-          <button class="btn amb-button amb-button-cap" id="page-prev" type="button">&#8592; Prev</button>
-          <span id="page-info" class="page-info" aria-live="polite">page — of — · — records</span>
-          <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
-          <button class="btn amb-button amb-button-cap" id="page-next" type="button">Next &#8594;</button>
-        </div>
-
         <div class="section">
-          <nav class="requests-tab-bar" id="requests-tab-bar">
-            <button class="tab-btn active" data-tab="entries" type="button">Entries <span class="tab-count" id="tab-count-entries">—</span></button>
-            <button class="tab-btn" data-tab="attempts" type="button">Attempts <span class="tab-count" id="tab-count-attempts">—</span></button>
-            <button class="tab-btn" data-tab="errors" type="button">Errors <span class="tab-count" id="tab-count-errors">—</span></button>
+          <nav class="requests-tab-bar" id="requests-tab-bar" aria-label="Request views">
+            <button class="tab-btn active" data-tab="entries" type="button" aria-pressed="true">Entries <span class="tab-count" id="tab-count-entries" hidden></span></button>
+            <button class="tab-btn" data-tab="attempts" type="button" aria-pressed="false">Attempts <span class="tab-count" id="tab-count-attempts" hidden></span></button>
+            <button class="tab-btn" data-tab="errors" type="button" aria-pressed="false">Errors <span class="tab-count" id="tab-count-errors" hidden></span></button>
           </nav>
           <nav class="entries-sub-tab-bar" id="entries-sub-tab-bar" data-visible="all" hidden>
             <button class="sub-tab-btn active" data-sub-tab="pool" type="button">Pool</button>
             <button class="sub-tab-btn" data-sub-tab="reason" type="button">Reason</button>
           </nav>
-          <div class="panel table-panel amb-surface amb-elevation-1" id="requests-panel"><div class="loading">loading…</div></div>
-          <p class="help">Status-code mode: grouping and exclusion apply to the currently loaded page; within each group, items sort by time descending. The export columns include request_id and error_detail. Row click opens the request detail modal (error chain, health action, live cooldown, artifacts).</p>
+          <div class="usage-notice" id="requests-notice" role="status"></div>
+          <div class="panel table-panel amb-surface amb-elevation-1" id="requests-panel" hidden></div>
+          <div class="pagination" id="requests-pagination" hidden>
+            <button class="btn amb-button amb-button-cap" id="page-prev" type="button">&#8592; Prev</button>
+            <span id="page-info" class="page-info" aria-live="polite"></span>
+            <label>Page size<select id="page-size"><option value="100">100</option><option value="200">200</option><option value="300">300</option></select></label>
+            <button class="btn amb-button amb-button-cap" id="page-next" type="button">Next &#8594;</button>
+          </div>
         </div>
       </div>
     </div>
@@ -444,6 +512,7 @@
       <button class="btn primary" id="export-csv-bar" type="button">Export CSV</button>
       <button class="icon-btn" id="sel-clear" type="button" aria-label="Clear selection">✕</button>
     </div>
+    </section>
   </main>
 </div>
 

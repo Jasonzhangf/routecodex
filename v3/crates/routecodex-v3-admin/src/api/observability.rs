@@ -147,6 +147,7 @@ pub(crate) struct RecordQuery {
     ports: Vec<u16>,
     provider_ids: Vec<String>,
     usage: Option<ProviderUsageQuery>,
+    skip_provider_usage: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -183,6 +184,7 @@ pub(crate) struct RecordsResponse {
     total: u64,
     page: u64,
     page_size: u64,
+    listener_ports: Vec<u16>,
     stats: serde_json::Value,
     facets: BTreeMap<String, serde_json::Value>,
     timeseries: Vec<TimeseriesBucket>,
@@ -291,6 +293,11 @@ impl RecordQuery {
                 }
                 "provider_ids" => {
                     query.provider_ids = parse_json_string_array(value, "provider_ids")?
+                }
+                "include_provider_usage" => {
+                    query.skip_provider_usage = !value
+                        .parse::<bool>()
+                        .map_err(|_| format!("invalid include_provider_usage: {value}"))?;
                 }
                 "model" => query.model = Some(value.to_string()),
                 "endpoint" => query.endpoint = Some(value.to_string()),
@@ -980,8 +987,11 @@ async fn records(
     // The cache lock spans metadata reads, decoding and the fold, so the read
     // runs on the blocking pool instead of stalling a runtime worker.
     let projection_state = state.clone();
+    // Calendar bounds and detail view are still owned by query.usage. Only
+    // the extra facts read and provider aggregation depend on this opt-out.
+    let usage = query.usage.as_ref().filter(|_| !query.skip_provider_usage);
     let source_filters = query.provider_usage_source_filters();
-    let needs_facts = query.usage.is_some() && !source_filters.uses_retained_scope();
+    let needs_facts = usage.is_some() && !source_filters.uses_retained_scope();
     let facts_state = state.clone();
     let selected_ports = source_filters.selected_ports().cloned();
     let projection_task =
@@ -1030,7 +1040,7 @@ async fn records(
         .filter(|row| query.matches(row))
         .cloned()
         .collect();
-    let matching_detail_from_ms = if query.usage.is_some() {
+    let matching_detail_from_ms = if usage.is_some() {
         projection
             .rows
             .iter()
@@ -1040,7 +1050,7 @@ async fn records(
     } else {
         None
     };
-    let usage_rows = filtered.clone();
+    let usage_rows = usage.map(|_| filtered.clone()).unwrap_or_default();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
         .map(|row| super::timeseries::TimeseriesRow {
@@ -1249,6 +1259,11 @@ async fn records(
         );
         facet_add(
             &mut facets,
+            "provider_ids",
+            row.meta.get("provider_id").and_then(Value::as_str),
+        );
+        facet_add(
+            &mut facets,
             "models",
             row.meta.get("model").and_then(Value::as_str),
         );
@@ -1416,7 +1431,7 @@ async fn records(
         .map(|(name, counts)| (name, json!(counts)))
         .collect();
     facets.insert("error_status_origins".to_string(), json!(status_origins));
-    let provider_usage = match query.usage.as_ref() {
+    let provider_usage = match usage {
         Some(usage) => {
             match build_provider_usage(
                 usage,
@@ -1440,6 +1455,7 @@ async fn records(
         total,
         page: query.page,
         page_size: query.page_size,
+        listener_ports: projection.listener_ports,
         stats,
         facets,
         timeseries,

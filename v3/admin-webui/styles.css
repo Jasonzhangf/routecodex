@@ -960,14 +960,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-bg); }
   box-shadow: var(--edge-light);
 }
 
-.port-tab-bar, .requests-tab-bar, .entries-sub-tab-bar {
+.requests-tab-bar, .entries-sub-tab-bar {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin: 12px 0;
 }
 
-.port-tab, .tab-btn, .sub-tab-btn {
+.tab-btn, .sub-tab-btn {
   border: 1px solid transparent;
   background: none;
   color: var(--muted);
@@ -979,9 +979,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-bg); }
   transition: color 120ms var(--ease-state), background-color 120ms var(--ease-state);
 }
 
-.port-tab:hover, .tab-btn:hover, .sub-tab-btn:hover { color: var(--label); }
+.tab-btn:hover, .sub-tab-btn:hover { color: var(--label); }
 
-.port-tab[aria-selected="true"], .tab-btn.active, .sub-tab-btn.active {
+.tab-btn.active, .sub-tab-btn.active {
   color: var(--accent);
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 28%, transparent);

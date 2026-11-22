@@ -1215,6 +1215,28 @@ async fn provider_usage_contract_aggregates_ports_attempts_and_calendar_periods(
         .iter()
         .any(|row| { row["meta"]["attempt_index"] == 4 && row["meta"]["provider_id"] == "p2" }));
 
+    for (view, ports, from, expected) in [
+        ("requests", "%5B4444%2C7777%5D", 0, &body),
+        ("attempts", "%5B7777%5D", 300, &attempts),
+    ] {
+        let (status, details) = get_json(&format!(
+            "{base}/api/observability/records?page=1&page_size=10&ports={ports}&view={view}&calendar_period=custom&timezone=UTC&from={from}&to=600&grain=day&include_provider_usage=false"
+        ))
+        .await;
+        assert_eq!(status, reqwest::StatusCode::OK);
+        assert!(details.get("provider_usage").is_none());
+        assert_eq!(details["listener_ports"], json!([4444, 7777]));
+        assert!(
+            details["facets"]["provider_ids"]["p1"]
+                .as_u64()
+                .unwrap_or(0)
+                > 0
+        );
+        for field in ["records", "total", "stats", "facets", "timeseries"] {
+            assert_eq!(details[field], expected[field], "{view} {field}");
+        }
+    }
+
     // The OR within dimensions and AND across dimensions are both observable.
     let (status, filtered) = get_json(&format!(
         "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%2C7777%5D&provider_ids=%5B%22p2%22%5D&view=all&calendar_period=custom&timezone=UTC&from=0&to=600"
@@ -2298,6 +2320,7 @@ async fn provider_usage_fact_read_does_not_block_legacy_records() {
     let usage_url = format!(
         "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=200"
     );
+    let details_url = format!("{usage_url}&include_provider_usage=false");
     let usage_task = tokio::spawn(async move { get_json(&usage_url).await });
     let writer_path = facts_path.clone();
     let writer_task = tokio::spawn(async move {
@@ -2330,13 +2353,23 @@ async fn provider_usage_fact_read_does_not_block_legacy_records() {
 
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let legacy_url = format!("{base}/api/observability/records?page=1&page_size=10");
-    let (status, legacy) =
-        tokio::time::timeout(std::time::Duration::from_millis(700), get_json(&legacy_url))
-            .await
-            .expect("legacy records must not wait for the blocked provider-usage fact read");
+    let ((status, legacy), (details_status, details)) =
+        tokio::time::timeout(std::time::Duration::from_millis(700), async {
+            tokio::join!(get_json(&legacy_url), get_json(&details_url))
+        })
+        .await
+        .expect("records must not wait for the blocked provider-usage fact read");
     assert_eq!(status, reqwest::StatusCode::OK, "legacy body: {legacy}");
     assert_eq!(legacy["total"], 1);
     assert!(legacy.get("provider_usage").is_none());
+    assert_eq!(
+        details_status,
+        reqwest::StatusCode::OK,
+        "details body: {details}"
+    );
+    assert_eq!(details["records"], legacy["records"]);
+    assert_eq!(details["total"], 1);
+    assert!(details.get("provider_usage").is_none());
 
     writer_task.await.expect("writer task");
     let (status, usage) = usage_task.await.expect("usage request");

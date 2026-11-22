@@ -8006,7 +8006,7 @@ chains:
 
 - chain_id: v3.admin.provider_usage_query
   owner_feature_id: v3.admin_observability_aggregation
-  summary: Admin reads bounded diagnostic facts for exact Provider queries or retained detail for the legacy display filter. The records API and Usage view preserve the selected scope and coverage.
+  summary: Admin reads bounded diagnostic facts for exact Provider queries or retained detail for the legacy display filter. Request and attempt detail queries can skip the optional provider aggregation while using the same calendar and detail projection.
   edges:
   - step_id: v3-admin-provider-usage-bounded-read
     from_node: V3AdminObservabilityAggregation
@@ -8039,7 +8039,7 @@ chains:
   - step_id: v3-admin-provider-usage-render
     from_node: V3AdminProviderUsageQueryResult
     to_node: V3AdminProviderUsageRendered
-    caller_symbol: renderAll
+    caller_symbol: renderStatistics
     caller_file: v3/admin-webui/app/views/usage.js
     callee_symbol: renderProviderUsage
     callee_file: v3/admin-webui/app/views/usage.js

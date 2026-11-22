@@ -295,6 +295,7 @@ pub(crate) fn visit_v3_obs_stores(
 /// separately only for a usage query and only for the ports that query selects.
 pub(super) struct V3ObsProjection {
     pub(super) rows: Arc<Vec<QueryRow>>,
+    pub(super) listener_ports: Vec<u16>,
     /// Highest `updated_epoch_ms` across every cached row.
     pub(super) max_seq: u64,
 }
@@ -344,6 +345,7 @@ pub(super) fn read_v3_obs_projection(
                 .as_ref()
                 .expect("projection is cached by the branch above"),
         ),
+        listener_ports: ports.iter().map(|(port, _)| *port).collect(),
         max_seq,
     })
 }
