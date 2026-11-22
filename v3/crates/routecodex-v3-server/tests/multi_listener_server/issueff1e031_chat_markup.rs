@@ -126,7 +126,33 @@ async fn upstream(
     sse_response(events)
 }
 
-fn sse_response(events: Vec<Value>) -> Response<Body> {
+const RESPONSE_METADATA_EVENTS: [(&str, &str); 2] = [
+    (
+        "response.metadata",
+        "provider_owned_responses_response_metadata",
+    ),
+    (
+        "codex.response.metadata",
+        "provider_owned_codex_response_metadata",
+    ),
+];
+
+fn response_metadata_event(event_type: &str) -> Value {
+    json!({
+        "type": event_type,
+        "response_id": "resp_ff1e031",
+        "sequence_number": 2,
+        "metadata": {"nested": ["value", {"flag": true, "count": 3, "empty": null}]}
+    })
+}
+
+fn sse_response(mut events: Vec<Value>) -> Response<Body> {
+    events.splice(
+        1..1,
+        RESPONSE_METADATA_EVENTS
+            .iter()
+            .map(|(event_type, _)| response_metadata_event(event_type)),
+    );
     let mut wire = String::new();
     for event in events {
         wire.push_str(&format!(
@@ -139,11 +165,20 @@ fn sse_response(events: Vec<Value>) -> Response<Body> {
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "text/event-stream")
-        .body(Body::from(wire))
+        .body(Body::from_stream(futures_util::stream::iter(
+            wire.as_bytes()
+                .chunks(31)
+                .map(|bytes| Ok::<_, std::convert::Infallible>(bytes.to_vec()))
+                .collect::<Vec<_>>(),
+        )))
         .unwrap()
 }
 
-async fn client_message(response: reqwest::Response, sse: bool) -> (Value, String) {
+async fn client_message(
+    response: reqwest::Response,
+    sse: bool,
+    provider_sse: bool,
+) -> (Value, String) {
     assert_eq!(response.status(), StatusCode::OK);
     let raw = response.text().await.unwrap();
     if !sse {
@@ -162,12 +197,20 @@ async fn client_message(response: reqwest::Response, sse: bool) -> (Value, Strin
     let mut id = String::new();
     let mut finish = String::new();
     let mut done = 0;
+    let mut metadata_count = [0; RESPONSE_METADATA_EVENTS.len()];
     for data in raw.lines().filter_map(|line| line.strip_prefix("data: ")) {
         if data == "[DONE]" {
             done += 1;
             continue;
         }
         let event: Value = serde_json::from_str(data).unwrap();
+        for (index, (event_type, field)) in RESPONSE_METADATA_EVENTS.iter().enumerate() {
+            if let Some(extension) = event.get(field) {
+                assert_eq!(event["object"], "chat.completion.chunk");
+                assert_eq!(extension, &response_metadata_event(event_type));
+                metadata_count[index] += 1;
+            }
+        }
         let Some(choice) = event["choices"]
             .as_array()
             .and_then(|choices| choices.first())
@@ -206,6 +249,10 @@ async fn client_message(response: reqwest::Response, sse: bool) -> (Value, Strin
     assert_eq!(
         done, 1,
         "one complete public Chat SSE terminal is required: {raw}"
+    );
+    assert_eq!(
+        metadata_count,
+        [usize::from(provider_sse); RESPONSE_METADATA_EVENTS.len()]
     );
     let calls = if id.is_empty() {
         json!([])
@@ -273,7 +320,7 @@ async fn run_case(
         .send()
         .await
         .unwrap();
-    let (assistant, finish) = client_message(first, client_sse).await;
+    let (assistant, finish) = client_message(first, client_sse, provider_sse).await;
     let first_capture = captures.recv().await.unwrap();
     assert_eq!(first_capture["model"], "wire-test");
     if let Some((expected, _)) = preserve {
@@ -321,7 +368,7 @@ async fn run_case(
         String::from_utf8(output.stdout).unwrap()
     };
     let second = client.post(&endpoint).json(&json!({"model":"client-test","messages":[user,assistant,{"role":"tool","tool_call_id":call["id"],"content":result}],"tools":tools,"stream":client_sse})).send().await.unwrap();
-    let (final_message, final_finish) = client_message(second, client_sse).await;
+    let (final_message, final_finish) = client_message(second, client_sse, provider_sse).await;
     assert_eq!(final_message["content"], DONE);
     assert_eq!(final_finish, "stop");
     captures.recv().await.unwrap();
