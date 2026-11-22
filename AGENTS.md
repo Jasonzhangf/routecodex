@@ -107,12 +107,12 @@ Use `rcc-dev-skills` as the sole V3 development workflow; generic skills supply 
 | task memory | `docs/agent-routing/40-task-memory-routing.md` |
 | AppSDK governance and legacy ablation | installed `~/.agents/skills/appsdk-project-governance/SKILL.md` |
 
-## LayerFS Task Branch & Git Workflow
+## Git Worktree and LayerFS Sync Workflow
 
-RouteCodex 已启用 LayerFS 作为主开发与 Git 同步流程；新任务不再新建 Git worktree，按 LayerFS Skill 执行分支同步、publish、Git 集成与验收。
+RouteCodex issue code work uses an issue-owned Git worktree and branch from the latest `origin/main`. Create a new worktree only when the resulting project total is at most 20. Reuse an existing workline only after an explicit owner handoff and confirmation that it is idle with no undelivered content. A clean state alone is not a separate admission gate.
 
-- 新任务使用 LayerFS task branch 开发，在项目专属 Workspace 内运行；并发任务各有独占 task branch 和唯一 writer。已经同步、空闲且没有未交付内容的工作线可以复用，不为每个后续任务重建。
-- Git main 由 master 管理。Git 同步工作线只负责 Git main 与 LayerFS main 之间的同步（从 Git 获取主线变化，保存 LayerFS commit，并 publish 到 LayerFS main）；task 工作线只负责自身与 LayerFS main 之间的同步。Git main 与 task branch 不直接管理彼此，通过 LayerFS main 交换更新。具体步骤以 `layerfs` Skill 为准。
+- Each issue workline has one writer. New issue worktrees start from the latest `origin/main`; create one only when the resulting total is at most 20. Reuse requires explicit owner handoff and confirmation that the line is idle with no undelivered content.
+- Git main 由 master 管理。Git 同步工作线只负责 Git main 与 LayerFS main 之间的同步（从 Git 获取主线变化，保存 LayerFS commit，并 publish 到 LayerFS main）。具体同步步骤以 `layerfs` Skill 为准。
 - 每次 LayerFS publish 前，在实际待发布候选上运行并通过项目本地 CI。CI 失败时保留原错，修复并重新验证后再 publish；不得 publish 或绕过失败。
 - master 管理独立 Git 元数据与任务提交捕获；多个任务提交可汇合为一个 PR。PR 合并并核对远端后，由 Git 同步工作线更新 LayerFS main。
 - 已有 Git worktree 继续由原 owner 完成原任务和 PR；合并后按规则关闭。不强删、不覆盖、不中断活动、dirty 或尚有未交付内容的工作树；不动他人资源或共享 base。
@@ -136,9 +136,12 @@ contract and terminal conditions; it does not define a second command flow.
 Every execution-bound local defect, including one found in post-restart Codex
 samples, must be deduplicated or recorded in the project bug tracker and carry
 its authoritative issue ID to a solution receipt. Every repeated regression
-requires a regression test in the mapped required gate. Each issue runs on its
-own LayerFS task branch from the latest LayerFS main; do not reproduce or fix
-separate issues in one shared branch, and do not create a new Git worktree.
+requires a regression test in the mapped required gate. Each issue runs in its
+own Git worktree and branch from the latest `origin/main`; create it only when
+the resulting project total is at most 20. Reuse requires explicit owner
+handoff and confirmation that the workline is idle with no undelivered content;
+a clean state alone is not a separate admission gate. Do not reproduce or fix
+separate issues in one shared branch.
 Classify provider sample errors from their typed cause and a probe bound to the same provider,
 interface, auth-key identity, and model. A later probe success is an independent
 attempt, not proof that an earlier payload failure was local. Confirmed local
@@ -158,7 +161,9 @@ merge/push, and the master owns the separate residual-resource inventory.
 Each issue run has one entry and one disposition exit:
 
 ```text
-bug intake/dedup -> issue-owned LayerFS task branch from latest LayerFS main
+bug intake/dedup -> issue-owned Git worktree and branch from latest `origin/main`
+   (create only if the resulting project total is at most 20; reuse only after
+   explicit owner handoff and confirmed idle with no undelivered content)
 -> reproduce + bind feature DAG/maps, first divergence, unique owner, and regression evidence
 -> minimal owner-scoped fix -> fetch/combine latest origin/main
 -> mapped tests/build + author debug + real-entry E2E or scoped consumer verification
