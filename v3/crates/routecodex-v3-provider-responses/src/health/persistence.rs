@@ -642,9 +642,9 @@ fn provider_rate_limit_persistence_entries(
 }
 
 pub(super) fn persist_cooldown_state(state: RwLockWriteGuard<'_, V3ProviderHealthState>) {
-    let ticket = V3ProviderHealthPersistenceTicket::from_state(&state);
-    drop(state);
-    if let Some(ticket) = ticket {
+    // Submission is nonblocking. Keep it under the state lock so concurrent
+    // observations cannot enqueue a stale snapshot after a newer one.
+    if let Some(ticket) = V3ProviderHealthPersistenceTicket::from_state(&state) {
         ticket.enqueue();
     }
 }

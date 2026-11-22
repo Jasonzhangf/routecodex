@@ -300,6 +300,60 @@ async fn assert_consecutive_errors(direct: bool) {
     assert_eq!(entries[0]["provider_id"], identity["provider_id"]);
     assert_eq!(entries[0]["until_ms"], minimum_end + 3_600_000);
     assert_eq!(business.load(SeqCst), 13);
+
+    let burst_start = minimum_end + 3_600_000;
+    clock.0.store(burst_start, SeqCst);
+    await_quota_probe(&client, &base, &identity, &probes).await;
+    for index in 0..10 {
+        if index == 9 {
+            clock.0.store(burst_start + 120_000, SeqCst);
+        }
+        assert!(
+            quota_business(&client, &base, &format!("rapid-429-{index}"))
+                .await
+                .contains("quota-window-fallback")
+        );
+        assert_eq!(business.load(SeqCst), 14 + index);
+        if index < 9 {
+            assert!(quota_entries(&client, &base).await.is_empty());
+        }
+    }
+    let short_end = burst_start + 135_000;
+    let short_entries = quota_entries(&client, &base).await;
+    assert_eq!(short_entries.len(), 1);
+    assert_eq!(short_entries[0]["until_ms"], short_end);
+    clock.0.store(short_end - 1, SeqCst);
+    assert!(quota_business(&client, &base, "before-short-expiry")
+        .await
+        .contains("quota-window-fallback"));
+    assert_eq!(business.load(SeqCst), 23);
+    clock.0.store(short_end, SeqCst);
+    assert!(quota_business(&client, &base, "first-after-short-expiry")
+        .await
+        .contains("quota-window-fallback"));
+    assert_eq!(business.load(SeqCst), 24);
+    let hour = quota_entries(&client, &base).await;
+    assert_eq!(hour.len(), 1);
+    assert_eq!(hour[0]["until_ms"], short_end + 3_600_000);
+
+    let slow_start = short_end + 3_600_000;
+    clock.0.store(slow_start, SeqCst);
+    await_quota_probe(&client, &base, &identity, &probes).await;
+    for index in 0..11 {
+        if index >= 9 {
+            clock.0.store(slow_start + 120_001, SeqCst);
+        }
+        assert!(quota_business(&client, &base, &format!("slow-429-{index}"))
+            .await
+            .contains("quota-window-fallback"));
+        assert_eq!(business.load(SeqCst), 25 + index);
+        if index < 10 {
+            assert!(quota_entries(&client, &base).await.is_empty());
+        }
+    }
+    let entries = quota_entries(&client, &base).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["until_ms"], slow_start + 3_720_001);
     handle.shutdown().await;
     first_task.abort();
     second_task.abort();

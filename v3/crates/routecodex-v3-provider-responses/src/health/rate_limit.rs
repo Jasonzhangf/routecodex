@@ -1,6 +1,49 @@
 use super::*;
 use crate::key_health::V3ProviderRateLimitProbeDisposition;
 
+const RATE_LIMIT_BURST_THRESHOLD: u32 = 10;
+const RATE_LIMIT_WINDOW_MS: u64 = 120_000;
+const RATE_LIMIT_SHORT_COOLDOWN_MS: u64 = 15_000;
+
+impl V3ProviderRateLimitEpisode {
+    pub(super) fn observe_http_429(&mut self, now_ms: u64, probe_cooldown_active: bool) -> bool {
+        if self.real_429_count == 0 {
+            // Older episode files can have elapsed timestamps but no 429 count.
+            self.first_429_at_ms = Some(now_ms);
+            self.last_429_at_ms = Some(now_ms);
+        }
+        self.real_429_count = self.real_429_count.saturating_add(1);
+        let first = self.first_429_at_ms.unwrap_or(now_ms).min(now_ms);
+        let latest = self.last_429_at_ms.unwrap_or(now_ms).max(now_ms);
+        self.first_429_at_ms = Some(first);
+        self.last_429_at_ms = Some(latest);
+        let elapsed_ms = latest - first;
+        if self.real_429_count > RATE_LIMIT_BURST_THRESHOLD && elapsed_ms > RATE_LIMIT_WINDOW_MS {
+            return true;
+        }
+        if self.real_429_count >= RATE_LIMIT_BURST_THRESHOLD
+            && elapsed_ms <= RATE_LIMIT_WINDOW_MS
+            && !probe_cooldown_active
+            && self.active_short_cooldown(latest).is_none()
+        {
+            self.short_cooldown_until_ms =
+                Some(latest.saturating_add(RATE_LIMIT_SHORT_COOLDOWN_MS));
+        }
+        false
+    }
+
+    pub(super) fn active_short_cooldown(&self, now_ms: u64) -> Option<u64> {
+        self.short_cooldown_until_ms
+            .filter(|until_ms| now_ms < *until_ms)
+    }
+
+    pub(super) fn reset_429_observations(&mut self) {
+        self.real_429_count = 0;
+        self.first_429_at_ms = None;
+        self.last_429_at_ms = None;
+    }
+}
+
 impl V3ProviderHealthStore {
     /// Compatibility entry for the retired elapsed-429 policy.
     ///
@@ -84,8 +127,7 @@ pub(super) fn accept_qualified_probe_success(
     if !qualified {
         return false;
     }
-    episode.first_429_at_ms = None;
-    episode.last_429_at_ms = None;
+    episode.reset_429_observations();
     episode.probe_required = false;
     if let Some(not_before) = episode.not_before_ms.filter(|until| now_ms < *until) {
         if let Some(probe) = state.provider_cooldown_probes.get_mut(key) {

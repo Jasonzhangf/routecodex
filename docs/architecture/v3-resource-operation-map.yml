@@ -1415,7 +1415,7 @@ resources:
     owner_node: V3ProviderHealthStore
     listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId]
-    semantic_contract: The existing health owner retains a consecutive error count and one-hour minimum for the complete identity. A matching HTTP 2xx probe at or after expiry can restore routing. A failed probe advances its cadence.
+    semantic_contract: The health owner retains consecutive failures and cooldown deadlines for the complete identity. Ordinary HTTP 429 uses a separate observation streak and can impose a timer-only cooldown. A matching HTTP 2xx probe at or after a one-hour cooldown expiry can restore routing. A failed probe advances its cadence.
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_global_health_for_classified_error, V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_key_success, V3ProviderHealthStore::record_provider_failure_action_for_interface, V3ProviderHealthStore::record_provider_failure_action_if_cooled_for_interface, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_success_if_current_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, routecodex-v3-server]
@@ -1434,9 +1434,10 @@ resources:
       cross_session: shared
       cross_model_same_key: isolated
       sibling_keys: isolated
-      cooldown_condition: ten consecutive real recoverable failures or one confirmed unrecoverable failure on a non-final Provider attempt
-      cooldown_deadline: one hour from the committing health observation
-      revival_rule: matching business success resets the count; after expiry, matching HTTP 2xx probe recovery restores routing using the selected private profile when required
+      cooldown_condition: On non-final attempts, other real recoverable failures start a one-hour cooldown at ten consecutive failures, and a confirmed unrecoverable failure starts it immediately.
+      ordinary_http_429: Count the consecutive failures and the span since the first separately. At ten or more failures within 120 seconds, apply a 15-second cooldown. Start a one-hour cooldown from the eleventh failure onward only when the span strictly exceeds 120 seconds.
+      cooldown_deadline: The duration runs from the committing health observation. The 15-second cooldown expires without a recovery probe.
+      revival_rule: Matching business success resets the streak. After a one-hour cooldown expires, matching HTTP 2xx probe recovery restores routing using the selected private profile when required.
       dry_run_rule: dry-run never acquires or sends an auth-key health probe
     allowed_writers: [V3ProviderFailureRuntimeHealth::record_provider_failure_record_with_policy, V3ProviderHealthStore::record_provider_failure_in_session_with_policy, V3ProviderHealthStore::acquire_provider_cooldown_probe, V3ProviderHealthStore::acquire_provider_cooldown_probe_if_due, V3ProviderHealthStore::complete_provider_cooldown_probe_success_with_permit, V3ProviderHealthStore::complete_provider_cooldown_probe_failure_with_permit]
     allowed_readers: [V3ProviderHealthStore::scheduling_projection, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys, V3ProviderHealthStore::provider_cooldown_probe_keys_due, V3ProviderHealthStore::provider_cooldown_probe_next_deadline_ms]
@@ -1453,7 +1454,7 @@ resources:
     owner_node: V3ProviderGlobalCooldownPersistence
     listener_scope: [serverId, bind, port]
     identity: [providerId, interfaceId, authAlias, modelId, failureClass, cooldownUntilMs, nextProbeAtMs]
-    semantic_contract: The listener health file retains consecutive failures and the committed cooldown minimum. Restart restores no active acquisition. Recovery remains required after expiry.
+    semantic_contract: The listener health file retains consecutive failures, the ordinary HTTP 429 observation window, and committed cooldown deadlines. Restart restores no active acquisition. A one-hour cooldown requires recovery after expiry, while a 15-second timer-only cooldown expires without a probe.
     allowed_writers: [V3ProviderCooldownCoordinator::load, V3ProviderCooldownCoordinator::reset_probe_schedule_for_startup, V3ProviderCooldownCoordinator::replace_entries, V3ProviderCooldownCoordinator::replace_entries_and_rate_limit_episodes]
     allowed_readers: [V3ProviderHealthStore::from_manifest, V3ProviderHealthStore::from_manifest_for_listener, V3ProviderHealthStore::availability_for_session, V3ProviderHealthStore::provider_cooldown_probe_keys_due]
     forbidden_writers: [routecodex-v3-error, routecodex-v3-virtual-router, routecodex-v3-target, request.normal_payload, response.client_payload]
