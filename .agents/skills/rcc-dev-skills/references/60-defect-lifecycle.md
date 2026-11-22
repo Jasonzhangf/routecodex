@@ -6,8 +6,11 @@ Use the project's canonical defect flow in `AGENTS.md` and issue contract in
 `.appsdk/skills/appsdk-project-governance/SKILL.md`. This reference supplies the
 per-issue DAG and the required post-restart Codex sample decision. Intake or
 deduplicate every execution-bound defect and carry its authoritative bug ID
-through its own LayerFS task branch/workspace, evidence, review, merge, cleanup,
-and solution receipt.
+through its own Git worktree and branch from the latest `origin/main`, evidence,
+review, merge, cleanup, and solution receipt. Create a new issue worktree only
+when the resulting project total is at most 20. Reuse an existing workline only
+after explicit owner handoff and confirmation that it is idle with no
+undelivered content; a clean state alone is not a separate admission gate.
 The RouteCodex standard defect flow requires commit and merge to `main`; the
 normal repair authorization in the global `AGENTS.md` covers commit, merge, and
 push after the gates pass. The global host orchestrator owns the independent
@@ -31,7 +34,7 @@ Each issue run has one entry and one disposition exit:
 
 ```text
 bug intake / dedup
--> issue-owned LayerFS task branch from latest LayerFS main
+-> issue-owned Git worktree and branch from latest `origin/main` (create only when the resulting project total is at most 20; reuse only after explicit owner handoff and confirmed idle/no-undelivered-content state)
 -> reproduce + feature DAG/map + first divergence + unique owner + red regression test
 -> minimal owner-scoped fix
 -> fetch/combine latest origin/main into the task branch
@@ -147,12 +150,11 @@ reported as passing samples.
 ## Resource Closeout DAG
 
 Each issue owner removes only resources created for that issue and proves their
-absence before its disposition receipt: its LayerFS task branch/workspace,
+absence before its disposition receipt: its issue-owned Git worktree and branch,
 temporary files, logs, forwards, and issue-owned processes. Do not remove shared
-runtime processes or another issue's resources. Verify the task branch/workspace
-is removed per the LayerFS Skill; for a pre-existing Git worktree still owned by
-this issue, verify absence from `git -C <repo> worktree list --porcelain` and
-`test ! -e <playground>` passes, and this run's temporary resources are gone.
+runtime processes or another issue's resources. Verify absence from
+`git -C <repo> worktree list --porcelain` and that `test ! -e <playground>`
+passes, and verify this run's temporary resources are gone.
 Preserve the task branch/workspace or worktree if removal fails because it is
 dirty or still in use; report the owner and blocker.
 
