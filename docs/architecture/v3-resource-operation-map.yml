@@ -2430,6 +2430,46 @@ resources:
     binding_status: source_controlled
     required_gates: [cargo test --manifest-path v3/Cargo.toml -p routecodex-v3-debug --lib observability_store, npm run verify:v3-resource-map]
 
+  - resource_id: v3.observability.provider_usage_facts
+    resource_kind: diagnostic_persistence
+    lifecycle: v3.execution_control_payload_architecture
+    owner_feature_id: v3.observability_persistence_isolation
+    owner_crate: routecodex-v3-debug
+    owner_node: V3ProviderUsagePersistenceStore
+    identity: [listenerId, requestKey, optionalAttemptOrdinal]
+    semantic_contract:
+      target_contract: The existing ordered writer persists compact terminal and failed-attempt facts and coverage before detail rotation. Replay updates the same fact identity.
+      coverage: historical_backfill_and_sticky_observation_gaps
+      retention: Lossless compaction keeps the latest revision per stable key. Per listener, latest facts are limited to 32 MiB and 100000 identities, the append log to 64 MiB, and individual facts and each companion state to 64 KiB. Capacity rejection retains prior facts and records a persistent partial-coverage disposition.
+    allowed_writers: [V3WebuiObservabilityPersistenceWriter]
+    allowed_readers: [V3ProviderUsagePersistenceStore, v3_webui_observability_read_provider_usage]
+    forbidden_writers: [routecodex-v3-admin, routecodex-v3-config_runtime_io, provider_health, resident_request_controller, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+
+  - resource_id: v3.admin.provider_usage_report
+    resource_kind: derived_control_projection
+    lifecycle: v3.admin.control_plane
+    owner_feature_id: v3.admin_observability_aggregation
+    owner_crate: routecodex-v3-admin
+    owner_node: V3AdminProviderUsageQueryResult
+    identity: [resolvedUsageQuery]
+    semantic_contract:
+      format: typed_json_projection
+      derived_only: true
+      sources: [v3.observability.webui_store, v3.observability.provider_usage_facts]
+      mutation: none
+    allowed_writers: [build_provider_usage]
+    allowed_readers: [records, renderProviderUsage]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider.wire_payload, protocol.metadata]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: source_controlled
+    required_gates: [npm run verify:v3-resource-map]
+
   - resource_id: v3.admin.environment
     resource_kind: derived_control_projection
     lifecycle: v3.admin.control_plane
@@ -3132,10 +3172,30 @@ resources:
     semantic_contract:
       current_binding: record_observed updates a bounded active/recent cache, releases the listener mutex, and then performs bounded non-blocking enqueue to a dedicated writer; startup folding is capped.
       target_contract: Active requests and bounded recent terminals remain in memory; a bounded single-writer queue owns append, rotation, and retention outside the request mutex.
+      terminal_close: Consuming aggregate terminal APIs atomically seal enqueue, process accepted work, close generation, receive the Shutdown receipt, and join the writer before returning.
+      production_prepare_boundary: prepare_exec_attempt keeps the existing recoverable flush and never seals enqueue or closes generation.
       config_boundary: Config compiles path and policy only; runtime observability I/O is owned by observability storage.
     allowed_writers: [V3WebuiObservability::record_observed]
     allowed_readers: [observability_single_writer, admin_paginated_history_reader]
     forbidden_writers: [routecodex-v3-config_runtime_io, provider_health, resident_request_controller, payload]
+    may_enter_provider_body: false
+    may_enter_client_body: false
+    may_enter_metadata_center: false
+    binding_status: active
+
+  - resource_id: v3.observability.provider_usage_closeout_receipt
+    resource_kind: diagnostic_persistence
+    lifecycle: v3.server.aggregate_terminal_close
+    owner_feature_id: v3.observability_persistence_isolation
+    owner_crate: routecodex-v3-server
+    owner_node: V3WebuiObservabilityPersistenceWriterLifecycle
+    identity: [listenerId]
+    semantic_contract:
+      target_contract: Terminal close returns only after accepted work is processed, pending coverage is persisted, generation is closed, and the writer thread exits. Failures remain explicit diagnostics and do not alter business results.
+      post_return_boundary: The writer performs no file writes after terminal close returns; a retained clone must not reopen the store.
+    allowed_writers: [V3WebuiObservabilityPersistenceWriter::close]
+    allowed_readers: [aggregate terminal closeout]
+    forbidden_writers: [request.normal_payload, response.client_payload, provider_health]
     may_enter_provider_body: false
     may_enter_client_body: false
     may_enter_metadata_center: false

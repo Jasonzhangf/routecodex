@@ -336,7 +336,7 @@ impl V3ServerAggregateHandle {
     pub async fn shutdown(mut self) -> Vec<routecodex_v3_debug::V3CodexSamplePersistFailure> {
         self.probe_lifecycle.terminate();
         self.probe_lifecycle.join().await;
-        self.flush_runtime_persistence();
+        self.close_runtime_persistence();
         let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
             Some(mut worker) => worker.shutdown().await,
             None => Vec::new(),
@@ -366,7 +366,7 @@ impl V3ServerAggregateHandle {
         // the process; otherwise the replacement can restore a lease with no
         // socket owner and the client waits forever.
         self.front_transport_broker.close_active_client_transports();
-        self.flush_runtime_persistence();
+        self.close_runtime_persistence();
         let codex_sample_persist_failures = match self.codex_sample_persist_worker.take() {
             Some(mut worker) => worker.shutdown().await,
             None => Vec::new(),
@@ -389,6 +389,19 @@ impl V3ServerAggregateHandle {
         for observability in &self.observability_writers {
             if let Err(error) = observability.flush_persistence() {
                 eprintln!("V3 observability persistence flush failed: {error}");
+            }
+        }
+    }
+
+    fn close_runtime_persistence(&self) {
+        for provider_health in &self.provider_health {
+            if let Err(error) = provider_health.flush_persistence() {
+                eprintln!("V3 provider health persistence flush failed: {error}");
+            }
+        }
+        for observability in &self.observability_writers {
+            if let Err(error) = observability.close_persistence() {
+                eprintln!("V3 observability persistence close failed: {error}");
             }
         }
     }

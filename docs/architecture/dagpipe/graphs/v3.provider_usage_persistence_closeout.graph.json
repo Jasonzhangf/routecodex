@@ -1,0 +1,81 @@
+{
+  "id": "v3.provider_usage_persistence_closeout",
+  "version": "1",
+  "inputs": [{"id": "aggregate消费式终结关闭请求", "schema": "Object"}],
+  "nodes": [
+    {
+      "id": "封闭writer接纳入口",
+      "operator": "routecodex.v3.observability.close_provider_usage_writer",
+      "operator_version": "1",
+      "inputs": ["aggregate消费式终结关闭请求"],
+      "output": {"id": "唯一终结所有权或启动失败", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.request_ledger_queue"], "writes": []}
+    },
+    {
+      "id": "处理已接纳用量工作",
+      "operator": "routecodex.v3.observability.resolve_provider_usage_work",
+      "operator_version": "1",
+      "inputs": ["唯一终结所有权或启动失败"],
+      "output": {"id": "已接纳工作处理结果", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.webui_store"], "writes": ["v3.observability.provider_usage_facts", "v3.observability.webui_store"]}
+    },
+    {
+      "id": "持久化覆盖缺口与写错误",
+      "operator": "routecodex.v3.observability.persist_provider_usage_closeout_state",
+      "operator_version": "1",
+      "inputs": ["已接纳工作处理结果"],
+      "output": {"id": "关闭前诊断持久化结果", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.request_ledger_queue"], "writes": ["v3.observability.provider_usage_facts"]}
+    },
+    {
+      "id": "关闭generation与coverage",
+      "operator": "routecodex.v3.observability.close_provider_usage_generation",
+      "operator_version": "1",
+      "inputs": ["关闭前诊断持久化结果"],
+      "output": {"id": "generation关闭结果", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": ["v3.observability.provider_usage_facts"]}
+    },
+    {
+      "id": "收取receipt并join writer",
+      "operator": "routecodex.v3.observability.join_provider_usage_writer",
+      "operator_version": "1",
+      "inputs": ["generation关闭结果"],
+      "output": {"id": "writer退出结果", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": ["v3.observability.request_ledger_queue"], "writes": []}
+    },
+    {
+      "id": "发布明确成功或失败回执",
+      "operator": "routecodex.v3.observability.report_provider_usage_closeout",
+      "operator_version": "1",
+      "inputs": ["writer退出结果"],
+      "output": {"id": "aggregate用量关闭回执", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole",
+      "resources": {"reads": [], "writes": ["v3.observability.provider_usage_closeout_receipt"]}
+    }
+  ],
+  "edges": [
+    {"from": "封闭writer接纳入口", "to": "处理已接纳用量工作", "arc_id": "唯一终结所有权或启动失败"},
+    {"from": "处理已接纳用量工作", "to": "持久化覆盖缺口与写错误", "arc_id": "已接纳工作处理结果"},
+    {"from": "持久化覆盖缺口与写错误", "to": "关闭generation与coverage", "arc_id": "关闭前诊断持久化结果"},
+    {"from": "关闭generation与coverage", "to": "收取receipt并join writer", "arc_id": "generation关闭结果"},
+    {"from": "收取receipt并join writer", "to": "发布明确成功或失败回执", "arc_id": "writer退出结果"}
+  ],
+  "outputs": ["aggregate用量关闭回执"]
+}

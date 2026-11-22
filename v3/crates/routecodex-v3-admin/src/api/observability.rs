@@ -10,6 +10,7 @@
 
 mod artifacts;
 mod cooldown;
+mod provider_usage;
 mod store_cache;
 mod stream;
 
@@ -17,16 +18,20 @@ use self::artifacts::{
     artifact_content, artifacts, list_v3_obs_artifacts, resolve_v3_obs_sample_dir,
 };
 use self::cooldown::{add_cooldown, cooldown_pool, probe_cooldown, remove_cooldown};
+use self::provider_usage::{
+    build_provider_usage, normalize_retained_usage, CalendarPeriod, ProviderUsageQuery,
+    ProviderUsageSourceFilters, UsageView,
+};
 pub(crate) use self::store_cache::visit_v3_obs_stores;
-use self::store_cache::{read_v3_obs_projection, read_v3_obs_rows_for_request_key};
+use self::store_cache::{
+    read_provider_usage_facts, read_v3_obs_projection, read_v3_obs_rows_for_request_key,
+};
 use self::stream::stream;
 use crate::AppState;
 use axum::extract::{Path as AxumPath, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
-use routecodex_v3_runtime::hub_v1::usage_normalization::{
-    split_v3_canonical_usage_cache, V3CanonicalUsageCache,
-};
+use routecodex_v3_runtime::hub_v1::usage_normalization::split_v3_canonical_usage_cache;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -139,6 +144,9 @@ pub(crate) struct RecordQuery {
     search: Option<String>,
     range: String,
     timezone_offset_minutes: i32,
+    ports: Vec<u16>,
+    provider_ids: Vec<String>,
+    usage: Option<ProviderUsageQuery>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -160,6 +168,8 @@ struct QueryRow {
     failed_attempts: u64,
     switches: u64,
     usage: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    usage_normalized: Option<serde_json::Value>,
     timing_internal_ms: Option<u64>,
     timing_external_ms: Option<u64>,
     #[serde(default)]
@@ -176,6 +186,8 @@ pub(crate) struct RecordsResponse {
     stats: serde_json::Value,
     facets: BTreeMap<String, serde_json::Value>,
     timeseries: Vec<TimeseriesBucket>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_usage: Option<self::provider_usage::ProviderUsageResponse>,
 }
 
 use super::timeseries::{local_day_start, system_epoch_ms, usage_is_countable, TimeseriesBucket};
@@ -184,6 +196,7 @@ impl RecordQuery {
     fn from_params(
         params: &std::collections::HashMap<String, String>,
         timezone_offset_minutes: i32,
+        now_ms: u64,
     ) -> Result<Self, String> {
         let mut query = Self {
             page: 1,
@@ -272,6 +285,13 @@ impl RecordQuery {
                 }
                 "provider" => query.provider = Some(value.to_string()),
                 "provider_id" => query.provider_id = Some(value.to_string()),
+                "ports" => {
+                    query.ports = serde_json::from_str::<Vec<u16>>(value)
+                        .map_err(|_| format!("invalid ports: {value}"))?
+                }
+                "provider_ids" => {
+                    query.provider_ids = parse_json_string_array(value, "provider_ids")?
+                }
                 "model" => query.model = Some(value.to_string()),
                 "endpoint" => query.endpoint = Some(value.to_string()),
                 "route" => query.route = Some(value.to_string()),
@@ -300,14 +320,23 @@ impl RecordQuery {
                         .parse()
                         .map_err(|_| format!("invalid timezone_offset_minutes: {value}"))?
                 }
+                "from" => query.time_from_ms = Some(parse_unix_ms(value, "from")?),
+                "to" => query.time_to_ms = Some(parse_unix_ms(value, "to")?),
                 _ => {}
             }
+        }
+        query.usage = ProviderUsageQuery::from_params(params)?;
+        if let Some(usage) = query.usage.as_mut() {
+            if usage.calendar_period == CalendarPeriod::Custom {
+                usage.from_ms = query.time_from_ms;
+                usage.to_ms = query.time_to_ms;
+            }
+            usage.resolve_range(now_ms)?;
         }
         if query.page == 0 || query.page_size == 0 || query.page_size > 300 {
             return Err("page and page_size must be between 1..300".to_string());
         }
         if matches!(query.range.as_str(), "today" | "week" | "month") {
-            let now_ms = system_epoch_ms()?;
             let today_start = local_day_start(now_ms, query.timezone_offset_minutes);
             query.time_from_ms = Some(match query.range.as_str() {
                 "today" => today_start,
@@ -320,16 +349,14 @@ impl RecordQuery {
     }
 
     fn matches(&self, row: &QueryRow) -> bool {
-        if self
-            .time_from_ms
-            .is_some_and(|from| row.started_epoch_ms < from)
+        self.matches_dimensions(row) && self.matches_time(row)
+    }
+
+    fn matches_dimensions(&self, row: &QueryRow) -> bool {
+        if (self.port.is_some() || !self.ports.is_empty())
+            && !self.port.is_some_and(|port| row.scope.port == port)
+            && !self.ports.contains(&row.scope.port)
         {
-            return false;
-        }
-        if self.time_to_ms.is_some_and(|to| row.started_epoch_ms > to) {
-            return false;
-        }
-        if self.port.is_some_and(|port| row.scope.port != port) {
             return false;
         }
         let meta_value = |name: &str| row.meta.get(name).and_then(serde_json::Value::as_str);
@@ -340,10 +367,15 @@ impl RecordQuery {
         {
             return false;
         }
-        if self
-            .provider_id
-            .as_deref()
-            .is_some_and(|value| meta_value("provider_id") != Some(value))
+        if (self.provider_id.is_some() || !self.provider_ids.is_empty())
+            && !self
+                .provider_id
+                .as_deref()
+                .is_some_and(|value| meta_value("provider_id") == Some(value))
+            && !self
+                .provider_ids
+                .iter()
+                .any(|value| meta_value("provider_id") == Some(value.as_str()))
         {
             return false;
         }
@@ -408,6 +440,24 @@ impl RecordQuery {
             .as_deref()
             .is_some_and(|value| row.scope.session.as_deref() != Some(value))
         {
+            return false;
+        }
+        true
+    }
+
+    fn matches_time(&self, row: &QueryRow) -> bool {
+        let (from_ms, to_ms) = self.resolved_time_bounds();
+        if from_ms.is_some_and(|from| row.started_epoch_ms < from) {
+            return false;
+        }
+        let to_is_exclusive = self.usage.is_some();
+        if to_ms.is_some_and(|to| {
+            if to_is_exclusive {
+                row.started_epoch_ms >= to
+            } else {
+                row.started_epoch_ms > to
+            }
+        }) {
             return false;
         }
         if let Some(status) = &self.status {
@@ -486,6 +536,36 @@ impl RecordQuery {
             }
         }
         true
+    }
+
+    fn resolved_time_bounds(&self) -> (Option<u64>, Option<u64>) {
+        match self.usage.as_ref() {
+            Some(usage) => (usage.resolved_from_ms, usage.resolved_to_ms),
+            None => (self.time_from_ms, self.time_to_ms),
+        }
+    }
+
+    fn provider_usage_source_filters(&self) -> ProviderUsageSourceFilters {
+        ProviderUsageSourceFilters::new(
+            self.port,
+            &self.ports,
+            self.provider.as_deref(),
+            self.provider_id.as_deref(),
+            &self.provider_ids,
+            self.status.is_some()
+                || self.error_status_code.is_some()
+                || self.error_origin.is_some()
+                || self.response_type.is_some()
+                || self.error_category.is_some()
+                || self.model.is_some()
+                || self.endpoint.is_some()
+                || self.route.is_some()
+                || self.entry_protocol.is_some()
+                || self.execution_mode.is_some()
+                || self.transport.is_some()
+                || self.session.is_some()
+                || self.search.is_some(),
+        )
     }
 
     fn sort_key(&self, row: &QueryRow) -> (String, u64) {
@@ -637,13 +717,13 @@ fn attempt_status_code(row: &QueryRow) -> Option<String> {
 /// `failed-attempt` query row with its original status/category/detail, so a
 /// retry that eventually succeeds does not hide the non-normal attempt.
 fn project_query_rows<'a>(rows: impl IntoIterator<Item = &'a SourceRow>) -> Vec<QueryRow> {
-    let mut latest: BTreeMap<String, &'a SourceRow> = BTreeMap::new();
+    let mut latest: BTreeMap<(u16, &str), &'a SourceRow> = BTreeMap::new();
     let mut attempt_rows: Vec<&'a SourceRow> = Vec::new();
     for row in rows {
         if is_provider_attempt_failure(row) {
             attempt_rows.push(row);
         } else {
-            latest.insert(row.request_key.clone(), row);
+            latest.insert((row.scope.port, row.request_key.as_str()), row);
         }
     }
 
@@ -680,6 +760,7 @@ fn to_query_row(row: &SourceRow) -> QueryRow {
         failed_attempts: row.failed_attempts,
         switches: row.switches,
         usage: row.usage.clone(),
+        usage_normalized: None,
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
@@ -703,6 +784,7 @@ fn to_attempt_query_row(row: &SourceRow) -> QueryRow {
         failed_attempts: row.failed_attempts,
         switches: row.switches,
         usage: row.usage.clone(),
+        usage_normalized: None,
         timing_internal_ms: row.timing_internal_ms,
         timing_external_ms: row.timing_external_ms,
         servertool: row.servertool,
@@ -848,39 +930,23 @@ fn row_total_value(row: &QueryRow) -> u64 {
     usage_value(row, "total_tokens")
 }
 
-/// Row usage -> canonical cache split via the shared truth source.
-///
-/// OpenAI/Responses/Gemini rows carry `cached_tokens` as a sub-count of an
-/// input that already includes cache; Anthropic/MiniMax/glm rows carry
-/// `cache_read_input_tokens` / `cache_creation_input_tokens` as independent
-/// counts that must be added to the uncached input.
-fn row_canonical_usage_cache(row: &QueryRow) -> V3CanonicalUsageCache {
-    split_v3_canonical_usage_cache(
-        Some(row_input_value(row)),
-        row_cached_value(row),
-        row_cache_read_value(row),
-        row_cache_creation_value(row),
-    )
-}
-
-/// Cache-hit numerator: the canonical cached sub-count, i.e. the cache read
-/// count under Anthropic/MiniMax/glm semantics.
-fn row_cache_hit_numerator(row: &QueryRow) -> u64 {
-    row_canonical_usage_cache(row).cached_tokens.unwrap_or(0)
-}
-
-/// Cache-hit denominator: the canonical effective input, i.e. input + read +
-/// creation under Anthropic/MiniMax/glm semantics.
-fn row_effective_input(row: &QueryRow) -> u64 {
-    row_canonical_usage_cache(row).effective_input_tokens
-}
-
 fn query_params(raw_query: &RawQuery) -> HashMap<String, String> {
     raw_query
         .0
         .as_deref()
         .map(parse_query_params)
         .unwrap_or_default()
+}
+
+fn parse_json_string_array(value: &str, name: &str) -> Result<Vec<String>, String> {
+    serde_json::from_str::<Vec<String>>(value)
+        .map_err(|_| format!("invalid {name}: expected a JSON string array"))
+}
+
+fn parse_unix_ms(value: &str, name: &str) -> Result<u64, String> {
+    value
+        .parse()
+        .map_err(|_| format!("invalid {name}: {value}"))
 }
 
 async fn records(
@@ -895,7 +961,17 @@ async fn records(
         .get("timezone_offset_minutes")
         .and_then(|value| value.parse::<i32>().ok())
         .unwrap_or(0);
-    let query = match RecordQuery::from_params(&params, timezone_offset_minutes) {
+    let now_ms = match system_epoch_ms() {
+        Ok(now_ms) => now_ms,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": error })),
+            )
+                .into_response()
+        }
+    };
+    let query = match RecordQuery::from_params(&params, timezone_offset_minutes, now_ms) {
         Ok(query) => query,
         Err(error) => {
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response()
@@ -904,11 +980,18 @@ async fn records(
     // The cache lock spans metadata reads, decoding and the fold, so the read
     // runs on the blocking pool instead of stalling a runtime worker.
     let projection_state = state.clone();
-    let projection = match tokio::task::spawn_blocking(move || {
-        read_v3_obs_projection(&projection_state)
-    })
-    .await
-    {
+    let source_filters = query.provider_usage_source_filters();
+    let needs_facts = query.usage.is_some() && !source_filters.uses_retained_scope();
+    let facts_state = state.clone();
+    let selected_ports = source_filters.selected_ports().cloned();
+    let projection_task =
+        tokio::task::spawn_blocking(move || read_v3_obs_projection(&projection_state));
+    let facts_task = needs_facts.then(|| {
+        tokio::task::spawn_blocking(move || {
+            read_provider_usage_facts(&facts_state, selected_ports.as_ref())
+        })
+    });
+    let projection = match projection_task.await {
         Ok(Ok(projection)) => projection,
         Ok(Err((status, body))) => return (status, Json(body)).into_response(),
         Err(error) => {
@@ -921,6 +1004,22 @@ async fn records(
                 .into_response()
         }
     };
+    let facts = match facts_task {
+        Some(task) => match task.await {
+            Ok(Ok(facts)) => facts,
+            Ok(Err((status, body))) => return (status, Json(body)).into_response(),
+            Err(error) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": format!("provider usage facts read task failed: {error}")
+                    })),
+                )
+                    .into_response()
+            }
+        },
+        None => routecodex_v3_debug::V3ProviderUsageRead::default(),
+    };
     // The matched rows are materialised as an owned, contiguous Vec: the stats,
     // facet and by-port passes below all walk it after the page sort, and
     // iterating owned rows there is measurably cheaper than chasing sorted
@@ -931,6 +1030,17 @@ async fn records(
         .filter(|row| query.matches(row))
         .cloned()
         .collect();
+    let matching_detail_from_ms = if query.usage.is_some() {
+        projection
+            .rows
+            .iter()
+            .filter(|row| query.matches_dimensions(row))
+            .map(|row| row.started_epoch_ms)
+            .min()
+    } else {
+        None
+    };
+    let usage_rows = filtered.clone();
     let timeseries_rows: Vec<super::timeseries::TimeseriesRow<'_>> = filtered
         .iter()
         .map(|row| super::timeseries::TimeseriesRow {
@@ -939,10 +1049,19 @@ async fn records(
             result: row.result.as_deref(),
         })
         .collect();
+    let (timeseries_from_ms, timeseries_to_ms) = query.resolved_time_bounds();
+    let timeseries_to_ms = if query.usage.is_none() {
+        // Legacy `time_to_ms` is inclusive; the usage calendar contract is
+        // half-open. Adapt only the legacy value for the existing projection.
+        timeseries_to_ms.map(|to| to.saturating_add(1))
+    } else {
+        timeseries_to_ms
+    };
     let timeseries = match super::timeseries::build_timeseries(
         &timeseries_rows,
         &query.range,
         query.timezone_offset_minutes,
+        (timeseries_from_ms, timeseries_to_ms),
     ) {
         Ok(timeseries) => timeseries,
         Err(error) => {
@@ -957,11 +1076,29 @@ async fn records(
         let key = query.sort_key(row);
         std::cmp::Reverse(key)
     });
-    let total = filtered.len() as u64;
+    let details: Vec<QueryRow> = match query
+        .usage
+        .as_ref()
+        .map(|usage| usage.view)
+        .unwrap_or(UsageView::All)
+    {
+        UsageView::Requests => filtered
+            .iter()
+            .filter(|row| row.result.as_deref() != Some("failed-attempt"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        UsageView::Attempts => filtered
+            .iter()
+            .filter(|row| row.result.as_deref() == Some("failed-attempt"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        UsageView::All => filtered.clone(),
+    };
+    let total = details.len() as u64;
     let offset = ((query.page - 1) * query.page_size) as usize;
-    let end = (offset + query.page_size as usize).min(filtered.len());
-    let mut page_rows: Vec<QueryRow> = if offset < filtered.len() {
-        filtered[offset..end].to_vec()
+    let end = (offset + query.page_size as usize).min(details.len());
+    let mut page_rows: Vec<QueryRow> = if offset < details.len() {
+        details[offset..end].to_vec()
     } else {
         Vec::new()
     };
@@ -973,6 +1110,11 @@ async fn records(
         if row.raw_artifact_ref.is_none() {
             row.raw_artifact_ref = resolve_v3_obs_row_artifact_ref(row);
         }
+    }
+    for row in page_rows.iter_mut() {
+        let mut normalized = normalize_retained_usage(row.usage.as_ref().unwrap_or(&Value::Null));
+        normalized["cache_hit_rate_percent"] = json!(null);
+        row.usage_normalized = row.usage.as_ref().map(|_| normalized);
     }
     let mut stats = json!({
         "count":0u64,
@@ -1004,6 +1146,9 @@ async fn records(
             .map(|origin| (origin.to_string(), 0u64))
             .collect(),
     );
+    // `view` scopes the paginated detail list only. Stats and facets keep their
+    // legacy meaning over every row matched by the request filters, including
+    // provider-attempt failures that are not request-view detail rows.
     let count = filtered.len() as f64;
     let mut input = 0;
     let mut output = 0;
@@ -1029,23 +1174,23 @@ async fn records(
             let row_input = row_input_value(row);
             let row_output = row_output_value(row);
             let row_cached = row_cached_value(row).unwrap_or(0);
-            // Canonical hit count: OpenAI `cached_tokens` sub-count, otherwise
-            // Anthropic `cache_read_input_tokens`.
-            let row_cache_read = row_cache_hit_numerator(row);
-            let row_cache_creation = row_cache_creation_value(row).unwrap_or(0);
             input += row_input;
             output += row_output;
             cached += row_cached;
-            stats_cache_read += row_cache_read;
-            stats_cache_creation += row_cache_creation;
+            stats_cache_read += row_cache_read_value(row).unwrap_or(0);
+            stats_cache_creation += row_cache_creation_value(row).unwrap_or(0);
             total_token_count += row_total_value(row);
-            let row_effective = row_effective_input(row);
-            // Anthropic/MiniMax/glm-5.3 split: cache_read is the only hit
-            // contribution; cache_creation is creation (write) and must not
-            // inflate the hit count. We still clamp to the effective input
-            // to keep legacy OpenAI rows <= 100% on accumulation.
-            hit_against_effective += row_cache_hit_numerator(row).min(row_effective);
-            effective_input_total += row_effective;
+            let cache = split_v3_canonical_usage_cache(
+                Some(row_input_value(row)),
+                row_cached_value(row),
+                row_cache_read_value(row),
+                row_cache_creation_value(row),
+            );
+            hit_against_effective += cache
+                .cached_tokens
+                .unwrap_or(0)
+                .min(cache.effective_input_tokens);
+            effective_input_total += cache.effective_input_tokens;
             if let Some(duration) = row.duration_ms {
                 durations += duration;
                 with_duration += 1;
@@ -1271,6 +1416,25 @@ async fn records(
         .map(|(name, counts)| (name, json!(counts)))
         .collect();
     facets.insert("error_status_origins".to_string(), json!(status_origins));
+    let provider_usage = match query.usage.as_ref() {
+        Some(usage) => {
+            match build_provider_usage(
+                usage,
+                &source_filters,
+                &facts,
+                &usage_rows,
+                matching_detail_from_ms,
+                now_ms,
+            ) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    return (StatusCode::BAD_REQUEST, Json(json!({ "error": error })))
+                        .into_response()
+                }
+            }
+        }
+        None => None,
+    };
     Json(RecordsResponse {
         records: page_rows.to_vec(),
         total,
@@ -1279,6 +1443,7 @@ async fn records(
         stats,
         facets,
         timeseries,
+        provider_usage,
     })
     .into_response()
 }

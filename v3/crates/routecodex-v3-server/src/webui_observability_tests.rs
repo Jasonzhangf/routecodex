@@ -36,6 +36,72 @@ fn scope(port: u16) -> V3ObsScope {
     }
 }
 
+pub(super) fn terminal_close_test_writer(
+    label: &str,
+    fact_limits: routecodex_v3_debug::observability_store::V3ProviderUsagePersistenceLimits,
+) -> (
+    V3WebuiObservabilityPersistenceWriter,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let dir = isolated_store(label);
+    let records = dir.join("records.jsonl");
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let alarm = Arc::new(RwLock::new(None));
+    let gaps = V3WebuiObservabilityGapQueue::new();
+    let pending_write_error = Arc::new(std::sync::Mutex::new(None));
+    let spawned = V3WebuiObservabilityPersistenceWriter::spawn_writer(
+        records.clone(),
+        receiver,
+        gaps.clone(),
+        Arc::clone(&alarm),
+        Arc::clone(&pending_write_error),
+        V3_WEBUI_HISTORY_MAX_BYTES,
+        fact_limits,
+    )
+    .expect("real persistence writer");
+    let lifecycle = Arc::new(V3WebuiObservabilityPersistenceWriterLifecycle::new(
+        sender.clone(),
+        true,
+    ));
+    lifecycle.attach_thread(spawned);
+    (
+        V3WebuiObservabilityPersistenceWriter {
+            gaps,
+            alarm,
+            pending_write_error,
+            history_max_bytes: V3_WEBUI_HISTORY_MAX_BYTES,
+            lifecycle,
+        },
+        dir,
+        records,
+    )
+}
+
+pub(super) fn terminal_close_test_row(
+    port: u16,
+    request_id: &str,
+    started_epoch_ms: u64,
+) -> V3ObsRequestRow {
+    V3ObsRequestRow {
+        request_key: build_v3_obs_request_key(port, request_id),
+        event_type: V3ObsEventType::Completed.as_str().to_string(),
+        started_epoch_ms,
+        updated_epoch_ms: started_epoch_ms,
+        finished_epoch_ms: Some(started_epoch_ms),
+        scope: scope(port),
+        result: Some("success".to_string()),
+        meta: provider_meta(request_id, "terminal-closeout"),
+        usage: Some(V3ObsUsageSummary {
+            input_tokens: Some(1),
+            output_tokens: Some(1),
+            total_tokens: Some(2),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 fn meta_with_full(req: &str) -> V3ObsRequestMeta {
     V3ObsRequestMeta {
         request_id: req.to_string(),

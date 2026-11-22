@@ -8004,6 +8004,53 @@ chains:
       side_channel_reads: []
       side_channel_writes: []
 
+- chain_id: v3.admin.provider_usage_query
+  owner_feature_id: v3.admin_observability_aggregation
+  summary: Admin reads bounded diagnostic facts for exact Provider queries or retained detail for the legacy display filter. The records API and Usage view preserve the selected scope and coverage.
+  edges:
+  - step_id: v3-admin-provider-usage-bounded-read
+    from_node: V3AdminObservabilityAggregation
+    to_node: V3AdminProviderUsageFactsRead
+    caller_symbol: read_provider_usage_facts
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability/store_cache.rs
+    callee_symbol: v3_webui_observability_read_provider_usage
+    callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
+    status: anchored
+    owner_feature_id: v3.admin_observability_aggregation
+    resource_flow:
+      consumes: [v3.observability.provider_usage_facts]
+      produces: []
+      side_channel_reads: [v3.observability.provider_usage_facts]
+      side_channel_writes: []
+  - step_id: v3-admin-provider-usage-aggregate
+    from_node: V3AdminObservabilityAggregation
+    to_node: V3AdminProviderUsageQueryResult
+    caller_symbol: records
+    caller_file: v3/crates/routecodex-v3-admin/src/api/observability.rs
+    callee_symbol: build_provider_usage
+    callee_file: v3/crates/routecodex-v3-admin/src/api/observability/provider_usage.rs
+    status: anchored
+    owner_feature_id: v3.admin_observability_aggregation
+    resource_flow:
+      consumes: [v3.observability.webui_store, v3.observability.provider_usage_facts]
+      produces: [v3.admin.provider_usage_report]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-admin-provider-usage-render
+    from_node: V3AdminProviderUsageQueryResult
+    to_node: V3AdminProviderUsageRendered
+    caller_symbol: renderAll
+    caller_file: v3/admin-webui/app/views/usage.js
+    callee_symbol: renderProviderUsage
+    callee_file: v3/admin-webui/app/views/usage.js
+    status: anchored
+    owner_feature_id: v3.admin_observability_aggregation
+    resource_flow:
+      consumes: [v3.admin.provider_usage_report]
+      produces: []
+      side_channel_reads: []
+      side_channel_writes: []
+
 - chain_id: v3.route_policy.condition_evaluation
   owner_feature_id: v3.route_policy_condition_evaluation
   summary: Typed turn observations are projected into a bounded history window and evaluated
@@ -8761,6 +8808,65 @@ chains:
       produces: [v3.observability.request_ledger_queue]
       side_channel_reads: [v3.observability.stream_diagnostics]
       side_channel_writes: [v3.observability.request_ledger_queue]
+  - step_id: v3-observability-provider-usage-persist
+    from_node: V3ExecutionControl07PersistenceQueued
+    to_node: V3ProviderUsagePersistenceDisposition
+    caller_symbol: V3WebuiObservability::persist_usage_then_detail
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: V3ProviderUsagePersistenceStore::persist_row_before_detail
+    callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
+    status: anchored
+    owner_feature_id: v3.observability_persistence_isolation
+    resource_flow:
+      consumes: [v3.observability.request_ledger_queue]
+      produces: [v3.observability.provider_usage_facts]
+      side_channel_reads: [v3.observability.provider_usage_facts]
+      side_channel_writes: [v3.observability.provider_usage_facts]
+  - step_id: v3-observability-provider-usage-terminal-close
+    from_node: V3ProviderUsagePersistenceDisposition
+    to_node: V3ObservabilityWriterTerminalOwned
+    caller_symbol: V3ServerAggregateHandle::close_runtime_persistence
+    caller_file: v3/crates/routecodex-v3-server/src/lib.rs
+    callee_symbol: V3WebuiObservability::close_persistence
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    edge_kind: terminal_usage_writer_close_before_aggregate_return
+    owner_feature_id: v3.observability_persistence_isolation
+    resource_flow:
+      consumes: [v3.observability.request_ledger_queue]
+      produces: [v3.observability.provider_usage_closeout_receipt]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: v3-observability-provider-usage-writer-shutdown
+    from_node: V3ObservabilityWriterTerminalOwned
+    to_node: V3ObservabilityWriterShutdownReceived
+    caller_symbol: V3WebuiObservabilityPersistenceWriter::close
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: run_v3_webui_observability_persistence_writer
+    callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    status: anchored
+    edge_kind: ordered_terminal_shutdown_after_admission_seal
+    owner_feature_id: v3.observability_persistence_isolation
+    resource_flow:
+      consumes: [v3.observability.request_ledger_queue]
+      produces: [v3.observability.provider_usage_closeout_receipt]
+      side_channel_reads: [v3.observability.request_ledger_queue]
+      side_channel_writes: []
+  - step_id: v3-observability-provider-usage-generation-close
+    from_node: V3ObservabilityWriterShutdownReceived
+    to_node: V3ObservabilityGenerationClosed
+    caller_symbol: run_v3_webui_observability_persistence_writer
+    caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
+    callee_symbol: V3ProviderUsagePersistenceStore::close_generation
+    callee_file: v3/crates/routecodex-v3-debug/src/observability_store.rs
+    status: anchored
+    edge_kind: generation_close_before_writer_join_receipt
+    owner_feature_id: v3.observability_persistence_isolation
+    resource_flow:
+      consumes: [v3.observability.request_ledger_queue, v3.observability.provider_usage_facts]
+      produces: [v3.observability.provider_usage_facts, v3.observability.provider_usage_closeout_receipt]
+      side_channel_reads: [v3.observability.provider_usage_facts]
+      side_channel_writes: [v3.observability.provider_usage_facts]
 
 - chain_id: v3.memory_raw_capture
   owner_feature_id: v3.memory_raw_capture

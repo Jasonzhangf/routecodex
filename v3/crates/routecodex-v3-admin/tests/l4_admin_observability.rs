@@ -6,6 +6,8 @@ use futures_util::StreamExt;
 use routecodex_v3_admin::{router, AppState};
 use routecodex_v3_config_mgmt::ConfigMgmtStore;
 use serde_json::{json, Value};
+#[cfg(unix)]
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -112,9 +114,13 @@ fn http_client() -> reqwest::Client {
 }
 
 fn write_observability_rows(home: &Path, rows: &[Value]) {
+    write_observability_rows_for_port(home, 4444, rows);
+}
+
+fn write_observability_rows_for_port(home: &Path, port: u16, rows: &[Value]) {
     let store_path = home
         .join("logs")
-        .join("server-v3-4444.request-records.jsonl");
+        .join(format!("server-v3-{port}.request-records.jsonl"));
     std::fs::create_dir_all(store_path.parent().expect("logs dir")).expect("logs dir");
     let content = rows
         .iter()
@@ -122,6 +128,90 @@ fn write_observability_rows(home: &Path, rows: &[Value]) {
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(store_path, format!("{content}\n")).expect("observability store");
+}
+
+fn write_provider_usage_facts(home: &Path, port: u16, facts: &[Value], coverage: &[Value]) {
+    let store_path = home
+        .join("logs")
+        .join(format!("server-v3-{port}.request-records.jsonl"));
+    let facts_path = routecodex_v3_debug::v3_provider_usage_facts_path(&store_path);
+    let coverage_path = routecodex_v3_debug::v3_provider_usage_coverage_path(&store_path);
+    let fact_lines = facts
+        .iter()
+        .map(|fact| json!({ "schema_version": 1, "fact": fact }).to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&facts_path, format!("{fact_lines}\n")).expect("provider usage facts");
+    std::fs::write(
+        &coverage_path,
+        serde_json::to_vec(coverage).expect("coverage json"),
+    )
+    .expect("provider usage coverage");
+}
+
+fn provider_usage_success_row(
+    request_key: &str,
+    port: u16,
+    started_epoch_ms: u64,
+    provider_id: &str,
+    usage: Value,
+) -> Value {
+    json!({
+        "request_key": request_key,
+        "event_type": "request.completed",
+        "started_epoch_ms": started_epoch_ms,
+        "updated_epoch_ms": started_epoch_ms + 100,
+        "finished_epoch_ms": started_epoch_ms + 100,
+        "duration_ms": 100,
+        "meta": {
+            "request_id": format!("{provider_id}-request"),
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider": provider_id,
+            "provider_id": provider_id,
+            "model": "m1"
+        },
+        "scope": {"port": port},
+        "result": "success",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": usage
+    })
+}
+
+fn provider_usage_failed_attempt_row(
+    request_key: &str,
+    port: u16,
+    started_epoch_ms: u64,
+    provider_id: &str,
+) -> Value {
+    json!({
+        "request_key": request_key,
+        "event_type": "request.provider_attempt_failed",
+        "started_epoch_ms": started_epoch_ms,
+        "updated_epoch_ms": started_epoch_ms + 10,
+        "finished_epoch_ms": null,
+        "duration_ms": null,
+        "meta": {
+            "request_id": format!("{provider_id}-request"),
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider": provider_id,
+            "provider_id": provider_id,
+            "model": "m1",
+            "provider_status": 500,
+            "error_category": "provider_http_500",
+            "error_detail": "provider attempt failed",
+            "attempt_index": started_epoch_ms / 100
+        },
+        "scope": {"port": port},
+        "result": null,
+        "attempts": 0,
+        "failed_attempts": 1,
+        "switches": 0,
+        "usage": null
+    })
 }
 
 /// A failing provider attempt carrying the full observed typed error truth:
@@ -952,6 +1042,1906 @@ async fn observability_records_accept_declared_network_facet_label_from_frontend
             path.display()
         );
     }
+}
+
+fn provider_usage_fixture() -> (Value, Value, Value, Value, Value) {
+    let p1_monday = provider_usage_success_row(
+        "shared",
+        4444,
+        100,
+        "p1",
+        json!({
+            "input_tokens": 1000,
+            "output_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 550},
+            "total_tokens": 1100
+        }),
+    );
+    // Same request key as p1 but a different listener: the logical-request
+    // identity is (port, request_key), so this is a separate request.
+    let p2_monday_terminal = provider_usage_success_row(
+        "shared",
+        7777,
+        200,
+        "p2",
+        json!({
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "cache_creation_input_tokens": 20,
+            "total_tokens": 110
+        }),
+    );
+    // Two attempts with one stable sequence; only the last attempt belongs to
+    // the successful request provider p2.
+    let p1_failed = provider_usage_failed_attempt_row("retry", 7777, 300, "p1");
+    let p2_failed = provider_usage_failed_attempt_row("retry", 7777, 400, "p2");
+    let terminal = provider_usage_success_row(
+        "retry",
+        7777,
+        500,
+        "p2",
+        json!({
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "total_tokens": 110
+        }),
+    );
+    let unwrapped = provider_usage_success_row(
+        "degenerate",
+        7777,
+        700,
+        "p1",
+        json!({"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}),
+    );
+    (
+        p1_monday,
+        p2_monday_terminal,
+        json!([p1_failed, p2_failed]),
+        terminal,
+        unwrapped,
+    )
+}
+
+#[tokio::test]
+async fn provider_usage_contract_aggregates_ports_attempts_and_calendar_periods() {
+    let (p1_monday, p2_monday_terminal, retrying, terminal, unwrapped) = provider_usage_fixture();
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            p1_monday.clone(),
+            provider_usage_success_row(
+                "old",
+                4444,
+                1_000,
+                "p1",
+                json!({"input_tokens": 9_999, "output_tokens": 9_999, "total_tokens": 19_998}),
+            ),
+        ],
+    );
+    let mut p2_rows = vec![p2_monday_terminal.clone(), unwrapped.clone()];
+    for failed in retrying.as_array().expect("failed attempts") {
+        p2_rows.push(failed.clone());
+    }
+    p2_rows.push(terminal.clone());
+    write_observability_rows_for_port(&home, 7777, &p2_rows);
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%2C7777%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600&grain=day"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "provider usage body: {body}"
+    );
+    let usage = &body["provider_usage"];
+    let summary = &usage["summary"];
+    assert_eq!(summary["request_count"], 3);
+    assert_eq!(summary["failed_attempt_count"], 2);
+    assert_eq!(summary["effective_input_tokens"], 1220);
+    assert_eq!(summary["output_tokens"], 120);
+    assert_eq!(summary["reported_total_tokens"], 1320);
+    assert_eq!(summary["cache_read_tokens"], 550);
+    assert_eq!(summary["cache_write_tokens"], 20);
+    let cache_hit_rate = summary["cache_hit_rate_percent"]
+        .as_f64()
+        .expect("numeric cache hit rate");
+    assert!(
+        (cache_hit_rate - 55.0).abs() < 1e-9,
+        "cache hit rate must be 55%: {cache_hit_rate}"
+    );
+    assert_eq!(summary["usage_record_count"], 3);
+    assert_eq!(summary["cache_read_missing_count"], 2);
+    assert_eq!(summary["cache_comparable_count"], 1);
+    assert_eq!(body["records"].as_array().expect("records").len(), 3);
+    assert_eq!(body["total"], 3, "pagination only limits detail rows");
+    assert_eq!(usage["range"]["timezone"], "UTC");
+    assert_eq!(usage["range"]["grain"], "day");
+    assert_eq!(usage["range"]["resolved_from_ms"], 0);
+    assert_eq!(usage["range"]["resolved_to_ms"], 600);
+    assert_eq!(usage["coverage"]["retained_from_ms"], 100);
+    assert_eq!(usage["coverage"]["partial"], true);
+
+    let by_provider = usage["by_provider"].as_array().expect("by_provider");
+    let p1 = by_provider
+        .iter()
+        .find(|item| item["provider_id"] == "p1")
+        .expect("p1 usage");
+    let p2 = by_provider
+        .iter()
+        .find(|item| item["provider_id"] == "p2")
+        .expect("p2 usage");
+    assert_eq!(p1["request_count"], 1);
+    assert_eq!(p1["failed_attempt_count"], 1);
+    assert_eq!(p2["request_count"], 2);
+    assert_eq!(p2["failed_attempt_count"], 1);
+    assert_eq!(p2["effective_input_tokens"], 220);
+    assert_eq!(p2["reported_total_tokens"], 220);
+    assert_eq!(p2["cache_hit_rate_percent"], Value::Null);
+    assert_eq!(p2["cache_comparable_count"], 0);
+    let timeseries = usage["timeseries"].as_array().expect("timeseries");
+    assert_eq!(timeseries.len(), 1);
+    let timeseries_hit_rate = timeseries[0]["cache_hit_rate_percent"]
+        .as_f64()
+        .expect("numeric timeseries cache hit rate");
+    assert!(
+        (timeseries_hit_rate - 55.0).abs() < 1e-9,
+        "timeseries cache hit rate must be 55%: {timeseries_hit_rate}"
+    );
+
+    // Failed attempts remain detail rows. The successful logical action is
+    // separate from its two failed attempts in the unified summary.
+    let (status, attempts) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B7777%5D&view=attempts&calendar_period=custom&timezone=UTC&from=300&to=600&grain=day"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "attempts body: {attempts}");
+    assert_eq!(attempts["total"], 2);
+    assert_eq!(attempts["provider_usage"]["summary"]["request_count"], 1);
+    assert_eq!(
+        attempts["provider_usage"]["summary"]["failed_attempt_count"],
+        2
+    );
+    assert!(attempts["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .any(|row| { row["meta"]["attempt_index"] == 3 && row["meta"]["provider_id"] == "p1" }));
+    assert!(attempts["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .any(|row| { row["meta"]["attempt_index"] == 4 && row["meta"]["provider_id"] == "p2" }));
+
+    // The OR within dimensions and AND across dimensions are both observable.
+    let (status, filtered) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%2C7777%5D&provider_ids=%5B%22p2%22%5D&view=all&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "ports OR body: {filtered}");
+    assert_eq!(filtered["total"], 3);
+    assert!(filtered["records"]
+        .as_array()
+        .expect("records")
+        .iter()
+        .all(|row| row["scope"]["port"] == 7777));
+
+    // A valid empty view is distinguishishable from a read failure and from a
+    // bad natural-calendar parameter.
+    let (status, empty) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&calendar_period=custom&timezone=UTC&from=300&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "empty page body: {empty}");
+    assert_eq!(empty["total"], 0);
+    assert!(empty["records"].as_array().expect("records").is_empty());
+    assert_eq!(empty["provider_usage"]["summary"]["request_count"], 0);
+    let (status, _bad_timezone) = get_json(&format!(
+        "{base}/api/observability/records?calendar_period=day&timezone=Mars%2FOlympus"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+
+    let (read_failure_base, _read_failure_state, read_failure_home) = bind_test_server().await;
+    let read_failure_store = read_failure_home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    std::fs::create_dir_all(read_failure_store.parent().expect("logs dir")).expect("logs dir");
+    std::fs::write(&read_failure_store, "{not-json}\n").expect("malformed observability store");
+    let (status, read_failure) = get_json(&format!(
+        "{read_failure_base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::BAD_GATEWAY,
+        "read failure body: {read_failure}"
+    );
+    assert!(read_failure["error"]
+        .as_str()
+        .is_some_and(|error| !error.is_empty()));
+
+    // A single-listener request key is not globally unique.
+    let (status, p2_only) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B7777%5D&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "p2 only body: {p2_only}");
+    assert_eq!(p2_only["provider_usage"]["summary"]["request_count"], 2);
+    let (status, p1_only) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "p1 only body: {p1_only}");
+    assert_eq!(p1_only["provider_usage"]["summary"]["request_count"], 1);
+    let p1_record = &p1_only["records"][0];
+    assert_eq!(
+        p1_record["usage_normalized"]["effective_input_tokens"],
+        p1_record["usage"]["input_tokens"]
+    );
+    assert_eq!(p1_record["usage_normalized"]["cache_read_tokens"], 550);
+    assert_eq!(
+        p1_record["usage_normalized"]["cache_hit_rate_percent"],
+        Value::Null
+    );
+    let (status, legacy_inclusive) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&time_from_ms=100&time_to_ms=100"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "legacy inclusive body: {legacy_inclusive}"
+    );
+    assert_eq!(legacy_inclusive["total"], 1);
+    assert_eq!(legacy_inclusive["stats"]["count"], 1);
+    assert!(legacy_inclusive.get("provider_usage").is_none());
+
+    let (status, paged) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=1&ports=%5B4444%2C7777%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "paged body: {paged}");
+    assert_eq!(paged["records"].as_array().expect("records").len(), 1);
+    assert_eq!(paged["total"], 3, "pagination only limits detail rows");
+    assert_eq!(paged["provider_usage"]["summary"]["request_count"], 3);
+}
+
+#[tokio::test]
+async fn provider_usage_calendar_week_uses_anchor_date_and_half_open_bounds() {
+    let (base, _state, home) = bind_test_server().await;
+    // 1970-01-08 00:00 UTC is Thursday. Its week is Monday 1970-01-05
+    // (epoch day 4) through the exclusive next Monday 1970-01-12 (epoch day 11).
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "previous-thursday",
+                4444,
+                0,
+                "p1",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "monday",
+                4444,
+                4 * 86_400_000,
+                "p1",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "next-sunday",
+                4444,
+                10 * 86_400_000,
+                "p1",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+            provider_usage_success_row(
+                "next-monday",
+                4444,
+                11 * 86_400_000,
+                "p1",
+                json!({"input_tokens": 999, "output_tokens": 9, "total_tokens": 1008}),
+            ),
+        ],
+    );
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=all&calendar_period=week&timezone=UTC&anchor_date=1970-01-08&grain=day"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "week body: {body}");
+    assert_eq!(
+        body["provider_usage"]["summary"]["request_count"], 2,
+        "week body: {body}"
+    );
+    assert_eq!(body["total"], 2);
+    assert_eq!(
+        body["stats"]["count"], 2,
+        "old stats use the same natural-period bounds"
+    );
+    assert!(
+        !body["timeseries"]
+            .as_array()
+            .expect("legacy timeseries")
+            .iter()
+            .any(|bucket| {
+                bucket["date"] == "1970-01-12"
+                    || bucket["date"]
+                        .as_str()
+                        .is_some_and(|date| date > "1970-01-11")
+            }),
+        "legacy timeseries must not include the exclusive next week: {body}"
+    );
+    assert_eq!(
+        body["provider_usage"]["summary"]["effective_input_tokens"],
+        30
+    );
+    assert_eq!(
+        body["provider_usage"]["summary"]["reported_total_tokens"],
+        33
+    );
+    assert_eq!(
+        body["provider_usage"]["range"]["resolved_from_ms"],
+        4 * 86_400_000
+    );
+    assert_eq!(
+        body["provider_usage"]["range"]["resolved_to_ms"],
+        11 * 86_400_000
+    );
+
+    let (status, half_open) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=all&calendar_period=custom&timezone=UTC&from=0&to=0"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "half-open body: {half_open}"
+    );
+    assert_eq!(half_open["provider_usage"]["summary"]["request_count"], 0);
+    assert_eq!(half_open["total"], 0);
+}
+
+#[tokio::test]
+async fn provider_usage_calendar_month_is_half_open_in_the_named_timezone() {
+    let (base, _state, home) = bind_test_server().await;
+    // UTC January 2026 is [1767225600000, 1769904000000).
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "before",
+                4444,
+                1_767_225_599_999,
+                "p1",
+                json!({"input_tokens": 999, "output_tokens": 9, "total_tokens": 1008}),
+            ),
+            provider_usage_success_row(
+                "start",
+                4444,
+                1_767_225_600_000,
+                "p1",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+            provider_usage_success_row(
+                "before-end",
+                4444,
+                1_769_903_999_999,
+                "p1",
+                json!({"input_tokens": 30, "output_tokens": 3, "total_tokens": 33}),
+            ),
+            provider_usage_success_row(
+                "end",
+                4444,
+                1_769_904_000_000,
+                "p1",
+                json!({"input_tokens": 999, "output_tokens": 9, "total_tokens": 1008}),
+            ),
+        ],
+    );
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=month&timezone=UTC&anchor_date=2026-01-15&grain=day"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "month body: {body}");
+    assert_eq!(body["total"], 2);
+    assert_eq!(body["provider_usage"]["summary"]["request_count"], 2);
+    assert_eq!(
+        body["provider_usage"]["summary"]["effective_input_tokens"],
+        50
+    );
+    assert_eq!(
+        body["provider_usage"]["range"]["resolved_from_ms"],
+        1_767_225_600_000u64
+    );
+    assert_eq!(
+        body["provider_usage"]["range"]["resolved_to_ms"],
+        1_769_904_000_000u64
+    );
+}
+
+#[tokio::test]
+async fn provider_usage_dst_day_is_half_open_in_the_named_timezone() {
+    let (base, _state, home) = bind_test_server().await;
+    // America/New_York 2026-03-08 starts at 05:00Z and ends at the 2026-03-09
+    // 04:00Z local midnight. The day is 23 hours because DST starts at 02:00.
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "before",
+                4444,
+                1_772_945_999_999,
+                "p1",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "start",
+                4444,
+                1_772_946_000_000,
+                "p1",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+            provider_usage_success_row(
+                "before-end",
+                4444,
+                1_773_028_799_999,
+                "p1",
+                json!({"input_tokens": 30, "output_tokens": 3, "total_tokens": 33}),
+            ),
+            provider_usage_success_row(
+                "end",
+                4444,
+                1_773_028_800_000,
+                "p1",
+                json!({"input_tokens": 999, "output_tokens": 9, "total_tokens": 1008}),
+            ),
+        ],
+    );
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=day&timezone=America%2FNew_York&anchor_date=2026-03-08&grain=hour"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "DST body: {body}");
+    assert_eq!(body["provider_usage"]["summary"]["request_count"], 2);
+    assert_eq!(
+        body["provider_usage"]["summary"]["effective_input_tokens"],
+        50
+    );
+    assert_eq!(
+        body["provider_usage"]["range"]["resolved_from_ms"],
+        1_772_946_000_000u64
+    );
+    assert_eq!(
+        body["provider_usage"]["range"]["resolved_to_ms"],
+        1_773_028_800_000u64
+    );
+}
+
+/// The shipped usage view keeps the existing table bounds in
+/// `time_from_ms` / `time_to_ms` while also sending the new calendar query.
+/// A custom usage range must still honor those legacy parameter names.
+#[tokio::test]
+async fn provider_usage_custom_range_accepts_legacy_time_bounds() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "inside",
+                4444,
+                100,
+                "p1",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "outside",
+                4444,
+                200,
+                "p1",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+        ],
+    );
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&time_from_ms=100&time_to_ms=200&grain=day"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "usage body: {body}");
+    assert_eq!(body["total"], 1, "legacy custom bounds filter detail rows");
+    assert_eq!(body["provider_usage"]["summary"]["request_count"], 1);
+    assert_eq!(
+        body["provider_usage"]["summary"]["effective_input_tokens"],
+        10
+    );
+    assert_eq!(body["provider_usage"]["range"]["resolved_from_ms"], 100);
+    assert_eq!(body["provider_usage"]["range"]["resolved_to_ms"], 200);
+}
+
+#[tokio::test]
+async fn provider_usage_facts_remain_the_statistics_source_when_detail_is_truncated() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "retained-only",
+            4444,
+            500,
+            "p-retained",
+            json!({"input_tokens": 999, "output_tokens": 9, "total_tokens": 1008}),
+        )],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:durable-only",
+                "request_started_epoch_ms": 100,
+                "result": "success",
+                "provider_id": "p-durable",
+                "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:cache-explicit-zero",
+                "request_started_epoch_ms": 200,
+                "result": "success",
+                "provider_id": "p-cache",
+                "usage": {
+                    "input_tokens": 20,
+                    "cache_read_input_tokens": 0,
+                    "output_tokens": 2,
+                    "total_tokens": 22
+                }
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:cache-read-only",
+                "request_started_epoch_ms": 300,
+                "result": "success",
+                "provider_id": "p-cache",
+                "usage": {"cache_read_input_tokens": 100, "total_tokens": 100}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:total-only",
+                "request_started_epoch_ms": 400,
+                "result": "success",
+                "provider_id": "p-total",
+                "usage": {"total_tokens": 7}
+            }),
+        ],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 100,
+            "detail_started_epoch_ms": 500,
+            "detail_incomplete": true,
+            "gaps": ["incomplete_detail_tail"]
+        })],
+    );
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "facts body: {body}");
+    assert_eq!(body["total"], 1, "detail remains the retained row only");
+    assert_eq!(body["records"][0]["request_key"], "retained-only");
+    let summary = &body["provider_usage"]["summary"];
+    assert_eq!(summary["request_count"], 4);
+    assert_eq!(summary["effective_input_tokens"], 30);
+    assert_eq!(summary["reported_effective_input_tokens"], 30);
+    assert_eq!(summary["reported_total_tokens"], 140);
+    assert_eq!(summary["cache_read_tokens"], 100);
+    assert_eq!(summary["cache_read_missing_count"], 2);
+    assert_eq!(summary["cache_read_explicit_zero_count"], 1);
+    assert_eq!(summary["effective_input_missing_count"], 2);
+    assert_eq!(summary["cache_comparable_count"], 1);
+    assert_eq!(summary["cache_comparable_read_tokens"], 0);
+    assert_eq!(summary["cache_comparable_effective_input_tokens"], 20);
+    assert_eq!(summary["cache_hit_rate_percent"], 0.0);
+    assert_eq!(summary["usage_record_count"], 4);
+    assert_eq!(
+        body["provider_usage"]["by_provider"]
+            .as_array()
+            .expect("by provider")
+            .iter()
+            .find(|item| item["provider_id"] == "p-durable")
+            .expect("durable provider")["request_count"],
+        1
+    );
+    assert!(body["provider_usage"]["by_provider"]
+        .as_array()
+        .expect("by provider")
+        .iter()
+        .all(|item| item["provider_id"] != "p-retained"));
+    assert_eq!(
+        body["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
+    assert_eq!(
+        body["provider_usage"]["coverage"]["statistics_started_epoch_ms"],
+        100
+    );
+    assert_eq!(
+        body["provider_usage"]["coverage"]["detail_started_epoch_ms"],
+        500
+    );
+    assert_eq!(body["provider_usage"]["coverage"]["partial"], true);
+}
+
+#[tokio::test]
+async fn provider_usage_detail_start_follows_selected_scope_not_global_rows_or_pages() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "early-other-provider",
+                4444,
+                60_000,
+                "p-early",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "scope-first",
+                4444,
+                300_000,
+                "p-scope",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+            provider_usage_success_row(
+                "scope-second",
+                4444,
+                310_000,
+                "p-scope",
+                json!({"input_tokens": 30, "output_tokens": 3, "total_tokens": 33}),
+            ),
+        ],
+    );
+    write_observability_rows_for_port(
+        &home,
+        7777,
+        &[provider_usage_success_row(
+            "unrelated-listener",
+            7777,
+            6_000,
+            "p-unrelated",
+            json!({"input_tokens": 40, "output_tokens": 4, "total_tokens": 44}),
+        )],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[json!({
+            "listener_id": 4444,
+            "request_key": "4444:scope-durable",
+            "request_started_epoch_ms": 200_000,
+            "result": "success",
+            "provider_id": "p-scope",
+            "usage": {"input_tokens": 50, "output_tokens": 5, "total_tokens": 55}
+        })],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 0,
+            "detail_started_epoch_ms": 60_000,
+            "detail_incomplete": true,
+            "gaps": ["detail_rotated"]
+        })],
+    );
+    write_provider_usage_facts(
+        &home,
+        7777,
+        &[json!({
+            "listener_id": 7777,
+            "request_key": "7777:unrelated-durable",
+            "request_started_epoch_ms": 5_000,
+            "result": "success",
+            "provider_id": "p-unrelated",
+            "usage": {"input_tokens": 40, "output_tokens": 4, "total_tokens": 44}
+        })],
+        &[json!({
+            "listener_id": 7777,
+            "statistics_started_epoch_ms": 0,
+            "detail_started_epoch_ms": 6_000,
+            "detail_incomplete": false,
+            "gaps": []
+        })],
+    );
+
+    let base_query =
+        "view=requests&calendar_period=custom&timezone=UTC&from=0&to=400000&sort_order=asc";
+    let (status, port_only) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&port=4444&{base_query}"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "port body: {port_only}");
+    assert_eq!(
+        port_only["provider_usage"]["coverage"]["detail_started_epoch_ms"],
+        60_000
+    );
+    assert_eq!(
+        port_only["provider_usage"]["coverage"]["retained_from_ms"],
+        60_000
+    );
+
+    let scoped_url =
+        format!("{base}/api/observability/records?port=4444&provider_id=p-scope&{base_query}");
+    let (status, scoped_page_one) = get_json(&format!("{scoped_url}&page=1&page_size=1")).await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "scoped page one: {scoped_page_one}"
+    );
+    assert_eq!(scoped_page_one["total"], 2);
+    assert_eq!(
+        scoped_page_one["provider_usage"]["summary"]["request_count"],
+        1
+    );
+    assert_eq!(
+        scoped_page_one["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
+    assert_eq!(
+        scoped_page_one["provider_usage"]["coverage"]["detail_started_epoch_ms"],
+        300_000
+    );
+    assert_eq!(
+        scoped_page_one["provider_usage"]["coverage"]["retained_from_ms"],
+        300_000
+    );
+
+    let (status, scoped_page_two) = get_json(&format!("{scoped_url}&page=2&page_size=1")).await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "scoped page two: {scoped_page_two}"
+    );
+    assert_eq!(scoped_page_two["total"], 2);
+    assert_eq!(
+        scoped_page_two["provider_usage"]["coverage"]["detail_started_epoch_ms"], 300_000,
+        "pagination must not change coverage"
+    );
+
+    let (status, empty_window) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=1&port=4444&provider_id=p-scope&view=requests&calendar_period=custom&timezone=UTC&from=350000&to=400000"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "empty scoped window: {empty_window}"
+    );
+    assert_eq!(empty_window["total"], 0);
+    assert_eq!(
+        empty_window["provider_usage"]["coverage"]["detail_started_epoch_ms"], 300_000,
+        "the selected time window must not erase the Provider's retained detail start"
+    );
+    assert_eq!(
+        empty_window["provider_usage"]["coverage"]["retained_from_ms"],
+        300_000
+    );
+
+    let (status, absent_provider) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=1&port=4444&provider_id=p-absent&view=requests&calendar_period=custom&timezone=UTC&from=350000&to=400000"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "absent scoped provider: {absent_provider}"
+    );
+    assert_eq!(absent_provider["total"], 0);
+    assert_eq!(
+        absent_provider["provider_usage"]["coverage"]["detail_started_epoch_ms"],
+        Value::Null,
+        "an absent Provider/port intersection has no observed retained detail"
+    );
+    assert_eq!(
+        absent_provider["provider_usage"]["coverage"]["retained_from_ms"],
+        Value::Null
+    );
+}
+
+#[tokio::test]
+async fn provider_usage_terminal_error_counts_once_and_usage_stays_success_only() {
+    let (base, _state, home) = bind_test_server().await;
+    let mut rows = Vec::with_capacity(222);
+    let mut facts = Vec::with_capacity(222);
+
+    for index in 0..221 {
+        let started = index as u64 * 1_000;
+        let usage = json!({
+            "input_tokens": 10,
+            "output_tokens": 1,
+            "total_tokens": 11
+        });
+        rows.push(provider_usage_success_row(
+            &format!("success-{index}"),
+            4444,
+            started,
+            "p-success",
+            usage.clone(),
+        ));
+        facts.push(json!({
+            "listener_id": 4444,
+            "request_key": format!("4444:success-{index}"),
+            "request_started_epoch_ms": started,
+            "result": "success",
+            "provider_id": "p-success",
+            "usage": usage
+        }));
+    }
+
+    let terminal_error = json!({
+        "request_key": "terminal-error",
+        "event_type": "request.failed",
+        "started_epoch_ms": 222_000,
+        "updated_epoch_ms": 222_100,
+        "finished_epoch_ms": 222_100,
+        "duration_ms": 100,
+        "meta": {
+            "request_id": "terminal-error",
+            "endpoint": "/v1/responses",
+            "entry_protocol": "responses",
+            "provider": "p-failed",
+            "provider_id": "p-failed",
+            "model": "m1",
+            "error_category": "provider_transport_error",
+            "error_detail": "provider response ended without a business result"
+        },
+        "scope": {"port": 4444},
+        "result": "error",
+        "attempts": 1,
+        "failed_attempts": 0,
+        "switches": 0,
+        "usage": {"input_tokens": 999, "output_tokens": 99, "total_tokens": 1098}
+    });
+    rows.push(terminal_error);
+    facts.push(json!({
+        "listener_id": 4444,
+        "request_key": "4444:terminal-error",
+        "request_started_epoch_ms": 222_000,
+        "result": "error",
+        "provider_id": "p-failed"
+    }));
+    write_observability_rows_for_port(&home, 4444, &rows);
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &facts,
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 0,
+            "detail_started_epoch_ms": 0,
+            "detail_incomplete": false,
+            "gaps": []
+        })],
+    );
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=300&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=223000"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "ledger body: {body}");
+    assert_eq!(body["total"], 222, "every logical request must be visible");
+    let summary = &body["provider_usage"]["summary"];
+    assert_eq!(summary["request_count"], 222);
+    assert_eq!(summary["failed_attempt_count"], 0);
+    assert_eq!(summary["usage_record_count"], 221);
+    assert_eq!(summary["effective_input_tokens"], 2_210);
+    assert_eq!(summary["reported_total_tokens"], 2_431);
+    assert_eq!(
+        summary["cache_read_missing_count"], 221,
+        "failed usage is never counted as successful usage"
+    );
+    let failed = body["provider_usage"]["by_provider"]
+        .as_array()
+        .expect("by provider")
+        .iter()
+        .find(|item| item["provider_id"] == "p-failed")
+        .expect("failed terminal provider");
+    assert_eq!(failed["request_count"], 1);
+    assert_eq!(failed["usage_record_count"], 0);
+    assert_eq!(failed["effective_input_tokens"], 0);
+    assert_eq!(failed["reported_total_tokens"], Value::Null);
+}
+
+#[tokio::test]
+async fn provider_usage_cache_comparability_and_total_only_usage_are_explicit() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "detail-anchor",
+            4444,
+            10,
+            "p-retained",
+            json!({"input_tokens": 999, "output_tokens": 99, "total_tokens": 1098}),
+        )],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:comparable",
+                "request_started_epoch_ms": 100,
+                "result": "success",
+                "provider_id": "p1",
+                "usage": {
+                    "input_tokens": 100,
+                    "input_tokens_details": {"cached_tokens": 40},
+                    "total_tokens": 140
+                }
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:cache-zero",
+                "request_started_epoch_ms": 200,
+                "result": "success",
+                "provider_id": "p1",
+                "usage": {
+                    "input_tokens": 50,
+                    "cache_read_input_tokens": 0,
+                    "total_tokens": 50
+                }
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:cache-without-input",
+                "request_started_epoch_ms": 300,
+                "result": "success",
+                "provider_id": "p1",
+                "usage": {
+                    "input_tokens_details": {"cached_tokens": 30},
+                    "total_tokens": 30
+                }
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:no-cache",
+                "request_started_epoch_ms": 400,
+                "result": "success",
+                "provider_id": "p1",
+                "usage": {"input_tokens": 10, "total_tokens": 11}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:total-only",
+                "request_started_epoch_ms": 500,
+                "result": "success",
+                "provider_id": "p1",
+                "usage": {"total_tokens": 7}
+            }),
+        ],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 0,
+            "detail_started_epoch_ms": 0,
+            "detail_incomplete": false,
+            "gaps": []
+        })],
+    );
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=1000"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "cache accounting body: {body}"
+    );
+    let summary = &body["provider_usage"]["summary"];
+    assert_eq!(summary["request_count"], 5);
+    assert_eq!(summary["usage_record_count"], 5);
+    assert_eq!(summary["effective_input_tokens"], 160);
+    assert_eq!(summary["reported_effective_input_tokens"], 160);
+    assert_eq!(summary["reported_total_tokens"], 238);
+    assert_eq!(summary["cache_read_tokens"], 70);
+    assert_eq!(summary["cache_read_missing_count"], 2);
+    assert_eq!(summary["cache_read_explicit_zero_count"], 1);
+    assert_eq!(summary["effective_input_missing_count"], 2);
+    assert_eq!(summary["cache_comparable_count"], 2);
+    assert_eq!(summary["cache_comparable_read_tokens"], 40);
+    assert_eq!(summary["cache_comparable_effective_input_tokens"], 150);
+    let hit_rate = summary["cache_hit_rate_percent"]
+        .as_f64()
+        .expect("numeric cache hit rate");
+    assert!(
+        (hit_rate - (80.0 / 3.0)).abs() < 1e-9,
+        "only comparable records enter the hit-rate denominator: {hit_rate}"
+    );
+    assert_eq!(
+        body["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
+}
+
+#[tokio::test]
+async fn provider_usage_separates_terminal_cancel_unattributed_active_and_attempts() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "retained-anchor",
+            4444,
+            10,
+            "p-retained",
+            json!({"input_tokens": 999, "output_tokens": 99, "total_tokens": 1098}),
+        )],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:success",
+                "request_started_epoch_ms": 100,
+                "result": "success",
+                "provider_id": "p-success",
+                "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:terminal-error",
+                "request_started_epoch_ms": 200,
+                "result": "error",
+                "provider_id": "p-error",
+                "usage": {"input_tokens": 200, "output_tokens": 20, "total_tokens": 220}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:cancelled",
+                "request_started_epoch_ms": 300,
+                "result": "cancelled",
+                "provider_id": "p-cancel",
+                "usage": {"input_tokens": 300, "output_tokens": 30, "total_tokens": 330}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:unattributed-error",
+                "request_started_epoch_ms": 400,
+                "result": "error",
+                "usage": {"input_tokens": 400, "output_tokens": 40, "total_tokens": 440}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:active",
+                "request_started_epoch_ms": 500,
+                "result": "active",
+                "provider_id": "p-active",
+                "usage": {"input_tokens": 500, "output_tokens": 50, "total_tokens": 550}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:retry",
+                "attempt_ordinal": 1,
+                "request_started_epoch_ms": 600,
+                "result": "failed_attempt",
+                "provider_id": "p-fail"
+            }),
+        ],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 0,
+            "detail_started_epoch_ms": 0,
+            "detail_incomplete": false,
+            "gaps": []
+        })],
+    );
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=1000"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "terminal status body: {body}"
+    );
+    let summary = &body["provider_usage"]["summary"];
+    assert_eq!(summary["request_count"], 4);
+    assert_eq!(summary["success_count"], 1);
+    assert_eq!(summary["error_count"], 2);
+    assert_eq!(summary["cancelled_count"], 1);
+    assert_eq!(summary["active_count"], 1);
+    assert_eq!(summary["unattributed_request_count"], 1);
+    assert_eq!(summary["failed_attempt_count"], 1);
+    assert_eq!(summary["usage_record_count"], 1);
+    assert_eq!(summary["effective_input_tokens"], 10);
+    assert_eq!(summary["reported_total_tokens"], 11);
+
+    let providers = body["provider_usage"]["by_provider"]
+        .as_array()
+        .expect("by provider");
+    let provider = |id: &str| {
+        providers
+            .iter()
+            .find(|item| item["provider_id"] == id)
+            .unwrap_or_else(|| panic!("provider {id}: {providers:?}"))
+    };
+    assert_eq!(provider("p-error")["request_count"], 1);
+    assert_eq!(provider("p-cancel")["cancelled_count"], 1);
+    assert_eq!(provider("p-active")["request_count"], 0);
+    assert_eq!(provider("p-active")["active_count"], 1);
+    assert_eq!(provider("p-fail")["request_count"], 0);
+    assert_eq!(provider("p-fail")["failed_attempt_count"], 1);
+    assert_eq!(provider("p-success")["usage_record_count"], 1);
+    let unattributed = providers
+        .iter()
+        .find(|item| item["provider_id"].is_null())
+        .expect("unattributed provider bucket");
+    assert_eq!(unattributed["request_count"], 1);
+    assert_eq!(unattributed["error_count"], 1);
+    assert_eq!(unattributed["unattributed_request_count"], 1);
+    assert_eq!(unattributed["usage_record_count"], 0);
+    assert_eq!(unattributed["effective_input_tokens"], 0);
+}
+
+#[tokio::test]
+async fn provider_usage_ports_limit_fact_reads_and_isolate_corruption() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "port-4444",
+            4444,
+            100,
+            "p1",
+            json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+        )],
+    );
+    write_observability_rows_for_port(
+        &home,
+        7777,
+        &[provider_usage_success_row(
+            "port-7777",
+            7777,
+            100,
+            "p2",
+            json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+        )],
+    );
+    let corrupt_store = home
+        .join("logs")
+        .join("server-v3-7777.request-records.jsonl");
+    std::fs::create_dir_all(routecodex_v3_debug::v3_provider_usage_facts_path(
+        &corrupt_store,
+    ))
+    .expect("unreadable unused listener facts");
+
+    let (status, selected) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=200"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "selected ports: {selected}"
+    );
+    assert_eq!(selected["provider_usage"]["summary"]["request_count"], 1);
+    assert_eq!(
+        selected["provider_usage"]["by_provider"][0]["provider_id"],
+        "p1"
+    );
+
+    let (status, all_ports) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%2C7777%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=200"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::BAD_GATEWAY,
+        "selected corrupt facts must fail explicitly: {all_ports}"
+    );
+    assert!(all_ports["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("listener 7777")));
+
+    let (status, legacy) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&time_from_ms=0&time_to_ms=200"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "legacy records: {legacy}");
+    assert_eq!(
+        legacy["total"], 2,
+        "legacy query keeps both retained listeners"
+    );
+    assert!(
+        legacy.get("provider_usage").is_none(),
+        "legacy shape must not read or return provider usage: {legacy}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn provider_usage_fact_read_does_not_block_legacy_records() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "retained",
+            4444,
+            100,
+            "p-retained",
+            json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+        )],
+    );
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    let facts_path = routecodex_v3_debug::v3_provider_usage_facts_path(&store_path);
+    let fifo = std::process::Command::new("mkfifo")
+        .arg(&facts_path)
+        .status()
+        .expect("run mkfifo");
+    assert!(fifo.success(), "mkfifo must create the fact-read blocker");
+
+    let usage_url = format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=200"
+    );
+    let usage_task = tokio::spawn(async move { get_json(&usage_url).await });
+    let writer_path = facts_path.clone();
+    let writer_task = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::task::spawn_blocking(move || {
+            let fact = json!({
+                "schema_version": 1,
+                "fact": {
+                    "listener_id": 4444,
+                    "request_key": "4444:fifo",
+                    "request_started_epoch_ms": 100,
+                    "result": "success",
+                    "provider_id": "p-fact",
+                    "usage": {
+                        "input_tokens": 20,
+                        "output_tokens": 2,
+                        "total_tokens": 22
+                    }
+                }
+            });
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&writer_path)
+                .expect("open usage facts fifo");
+            writeln!(file, "{fact}").expect("write usage fact");
+        })
+        .await
+        .expect("write task");
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let legacy_url = format!("{base}/api/observability/records?page=1&page_size=10");
+    let (status, legacy) =
+        tokio::time::timeout(std::time::Duration::from_millis(700), get_json(&legacy_url))
+            .await
+            .expect("legacy records must not wait for the blocked provider-usage fact read");
+    assert_eq!(status, reqwest::StatusCode::OK, "legacy body: {legacy}");
+    assert_eq!(legacy["total"], 1);
+    assert!(legacy.get("provider_usage").is_none());
+
+    writer_task.await.expect("writer task");
+    let (status, usage) = usage_task.await.expect("usage request");
+    assert_eq!(status, reqwest::StatusCode::OK, "usage body: {usage}");
+    assert_eq!(usage["provider_usage"]["summary"]["request_count"], 1);
+    assert_eq!(
+        usage["provider_usage"]["by_provider"][0]["provider_id"],
+        "p-fact"
+    );
+}
+
+#[tokio::test]
+async fn provider_usage_missing_fact_listener_is_explicit() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "available-port",
+            4444,
+            100,
+            "p1",
+            json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+        )],
+    );
+    write_observability_rows_for_port(
+        &home,
+        7777,
+        &[provider_usage_success_row(
+            "missing-facts-port",
+            7777,
+            100,
+            "p2",
+            json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+        )],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[json!({
+            "listener_id": 4444,
+            "request_key": "4444:available-port",
+            "request_started_epoch_ms": 100,
+            "result": "success",
+            "provider_id": "p1",
+            "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}
+        })],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 100,
+            "detail_started_epoch_ms": 100,
+            "detail_incomplete": false,
+            "gaps": []
+        })],
+    );
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%2C7777%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=200"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "mixed available/missing facts must remain queryable: {body}"
+    );
+    assert_eq!(body["total"], 2, "retained detail keeps both listeners");
+    assert_eq!(body["provider_usage"]["summary"]["request_count"], 1);
+    assert_eq!(
+        body["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
+    assert_eq!(body["provider_usage"]["coverage"]["complete"], false);
+    assert_eq!(body["provider_usage"]["coverage"]["partial"], true);
+    let listeners = body["provider_usage"]["coverage"]["listeners"]
+        .as_array()
+        .expect("listener coverage");
+    let available = listeners
+        .iter()
+        .find(|listener| listener["listener_id"] == 4444)
+        .expect("available listener coverage");
+    assert_eq!(available["statistics_started_epoch_ms"], 100);
+    assert_eq!(available["detail_incomplete"], false);
+    let missing = listeners
+        .iter()
+        .find(|listener| listener["listener_id"] == 7777)
+        .expect("missing listener coverage");
+    assert_eq!(missing["statistics_started_epoch_ms"], Value::Null);
+    assert_eq!(missing["detail_started_epoch_ms"], Value::Null);
+    assert_eq!(missing["detail_incomplete"], true);
+    assert!(missing["gaps"]
+        .as_array()
+        .expect("missing listener gaps")
+        .contains(&json!("provider_usage_facts_unavailable")));
+
+    let (status, legacy) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&time_from_ms=0&time_to_ms=200"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "legacy records: {legacy}");
+    assert_eq!(legacy["total"], 2);
+    assert!(legacy.get("provider_usage").is_none());
+}
+
+#[tokio::test]
+async fn provider_usage_retained_scope_is_explicit_for_detail_only_filter() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "durable-and-retained",
+                4444,
+                100,
+                "p1",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "detail-error",
+                4444,
+                200,
+                "p2",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+        ],
+    );
+    let store_path = home
+        .join("logs")
+        .join("server-v3-4444.request-records.jsonl");
+    std::fs::create_dir_all(routecodex_v3_debug::v3_provider_usage_facts_path(
+        &store_path,
+    ))
+    .expect("unreadable unused durable facts");
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&status=error&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "detail-only filters must not read durable facts: {body}"
+    );
+    assert_eq!(
+        body["provider_usage"]["coverage"]["source"],
+        "retained_detail"
+    );
+    assert_eq!(body["provider_usage"]["coverage"]["complete"], false);
+}
+
+#[tokio::test]
+async fn provider_usage_absent_fact_listener_declares_retained_scope() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[provider_usage_success_row(
+            "retained-only",
+            4444,
+            100,
+            "p-retained",
+            json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+        )],
+    );
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "no-facts listener body: {body}"
+    );
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["provider_usage"]["summary"]["request_count"], 1);
+    assert_eq!(body["provider_usage"]["summary"]["usage_record_count"], 1);
+    assert_eq!(
+        body["provider_usage"]["coverage"]["source"],
+        "retained_detail"
+    );
+    assert_eq!(
+        body["provider_usage"]["coverage"]["detail_started_epoch_ms"],
+        100
+    );
+    assert_eq!(body["provider_usage"]["coverage"]["partial"], true);
+    let listener = &body["provider_usage"]["coverage"]["listeners"][0];
+    assert_eq!(listener["listener_id"], 4444);
+    assert_eq!(listener["statistics_started_epoch_ms"], 100);
+    assert_eq!(listener["detail_incomplete"], false);
+    assert!(listener["gaps"]
+        .as_array()
+        .expect("listener gaps")
+        .contains(&json!("retained_scope_only")));
+}
+
+#[tokio::test]
+async fn provider_usage_sticky_capacity_keeps_saved_facts_and_only_affects_its_listener() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "affected-retained",
+                4444,
+                150,
+                "p-affected",
+                json!({"input_tokens": 900, "output_tokens": 90, "total_tokens": 990}),
+            ),
+            provider_usage_success_row(
+                "affected-rejected",
+                4444,
+                175,
+                "p-affected",
+                json!({"input_tokens": 800, "output_tokens": 80, "total_tokens": 880}),
+            ),
+        ],
+    );
+    write_observability_rows_for_port(
+        &home,
+        7777,
+        &[provider_usage_success_row(
+            "complete-retained",
+            7777,
+            250,
+            "p-complete",
+            json!({"input_tokens": 200, "output_tokens": 20, "total_tokens": 220}),
+        )],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[json!({
+            "listener_id": 4444,
+            "request_key": "4444:affected-saved",
+            "request_started_epoch_ms": 100,
+            "result": "success",
+            "provider_id": "p-affected",
+            "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}
+        })],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 100,
+            "detail_started_epoch_ms": 100,
+            "detail_incomplete": true,
+            "gaps": ["provider_usage_fact_capacity_keys"]
+        })],
+    );
+    write_provider_usage_facts(
+        &home,
+        7777,
+        &[json!({
+            "listener_id": 7777,
+            "request_key": "7777:complete-saved",
+            "request_started_epoch_ms": 200,
+            "result": "success",
+            "provider_id": "p-complete",
+            "usage": {"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}
+        })],
+        &[json!({
+            "listener_id": 7777,
+            "statistics_started_epoch_ms": 200,
+            "detail_started_epoch_ms": 200,
+            "detail_incomplete": false,
+            "gaps": []
+        })],
+    );
+
+    let (status, body) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%2C7777%5D&view=requests&calendar_period=custom&timezone=UTC&from=100&to=400"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "capacity body: {body}");
+    let usage = &body["provider_usage"];
+    assert_eq!(usage["coverage"]["source"], "durable_facts");
+    assert_eq!(usage["coverage"]["complete"], false);
+    assert_eq!(usage["coverage"]["partial"], true);
+    assert_eq!(usage["summary"]["request_count"], 2);
+    assert_eq!(usage["summary"]["effective_input_tokens"], 120);
+    assert_eq!(usage["summary"]["output_tokens"], 12);
+    assert_eq!(usage["summary"]["reported_total_tokens"], 132);
+    assert!(usage["by_provider"]
+        .as_array()
+        .expect("by provider")
+        .iter()
+        .all(|provider| provider["provider_id"] != "p-retained"));
+
+    let listeners = usage["coverage"]["listeners"]
+        .as_array()
+        .expect("listener coverage");
+    let affected = listeners
+        .iter()
+        .find(|listener| listener["listener_id"] == 4444)
+        .expect("affected listener coverage");
+    assert_eq!(affected["statistics_started_epoch_ms"], 100);
+    assert_eq!(affected["detail_incomplete"], true);
+    assert!(affected["gaps"]
+        .as_array()
+        .expect("affected gaps")
+        .contains(&json!("provider_usage_fact_capacity_keys")));
+    let unaffected = listeners
+        .iter()
+        .find(|listener| listener["listener_id"] == 7777)
+        .expect("unaffected listener coverage");
+    assert_eq!(unaffected["detail_incomplete"], false);
+    assert_eq!(unaffected["gaps"], json!([]));
+
+    let (status, affected_query) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&port=4444&provider_id=p-affected&view=requests&calendar_period=custom&timezone=UTC&from=100&to=400"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "affected exact query: {affected_query}"
+    );
+    assert_eq!(
+        affected_query["provider_usage"]["summary"]["request_count"],
+        1
+    );
+    assert_eq!(
+        affected_query["provider_usage"]["summary"]["effective_input_tokens"],
+        100
+    );
+    assert_eq!(
+        affected_query["provider_usage"]["summary"]["reported_total_tokens"],
+        110
+    );
+    assert_eq!(
+        affected_query["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
+    assert_eq!(
+        affected_query["provider_usage"]["coverage"]["partial"],
+        true
+    );
+
+    let (status, unaffected_query) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&port=7777&provider_id=p-complete&view=requests&calendar_period=custom&timezone=UTC&from=200&to=400"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "unaffected exact query: {unaffected_query}"
+    );
+    assert_eq!(
+        unaffected_query["provider_usage"]["summary"]["request_count"],
+        1
+    );
+    assert_eq!(
+        unaffected_query["provider_usage"]["summary"]["effective_input_tokens"],
+        20
+    );
+    assert_eq!(
+        unaffected_query["provider_usage"]["coverage"]["complete"],
+        true
+    );
+    assert_eq!(
+        unaffected_query["provider_usage"]["coverage"]["listeners"][0]["detail_incomplete"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn provider_usage_exact_ids_and_retained_scope_are_explicit() {
+    let (base, _state, home) = bind_test_server().await;
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[
+            provider_usage_success_row(
+                "retained-p1",
+                4444,
+                100,
+                "p1",
+                json!({"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}),
+            ),
+            provider_usage_success_row(
+                "retained-p10",
+                4444,
+                200,
+                "p10",
+                json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+            ),
+        ],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:durable-p1",
+                "request_started_epoch_ms": 100,
+                "result": "success",
+                "provider_id": "p1",
+                "usage": {"input_tokens": 10, "output_tokens": 1, "total_tokens": 11}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:durable-p10",
+                "request_started_epoch_ms": 200,
+                "result": "success",
+                "provider_id": "p10",
+                "usage": {"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}
+            }),
+        ],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 100,
+            "detail_started_epoch_ms": 100,
+            "detail_incomplete": true,
+            "gaps": ["retained_detail_available"]
+        })],
+    );
+    let (status, exact_provider) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B4444%5D&provider_ids=%5B%22p1%22%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "provider body: {exact_provider}"
+    );
+    assert_eq!(exact_provider["total"], 1);
+    assert_eq!(
+        exact_provider["provider_usage"]["summary"]["request_count"], 1,
+        "provider IDs match exactly and p1 must not select p10"
+    );
+    assert_eq!(
+        exact_provider["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
+
+    let (status, exact_ports) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&ports=%5B444%5D&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(exact_ports["provider_usage"]["summary"]["request_count"], 0);
+    assert_eq!(exact_ports["provider_usage"]["by_provider"], json!([]));
+}
+
+#[tokio::test]
+async fn provider_usage_legacy_display_identity_stays_retained_and_intersects_exact_id() {
+    let (base, _state, home) = bind_test_server().await;
+    let mut display_id_a = provider_usage_success_row(
+        "display-id-a",
+        4444,
+        100,
+        "id-a",
+        json!({"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}),
+    );
+    display_id_a["meta"]["provider"] = json!("Display Provider");
+    let mut display_id_b = provider_usage_success_row(
+        "display-id-b",
+        4444,
+        200,
+        "id-b",
+        json!({"input_tokens": 20, "output_tokens": 2, "total_tokens": 22}),
+    );
+    display_id_b["meta"]["provider"] = json!("Display Provider");
+    let mut other_id_a = provider_usage_success_row(
+        "other-id-a",
+        4444,
+        300,
+        "id-a",
+        json!({"input_tokens": 30, "output_tokens": 3, "total_tokens": 33}),
+    );
+    other_id_a["meta"]["provider"] = json!("Other Provider");
+    let mut other_id_b = provider_usage_success_row(
+        "other-id-b",
+        4444,
+        400,
+        "id-b",
+        json!({"input_tokens": 40, "output_tokens": 4, "total_tokens": 44}),
+    );
+    other_id_b["meta"]["provider"] = json!("Other Provider");
+    write_observability_rows_for_port(
+        &home,
+        4444,
+        &[display_id_a, display_id_b, other_id_a, other_id_b],
+    );
+    write_provider_usage_facts(
+        &home,
+        4444,
+        &[
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:display-id-a",
+                "request_started_epoch_ms": 100,
+                "result": "success",
+                "provider_id": "id-a",
+                "usage": {"input_tokens": 101, "output_tokens": 11, "total_tokens": 112}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:display-id-b",
+                "request_started_epoch_ms": 200,
+                "result": "success",
+                "provider_id": "id-b",
+                "usage": {"input_tokens": 21, "output_tokens": 2, "total_tokens": 23}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:other-id-a",
+                "request_started_epoch_ms": 300,
+                "result": "success",
+                "provider_id": "id-a",
+                "usage": {"input_tokens": 31, "output_tokens": 3, "total_tokens": 34}
+            }),
+            json!({
+                "listener_id": 4444,
+                "request_key": "4444:other-id-b",
+                "request_started_epoch_ms": 400,
+                "result": "success",
+                "provider_id": "id-b",
+                "usage": {"input_tokens": 41, "output_tokens": 4, "total_tokens": 45}
+            }),
+        ],
+        &[json!({
+            "listener_id": 4444,
+            "statistics_started_epoch_ms": 100,
+            "detail_started_epoch_ms": 100,
+            "detail_incomplete": true,
+            "gaps": ["retained_detail_available"]
+        })],
+    );
+
+    let (status, legacy) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&provider=Display%20Provider&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600&grain=day"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "legacy body: {legacy}");
+    let legacy_keys: Vec<&str> = legacy["records"]
+        .as_array()
+        .expect("legacy records")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request key"))
+        .collect();
+    assert_eq!(legacy_keys, vec!["display-id-b", "display-id-a"]);
+    assert_eq!(legacy["total"], 2);
+    assert_eq!(legacy["records"][0]["meta"]["provider"], "Display Provider");
+    assert_eq!(legacy["records"][0]["meta"]["provider_id"], "id-b");
+    let legacy_usage = &legacy["provider_usage"];
+    assert_eq!(legacy_usage["summary"]["request_count"], 2);
+    assert_eq!(legacy_usage["summary"]["effective_input_tokens"], 120);
+    assert_eq!(legacy_usage["summary"]["output_tokens"], 12);
+    assert_eq!(legacy_usage["summary"]["reported_total_tokens"], 132);
+    assert_eq!(legacy_usage["timeseries"][0]["request_count"], 2);
+    assert_eq!(legacy_usage["timeseries"][0]["effective_input_tokens"], 120);
+    assert_eq!(legacy_usage["coverage"]["source"], "retained_detail");
+    assert_eq!(legacy_usage["coverage"]["complete"], false);
+    assert_eq!(legacy_usage["coverage"]["partial"], true);
+    assert!(legacy_usage["coverage"]["listeners"][0]["gaps"]
+        .as_array()
+        .expect("legacy listener gaps")
+        .contains(&json!("retained_scope_only")));
+
+    let (status, intersected) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&provider=Display%20Provider&provider_id=id-a&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600&grain=day"
+    ))
+    .await;
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "intersection body: {intersected}"
+    );
+    assert_eq!(intersected["total"], 1);
+    assert_eq!(intersected["records"][0]["request_key"], "display-id-a");
+    assert_eq!(
+        intersected["provider_usage"]["summary"]["effective_input_tokens"],
+        100
+    );
+    assert_eq!(
+        intersected["provider_usage"]["coverage"]["source"],
+        "retained_detail"
+    );
+
+    let (status, exact_id) = get_json(&format!(
+        "{base}/api/observability/records?page=1&page_size=10&provider_id=id-a&view=requests&calendar_period=custom&timezone=UTC&from=0&to=600&grain=day"
+    ))
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK, "exact body: {exact_id}");
+    assert_eq!(exact_id["total"], 2);
+    let exact_keys: Vec<&str> = exact_id["records"]
+        .as_array()
+        .expect("exact records")
+        .iter()
+        .map(|row| row["request_key"].as_str().expect("request key"))
+        .collect();
+    assert_eq!(exact_keys, vec!["other-id-a", "display-id-a"]);
+    assert_eq!(
+        exact_id["provider_usage"]["summary"]["effective_input_tokens"],
+        132
+    );
+    assert_eq!(exact_id["provider_usage"]["summary"]["output_tokens"], 14);
+    assert_eq!(
+        exact_id["provider_usage"]["summary"]["reported_total_tokens"],
+        146
+    );
+    assert_eq!(
+        exact_id["provider_usage"]["coverage"]["source"],
+        "durable_facts"
+    );
 }
 
 /// Local request conversion failure and real upstream HTTP 400 must stay

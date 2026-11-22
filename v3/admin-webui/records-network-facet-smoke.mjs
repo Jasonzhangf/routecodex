@@ -27,7 +27,8 @@ function region(source, from, to) {
 }
 
 const values = {
-  "chart-range": "all", "sort-field": "started_epoch_ms", "sort-order": "desc",
+  "calendar-period": "all", "chart-grain": "day", "timezone": "UTC",
+  "calendar-anchor": "", "sort-field": "started_epoch_ms", "sort-order": "desc",
   "port-filter": "all", "provider-filter": "all", "model-filter": "all",
   "endpoint-filter": "all", "route-filter": "", "protocol-filter": "all",
   "mode-filter": "all", "search-filter": "",
@@ -37,14 +38,21 @@ const requests = [];
 const errors = [];
 const state = {
   page: 1, pageSize: 100, attemptsPage: 1, sortMode: "time", port: "all",
+  queryEpoch: 0, providerUsage: [], providerUsageSummary: {}, providerUsageRange: null,
+  providerUsageCoverage: null, providerUsageError: null,
   timeFrom: null, timeTo: null, errorStatusCode: null, errorOrigin: null,
   statusKinds: new Set(), providerSel: new Set(), modelSel: new Set(),
 };
+const providerUsageErrors = [];
+function renderProviderUsage() {
+  providerUsageErrors.push(state.providerUsageError);
+}
 const context = vm.createContext({
   state, URLSearchParams, Date,
   document: { getElementById: (id) => elements[id] },
   // Stub rendering only. Every API request executes served core.api and HTTP.
   renderAll() {},
+  renderProviderUsage,
   showStatus: (_kind, message) => errors.push(message),
   fetch: async (path, options) => {
     const response = await fetch(new URL(path, base), options);
@@ -55,17 +63,27 @@ const context = vm.createContext({
 });
 vm.runInContext("let adminToken = null;\n" +
   region(core, "export async function api(", "export function el(").replace(/^export /, "") +
-  region(view, "function activePlans()", "async function load()") +
+  region(view, "// Latest-wins loading", "async function load()") +
   region(view, "function drilldownErrorStatus(", "// ---------- error-detail modal"), context);
 
 await context.loadRecords();
 await context.loadRecords();
 const networkQueries = requests.filter((r) => new URL(r.path, base).searchParams.get("error_status_code") === "network");
 console.log(JSON.stringify({ networkQueries, sample: state.errorExamples?.["network|local"] }));
+const requestViews = requests.filter((r) => {
+  const params = new URL(r.path, base).searchParams;
+  return params.get("view") === "requests" && params.get("page_size") === "100";
+});
+assert.equal(requestViews.length, 2, "both entry-table loads must use the requests view");
+assert.ok(requestViews.every((r) => new URL(r.path, base).searchParams.get("calendar_period") === "all"));
+assert.ok(requestViews.every((r) => new URL(r.path, base).searchParams.get("timezone") === "UTC"));
+assert.ok(requestViews.every((r) => new URL(r.path, base).searchParams.get("grain") === "day"));
+assert.ok(requests.some((r) => new URL(r.path, base).searchParams.get("view") === "attempts"));
+assert.equal(state.providerUsageError, null, "provider usage must be consumed from the records response");
 assert.equal(networkQueries.length, 2, "both loads must request the backend's network/local facet");
 assert.ok(networkQueries.every((r) => r.status === 200), "actual loadErrors network query must succeed");
 assert.ok(networkQueries.every((r) => new URL(r.path, base).searchParams.get("error_origin") === "local"));
-assert.equal(state.errorExamples["network|local"], "provider attempt transport failed");
+assert.equal(state.errorExamples["network|local"], "provider transport failed before a response");
 assert.equal(state.attemptRecords.length, 1);
 assert.equal(state.attemptRecords[0].request_key, "4444:attempt-network");
 assert.deepEqual(errors, []);
@@ -78,9 +96,13 @@ context.drilldownErrorStatus("network", "local");
 await reload;
 assert.equal(state.errorStatusCode, "network");
 assert.equal(state.errorOrigin, "local");
-assert.equal(state.total, 2);
+assert.equal(state.total, 1);
 assert.deepEqual(Array.from(state.records, (row) => row.request_key), [
-  "4444:attempt-network", "4444:terminal-network",
+  "4444:terminal-network",
+]);
+assert.equal(state.attemptsTotal, 1);
+assert.deepEqual(Array.from(state.attemptRecords, (row) => row.request_key), [
+  "4444:attempt-network",
 ]);
 assert.deepEqual(errors, []);
 console.log("records-network-facet smoke passed");
