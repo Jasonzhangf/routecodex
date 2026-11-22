@@ -8,7 +8,7 @@ use routecodex_v3_error::{
 use routecodex_v3_provider_responses::V3ProviderRecoveryKind;
 
 #[test]
-fn classified_global_429_counts_to_ten_and_auth_is_immediate() {
+fn classified_global_429_burst_expires_and_auth_is_immediate() {
     let mut manifest = global_pool_alive_manifest("global_status_policy_classified");
     for group in manifest.route_groups.values_mut() {
         for pool in group.pools.values_mut() {
@@ -47,23 +47,37 @@ fn classified_global_429_counts_to_ten_and_auth_is_immediate() {
         assert_eq!(
             available,
             attempt < 10,
-            "real 429 must cool only on the tenth consecutive observation"
+            "the tenth 429 in a burst must start the short cooldown"
         );
     }
     assert!(
         recoverable_health
             .store()
-            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 140_000,)
+            .availability_for_session(&scope, "first", Some("key2"), Some("gpt-test"), 10_011)
             .available
     );
     let recovered_by_business = recoverable_health
         .store()
-        .record_provider_key_success("first", "key1", "gpt-test", 140_001)
+        .record_provider_key_success("first", "key1", "gpt-test", 10_011)
         .expect("business success receipt");
     assert_eq!(recovered_by_business.failure_streak, 0);
     assert!(
         !recovered_by_business.available,
-        "business success must reset the streak without shortening the committed cooldown"
+        "business success must reset the streak without shortening the short cooldown"
+    );
+    assert!(
+        !recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 25_009)
+            .available,
+        "the identity stays cooled until 15 seconds after the tenth observation"
+    );
+    assert!(
+        recoverable_health
+            .store()
+            .availability_for_session(&scope, "first", Some("key1"), Some("gpt-test"), 25_010)
+            .available,
+        "the short cooldown expires without a recovery probe"
     );
 
     let unrecoverable_health = V3ProviderFailureRuntimeHealth::from_manifest(&manifest);

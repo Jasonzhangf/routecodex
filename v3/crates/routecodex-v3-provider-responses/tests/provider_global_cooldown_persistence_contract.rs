@@ -506,8 +506,12 @@ fn assert_persisted_429_recovery(advisory: bool) {
             .record_provider_failure_action("p", "k", "m", &action, time)
             .unwrap();
     }
+    let tenth = store
+        .record_provider_failure_action("p", "k", "m", &action, 120_101)
+        .unwrap();
+    assert!(tenth.available);
     let committed = store
-        .record_provider_failure_action("p", "k", "m", &action, 109)
+        .record_provider_failure_action("p", "k", "m", &action, 120_102)
         .unwrap();
     assert!(committed.cooldown);
     // An active physical acquisition is deliberately abandoned across restart.
@@ -527,7 +531,7 @@ fn assert_persisted_429_recovery(advisory: bool) {
             .available,
         "a persisted 429 hold must block during its window"
     );
-    let now = 3_600_109;
+    let now = 3_720_102;
     assert!(
         !restored
             .record_provider_key_success("p", "k", "m", now)
@@ -539,8 +543,9 @@ fn assert_persisted_429_recovery(advisory: bool) {
         .unwrap()
         .persisted_rate_limit_episodes();
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].1.failure_count, 10);
-    assert_eq!(entries[0].1.last_failure_at_ms, Some(109));
+    assert_eq!(entries[0].1.failure_count, 11);
+    assert_eq!(entries[0].1.real_429_count, 11);
+    assert_eq!(entries[0].1.last_failure_at_ms, Some(120_102));
     assert!(entries[0].1.probe_required);
     assert_eq!(entries[0].1.not_before_ms, Some(now));
     assert!(

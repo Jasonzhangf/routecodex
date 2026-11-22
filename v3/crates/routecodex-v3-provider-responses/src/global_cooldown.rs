@@ -35,6 +35,10 @@ pub struct V3ProviderRateLimitEpisode {
     pub last_429_at_ms: Option<u64>,
     pub not_before_ms: Option<u64>,
     pub probe_required: bool,
+    #[serde(default)]
+    pub real_429_count: u32,
+    #[serde(default)]
+    pub short_cooldown_until_ms: Option<u64>,
     /// Shared-policy recoverable streak. Old elapsed-429 files omit these
     /// fields and therefore load with a fresh count of zero.
     #[serde(default)]

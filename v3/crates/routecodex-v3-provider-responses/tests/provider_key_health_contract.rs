@@ -46,8 +46,8 @@ fn record_mixed_failures(
     count: usize,
 ) -> V3ProviderKeyHealthProjection {
     let statuses = [
-        (429, "rate_limit_error"),
         (500, "provider_http_500"),
+        (429, "rate_limit_error"),
         (502, "provider_http_502"),
     ];
     let mut projection = None;
@@ -93,7 +93,7 @@ fn recoverable_429_is_counted_for_exact_identity() {
             .record_provider_failure_action("p", "a", "m", &action, 109)
             .unwrap()
             .cooldown_until_ms,
-        Some(3_600_109)
+        Some(15_109)
     );
     // A repeated 429 on the same identity never blocks a sibling identity.
     for (provider, key, model) in [("p", "b", "m"), ("p", "a", "n"), ("q", "a", "m")] {
@@ -108,13 +108,64 @@ fn recoverable_429_is_counted_for_exact_identity() {
     store
         .record_provider_failure_action("p", "a", "m", &action, 126)
         .unwrap();
-    assert_eq!(
-        store
+    assert!(
+        !store
             .scheduling_projection("p", "a", "m", 1, 1, 126)
             .unwrap()
-            .available,
-        false
+            .available
     );
+    assert!(store
+        .acquire_provider_cooldown_probe("p", Some("a"), Some("m"))
+        .unwrap()
+        .is_none());
+    assert!(
+        store
+            .scheduling_projection("p", "a", "m", 1, 1, 15_109)
+            .unwrap()
+            .available
+    );
+    let after_success = store
+        .record_provider_failure_action("p", "a", "m", &action, 121_000)
+        .unwrap();
+    assert!(after_success.available);
+    assert_eq!(after_success.failure_streak, 2);
+}
+
+#[test]
+fn concurrent_429s_count_once_without_sliding_the_short_deadline() {
+    let store = V3ProviderHealthStore::default();
+    let action = real_http_429_action();
+    for time in 1_000..1_010 {
+        store
+            .record_provider_failure_action("p", "k", "m", &action, time)
+            .unwrap();
+    }
+    std::thread::scope(|workers| {
+        for time in 2_000..2_008 {
+            let store = &store;
+            let action = &action;
+            workers.spawn(move || {
+                let observed = store
+                    .record_provider_failure_action("p", "k", "m", action, time)
+                    .unwrap();
+                assert_eq!(observed.cooldown_until_ms, Some(16_009));
+            });
+        }
+    });
+    let short = store.cooldown_entries(2_008);
+    assert_eq!(short.len(), 1);
+    assert_eq!(short[0].failure_count, Some(18));
+    assert!(
+        store
+            .scheduling_projection("p", "k", "m", 1, 1, 16_009)
+            .unwrap()
+            .available
+    );
+    let sustained = store
+        .record_provider_failure_action("p", "k", "m", &action, 121_001)
+        .unwrap();
+    assert_eq!(sustained.failure_streak, 19);
+    assert_eq!(sustained.cooldown_until_ms, Some(3_721_001));
 }
 
 #[test]
@@ -397,12 +448,44 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     let _ = std::fs::remove_file(&path);
     let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     let action = real_http_429_action();
-    for now in 1_000..1_010 {
+    for now in 1_000..1_009 {
         store
             .record_provider_failure_action_for_interface("p", "default", "k", "m", &action, now)
             .unwrap();
     }
+    store
+        .flush_persistence()
+        .expect("flush partial 429 episode");
+    drop(store);
+    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
+    let tenth = store
+        .record_provider_failure_action("p", "k", "m", &action, 121_000)
+        .unwrap();
+    assert_eq!(tenth.cooldown_until_ms, Some(136_000));
+    store.flush_persistence().expect("flush short 429 cooldown");
+    drop(store);
+    let store = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
+    assert!(
+        !store
+            .scheduling_projection("p", "k", "m", 1, 1, 135_999)
+            .unwrap()
+            .available
+    );
+    assert!(
+        store
+            .scheduling_projection("p", "k", "m", 1, 1, 136_000)
+            .unwrap()
+            .available
+    );
+    assert!(store
+        .acquire_provider_cooldown_probe("p", Some("k"), Some("m"))
+        .unwrap()
+        .is_none());
+    store
+        .record_provider_failure_action("p", "k", "m", &action, 136_000)
+        .unwrap();
     store.flush_persistence().expect("flush scoped persistence");
+    drop(store);
     let episodes = V3ProviderCooldownCoordinator::load(path.clone())
         .unwrap()
         .persisted_rate_limit_episodes();
@@ -412,12 +495,16 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
     assert_eq!(key.interface_id, "default");
     assert_eq!(key.auth_alias.as_deref(), Some("k"));
     assert_eq!(key.model_id.as_deref(), Some("m"));
-    assert_eq!(episode.failure_count, 10);
-    assert_eq!(episode.last_failure_at_ms, Some(1_009));
-    assert_eq!(episode.not_before_ms, Some(3_601_009));
+    assert_eq!(episode.failure_count, 11);
+    assert_eq!(episode.real_429_count, 11);
+    assert_eq!(episode.first_429_at_ms, Some(1_000));
+    assert_eq!(episode.last_429_at_ms, Some(136_000));
+    let hour_end = 3_736_000;
+    assert_eq!(episode.not_before_ms, Some(hour_end));
     assert!(episode.probe_required);
 
-    let restored = V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path);
+    let restored =
+        V3ProviderHealthStore::from_manifest_with_persistence_path(&manifest, path.clone());
     assert!(
         restored
             .has_provider_cooldown_probe_pending_for_interface(
@@ -427,11 +514,11 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         "the restored exclusion keeps a probe schedule without restoring an active permit"
     );
     restored
-        .record_provider_key_success_for_interface("p", "default", "k", "m", 3_601_002)
+        .record_provider_key_success_for_interface("p", "default", "k", "m", hour_end - 2)
         .unwrap();
     assert!(
         !restored
-            .availability_for_interface("p", "default", Some("k"), Some("m"), 3_601_003)
+            .availability_for_interface("p", "default", Some("k"), Some("m"), hour_end - 1)
             .available,
         "the persisted hour lock survives a business success"
     );
@@ -440,14 +527,17 @@ targets = [{ kind = "provider_model", provider = "p", model = "m", key = "k", pr
         .unwrap()
         .expect("the restored lock exposes a fresh current probe");
     restored
-        .complete_provider_cooldown_probe_success_with_permit(&probe, 3_601_009)
+        .complete_provider_cooldown_probe_success_with_permit(&probe, hour_end)
         .unwrap();
     assert!(
         restored
-            .availability_for_interface("p", "default", Some("k"), Some("m"), 3_601_009)
+            .availability_for_interface("p", "default", Some("k"), Some("m"), hour_end)
             .available,
         "only the restored current qualified probe clears the persisted lock"
     );
+    restored.flush_persistence().unwrap();
+    drop(restored);
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -1514,7 +1604,7 @@ fn score_and_cooldown_are_isolated_per_provider_key_and_model() {
 }
 
 #[test]
-fn different_recoverable_fingerprints_do_not_add_up_to_one_cooldown() {
+fn tenth_mixed_failure_only_commits_the_hour_for_non_429() {
     // Different recoverable fingerprints share one complete-identity streak.
     let store = V3ProviderKeyHealthStore::default();
     for (offset, status, expected_streak) in [(0, 429_u16, 1), (1, 500, 2), (2, 502, 3)] {
@@ -1540,9 +1630,28 @@ fn different_recoverable_fingerprints_do_not_add_up_to_one_cooldown() {
         assert!(projection.available, "status={status}");
     }
 
-    let committed =
-        record_mixed_failures(&store, "provider-a", "default", "key-a", "model-a", 200, 7);
-    assert_eq!(committed.failure_streak, 10);
+    record_mixed_failures(&store, "provider-a", "default", "key-a", "model-a", 200, 6);
+    let tenth = store
+        .record_provider_failure_action(
+            "provider-a",
+            "key-a",
+            "model-a",
+            &real_http_429_action(),
+            206,
+        )
+        .unwrap();
+    assert_eq!(tenth.failure_streak, 10);
+    assert!(tenth.available);
+    let committed = store
+        .record_provider_failure_action(
+            "provider-a",
+            "key-a",
+            "model-a",
+            &real_http_provider_action(500, "provider_http_500"),
+            207,
+        )
+        .unwrap();
+    assert_eq!(committed.failure_streak, 11);
     assert!(committed.cooldown);
     assert!(!committed.available);
 }

@@ -76,7 +76,11 @@ fn key_health_projection(
     let history = state.adaptive_history.get(key);
     let cooldown_until_ms = history
         .and_then(|history| history.rate_limit_episode.as_ref())
-        .and_then(|episode| episode.not_before_ms)
+        .and_then(|episode| {
+            episode
+                .not_before_ms
+                .or_else(|| episode.active_short_cooldown(now_ms))
+        })
         .or_else(|| {
             state
                 .provider_cooldown_probes
@@ -115,7 +119,9 @@ fn key_blocks_availability(
         .get(key)
         .and_then(|history| history.rate_limit_episode.as_ref())
         .is_some_and(|episode| {
-            episode.probe_required || episode.not_before_ms.is_some_and(|until| now_ms < until)
+            episode.probe_required
+                || episode.not_before_ms.is_some_and(|until| now_ms < until)
+                || episode.active_short_cooldown(now_ms).is_some()
         })
     {
         return true;

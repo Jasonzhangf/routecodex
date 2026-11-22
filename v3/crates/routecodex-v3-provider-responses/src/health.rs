@@ -1578,6 +1578,14 @@ impl V3ProviderHealthStore {
             V3ProviderRecoveryKind::RecoverableCounted => V3_PROVIDER_RECOVERABLE_FAILURE_THRESHOLD,
             _ => 0,
         };
+        let probe_cooldown_active = state
+            .provider_cooldown_probes
+            .get(&key)
+            .is_some_and(|probe| {
+                probe.blocked_until_ms.is_some()
+                    || probe.next_probe_at_ms.is_some()
+                    || probe.active_probe.is_some()
+            });
         let history = state.adaptive_history.entry(key.clone()).or_default();
         if matches!(
             action.recovery,
@@ -1611,6 +1619,11 @@ impl V3ProviderHealthStore {
             history.failures = history.failures.saturating_add(1);
             history.score_generation = history.score_generation.saturating_add(1);
             let failure_streak = history.failure_streak;
+            let is_http_429 = action.recovery == V3ProviderRecoveryKind::RecoverableCounted
+                && action
+                    .failure_fingerprint
+                    .as_ref()
+                    .is_some_and(|fingerprint| fingerprint.http_status == 429);
             let episode = history
                 .rate_limit_episode
                 .get_or_insert_with(Default::default);
@@ -1619,53 +1632,35 @@ impl V3ProviderHealthStore {
             let interval = configured_max_probe_interval_ms
                 .map(|maximum| V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS.min(maximum))
                 .unwrap_or(V3_PROVIDER_COOLDOWN_PROBE_INTERVAL_MS);
-            let should_block = action.scope == V3ProviderHealthScope::GlobalProviderKey
-                && match action.recovery {
-                    V3ProviderRecoveryKind::IrrecoverableGlobalCooldown
-                    | V3ProviderRecoveryKind::RecoverableCounted => {
-                        history.failure_streak >= failure_threshold
-                    }
-                    _ => false,
+            let start_probe_cooldown = action.scope == V3ProviderHealthScope::GlobalProviderKey
+                && if is_http_429 {
+                    history
+                        .last_success_at_ms
+                        .is_none_or(|success| now_ms >= success)
+                        && episode.observe_http_429(now_ms, probe_cooldown_active)
+                } else {
+                    failure_streak >= failure_threshold
                 };
-            if should_block {
-                let committed = state
-                    .provider_cooldown_probes
-                    .get(&key)
-                    .is_some_and(|probe| {
-                        probe.blocked_until_ms.is_some()
-                            || probe.next_probe_at_ms.is_some()
-                            || probe.active_probe.is_some()
-                    });
-                if !committed {
-                    let candidate_until_ms = now_ms.saturating_add(V3_PROVIDER_HEALTH_COOLDOWN_MS);
-                    let blocked_until_ms = state
-                        .adaptive_history
-                        .get(&key)
-                        .and_then(|history| history.rate_limit_episode.as_ref())
-                        .and_then(|episode| episode.not_before_ms)
-                        .unwrap_or(0)
-                        .max(candidate_until_ms);
-                    if let Some(episode) = state
-                        .adaptive_history
-                        .get_mut(&key)
-                        .and_then(|history| history.rate_limit_episode.as_mut())
-                    {
-                        episode.not_before_ms = Some(blocked_until_ms);
-                        episode.probe_required = true;
-                    }
-                    upsert_provider_cooldown_probe_with_interval(
-                        &mut state,
-                        provider_id,
-                        interface_id,
-                        Some(auth_alias),
-                        Some(model_id),
-                        now_ms,
-                        blocked_until_ms,
-                        interval,
-                        action.long_probe_backoff,
-                        advisory_probe,
-                    );
-                }
+            if start_probe_cooldown && !probe_cooldown_active {
+                let blocked_until_ms = episode
+                    .not_before_ms
+                    .unwrap_or(0)
+                    .max(now_ms.saturating_add(V3_PROVIDER_HEALTH_COOLDOWN_MS));
+                episode.not_before_ms = Some(blocked_until_ms);
+                episode.probe_required = true;
+                episode.short_cooldown_until_ms = None;
+                upsert_provider_cooldown_probe_with_interval(
+                    &mut state,
+                    provider_id,
+                    interface_id,
+                    Some(auth_alias),
+                    Some(model_id),
+                    now_ms,
+                    blocked_until_ms,
+                    interval,
+                    action.long_probe_backoff,
+                    advisory_probe,
+                );
             }
         }
         let projection = key_health_projection(&state, &key, now_ms);
@@ -1714,6 +1709,7 @@ impl V3ProviderHealthStore {
             .and_then(|history| history.rate_limit_episode.as_ref())
             .is_some_and(|episode| {
                 episode.probe_required
+                    || episode.active_short_cooldown(now_ms).is_some()
                     || episode
                         .not_before_ms
                         .is_some_and(|not_before| now_ms < not_before)
@@ -1732,6 +1728,7 @@ impl V3ProviderHealthStore {
         } else if let Some(episode) = history.rate_limit_episode.as_mut() {
             episode.failure_count = 0;
             episode.last_failure_at_ms = None;
+            episode.reset_429_observations();
         }
         let projection = key_health_projection(&state, &key, now_ms);
         persist_cooldown_state(state);
@@ -2155,6 +2152,11 @@ impl V3ProviderHealthStore {
                     model_id,
                 );
                 removed |= state.provider_cooldown_probes.remove(&key).is_some();
+                removed |= state
+                    .adaptive_history
+                    .get(&key)
+                    .and_then(|history| history.rate_limit_episode.as_ref())
+                    .is_some_and(|episode| episode.short_cooldown_until_ms.is_some());
                 if removed {
                     state.adaptive_history.remove(&key);
                 }
@@ -2167,8 +2169,7 @@ impl V3ProviderHealthStore {
         Ok(removed)
     }
 
-    /// Returns all current cooldown entries (session + auth_key + provider-level probes).
-    /// Entries with no remaining time are excluded.
+    /// Returns current timer and probe-backed cooldown entries.
     pub fn cooldown_entries(&self, now_ms: u64) -> Vec<V3CooldownPoolEntry> {
         let state = match self.state.read() {
             Ok(s) => s,
@@ -2214,6 +2215,27 @@ impl V3ProviderHealthStore {
                 reason: Some(cooldown.reason.clone()),
                 failure_count: None,
                 kind: "auth_key".to_string(),
+            });
+        }
+
+        for (key, history) in &state.adaptive_history {
+            let Some(episode) = &history.rate_limit_episode else {
+                continue;
+            };
+            let Some(until_ms) = episode.active_short_cooldown(now_ms) else {
+                continue;
+            };
+            entries.push(V3CooldownPoolEntry {
+                provider_id: key.provider_id.clone(),
+                interface_id: key.interface_id.clone(),
+                auth_alias: key.auth_alias.clone(),
+                model_id: key.model_id.clone(),
+                state: "blocked".to_string(),
+                until_ms: Some(until_ms),
+                remaining_ms: Some(until_ms.saturating_sub(now_ms) as i64),
+                reason: Some("provider_http_429".to_string()),
+                failure_count: Some(episode.real_429_count),
+                kind: "probe".to_string(),
             });
         }
 
