@@ -1861,6 +1861,7 @@ features:
   - internal side-channel fields fail before provider transport
   required_blackbox:
   - loopback upstream receives exactly one POST /v1/chat/completions per valid request
+  - openai_chat_responses_ff1e031_sse_sse_round_trip preserves full registered Responses metadata in valid Chat chunks and completes through the initial Responses provider with the existing tool round trip and one terminal.
   - Server JSON response preserves controlled provider semantics
   - Server does not commit SSE response headers or frames before the controlled provider attempt reaches a valid terminal
   - Server 429 response exposes Error01-06 and does not wrap success
