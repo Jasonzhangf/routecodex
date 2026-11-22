@@ -1137,3 +1137,28 @@ fn anthropic_transducer_emits_cache_only_usage_terminal_chunk() {
     assert_eq!(usage["completion_tokens"], json!(0));
     assert_eq!(usage["total_tokens"], json!(64));
 }
+#[test]
+fn registered_responses_metadata_is_lossless_but_does_not_complete_chat() {
+    let mut transducer = V3OpenAiChatResponsesSseTransducer::new();
+    let event = json!({
+        "type": "response.metadata",
+        "sequence_number": 3,
+        "response_id": "resp_metadata",
+        "metadata": {"nested": [true, 42, null]}
+    });
+    let chunks = transducer.push_event(event.clone()).unwrap();
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(
+        chunks[0]["provider_owned_responses_response_metadata"],
+        event
+    );
+    assert_eq!(chunks[0]["choices"][0]["delta"], json!({}));
+    assert!(chunks[0]["choices"][0]["finish_reason"].is_null());
+    assert!(transducer.finish().is_err());
+    assert_eq!(
+        transducer
+            .push_event(json!({"type":"response.metadata_unknown"}))
+            .unwrap_err(),
+        "Responses SSE event type response.metadata_unknown is unsupported"
+    );
+}

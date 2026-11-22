@@ -773,9 +773,8 @@ fn require_object(payload: &Value) -> Result<&Map<String, Value>, V3OpenAiChatCo
 /// Responses 协议 SSE -> OpenAI Chat SSE 的流式转换器（provider 解耦）：
 /// 客户端 Chat SSE 由本转换器生成，provider 的 responses SSE 事件
 /// （response.created / output_text.delta / output_item.done / completed）
-/// 逐帧映射为 chat.completion.chunk。未映射事件容错跳过，不允许把
-/// provider 的 responses SSE 直接当作 chat SSE 透传（缺 choices 会
-/// 让 chat SSE 状态机 fail-fast -> 客户端 EOF）。
+/// 逐帧映射为 chat.completion.chunk。已登记的 provider 扩展保留在
+/// Chat chunk 的扩展字段中，其他未映射事件仍走错误路径。
 pub(crate) struct V3OpenAiChatResponsesSseTransducer {
     response_started: bool,
     completed: bool,
@@ -1069,7 +1068,20 @@ impl V3OpenAiChatResponsesSseTransducer {
                 self.record_delta(object, "reasoning_content", &delta);
                 Ok(vec![self.chunk(json!({"reasoning_content": delta}), None)])
             }
-            other => Err(format!("Responses SSE event type {other} is unsupported")),
+            other => {
+                let Some(extension) = table_map_value(
+                    V3TableKind::ProviderResponseEvent,
+                    "responses",
+                    other,
+                    V3TableDirection::Inbound,
+                )?
+                else {
+                    return Err(format!("Responses SSE event type {other} is unsupported"));
+                };
+                let mut chunk = self.chunk(json!({}), None);
+                chunk[extension] = event;
+                Ok(vec![chunk])
+            }
         }
     }
 
