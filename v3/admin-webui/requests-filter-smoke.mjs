@@ -30,13 +30,11 @@ function makeSelect() {
 
 const portFilterSelect = makeSelect();
 const protocolFilterSelect = makeSelect();
-const providerFilterSelect = makeSelect();
 const modelFilterSelect = makeSelect();
 const endpointFilterSelect = makeSelect();
 
-assert.match(markup, /<select id="port-filter"><option value="all">all ports<\/option>/);
-assert.match(markup, /<div class="selection-summary" id="port-filter-row">/);
-assert.match(markup, /<select id="provider-filter"><option value="all">all providers<\/option>/);
+assert.match(markup, /<select id="port-filter"><option value="all">All ports<\/option>/);
+assert.match(markup, /id="filter-provider"/);
 assert.match(markup, /<select id="model-filter"><option value="all">all models<\/option>/);
 assert.match(markup, /<select id="endpoint-filter"><option value="all">all endpoints<\/option>/);
 assert.match(markup, /<label>Route<input id="route-filter" type="search" placeholder="route"><\/label>/);
@@ -45,9 +43,8 @@ assert.match(markup, /id="timezone"/);
 assert.match(markup, /id="calendar-anchor"/);
 assert.match(markup, /<option value="custom">Custom<\/option>/);
 assert.match(markup, /id="provider-usage-table"/);
-assert.match(markup, /id="clear-selected-port"/);
 assert.match(markup, /id="clear-selected-provider"/);
-assert.match(view, /populateFacetSelect\("provider-filter", providerFacets\(\), "all providers"\)/);
+assert.match(view, /state\.providerCounts = \{ \.\.\.\(state\.facets\.provider_ids \|\| \{\}\) \}/);
 assert.match(view, /populateFacetSelect\("model-filter", state\.facets\.models \|\| \{\}, "all models"\)/);
 assert.match(view, /populateFacetSelect\("endpoint-filter", state\.facets\.endpoints \|\| \{\}, "all endpoints"\)/);
 assert.match(view, /const model = document\.getElementById\("model-filter"\)\.value;/);
@@ -64,16 +61,14 @@ assert.match(view, /document\.getElementById\("calendar-anchor"\)\.addEventListe
 assert.match(view, /if \(state\.providerSel\.size\) params\.set\("provider_ids", JSON\.stringify\(\[\.\.\.state\.providerSel\]\)\);/);
 assert.doesNotMatch(view, /params\.set\("provider", provider\)/);
 assert.match(view, /\.filter\(\(item\) => item\.provider_id !== ""\)/);
-assert.match(view, /state\.providerUsageSummary = response\.provider_usage\?\.summary \|\| state\.stats;/);
+assert.match(view, /state\.providerUsageSummary = response\.provider_usage\?\.summary \|\| state\.statisticsStats;/);
 assert.match(view, /state\.providerUsage = \(response\.provider_usage\?\.by_provider \|\| \[\]\)/);
-assert.match(view, /state\.records = response\.records \|\| \[\];\n    state\.total = Number\(response\.total \|\| 0\);/);
-assert.match(view, /state\.providerUsageError = error\.message;/);
+assert.match(view, /state\.records = response\.records \|\| \[\];\n\s+state\.total = Number\(response\.total \|\| 0\);/);
 assert.match(view, /document\.getElementById\("port-filter"\)\.addEventListener\("change"/);
 assert.doesNotMatch(view, /portSelect\.replaceChildren\(allPorts, \.\.\.Object\.entries\(state\.facets\.ports \|\| \{\}\)/,
   "the port select must not rebuild only from the filtered response facets");
 assert.match(view, /params\.set\("view", "requests"\);/);
 assert.match(view, /params\.set\("view", "attempts"\);/);
-assert.doesNotMatch(view, /params\.set\("view", "all"\);/);
 assert.match(view, /const MAX_EXPORT_ROWS = 5000;/);
 assert.match(view, /const attempts = \(state\.tab \|\| "entries"\) === "attempts";/);
 assert.match(view, /const params = attempts\n      \? applyAttemptViewParams\(buildQueryParams\(page\)\)\n      : buildQueryParams\(page\);/);
@@ -83,7 +78,6 @@ assert.match(view, /function renderProviderUsage\(\)/);
 assert.match(view, /response\.provider_usage\?\.by_provider/);
 assert.match(view, /function rowStableKey\(row\)/);
 assert.match(view, /button\.disabled = typeof onClick !== "function";/);
-assert.match(view, /const epoch = \+\+state\.queryEpoch;\n  if \(loadInFlight\)/);
 assert.doesNotMatch(view, /function activePlans\(\)/);
 assert.doesNotMatch(view, /function mergeStats\(/);
 
@@ -190,13 +184,7 @@ if (base) {
       page_size: pageSize,
       stats: { count: filtered.length },
       facets: { ports },
-      provider_usage: {
-        summary: {},
-        by_provider: [],
-        timeseries: [],
-        range: null,
-        coverage: { listeners: [{ listener_id: 4444 }, { listener_id: 7777 }] },
-      },
+      listener_ports: [4444, 7777],
     }));
   });
   fixtureServer.listen(0, "127.0.0.1");
@@ -206,7 +194,7 @@ if (base) {
     const formValues = {
       "calendar-period": "all", "chart-grain": "day", "timezone": "UTC",
       "calendar-anchor": "", "sort-field": "started_epoch_ms", "sort-order": "desc",
-      "port-filter": "all", "provider-filter": "p1", "model-filter": "all",
+      "port-filter": "all", "model-filter": "all",
       "endpoint-filter": "all", "route-filter": "", "protocol-filter": "all",
       "mode-filter": "all", "search-filter": "",
     };
@@ -235,7 +223,6 @@ if (base) {
       },
       addEventListener() {},
     });
-    const portTableBody = makeNode();
     Object.assign(fixtureElements, {
       "selection-bar": { classList: { show: false, toggle(_name, show) { this.show = show; } } },
       "sel-count": { textContent: "0" },
@@ -243,10 +230,11 @@ if (base) {
       "copy-tsv-top": { disabled: true },
       "port-filter": portFilterSelect,
       "protocol-filter": protocolFilterSelect,
-      "provider-filter": providerFilterSelect,
       "model-filter": modelFilterSelect,
       "endpoint-filter": endpointFilterSelect,
-      "port-tabs": makeNode(),
+      "requests-panel": {},
+      "requests-pagination": {},
+      "requests-notice": { classList: { toggle() {} } },
     });
     const downloaded = [];
     const statuses = [];
@@ -263,23 +251,21 @@ if (base) {
       providerUsage: [], providerUsageSummary: {}, providerUsageRange: null,
       providerUsageCoverage: null, providerUsageError: null, timeseries: [],
       facets: {}, errorStatusCode: null, errorOrigin: null, loading: false,
-      queryEpoch: 0, port: "all", sortMode: "time", statusKinds: new Set(),
-      providerSel: new Set(["p1"]), modelSel: new Set(),
+      sortMode: "time", statusKinds: new Set(),
+      providerSel: new Set(["p1"]),
       selection: new Set(["7777:retry-p1-only|attempt-1"]),
-      exports: [], timeFrom: null, timeTo: null, portCountsCache: {},
+      exports: [], timeFrom: null, timeTo: null, listenerPorts: [],
     };
     const fixtureContext = vm.createContext({
       state: fixtureState,
       URL: URLWithObject,
       URLSearchParams,
+      AbortController,
       Date,
       Intl,
       Blob,
       document: {
         getElementById: (id) => fixtureElements[id],
-        querySelector: (selector) => selector === "#ports-table tbody"
-          ? portTableBody
-          : null,
         createElement: (tag) => {
           const node = makeNode();
           node.tag = tag;
@@ -289,17 +275,17 @@ if (base) {
       },
       fetch: (path, options) => fetch(new URL(path, fixtureBase), options),
       renderAll() {},
-      renderProviderUsage() {},
+      renderTabCounts() {},
       showStatus: (kind, message) => statuses.push({ kind, message }),
     });
     vm.runInContext("let adminToken = null;\n" +
-      region(core, "export async function api(", "export function el(").replace(/^export /, "") +
+      region(core, "export async function api(", "export function escapeHtml(").replace(/^export /gm, "") +
       region(core, "export function fmtMs(", "export function badge(").replace(/^export /gm, "") +
       region(servedView, "function endpointLabel(", "const state = {") +
-      region(servedView, "function rowStableKey(", "async function load()") +
-      region(servedView, "function providerIdOf(", "function providerFacets(") +
-      region(servedView, "function renderStats(stats)", "function renderProviderUsage(") +
-      region(servedView, "function renderPortTabs()", "const STATUS_KIND_LABELS") +
+      region(servedView, "function rowStableKey(", "// ---------- cooldown panel") +
+      region(servedView, "function providerIdOf(", "function selectionButton(") +
+      region(servedView, "function renderFacetFilters()", "function renderProviderUsage(") +
+      region(servedView, "function populateFacetSelect(", "function numberCell(") +
       region(servedView, "// ---------- selection & export ----------", "function renderStatsCards(") +
       region(servedView, "function activePagination()", "function renderPagination("), fixtureContext);
 
@@ -328,6 +314,7 @@ if (base) {
       .map((path) => new URL(path, fixtureBase).searchParams);
     assert.deepEqual(exportQueries.map((params) => params.get("page")), ["1", "2"]);
     for (const params of exportQueries) {
+      assert.equal(params.get("include_provider_usage"), "false");
       assert.equal(params.get("view"), "attempts");
       assert.equal(params.get("status"), "retrying");
       assert.equal(params.get("provider_ids"), "[\"p1\"]");
@@ -366,48 +353,37 @@ if (base) {
     assert.equal(new URL(fixtureRequests.at(-1), fixtureBase).searchParams.get("view"), "attempts");
 
     fixtureState.tab = "entries";
-    fixtureState.port = "all";
-    fixtureState.portCountsCache = {};
     fixtureState.providerSel.add("p2");
     fixtureElements["port-filter"].value = "all";
-    fixtureElements["provider-filter"].value = "p2";
     await fixtureContext.loadRecords();
-    fixtureContext.renderStats(fixtureState.stats);
 
     const optionValues = () => fixtureElements["port-filter"].options.map((option) => option.textContent);
-    assert.deepEqual(optionValues(), ["all", "4444", "7777"],
-      "Coverage listeners must seed known ports even when p2 has no 4444 row");
-    assert.equal(fixtureState.portCountsCache["4444"], 0);
-    assert.equal(fixtureState.portCountsCache["7777"], 2);
+    assert.deepEqual(optionValues(), ["All ports", "4444", "7777"],
+      "Configured listeners must seed known ports even when p2 has no 4444 row");
 
     fixtureElements["port-filter"].value = "4444";
-    fixtureState.port = "4444";
     await fixtureContext.loadRecords();
-    fixtureContext.renderStats(fixtureState.stats);
-    fixtureContext.renderPortTabs();
     const emptyPortQuery = new URL(fixtureRequests.at(-1), fixtureBase).searchParams;
     assert.equal(fixtureState.total, 0);
     assert.equal(emptyPortQuery.get("port"), "4444");
     assert.deepEqual(JSON.parse(emptyPortQuery.get("provider_ids")), ["p2"]);
     assert.equal(fixtureElements["port-filter"].value, "4444");
-    assert.deepEqual(optionValues(), ["all", "4444", "7777"],
+    assert.deepEqual(optionValues(), ["All ports", "4444", "7777"],
       "An empty intersection must retain every known port and the selected port");
-    const portTab4444 = fixtureElements["port-tabs"].children.find((node) => node.dataset.port === "4444");
-    assert.equal(portTab4444?.["aria-selected"], "true");
-    assert.equal(portTab4444?.children.at(-1)?.textContent, "0");
 
     fixtureState.providerSel.clear();
     await fixtureContext.loadRecords();
-    fixtureContext.renderStats(fixtureState.stats);
     const clearedProviderQuery = new URL(fixtureRequests.at(-1), fixtureBase).searchParams;
     assert.equal(clearedProviderQuery.get("port"), "4444");
     assert.equal(clearedProviderQuery.get("provider_ids"), null);
-    assert.equal(fixtureState.port, "4444");
     assert.equal(fixtureElements["port-filter"].value, "4444");
     assert.equal(fixtureState.total, 1);
 
     fixtureState.providerSel.add("p2");
     const delayedProviderLoad = fixtureContext.loadRecords();
+    const beforeCoalescedRefresh = fixtureRequests.length;
+    await fixtureContext.loadRecords();
+    assert.equal(fixtureRequests.length, beforeCoalescedRefresh, "refresh joins the in-flight filter");
     fixtureState.providerSel.clear();
     await fixtureContext.loadRecords();
     await delayedProviderLoad;
@@ -415,7 +391,6 @@ if (base) {
     assert.equal(latestQuery.get("port"), "4444");
     assert.equal(latestQuery.get("provider_ids"), null);
     assert.equal(fixtureState.providerSel.size, 0);
-    assert.equal(fixtureState.port, "4444");
   } finally {
     await new Promise((resolve, reject) => {
       fixtureServer.close((error) => error ? reject(error) : resolve());

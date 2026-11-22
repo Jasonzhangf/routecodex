@@ -3901,6 +3901,7 @@ features:
   - docs/architecture/v3-mainline-call-map.yml
   required_positive:
   - The records API reports provider usage for a unified calendar range and provider/listener selection, deduplicates requests and failed attempts independently, and computes cache hit rate from comparable token totals before pagination.
+  - A records query with include_provider_usage=false preserves calendar bounds, request or attempt projection, totals, and facets while omitting provider aggregation. Usage opens on request rows and acquires Statistics independently.
   - A legacy display-provider filter preserves retained-detail membership and totals, including when intersected with exact Provider IDs; exact-only usage retains durable coverage.
   - The records API and Usage view expose capacity gaps for the affected listener; an independent listener remains queryable under its own coverage.
   - A retained error row with error_category=http_200, provider_status=200, and no stored typed terminal status renders the terminal status unknown in both the records API facets/filter and the served usage.js status label, while result=error, error_origin=local, and the original meta fields stay unchanged.

@@ -5,9 +5,11 @@ const markup = fs.readFileSync(new URL("./requests.html", import.meta.url), "utf
 const view = fs.readFileSync(new URL("./app/views/usage.js", import.meta.url), "utf8");
 const styles = fs.readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
-assert.match(markup, /id="provider-filter"[^>]*>.*all providers/s);
+assert.match(markup, /id="usage-requests" aria-labelledby="usage-nav-requests">/);
+assert.match(markup, /id="usage-statistics" aria-labelledby="usage-nav-statistics" hidden>/);
+assert.match(markup, /id="usage-cooldown" aria-labelledby="usage-nav-cooldown" hidden>/);
 assert.match(markup, /id="model-filter"[^>]*>.*all models/s);
-assert.match(markup, /id="port-filter"[^>]*>.*all ports/s);
+assert.match(markup, /id="port-filter"[^>]*>.*All ports/s);
 assert.match(markup, /id="endpoint-filter"[^>]*>.*all endpoints/s);
 assert.match(markup, /id="route-filter"[^>]*>/);
 assert.match(markup, /id="provider-usage-table"/);
@@ -28,7 +30,7 @@ assert.match(view, /numberCell\(item\.failed_attempt_count\)/);
 assert.match(view, /usageNumberCell\(item\.reported_effective_input_tokens\)/);
 assert.match(view, /usageNumberCell\(item\.reported_total_tokens\)/);
 assert.match(view, /el\("td", "num", item\.cache_hit_rate_percent == null \? "—" :/);
-assert.match(view, /providers\.length \? `Provider \$\{providers\.join\(", "\)\}` : "All providers"/);
+assert.match(view, /Provider: \$\{providers\.join\(", "\)\}/);
 assert.match(view, /request details from \$\{detailStart\}/);
 assert.match(markup, /\.selection-link:hover,/);
 assert.match(markup, /#provider-usage-table \{/);

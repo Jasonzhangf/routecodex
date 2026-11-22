@@ -402,7 +402,7 @@ async fn revisions_and_static_assets_are_served() {
     assert!(requests.status().is_success());
     let requests_body = requests.text().await.expect("requests page body");
     assert!(
-        requests_body.contains("Persistent request records"),
+        requests_body.contains(r#"id="usage-requests" aria-labelledby="usage-nav-requests""#),
         "requests page rendered"
     );
     let routes = http_client()

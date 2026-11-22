@@ -29,32 +29,33 @@ function region(source, from, to) {
 const values = {
   "calendar-period": "all", "chart-grain": "day", "timezone": "UTC",
   "calendar-anchor": "", "sort-field": "started_epoch_ms", "sort-order": "desc",
-  "port-filter": "all", "provider-filter": "all", "model-filter": "all",
+  "port-filter": "all", "model-filter": "all",
   "endpoint-filter": "all", "route-filter": "", "protocol-filter": "all",
   "mode-filter": "all", "search-filter": "",
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) => [id, { value }]));
+elements["selection-bar"] = { classList: { toggle() {} } };
 const requests = [];
 const errors = [];
 const state = {
   records: [], attemptRecords: [], errorFacets: [], page: 1, pageSize: 100,
   total: 0, attemptsTotal: 0, attemptsPage: 1, errorStatuses: 0,
   errorExamples: {}, tab: "entries", entriesGroup: "pool", stats: {},
-  queryEpoch: 0, providerUsage: [], providerUsageSummary: {},
-  providerUsageRange: null, providerUsageCoverage: null, providerUsageError: null,
-  timeseries: [],
+  listenerPorts: [],
   facets: { ports: {}, providers: {}, models: {}, routes: {}, endpoints: {}, sessions: {}, response_types: {}, entry_protocols: {}, error_status_codes: {} },
-  statusKinds: new Set(), providerSel: new Set(), modelSel: new Set(),
+  statusKinds: new Set(), providerSel: new Set(),
   sortMode: "time", port: "all", timeFrom: null, timeTo: null,
   errorStatusCode: null, errorOrigin: null,
 };
 const context = vm.createContext({
-  state, URLSearchParams, Date,
-  document: { getElementById: (id) => elements[id] },
+  state, URLSearchParams, Date, AbortController,
+  document: { getElementById: (id) => elements[id] ?? {} },
   renderAll() {},
-  showStatus: (_kind, message) => errors.push(message),
+  renderTabCounts() {},
+  renderFacetFilters() {},
+  setUsageNotice: (_view, message, retry) => { if (retry) errors.push(message); },
+  openUsageView: () => context.loadRecords(),
   el: (_tag, _className, text) => ({ textContent: text }),
-  loadAttempts: async () => {},
   fetch: async (path, options) => {
     const response = await fetch(new URL(path, base), options);
     const body = await response.clone().json();
@@ -65,7 +66,7 @@ const context = vm.createContext({
 vm.runInContext("let adminToken = null;\n" +
   region(core, "export async function api(", "export function el(").replace(/^export /, "") +
   region(view, "function statusText(row)", "function compactFinishReason(row)") +
-  region(view, "// Latest-wins loading", "async function load()") +
+  region(view, "function activeRange()", "// ---------- cooldown panel") +
   region(view, "function drilldownErrorStatus(code, origin = null)", "// ---------- error-detail modal"), context);
 
 await context.loadRecords();

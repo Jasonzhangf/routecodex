@@ -3076,7 +3076,7 @@ flowchart TD
 
 ## v3.admin.provider_usage_query
 
-Admin reads bounded diagnostic facts for exact Provider queries or retained detail for the legacy display filter. The records API and Usage view preserve the selected scope and coverage.
+Admin reads bounded diagnostic facts for exact Provider queries or retained detail for the legacy display filter. Request and attempt detail queries can skip the optional provider aggregation while using the same calendar and detail projection.
 
 Owner feature: `v3.admin_observability_aggregation`
 
@@ -3091,7 +3091,7 @@ flowchart TD
     c_74_v3_admin_provider_usage_query_1["v3-debug<br/>v3_webui_observability_read_provider_usage<br/><small>routecodex-v3-debug/src/observability_store.rs</small>"]
   end
   subgraph c_74_v3_admin_provider_usage_query_m_v3_admin_webui["v3/admin-webui"]
-    c_74_v3_admin_provider_usage_query_4["v3/admin-webui<br/>renderAll<br/><small>v3/admin-webui/app/views/usage.js</small>"]
+    c_74_v3_admin_provider_usage_query_4["v3/admin-webui<br/>renderStatistics<br/><small>v3/admin-webui/app/views/usage.js</small>"]
     c_74_v3_admin_provider_usage_query_5["v3/admin-webui<br/>renderProviderUsage<br/><small>v3/admin-webui/app/views/usage.js</small>"]
   end
   c_74_v3_admin_provider_usage_query_0 -->|v3-admin-provider-usage-bounded-read<br/>V3AdminObservabilityAggregation → V3AdminProviderUsageFactsRead| c_74_v3_admin_provider_usage_query_1
@@ -3103,7 +3103,7 @@ flowchart TD
 | --- | --- | --- | --- | --- | --- |
 | `v3-admin-provider-usage-bounded-read` | `V3AdminObservabilityAggregation` → `V3AdminProviderUsageFactsRead` | anchored | read_provider_usage_facts<br/><small>routecodex-v3-admin/src/api/observability/store_cache.rs</small> | v3_webui_observability_read_provider_usage<br/><small>routecodex-v3-debug/src/observability_store.rs</small> | `v3.admin_observability_aggregation` |
 | `v3-admin-provider-usage-aggregate` | `V3AdminObservabilityAggregation` → `V3AdminProviderUsageQueryResult` | anchored | records<br/><small>routecodex-v3-admin/src/api/observability.rs</small> | build_provider_usage<br/><small>routecodex-v3-admin/src/api/observability/provider_usage.rs</small> | `v3.admin_observability_aggregation` |
-| `v3-admin-provider-usage-render` | `V3AdminProviderUsageQueryResult` → `V3AdminProviderUsageRendered` | anchored | renderAll<br/><small>v3/admin-webui/app/views/usage.js</small> | renderProviderUsage<br/><small>v3/admin-webui/app/views/usage.js</small> | `v3.admin_observability_aggregation` |
+| `v3-admin-provider-usage-render` | `V3AdminProviderUsageQueryResult` → `V3AdminProviderUsageRendered` | anchored | renderStatistics<br/><small>v3/admin-webui/app/views/usage.js</small> | renderProviderUsage<br/><small>v3/admin-webui/app/views/usage.js</small> | `v3.admin_observability_aggregation` |
 
 ## v3.route_policy.condition_evaluation
 
