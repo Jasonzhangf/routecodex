@@ -1559,7 +1559,10 @@ const expectedErrorResources = {
   },
   error_err06_client_projected: {
     reads: ['v3.error.chain', 'v3.error.execution_decision'],
-    writes: ['v3.error.client_projection_candidate'],
+    writes: [
+      'v3.error.client_projection_candidate',
+      'v3.error.final_external_http_projection_eligibility',
+    ],
   },
 };
 for (const [nodeId, expected] of Object.entries(expectedErrorResources)) {
