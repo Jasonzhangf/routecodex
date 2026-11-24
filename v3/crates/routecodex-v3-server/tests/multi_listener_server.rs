@@ -14306,10 +14306,7 @@ async fn debug_response_dry_run_replays_anthropic_provider_json_through_relay_re
         .iter()
         .find(|part| part.get("type").and_then(Value::as_str) == Some("tool_use"))
         .expect("Anthropic tool_use must remain projected");
-    assert_eq!(
-        tool_use["input"],
-        json!({"cmd": "pwd"})
-    );
+    assert_eq!(tool_use["input"], json!({"cmd": "pwd"}));
 }
 
 #[tokio::test]
