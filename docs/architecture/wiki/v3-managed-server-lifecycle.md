@@ -13,6 +13,14 @@ preparation. Successful exec can interrupt remaining transports; clients detect 
 interruption and decide whether to retry. RCC does not replay interrupted requests
 or fabricate a successful completion.
 
+Explicit shutdown seals persistence admission once and awaits terminal receipts and
+writer exit without blocking runtime threads. The managed control listener remains
+available for exact-owner status queries and reports `Stopping` while shutdown is
+pending. Conflicting operations are rejected. After the wait expires, both stop
+and start preserve a responsive owner that is still completing this shutdown.
+Writer errors remain in the terminal persistence failure receipt. Emergency Drop
+hands queued work to a close reaper and does not publish a successful close receipt.
+
 ```mermaid
 flowchart LR
   A[V3Lifecycle01ValidatedConfig] --> B[V3Lifecycle02InstanceDeclared]
@@ -87,6 +95,9 @@ flowchart TB
   and it is never provider/client payload.
 - `status.json` is an observation of starting/running/stopping/stopped/failed, not authority to take
   over a port or process.
+- Before a fresh start releases listeners, it checks any previous-release transfer for the target.
+  A valid transfer whose recorded previous process has exited is retired. A live or unverifiable
+  owner keeps the transfer and causes an explicit refusal.
 
 ## Commands
 
@@ -143,7 +154,10 @@ change discovery behavior.
   orphan runtime reap, and explicit PID signal harvest all operate on business listeners only
   (`server_id != "admin_webui"`). An external process that owns only the admin port is never
   discovered as stale, never blocks start, and is never signaled.
-- The explicit PID port-range guard is unchanged and remains scoped to business target ports.
+- The explicit PID port-range guard includes an attached admin port only for the exact published
+  aggregate. The declaration, PID cache, control nonce and OS process start token must agree, and
+  the requested config path and full listener set must match. An extra listener outside this scope
+  still causes refusal. Admin-only occupancy never introduces a PID into the signal set.
 - Server-side, `admin_webui` is an optional attached listener. A missing admin router config, a
   bind-address parse failure, or a bind failure emits an explicit warning and skips admin router
   construction, AppState/background registration, and the admin listener task. Already-bound

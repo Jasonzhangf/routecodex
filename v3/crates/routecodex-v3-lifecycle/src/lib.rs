@@ -472,6 +472,7 @@ impl V3ManagedLifecycle {
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "start")?;
+        retire_abandoned_previous_release_transfer(&self.state_root, &instance_dir, &declaration)?;
         release_listener_set_for_start(&self.state_root, &instance_dir, &declaration).await?;
         wait_for_stopping_instance(&instance_dir, &declaration, timeout).await?;
         reap_inactive_runtime_files(&instance_dir, &declaration)?;
@@ -563,6 +564,14 @@ impl V3ManagedLifecycle {
         validate_auth_handles(&manifest)?;
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
+        {
+            let _lock = acquire_operation_lock(&instance_dir, "start")?;
+            retire_abandoned_previous_release_transfer(
+                &self.state_root,
+                &instance_dir,
+                &declaration,
+            )?;
+        }
         if let Ok(status) = self.query_live(&declaration).await {
             if matches!(
                 status.state,
@@ -747,6 +756,35 @@ impl V3ManagedLifecycle {
         let instance_dir = self.instance_dir(&declaration.instance_id);
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "stop")?;
+        let mut owners = find_live_published_owners(&self.state_root, |published| {
+            published.config_path == declaration.config_path
+                && same_managed_listener_set(&published.listeners, &declaration.listeners)
+        })?;
+        if owners.len() > 1 {
+            // A legacy PID record can name a live PID without proving that it
+            // still owns the recorded control endpoint. Resolve conflicts
+            // through the actual control channel before sending Stop.
+            let mut responsive = Vec::new();
+            for (path, published) in owners {
+                if self.query_live(&published).await.is_ok() {
+                    responsive.push((path, published));
+                }
+            }
+            if responsive.len() != 1 {
+                return Err(V3LifecycleError::IdentityMismatch(
+                    "cannot resolve one responsive owner for the stop scope".into(),
+                ));
+            }
+            owners = responsive;
+        }
+        let (instance_dir, declaration, _owner_lock) = match owners.pop() {
+            Some((path, published)) if path != instance_dir => {
+                let lock = acquire_operation_lock(&path, "stop")?;
+                (path, published, Some(lock))
+            }
+            Some((path, published)) => (path, published, None),
+            None => (instance_dir, declaration, None),
+        };
         let response = match send_control(&instance_dir, &declaration, ControlOperation::Stop).await
         {
             Ok(response) => response,
@@ -761,6 +799,9 @@ impl V3ManagedLifecycle {
             Err(error) => return Err(error),
         };
         if !response.accepted {
+            if response.state == V3ManagedRunState::Stopping {
+                require_no_pending_shutdown(&instance_dir, &declaration).await?;
+            }
             return Err(V3LifecycleError::IdentityMismatch(response.message));
         }
         let deadline = tokio::time::Instant::now() + timeout;
@@ -786,6 +827,7 @@ impl V3ManagedLifecycle {
         instance_dir: &Path,
         declaration: &V3ManagedInstanceDeclaration,
     ) -> Result<V3ManagedStatusRecord, V3LifecycleError> {
+        require_no_pending_shutdown(instance_dir, declaration).await?;
         let hooks_cleanup_detail = hooks_sidecar_cleanup_incomplete_detail(instance_dir);
         let force_timeout = env_duration_ms(
             &[
@@ -802,7 +844,8 @@ impl V3ManagedLifecycle {
             Some("graceful stop timed out; forcing scoped listener shutdown".to_string()),
         )?;
         force_release_scoped_listener_set_after_graceful_timeout(
-            &declaration.listeners,
+            &self.state_root,
+            declaration,
             force_timeout,
         )
         .await?;
@@ -1429,6 +1472,7 @@ async fn release_listener_set_for_start(
     if wait_for_listener_set_available(&declaration.listeners, graceful_timeout).await {
         return Ok(());
     }
+    require_no_pending_shutdown(instance_dir, declaration).await?;
 
     release_foreign_managed_listener_ports_for_start(
         state_root,
@@ -1443,7 +1487,7 @@ async fn release_listener_set_for_start(
 
     let occupied_ports = occupied_listener_ports(&declaration.listeners);
     let terminate_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
-    guard_explicit_listener_pids_are_scoped_to_target_ports(&terminate_pids, &occupied_ports)?;
+    guard_managed_listener_pids(state_root, declaration, &terminate_pids, &occupied_ports)?;
     let mut terminate_pids = BTreeSet::from_iter(terminate_pids.iter().copied());
     terminate_pids.extend(instance_residual_pids_for_listener_set(
         state_root,
@@ -1457,7 +1501,7 @@ async fn release_listener_set_for_start(
 
     let occupied_ports = occupied_listener_ports(&declaration.listeners);
     let kill_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
-    guard_explicit_listener_pids_are_scoped_to_target_ports(&kill_pids, &occupied_ports)?;
+    guard_managed_listener_pids(state_root, declaration, &kill_pids, &occupied_ports)?;
     let mut kill_pids = BTreeSet::from_iter(kill_pids.iter().copied());
     kill_pids.extend(instance_residual_pids_for_listener_set(
         state_root,
@@ -1479,12 +1523,14 @@ async fn release_listener_set_for_start(
 }
 
 async fn force_release_scoped_listener_set_after_graceful_timeout(
-    listeners: &[V3ManagedListenerDeclaration],
+    state_root: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
     timeout: Duration,
 ) -> Result<(), V3LifecycleError> {
+    let listeners = &declaration.listeners;
     let occupied_ports = occupied_listener_ports(listeners);
     let terminate_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
-    guard_explicit_listener_pids_are_scoped_to_target_ports(&terminate_pids, &occupied_ports)?;
+    guard_managed_listener_pids(state_root, declaration, &terminate_pids, &occupied_ports)?;
     signal_explicit_listener_pids(&terminate_pids, V3LifecycleSignal::Terminate)?;
     if wait_for_listener_set_available(listeners, timeout).await {
         return Ok(());
@@ -1492,7 +1538,7 @@ async fn force_release_scoped_listener_set_after_graceful_timeout(
 
     let occupied_ports = occupied_listener_ports(listeners);
     let kill_pids = explicit_listener_pids_for_ports(&occupied_ports)?;
-    guard_explicit_listener_pids_are_scoped_to_target_ports(&kill_pids, &occupied_ports)?;
+    guard_managed_listener_pids(state_root, declaration, &kill_pids, &occupied_ports)?;
     signal_explicit_listener_pids(&kill_pids, V3LifecycleSignal::Kill)?;
     if wait_for_listener_set_available(listeners, timeout).await {
         return Ok(());
@@ -1598,6 +1644,29 @@ async fn release_foreign_managed_listener_ports_for_start(
         {
             return Ok(());
         }
+        if response.is_ok() {
+            require_no_pending_shutdown(&path, &published).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn require_no_pending_shutdown(
+    instance_dir: &Path,
+    declaration: &V3ManagedInstanceDeclaration,
+) -> Result<(), V3LifecycleError> {
+    let pending = send_control(instance_dir, declaration, ControlOperation::Status)
+        .await
+        .is_ok_and(|response| {
+            response.accepted
+                && response.schema_version == SCHEMA_VERSION
+                && response.instance_id == declaration.instance_id
+                && response.state == V3ManagedRunState::Stopping
+        });
+    if pending {
+        return Err(V3LifecycleError::Timeout(
+            "shutdown is still pending; original owner retained until persistence and writer exit complete".into(),
+        ));
     }
     Ok(())
 }

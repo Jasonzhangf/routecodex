@@ -8827,7 +8827,7 @@ chains:
     to_node: V3ObservabilityWriterTerminalOwned
     caller_symbol: V3ServerAggregateHandle::close_runtime_persistence
     caller_file: v3/crates/routecodex-v3-server/src/lib.rs
-    callee_symbol: V3WebuiObservability::close_persistence
+    callee_symbol: V3WebuiObservability::close_persistence_async
     callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
     status: anchored
     edge_kind: terminal_usage_writer_close_before_aggregate_return
@@ -8840,7 +8840,7 @@ chains:
   - step_id: v3-observability-provider-usage-writer-shutdown
     from_node: V3ObservabilityWriterTerminalOwned
     to_node: V3ObservabilityWriterShutdownReceived
-    caller_symbol: V3WebuiObservabilityPersistenceWriter::close
+    caller_symbol: V3WebuiObservabilityPersistenceWriter::finish_close
     caller_file: v3/crates/routecodex-v3-server/src/webui_observability.rs
     callee_symbol: run_v3_webui_observability_persistence_writer
     callee_file: v3/crates/routecodex-v3-server/src/webui_observability.rs

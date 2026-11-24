@@ -141,6 +141,99 @@ fn assert_previous_release_one_step(path_change: bool) {
 }
 
 #[test]
+fn f8c64a9_fresh_start_retires_dead_previous_transfer() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, false, true, Some(provider.port));
+    let mut runtime = start_previous_release(&root, &state, &config, ports[0]);
+    let owner = single_instance_dir(&state);
+    let previous: Value =
+        serde_json::from_slice(&fs::read(owner.join("instance.json")).unwrap()).unwrap();
+    let pid: Value = serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+    write_config_with_provider(&root, ports, false, false, Some(provider.port));
+    let lifecycle = routecodex_v3_lifecycle::V3ManagedLifecycle::new(&config).unwrap();
+    let (target, _) = lifecycle.declaration(env!("CARGO_BIN_EXE_rccv3")).unwrap();
+    let target_dir = state.join("instances").join(&target.instance_id);
+    fs::create_dir_all(&target_dir).unwrap();
+    let transfer = target_dir.join("previous-release-restart.json");
+    fs::write(
+        &transfer,
+        serde_json::json!({
+            "schema_version": 1,
+            "previous": previous,
+            "pid": pid,
+            "target": target,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    runtime.child.kill().unwrap();
+    runtime.child.wait().unwrap();
+    for port in ports {
+        wait_port(port, false);
+    }
+    let output = run(env!("CARGO_BIN_EXE_rccv3"), &state, &config, "start");
+    if output.status.success() {
+        for port in ports {
+            assert_eq!(http_get_json(port, "/health")["status"], "ok");
+        }
+        let _ = run(env!("CARGO_BIN_EXE_rccv3"), &state, &config, "stop");
+    }
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !transfer.exists(),
+        "the dead owner's transfer must be retired"
+    );
+}
+
+#[test]
+fn f8c64a9_live_previous_transfer_refuses_start_without_disturbing_owner() {
+    let _guard = lifecycle_test_guard();
+    let root = TempDir::new().unwrap();
+    let state = root.path().join("state");
+    let ports = [free_port(), free_port()];
+    let provider = P0Provider::start();
+    let config = write_config_with_provider(&root, ports, false, true, Some(provider.port));
+    let mut runtime = start_previous_release(&root, &state, &config, ports[0]);
+    let owner = single_instance_dir(&state);
+    let previous: Value =
+        serde_json::from_slice(&fs::read(owner.join("instance.json")).unwrap()).unwrap();
+    let pid: Value = serde_json::from_slice(&fs::read(owner.join("pid.cache")).unwrap()).unwrap();
+    let control = fs::read(owner.join("control.json")).unwrap();
+    write_config_with_provider(&root, ports, false, false, Some(provider.port));
+    let lifecycle = routecodex_v3_lifecycle::V3ManagedLifecycle::new(&config).unwrap();
+    let (target, _) = lifecycle.declaration(env!("CARGO_BIN_EXE_rccv3")).unwrap();
+    let target_dir = state.join("instances").join(&target.instance_id);
+    fs::create_dir_all(&target_dir).unwrap();
+    let transfer = target_dir.join("previous-release-restart.json");
+    let contents = serde_json::json!({
+        "schema_version": 1,
+        "previous": previous,
+        "pid": pid,
+        "target": target,
+    })
+    .to_string();
+    fs::write(&transfer, &contents).unwrap();
+    let output = run(env!("CARGO_BIN_EXE_rccv3"), &state, &config, "start");
+    assert!(
+        !output.status.success(),
+        "a live transfer must block takeover"
+    );
+    assert!(runtime.child.try_wait().unwrap().is_none());
+    assert_eq!(fs::read(owner.join("control.json")).unwrap(), control);
+    assert_eq!(fs::read_to_string(&transfer).unwrap(), contents);
+    let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
+    p0_responses_on_connection(&mut connection, ports[0], root.path());
+}
+
+#[test]
 fn previous_release_one_step_content_change() {
     assert_previous_release_one_step(false);
 }
