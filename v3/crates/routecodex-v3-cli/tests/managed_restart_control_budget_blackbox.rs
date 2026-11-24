@@ -200,11 +200,16 @@ targets = [{{ kind = "provider_model", provider = "test", model = "test", key = 
         let finished = Instant::now();
         // CLI bootstrap/config authoring precedes the control exchange. Measure
         // the peer-observable budget, and retain total process time separately.
-        let first_request_at = self
-            .first_request_at
-            .lock()
-            .unwrap()
-            .expect("real CLI must reach the external control peer");
+        let first_request_at = self.first_request_at.lock().unwrap();
+        if budget_ms == Some(0) {
+            assert!(
+                first_request_at.is_none(),
+                "expired budget reached control peer"
+            );
+            return (output, finished.duration_since(started));
+        }
+        let first_request_at =
+            first_request_at.expect("real CLI must reach the external control peer");
         eprintln!(
             "{command} setup={:?} total={:?}",
             first_request_at.duration_since(started),
@@ -261,6 +266,16 @@ fn restart_accepts_delayed_ack_only_after_exact_replacement_observed() {
 }
 
 #[test]
+fn restart_expired_budget_reports_pre_control_stage_without_contacting_owner() {
+    let peer = ControlPeer::start(Duration::ZERO, false, false, Duration::ZERO);
+    let (output, _) = peer.cli("restart", Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("before control exchange"), "{stderr}");
+    assert!(stderr.contains("owner lookup and locks"), "{stderr}");
+}
+
+#[test]
 fn restart_short_declared_budget_expires_during_control_exchange() {
     let peer = ControlPeer::start(Duration::from_millis(1500), false, false, Duration::ZERO);
     let (output, elapsed) = peer.cli("restart", Some(500));
@@ -293,7 +308,10 @@ fn restart_ack_and_replacement_wait_share_one_declared_budget() {
         !output.status.success(),
         "ACK without replacement is not completion"
     );
-    assert!(stderr.contains("timed out"), "{stderr}");
+    assert!(
+        stderr.contains("waiting for replacement after control accepted"),
+        "{stderr}"
+    );
     assert!(elapsed >= Duration::from_millis(1100));
     assert!(
         elapsed < Duration::from_millis(1750),

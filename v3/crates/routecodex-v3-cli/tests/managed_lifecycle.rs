@@ -298,17 +298,81 @@ fn p0_restart_repeated_declarations_keep_exact_owner() {
     let config_a = write_config_with_provider(&root, ports, true, true, Some(provider.port));
     let config_b = root.path().join("config-b.toml");
     let config_c = root.path().join("config-c.toml");
-    fs::copy(&config_a, &config_b).unwrap();
-    fs::copy(&config_a, &config_c).unwrap();
+    let home = root.path().join("home");
+    let logs = home.join(".rcc/logs");
+    fs::create_dir_all(&logs).unwrap();
+    let log_file = logs.join("server.log");
+    let fixture = fs::read_to_string(&config_a).unwrap().replace(
+        "[debug]\n",
+        &format!("[debug]\nlog_file = {:?}\n", log_file.to_str().unwrap()),
+    );
+    for config in [&config_a, &config_b, &config_c] {
+        fs::write(config, &fixture).unwrap();
+    }
+    let records = routecodex_v3_config::v3_webui_observability_store_path(
+        &config_a,
+        log_file.to_str(),
+        ports[0],
+    );
+    let facts_path = routecodex_v3_debug::v3_provider_usage_facts_path(&records);
+    let generation_path = routecodex_v3_debug::v3_provider_usage_generation_path(&records);
+    {
+        let mut writer = std::io::BufWriter::new(fs::File::create(&facts_path).unwrap());
+        for index in 0..2048 {
+            let row = serde_json::json!({
+                "schema_version": 1,
+                "fact": {
+                    "listener_id": ports[0],
+                    "request_key": format!("{}:already-recorded-{index}", ports[0]),
+                    "request_started_epoch_ms": 10,
+                    "result": "success",
+                    "provider_id": "test",
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                    "gaps": [],
+                }
+            });
+            writeln!(writer, "{row}").unwrap();
+        }
+        writer.flush().unwrap();
+    }
     let process = p0_start(&root, &state, &config_a);
     let session_id = unsafe { libc::getsid(process.pid as libc::pid_t) };
     assert!(session_id >= 0);
     for (index, config) in [&config_b, &config_a, &config_c].into_iter().enumerate() {
-        let output = run_with_timeout(env!("CARGO_BIN_EXE_rccv3"), &state, config, "restart", 5000);
+        let output = managed_test_command(env!("CARGO_BIN_EXE_rccv3"), &state)
+            .arg("restart")
+            .arg("--config")
+            .arg(config)
+            .arg("--snapall")
+            .env("HOME", &home)
+            .env("ROUTECODEX_V3_STATE_DIR", &state)
+            .env(
+                "ROUTECODEX_REQUEST_ID_COUNTER_FILE",
+                request_counter_file(&state),
+            )
+            .env("V3_MANAGED_TEST_KEY", SECRET)
+            .env("ROUTECODEX_V3_RESTART_TRACE", "1")
+            .output()
+            .unwrap();
+        let trace = String::from_utf8_lossy(&output.stderr);
+        eprintln!("{trace}");
+        if !output.status.success() {
+            assert_eq!(http_get_json(ports[0], "/health")["status"], "ok");
+            assert_eq!(
+                unsafe { libc::getsid(process.pid as libc::pid_t) },
+                session_id
+            );
+        }
         assert!(
             output.status.success(),
             "switch {index}: {}",
             String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(trace.contains("Restart phase: finding previous owner"));
+        assert!(trace.contains("Restart phase: waiting for replacement"));
+        assert!(
+            generation_path.exists(),
+            "the runtime must open the seeded ledger"
         );
         let owners = fs::read_dir(state.join("instances"))
             .unwrap()
@@ -330,9 +394,26 @@ fn p0_restart_repeated_declarations_keep_exact_owner() {
         for port in ports {
             assert_eq!(http_get_json(port, "/health")["status"], "ok");
         }
+        let debug = http_get_json(ports[0], "/_routecodex/debug/status");
+        assert_eq!(debug["debug"]["codex_samples_enabled"], true);
+        assert_eq!(debug["debug"]["direct_snapshots_enabled"], true);
         let mut connection = TcpStream::connect(("127.0.0.1", ports[0])).unwrap();
         p0_responses_on_connection(&mut connection, ports[0], root.path());
+        let samples = home
+            .join(".rcc/codex-samples/openai-responses/ports")
+            .join(ports[0].to_string());
+        p0_sample_restart::wait_sample_responses(&samples, index + 1);
     }
+    let facts = routecodex_v3_debug::v3_webui_observability_read_provider_usage(&records)
+        .unwrap()
+        .facts;
+    assert_eq!(
+        facts
+            .iter()
+            .filter(|fact| fact.request_key.contains(":already-recorded-"))
+            .count(),
+        2048
+    );
 }
 
 #[test]
