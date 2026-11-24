@@ -16,6 +16,8 @@ const STEPS = [
   ['test:v3-architecture-ci-failure-aggregation-regression', 'V3 architecture CI reports all independent sibling failures'],
   ['verify:v3-contract-map-owner', 'V3 contract-map owner and lifecycle bindings remain synchronized'],
   ['verify:v3-mainline-manifest-sync', 'Generated architecture manifests remain bound to canonical call maps'],
+  ['verify:v3-retired-tool-features', 'Retired Toolreason and servertool features remain absent from active source, config, maps, and CI'],
+  ['test:v3-retired-tool-features-red-fixtures', 'Retired Toolreason/servertool guard mutations are rejected'],
   ['verify:v3-client-sse-head-commit', 'Server commits the client SSE head and keepalives only; the Runtime still buffers the full provider attempt'],
   ['test:v3-client-sse-head-commit', 'The client SSE transport channel owns framing, keepalives, and the committed client payload projection'],
   ['test:v3-client-transport-boundary', 'Public-entry client transport boundary behavior: head commit, exec drain, and provider terminal handling'],

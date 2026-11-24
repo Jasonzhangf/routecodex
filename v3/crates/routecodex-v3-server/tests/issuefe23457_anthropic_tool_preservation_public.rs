@@ -432,8 +432,41 @@ async fn fe23457_strict_provider_rejects_dropped_declaration_field() {
     );
 }
 
+#[test]
+fn fe23457_relay_preserves_tool_call_and_paired_result() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "fe23457_relay_preserves_tool_call_and_paired_result_child",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("FE23457_RETIRED_TOOL_OBSERVATION_CHILD", "1")
+        .output()
+        .expect("spawn the dedicated public Anthropic tool child process");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "public Anthropic tool child failed:\nstatus={:?}\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("FE23457_RETIRED_TOOL_OBSERVATION=ok"),
+        "child must complete the paired public tool path:\n{stdout}"
+    );
+    let retired_label = format!("{}{}", "TOOL", "REASON");
+    assert!(
+        !stdout.contains(&retired_label) && !stderr.contains(&retired_label),
+        "retired tool observation reached the human console:\n{stdout}\n{stderr}"
+    );
+}
+
 #[tokio::test]
-async fn fe23457_relay_preserves_tool_call_and_paired_result() {
+async fn fe23457_relay_preserves_tool_call_and_paired_result_child() {
+    if std::env::var_os("FE23457_RETIRED_TOOL_OBSERVATION_CHILD").is_none() {
+        return;
+    }
     let _guard = TestHomeGuard::new("tool-call-and-paired-result");
     let fixture = RunningFixture::start().await;
     let client = http_client().await;
@@ -511,4 +544,5 @@ async fn fe23457_relay_preserves_tool_call_and_paired_result() {
     assert_eq!(tool_result["content"], "fe23457-accept\n");
     assert_eq!(tool_result["is_error"], false);
     fixture.stop().await;
+    println!("FE23457_RETIRED_TOOL_OBSERVATION=ok");
 }
