@@ -127,6 +127,10 @@ pub struct V3ManagedStatusRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum V3ManagedLifecycleObservation {
+    RestartPhase {
+        phase: &'static str,
+        elapsed: Duration,
+    },
     RestartTargetResolved {
         instance_id: String,
         control_instance_id: String,
@@ -889,15 +893,26 @@ impl V3ManagedLifecycle {
     {
         // One declared budget covers owner lookup, control preparation/ACK and
         // replacement observation. Ordinary Status keeps its separate budget.
-        let deadline = tokio::time::Instant::now() + timeout;
+        let started_at = tokio::time::Instant::now();
+        let deadline = started_at + timeout;
+        let trace = |observe: &mut F, phase| {
+            observe(V3ManagedLifecycleObservation::RestartPhase {
+                phase,
+                elapsed: started_at.elapsed(),
+            });
+        };
+        trace(&mut observe, "loading declaration");
         let (declaration, manifest) = self.declaration(executable_path.as_ref())?;
+        let declaration_ready_at = tokio::time::Instant::now();
         let instance_dir = self.instance_dir(&declaration.instance_id);
+        trace(&mut observe, "locking target instance");
         ensure_private_dir(&instance_dir)?;
         let _lock = acquire_operation_lock(&instance_dir, "restart")?;
         let (control_instance_dir, control_declaration, _previous_owner_lock) =
             if instance_has_control_truth(&instance_dir) {
                 (instance_dir.clone(), declaration.clone(), None)
             } else {
+                trace(&mut observe, "finding previous owner");
                 let previous_owner =
                     find_live_previous_owner_for_restart(&self.state_root, &declaration)?;
                 let Some((previous_instance_dir, previous_declaration)) = previous_owner else {
@@ -917,7 +932,7 @@ impl V3ManagedLifecycle {
                         {
                             if tokio::time::Instant::now() >= deadline {
                                 return Err(V3LifecycleError::Timeout(format!(
-                                    "restart {}",
+                                    "restart {} before bootstrapping stopped owner",
                                     declaration.instance_id
                                 )));
                             }
@@ -941,7 +956,7 @@ impl V3ManagedLifecycle {
                             .await
                             .map_err(|_| {
                                 V3LifecycleError::Timeout(format!(
-                                    "restart {}",
+                                    "restart {} waiting for bootstrapped owner",
                                     declaration.instance_id
                                 ))
                             })?;
@@ -951,6 +966,7 @@ impl V3ManagedLifecycle {
                         declaration.instance_id.clone(),
                     ));
                 };
+                trace(&mut observe, "locking previous owner");
                 let previous_owner_lock =
                     acquire_operation_lock(&previous_instance_dir, "restart")?;
                 (
@@ -961,8 +977,10 @@ impl V3ManagedLifecycle {
             };
         if tokio::time::Instant::now() >= deadline {
             return Err(V3LifecycleError::Timeout(format!(
-                "restart {}",
-                declaration.instance_id
+                "restart {} before control exchange (declaration {:?}, owner lookup and locks {:?})",
+                declaration.instance_id,
+                declaration_ready_at.duration_since(started_at),
+                declaration_ready_at.elapsed()
             )));
         }
         observe(V3ManagedLifecycleObservation::RestartTargetResolved {
@@ -971,13 +989,19 @@ impl V3ManagedLifecycle {
             listeners: declaration.listeners.clone(),
         });
         let previous_start_nonce = read_pid_cache_start_nonce(&control_instance_dir)?;
+        trace(&mut observe, "validating provider credentials");
         validate_auth_handles(&manifest)?;
+        trace(&mut observe, "preparing previous release transfer");
         let mut transfer = prepare_previous_release_restart_transfer(
             &control_instance_dir,
             &control_declaration,
             &instance_dir,
             &declaration,
         )?;
+        trace(
+            &mut observe,
+            "sending restart control and waiting for acceptance",
+        );
         let response = match send_restart_control(
             &control_instance_dir,
             &control_declaration,
@@ -1028,7 +1052,10 @@ impl V3ManagedLifecycle {
                 )
                 .await
                 .map_err(|_| {
-                    V3LifecycleError::Timeout(format!("restart {}", declaration.instance_id))
+                    V3LifecycleError::Timeout(format!(
+                        "restart {} waiting for recovered owner",
+                        declaration.instance_id
+                    ))
                 })?;
             }
             Err(error) => return Err(error),
@@ -1044,6 +1071,7 @@ impl V3ManagedLifecycle {
             state: response.state.clone(),
             message: response.message.clone(),
         });
+        trace(&mut observe, "waiting for replacement");
         let mut last_observed_status = None;
         observe_status_if_changed(
             &mut observe,
@@ -1060,7 +1088,7 @@ impl V3ManagedLifecycle {
         loop {
             if tokio::time::Instant::now() >= deadline {
                 return Err(V3LifecycleError::Timeout(format!(
-                    "restart {}",
+                    "restart {} waiting for replacement after control accepted",
                     declaration.instance_id
                 )));
             }

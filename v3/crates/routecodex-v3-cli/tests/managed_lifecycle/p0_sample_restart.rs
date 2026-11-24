@@ -23,7 +23,7 @@ fn start_sampling(root: &TempDir, state: &Path, config: &Path) -> P0ManagedProce
     P0ManagedProcess { pid }
 }
 
-fn wait_sample_responses(samples: &Path, expected: usize) {
+pub(super) fn wait_sample_responses(samples: &Path, expected: usize) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let complete = fs::read_dir(samples)
