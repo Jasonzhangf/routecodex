@@ -225,7 +225,6 @@ async fn anthropic_relay_routes_on_normalized_request_before_tool_thinking_gover
             )
             .expect("test provider failure session scope"),
             request_id: "req-anthropic-request-order".into(),
-            toolreason_observation_session_id: None,
             payload: payload.clone(),
         },
         &transport,

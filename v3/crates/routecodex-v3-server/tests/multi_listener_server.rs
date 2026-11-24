@@ -14058,10 +14058,9 @@ async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_witho
     std::env::set_var("V3_TEST_KEY", "response-dry-run-key");
     let mut response_manifest = manifest(free_port(), free_port());
     for server in response_manifest.servers.values_mut() {
-        server.features.extend([
-            ("tool_thinking".to_string(), true),
-            ("toolreason_client_projection".to_string(), true),
-        ]);
+        server
+            .features
+            .extend([("tool_thinking".to_string(), true)]);
     }
     let handle = spawn_v3_server_aggregate(response_manifest).await.unwrap();
     let listener = &handle.listeners[0];
@@ -14124,9 +14123,8 @@ async fn debug_response_dry_run_replays_captured_sse_through_direct_resp03_witho
     let projected = body["clientResponse"]["rawSse"]
         .as_str()
         .expect("response dry-run must materialize client SSE");
-    // Production direct hooks no longer inject retired toolreason text. The
-    // dry-run still preserves the provider SSE shape and records the missing
-    // observation without manufacturing a client-visible message.
+    // The dry-run preserves the provider SSE shape without manufacturing a
+    // client-visible message.
     assert!(!projected.contains("调用工具 probe：确认当前工作目录"));
     let projected_events = projected
         .split("\n\n")
@@ -14152,10 +14150,9 @@ async fn debug_response_dry_run_preserves_missing_reason_and_rejects_malformed_e
     std::env::set_var("V3_TEST_KEY", "response-dry-run-negative-key");
     let mut response_manifest = manifest(free_port(), free_port());
     for server in response_manifest.servers.values_mut() {
-        server.features.extend([
-            ("tool_thinking".to_string(), true),
-            ("toolreason_client_projection".to_string(), true),
-        ]);
+        server
+            .features
+            .extend([("tool_thinking".to_string(), true)]);
     }
     let handle = spawn_v3_server_aggregate(response_manifest).await.unwrap();
     let listener = &handle.listeners[0];
@@ -14210,7 +14207,6 @@ async fn debug_response_dry_run_preserves_missing_reason_and_rejects_malformed_e
         .expect("missing-reason response dry-run must materialize client SSE");
     assert!(missing_reason_projection.contains("fc_missing"));
     assert!(!missing_reason_projection.contains("rcc_reason_"));
-    assert!(!missing_reason_projection.contains("TOOLREASON"));
 
     let malformed = client
         .post(format!(
@@ -14255,10 +14251,9 @@ async fn debug_response_dry_run_replays_anthropic_provider_json_through_relay_re
     let mut response_manifest =
         responses_direct_binding_anthropic_provider_manifest(free_port(), free_port());
     for server in response_manifest.servers.values_mut() {
-        server.features.extend([
-            ("tool_thinking".to_string(), true),
-            ("toolreason_client_projection".to_string(), true),
-        ]);
+        server
+            .features
+            .extend([("tool_thinking".to_string(), true)]);
     }
     let handle = spawn_v3_server_aggregate(response_manifest).await.unwrap();
     let listener = &handle.listeners[0];
@@ -14327,10 +14322,12 @@ async fn debug_response_dry_run_replays_anthropic_provider_json_through_relay_re
     let content = body["clientResponse"]["content"]
         .as_array()
         .expect("Anthropic client response content");
-    assert!(content.iter().any(|part| {
-        part.get("type").and_then(Value::as_str) == Some("text")
-            && part.get("text").and_then(Value::as_str) == Some("调用工具 probe：确认当前工作目录")
-    }));
+    assert!(
+        content
+            .iter()
+            .all(|part| part.get("type").and_then(Value::as_str) != Some("text")),
+        "retired projection must not synthesize client text: {content:?}"
+    );
     let tool_use = content
         .iter()
         .find(|part| part.get("type").and_then(Value::as_str) == Some("tool_use"))

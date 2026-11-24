@@ -7,7 +7,6 @@ nodes:
   - V3HubRespInbound02Normalized
   - V3HubRespChatProcess03Governed
   - V3Resp03FinishReasonBranch
-  - V3Resp03ToolCallServertoolHook
   - V3Resp03OrdinaryToolGovernance
   - V3HubRespOutbound05ClientSemantic
   - V3ServerRespOutbound06ClientFrame
@@ -28,13 +27,6 @@ edges:
     status: anchored
   - step_id: v3-resp03-tool-governance-03
     from_node: V3Resp03FinishReasonBranch
-    to_node: V3Resp03ToolCallServertoolHook
-    owner_feature_id: v3.resp03_tool_governance_gap_closeout
-    owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/servertool_hooks.rs
-    owner_symbol: apply_v3_tool_call_servertool_hook_at_resp03
-    status: anchored
-  - step_id: v3-resp03-tool-governance-04
-    from_node: V3Resp03ToolCallServertoolHook
     to_node: V3Resp03OrdinaryToolGovernance
     owner_feature_id: v3.resp03_tool_governance_gap_closeout
     owner_file: v3/crates/routecodex-v3-runtime/src/hub_v1/resp_chat_process_03_governed.rs

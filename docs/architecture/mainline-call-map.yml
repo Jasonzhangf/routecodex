@@ -322,35 +322,12 @@ chains:
     status: anchored
 - chain_id: stage_a.p0_rust_migration.mainline
   summary: 'Stage A locks P0 Rust migration owner boundaries before implementation:
-    servertool followup orchestration, Anthropic conversion, Responses continuation
-    store, and request/response Chat Process tool governance.'
+    Anthropic conversion, Responses continuation store, and request/response Chat
+    Process tool governance.'
   entry_contract:
     node: StageAOwnerBoundary
     owner_doc: docs/goal-prompts/2026-07-03-rust-hub-pipeline-migration.md
   edges:
-  - step_id: stage-a-p0-01
-    from_node: HubRespChatProcess03Governed
-    to_node: ServertoolOutcome
-    caller_symbol: run_servertool_response_stage_json
-    caller_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
-    callee_symbol: plan_servertool_outcome_json
-    callee_file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/chat_servertool_orchestration.rs
-    owner_feature_id: servertool.followup_orchestration
-    semantic_input: post-Chat-Process governed response and servertool runtime context
-    semantic_output: servertool outcome/followup plan before client projection
-    resource_flow:
-      consumes:
-      - response.hub_semantic
-      - servertool.followup_state
-      produces:
-      - stage_a.servertool_outcome_plan
-      side_channel_reads:
-      - servertool.followup_state
-      side_channel_writes:
-      - stage_a.servertool_outcome_plan
-    status: anchored
-    note: TS servertool shells may execute IO from native plans, but followup/orchestration
-      semantics must remain Rust-owned.
   - step_id: stage-a-p0-02
     from_node: AnthropicChatInbound
     to_node: OpenAiChatCanonical
@@ -1451,15 +1428,6 @@ shared_multi_reference_functions:
   - response.mainline
   note: Rust selects provider-response MetadataCenter no-op/bind/write effects; TS
     executes only opaque center binding and returned writes.
-- function_id: native.provider_response_servertool_retirement_effect
-  binding_status: confirmed
-  symbol: plan_provider_response_servertool_retirement_effect_json
-  file: sharedmodule/llmswitch-core/rust-core/crates/router-hotpath-napi/src/hub_pipeline_lib/effect_plan.rs
-  owner_feature_id: hub.provider_response_servertool_retirement_effect_plan
-  reused_by_chains:
-  - response.mainline
-  note: Rust selects continue/reject and optional stop-gateway write for retired provider-response
-    servertool actions; TS executes only the returned effects.
 - function_id: native.provider_response_stream_pipe_effect
   binding_status: confirmed
   symbol: plan_provider_response_stream_pipe_effect_json

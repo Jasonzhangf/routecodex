@@ -32,6 +32,8 @@
     "render:v3-execution-control-payload-architecture": "node scripts/architecture/render-v3-execution-control-payload-architecture.mjs",
     "verify:v3-execution-control-payload-architecture": "node scripts/architecture/verify-v3-execution-control-payload-architecture.mjs",
     "test:v3-execution-control-payload-architecture-red-fixtures": "node scripts/tests/v3-execution-control-payload-architecture-red-fixtures.mjs",
+    "verify:v3-retired-tool-features": "node scripts/architecture/verify-v3-retired-tool-features.mjs",
+    "test:v3-retired-tool-features-red-fixtures": "node scripts/tests/v3-retired-tool-features-red-fixtures.mjs",
     "verify:v3-contract-map-owner": "node scripts/architecture/verify-v3-contract-map-owner.mjs",
     "verify:v3-mainline-manifest-sync": "node scripts/architecture/verify-v3-mainline-manifest-sync.mjs",
     "test:v3-client-sse-head-commit": "node scripts/run-v3-cargo-test.mjs -p routecodex-v3-server --lib client_sse_transport -- --nocapture",

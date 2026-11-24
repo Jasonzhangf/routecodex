@@ -128,7 +128,7 @@ fn chat_sse_keeps_text_and_tool_call_semantics_distinct() {
 }
 
 #[test]
-fn chat_sse_preserves_toolreason_reasoning_on_tool_call_delta() {
+fn chat_sse_preserves_reasoning_on_tool_call_delta() {
     let input = json!({
         "object": "chat.completion.chunk",
         "choices": [

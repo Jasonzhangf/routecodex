@@ -1,21 +1,3 @@
-struct V3RelayToolreasonStreamState {
-    tool_names: Vec<String>,
-    pending_reasons: Vec<Option<String>>,
-    argument_buffers: Vec<String>,
-    reason_emitted: bool,
-}
-
-impl V3RelayToolreasonStreamState {
-    fn new() -> Self {
-        Self {
-            tool_names: Vec::new(),
-            pending_reasons: Vec::new(),
-            argument_buffers: Vec::new(),
-            reason_emitted: false,
-        }
-    }
-}
-
 fn project_sse_event_payload(
     request_id: &str,
     session_id: Option<&str>,
@@ -73,7 +55,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
             stream,
             decoder,
             transducer,
-            V3RelayToolreasonStreamState::new(),
             VecDeque::<(Vec<u8>, bool)>::new(),
             false,
             false,
@@ -85,7 +66,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
             mut provider,
             mut decoder,
             mut transducer,
-            mut toolreason,
             mut pending,
             mut done_seen,
             mut finished,
@@ -109,7 +89,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                         provider,
                                         decoder,
                                         transducer,
-                                        toolreason,
                                         pending,
                                         done_seen,
                                         finished,
@@ -126,7 +105,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
-                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -159,7 +137,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
-                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -178,15 +155,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                             done_seen = true;
                             pending.push_back((b"data: [DONE]\n\n".to_vec(), false));
                         }
-                        crate::hub_v1::finalize_v3_toolreason_observation_at_resp03_with_context(
-                            &toolreason.tool_names,
-                            &mut toolreason.pending_reasons,
-                            &mut toolreason.reason_emitted,
-                            crate::hub_v1::V3ToolreasonObservationContext {
-                                session_id: Some(session_id.as_str()),
-                                request_id: Some(request_id.as_str()),
-                            },
-                        );
                         return match pending.pop_front() {
                             Some((frame, _terminal)) => Some((
                                 Ok(frame),
@@ -194,7 +162,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
-                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -221,7 +188,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
-                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
@@ -238,7 +204,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                 provider,
                                 decoder,
                                 transducer,
-                                toolreason,
                                 pending,
                                 done_seen,
                                 finished,
@@ -324,7 +289,6 @@ fn project_anthropic_sse_as_openai_chat_stream(
                                     provider,
                                     decoder,
                                     transducer,
-                                    toolreason,
                                     pending,
                                     done_seen,
                                     finished,
