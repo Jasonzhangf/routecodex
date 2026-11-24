@@ -7341,24 +7341,9 @@ chains:
     search calls and their results only classify when they belong structurally to
     the current turn; earlier user/tool turns remain business history and never
     change the current classification.
-  manifest: docs/architecture/manifests/vr.route_classifier.mainline.yml
   edges:
-  - step_id: vr-current-turn-01
-    from_node: V3HubReqExecution05Planned
-    to_node: V3CurrentTurnRouteFacts
-    caller_symbol: build_v3_current_turn_route_facts
-    caller_file: v3/crates/routecodex-v3-route-classifier/src/active_turn.rs
-    callee_symbol: classify_route
-    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
-    status: anchored
-    owner_feature_id: vr.current_turn_typed_route_facts
-    resource_flow:
-      consumes: [v3.route.current_turn_facts]
-      produces: [v3.route.request_facts]
-      side_channel_reads: []
-      side_channel_writes: []
   - step_id: v3-route-classifier-facts-02
-    from_node: V3RouterRequestFacts
+    from_node: V3HubReqInbound02Normalized
     to_node: V3CurrentTurnRouteFacts
     caller_symbol: build_v3_router_request_facts_for_entry_with_control
     caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
@@ -7369,6 +7354,20 @@ chains:
     owner_feature_id: v3.route_classifier_local_owner
     resource_flow:
       consumes: [v3.request.normal_payload]
+      produces: [v3.route.current_turn_facts]
+      side_channel_reads: []
+      side_channel_writes: []
+  - step_id: vr-current-turn-01
+    from_node: V3CurrentTurnRouteFacts
+    to_node: V3RouterRequestFacts
+    caller_symbol: build_v3_router_request_facts_for_entry_with_control
+    caller_file: v3/crates/routecodex-v3-runtime/src/nodes.rs
+    callee_symbol: classify_route
+    callee_file: v3/crates/routecodex-v3-route-classifier/src/route.rs
+    status: anchored
+    owner_feature_id: vr.current_turn_typed_route_facts
+    resource_flow:
+      consumes: [v3.route.current_turn_facts]
       produces: [v3.route.request_facts]
       side_channel_reads: []
       side_channel_writes: []

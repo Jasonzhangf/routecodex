@@ -3,19 +3,25 @@ use serde_json::Value;
 use crate::shell::classify_shell_command;
 
 const THINKING_TOOL_EXACT: &[&str] = &[
+    "analyze_code",
+    "analyze_document",
+    "compare_files",
+    "inspect_file",
+    "review_code",
     "request_user_input",
     "update_plan",
     "read",
     "read_file",
     "read_text",
+    "read_text_file",
+    "read_document",
     "view_file",
     "view_code",
     "view_document",
+    "view_image",
     "open_file",
     "get_file",
-    "download_file",
     "describe_current_request",
-    "request_user_input",
 ];
 const WRITE_TOOL_EXACT: &[&str] = &[
     "edit",
@@ -44,9 +50,6 @@ const SEARCH_TOOL_EXACT: &[&str] = &[
     "list_directory",
     "list_dir",
 ];
-const THINKING_TOOL_KEYWORDS: &[&str] = &[
-    "read", "view", "download", "open", "show", "fetch", "inspect", "plan",
-];
 const SEARCH_TOOL_KEYWORDS: &[&str] = &["find", "grep", "glob", "lookup", "locate"];
 const WEB_TOOL_KEYWORDS: &[&str] = &[
     "websearch",
@@ -61,10 +64,6 @@ const WEB_TOOL_KEYWORDS: &[&str] = &[
 const SHELL_TOOL_NAMES: &[&str] = &["shell_command", "shell", "bash", "exec_command"];
 pub(crate) const SHELL_THINKING_COMMANDS: &[&str] =
     &["cat", "head", "tail", "strings", "less", "more", "nl"];
-pub(crate) const SHELL_TOOLS_COMMANDS: &[&str] = &[
-    "npm", "npx", "yarn", "bun", "pnpm", "cargo", "go", "pytest", "maven", "gradle", "tsc",
-    "eslint", "prettier", "make", "cmake",
-];
 pub(crate) const SHELL_SEARCH_COMMANDS: &[&str] = &[
     "rg",
     "ripgrep",
@@ -81,10 +80,20 @@ pub(crate) const SHELL_SEARCH_COMMANDS: &[&str] = &[
     "tree",
     "pwd",
 ];
-pub(crate) const SHELL_WRITE_COMMANDS: &[&str] =
-    &["apply_patch", "tee", "touch", "truncate", "patch"];
-pub(crate) const SHELL_REDIRECT_WRITE_BINARIES: &[&str] = &[
-    "cat", "printf", "python", "node", "perl", "ruby", "php", "bash", "sh", "zsh", "echo",
+pub(crate) const SHELL_WRITE_COMMANDS: &[&str] = &[
+    "apply_patch",
+    "tee",
+    "touch",
+    "truncate",
+    "patch",
+    "cp",
+    "mv",
+    "rm",
+    "mkdir",
+    "rmdir",
+    "ln",
+    "chmod",
+    "chown",
 ];
 pub(crate) const SHELL_WRAPPER_COMMANDS: &[&str] =
     &["sudo", "env", "time", "nice", "nohup", "command", "stdbuf"];
@@ -420,6 +429,12 @@ fn build_command_snippet(command_text: &str) -> Option<String> {
 
 fn categorize_tool_name(name: &str) -> String {
     let normalized = name.to_lowercase();
+    if WRITE_TOOL_EXACT.contains(&normalized.as_str()) {
+        return "coding".to_string();
+    }
+    if THINKING_TOOL_EXACT.contains(&normalized.as_str()) {
+        return "thinking".to_string();
+    }
     if SEARCH_TOOL_EXACT.iter().any(|item| *item == normalized)
         || SEARCH_TOOL_KEYWORDS
             .iter()
@@ -429,16 +444,6 @@ fn categorize_tool_name(name: &str) -> String {
         || normalized.starts_with("list-")
     {
         return "search".to_string();
-    }
-    if THINKING_TOOL_EXACT.iter().any(|item| *item == normalized)
-        || THINKING_TOOL_KEYWORDS
-            .iter()
-            .any(|keyword| normalized.contains(keyword))
-    {
-        return "thinking".to_string();
-    }
-    if WRITE_TOOL_EXACT.iter().any(|item| *item == normalized) {
-        return "coding".to_string();
     }
     "other".to_string()
 }
