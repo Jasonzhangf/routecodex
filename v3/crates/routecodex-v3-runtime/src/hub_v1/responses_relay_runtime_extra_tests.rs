@@ -1163,6 +1163,43 @@ async fn anthropic_provider_sse_message_stop_closes_open_thinking_block_without_
 }
 
 #[tokio::test]
+async fn anthropic_provider_sse_preserves_empty_signed_thinking_without_502() {
+    let observation = V3RuntimeStreamObservation::default();
+    let provider = Box::pin(stream::iter(vec![
+            Ok(b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_empty_thinking\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"glm-5.2\",\"content\":[],\"usage\":{\"input_tokens\":9,\"output_tokens\":0}}}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig-empty-thinking\"}}\n\n".to_vec()),
+            Ok(b"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n".to_vec()),
+            Ok(b"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"Visible answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n".to_vec()),
+            Ok(b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":9,\"output_tokens\":4},\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n".to_vec()),
+            Ok(b"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n".to_vec()),
+        ]));
+    let response = build_v3_hub_resp_inbound_02_from_provider_stream_events_for_protocol(
+        V3HubProviderWireProtocol::Anthropic,
+        provider,
+        &observation,
+    )
+    .await
+    .expect("a signed empty Anthropic thinking block must remain representable");
+
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["type"], "reasoning");
+    assert_eq!(response["output"][0]["summary"], json!([]));
+    assert_eq!(
+        response["output"][0]["encrypted_content"],
+        "sig-empty-thinking"
+    );
+    assert_eq!(
+        response["output"][0]["routecodex_chat_extension"]["anthropic_reasoning"]["thinking"],
+        ""
+    );
+    assert_eq!(
+        response["output"][1]["content"][0]["text"],
+        "Visible answer"
+    );
+}
+
+#[tokio::test]
 async fn anthropic_provider_sse_rejects_thinking_text_alias() {
     let observation = V3RuntimeStreamObservation::default();
     let provider = Box::pin(stream::iter(vec![

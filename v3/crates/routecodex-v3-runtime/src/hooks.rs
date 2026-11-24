@@ -1188,7 +1188,7 @@ fn external_link_for_provider_error(error: &V3ProviderError) -> V3ExternalErrorL
             message,
             ..
         } => V3ExternalErrorLink {
-            kind: V3ExternalErrorKind::Provider,
+            kind: V3ExternalErrorKind::ProviderApplicationEvent,
             status: *status,
             code: code
                 .clone()

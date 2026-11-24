@@ -73,6 +73,9 @@ features:
   - Genuine recoverable Provider HTTP failures increment the complete identity's consecutive count. A non-429 recoverable failure applies the shared tenth-error one-hour policy. Ordinary HTTP 429 requires its own count and time span. A confirmed unrecoverable failure commits the one-hour minimum immediately. A successful attempt resets its own identity's observation counts.
   - Managed listener regressions cover immediate successor selection, live 2xx probe recovery, failed-probe isolation and exact-identity cooldown.
   - no_first_failure_cooldown_public_http proves that one real HTTP 429 or HTTP 500 keeps the identity routable. A confirmed 401 excludes only its complete identity, and an eligible fallback completes the affected request.
+  - no_first_failure_cooldown_public_http also proves that HTTP 403 blocks the complete identity only on the tenth consecutive 403. A different HTTP result or matching business success breaks that sequence. The partial count survives listener shutdown and reopening; the final-identity 403 preserves the upstream error and leaves the count untouched.
+  - relay_http_400_breaks_forbidden_streak_without_cooling proves that a genuine request-local HTTP 400 interrupts a partial 403 streak without changing fallback or creating a cooldown.
+  - websocket_provider_event_403_keeps_its_account_classification proves that an application event keeps its numeric status and typed account action without contributing to the HTTP 403 streak.
   - non429_hold_preserves_healthy_fallback_and_matching_success_cancels_cooling proves valid concurrent failures hold only the failed exact identity before cooling, healthy fallback remains immediately usable, and matching in-flight success cancels the pending cooling decision before the original observation floor.
   - non429_business_success_supersedes_in_flight_observation_failure proves an admitted observation cannot resurrect cooling after matching business success; healthy sibling traffic continues while the old probe is pending.
   - matching_business_success_recovers_only_its_non429_cooldown proves the public typed health consumer clears a probe-managed cooldown on matching real business success and preserves other interface, key and model cooldowns; explicit auth holds remain operator/probe owned.
@@ -3480,7 +3483,7 @@ features:
   - failed provider-health probes advance only next_probe_at_ms and never extend the original blocked_until_ms
   - every ordinary and long-policy probe interval is capped at 30 minutes; a configured provider health probe_interval_ms is an optional maximum and cannot exceed 30 minutes
   - cc-sol and kdns providers configured with probe_interval_ms=120000 run the bounded ladder but never wait longer than two minutes between recovery probes
-  - matched HTTP 401 and HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
+  - matched HTTP 401 and consecutive HTTP 403 automatic cooldown policies retain the exact selected provider+auth_alias+model identity
   - every automatic failure excludes and cools only the failed complete candidate; untried sibling keys, models and providers remain available
   - Confirmed HTTP 401 errors start the one-hour cooldown immediately for the complete identity. Independent current probes retain their recovery cadence.
   - Ordinary HTTP 429 requires its own count and elapsed span for automatic cooldown; other recoverable HTTP errors retain their shared-count policy. An early successful or failed probe cannot shorten the committed one-hour minimum.

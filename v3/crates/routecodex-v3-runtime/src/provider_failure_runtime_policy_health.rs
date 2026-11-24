@@ -327,7 +327,12 @@ impl V3ProviderFailureRuntimeHealth {
         let provider_http_status = source
             .external_error
             .as_ref()
-            .filter(|error| error.kind == V3ExternalErrorKind::Provider)
+            .filter(|error| {
+                matches!(
+                    error.kind,
+                    V3ExternalErrorKind::Provider | V3ExternalErrorKind::ProviderApplicationEvent
+                )
+            })
             .and_then(|error| error.status);
         let status = provider_http_status.unwrap_or(0);
         let action = apply_v3_internal_provider_failure_policy(
@@ -629,15 +634,6 @@ impl V3ProviderFailureRuntimeHealth {
                 health_now_ms,
             )
             .map_err(|error| error.to_string())?;
-        if let (Some(auth_alias), Some(model_id)) = (auth_alias, model_id) {
-            self.store.record_provider_key_success_for_interface(
-                provider_id,
-                interface_id,
-                auth_alias,
-                model_id,
-                health_now_ms,
-            )?;
-        }
         // A completed business 2xx is the recovery counterpart of an observed
         // 429: it restores one unit of adaptive concurrency budget up to the
         // configured hard maximum and clears the saturation window for the
